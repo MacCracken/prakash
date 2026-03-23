@@ -104,7 +104,7 @@ pub fn snell(n1: f64, n2: f64, incident_angle: f64) -> Result<f64> {
 pub fn critical_angle(n1: f64, n2: f64) -> Result<f64> {
     if n1 <= n2 {
         return Err(PrakashError::InvalidParameter {
-            reason: format!("critical angle requires n1 > n2, got n1={n1}, n2={n2}"),
+            reason: "critical angle requires n1 > n2".into(),
         });
     }
     Ok((n2 / n1).asin())

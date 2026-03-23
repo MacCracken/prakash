@@ -41,6 +41,7 @@ pub fn path_to_phase(path_diff: f64, wavelength: f64) -> f64 {
 /// refractive index `n_film`, at near-normal incidence.
 ///
 /// Returns intensity as a fraction of incident (0.0–1.0 approximate).
+#[inline]
 pub fn thin_film_reflectance(wavelength_nm: f64, thickness_nm: f64, n_film: f64) -> f64 {
     let path = 2.0 * n_film * thickness_nm;
     let phase = 2.0 * PI * path / wavelength_nm + PI; // +π for phase change on reflection
@@ -55,6 +56,7 @@ pub fn thin_film_reflectance(wavelength_nm: f64, thickness_nm: f64, n_film: f64)
 ///
 /// I(θ) = I0 · (sin(β)/β)² where β = π·a·sin(θ)/λ
 /// `slit_width` and `wavelength` in same units.
+#[inline]
 pub fn single_slit_intensity(slit_width: f64, wavelength: f64, angle: f64, i0: f64) -> f64 {
     let beta = PI * slit_width * angle.sin() / wavelength;
     if beta.abs() < 1e-10 {
@@ -68,6 +70,7 @@ pub fn single_slit_intensity(slit_width: f64, wavelength: f64, angle: f64, i0: f
 ///
 /// Combines single-slit envelope with two-slit interference.
 /// `slit_width`: width of each slit, `slit_spacing`: center-to-center distance.
+#[inline]
 pub fn double_slit_intensity(
     slit_width: f64,
     slit_spacing: f64,

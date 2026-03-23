@@ -33,6 +33,7 @@ pub fn magnification(object_distance: f64, image_distance: f64) -> f64 {
 /// 1/f = (n-1) · (1/R1 - 1/R2)
 ///
 /// Convention: R > 0 if center of curvature is to the right.
+#[inline]
 pub fn lensmaker_focal_length(n: f64, r1: f64, r2: f64) -> Result<f64> {
     let power = (n - 1.0) * (1.0 / r1 - 1.0 / r2);
     if power.abs() < 1e-15 {
@@ -106,7 +107,12 @@ pub fn combined_focal_length(f1: f64, f2: f64) -> Result<f64> {
 pub fn depth_of_field(focal_length: f64, f_number: f64, coc: f64, subject_dist: f64) -> (f64, f64) {
     let h = (focal_length * focal_length) / (f_number * coc); // hyperfocal distance
     let near = (h * subject_dist) / (h + (subject_dist - focal_length));
-    let far = (h * subject_dist) / (h - (subject_dist - focal_length));
+    let far_denom = h - (subject_dist - focal_length);
+    let far = if far_denom <= 0.0 {
+        f64::INFINITY // at or beyond hyperfocal distance
+    } else {
+        (h * subject_dist) / far_denom
+    };
     (near, far)
 }
 
@@ -309,7 +315,11 @@ pub struct SeidelCoefficients {
 /// q = -1 for plano-convex (flat on left).
 #[inline]
 pub fn shape_factor(r1: f64, r2: f64) -> f64 {
-    (r2 + r1) / (r2 - r1)
+    let denom = r2 - r1;
+    if denom.abs() < 1e-15 {
+        return 0.0; // equal radii → symmetric, q=0
+    }
+    (r2 + r1) / denom
 }
 
 /// Conjugate factor (position factor): p = (di − do) / (di + do).
@@ -327,6 +337,7 @@ pub fn conjugate_factor(object_distance: f64, image_distance: f64) -> f64 {
 /// `p` = conjugate factor (position factor).
 ///
 /// The coefficients are normalized to the lens power.
+#[inline]
 pub fn seidel_coefficients(n: f64, focal_length: f64, q: f64, p: f64) -> SeidelCoefficients {
     let phi = 1.0 / focal_length; // optical power
 
@@ -414,6 +425,7 @@ pub fn petzval_radius(petzval_sum: f64) -> Option<f64> {
 /// 1/f = 1/f₁ + 1/f₂ − d/(f₁·f₂)
 ///
 /// Returns the effective focal length of the system.
+#[inline]
 pub fn separated_lenses_focal_length(f1: f64, f2: f64, separation: f64) -> Result<f64> {
     let power = 1.0 / f1 + 1.0 / f2 - separation / (f1 * f2);
     if power.abs() < 1e-15 {

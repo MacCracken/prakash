@@ -46,9 +46,9 @@ impl Rgb {
     pub fn to_u8(self) -> [u8; 3] {
         let c = self.clamp();
         [
-            (c.r * 255.0) as u8,
-            (c.g * 255.0) as u8,
-            (c.b * 255.0) as u8,
+            (c.r * 255.0 + 0.5) as u8,
+            (c.g * 255.0 + 0.5) as u8,
+            (c.b * 255.0 + 0.5) as u8,
         ]
     }
 
@@ -63,6 +63,7 @@ impl Rgb {
 ///
 /// Uses a piecewise linear approximation of the CIE 1931 color matching functions.
 /// Only valid for visible range (380–780 nm).
+#[inline]
 pub fn wavelength_to_rgb(wavelength_nm: f64) -> Result<Rgb> {
     if !(VISIBLE_MIN_NM..=VISIBLE_MAX_NM).contains(&wavelength_nm) {
         return Err(PrakashError::WavelengthOutOfRange { nm: wavelength_nm });
@@ -121,6 +122,7 @@ pub fn wien_peak(temperature_k: f64) -> f64 {
 /// Approximate color temperature (Kelvin) from correlated color temperature.
 ///
 /// Converts a color temperature to an RGB color using Tanner Helland's algorithm.
+#[inline]
 pub fn color_temperature_to_rgb(kelvin: f64) -> Rgb {
     let temp = (kelvin / 100.0).clamp(10.0, 400.0);
 
@@ -687,7 +689,7 @@ mod tests {
     fn test_rgb_to_u8() {
         assert_eq!(Rgb::WHITE.to_u8(), [255, 255, 255]);
         assert_eq!(Rgb::BLACK.to_u8(), [0, 0, 0]);
-        assert_eq!(Rgb::new(0.5, 0.5, 0.5).to_u8(), [127, 127, 127]);
+        assert_eq!(Rgb::new(0.5, 0.5, 0.5).to_u8(), [128, 128, 128]);
     }
 
     #[test]
@@ -696,7 +698,7 @@ mod tests {
         let u = c.to_u8();
         assert_eq!(u[0], 255);
         assert_eq!(u[1], 0);
-        assert_eq!(u[2], 127);
+        assert_eq!(u[2], 128);
     }
 
     #[test]
