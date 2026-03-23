@@ -1,6 +1,6 @@
 [package]
 name = "prakash"
-version = "0.1.0"
+version = "0.22.3"
 edition = "2024"
 rust-version = "1.89"
 license = "GPL-3.0"
@@ -43,11 +43,11 @@ criterion = { version = "0.5", features = ["html_reports"] }
 [[bench]]
 name = "benchmarks"
 harness = false
-required-features = ["ray", "wave", "spectral", "lens"]
+required-features = ["ray", "wave", "spectral", "lens", "pbr"]
 
 [[test]]
 name = "integration"
-required-features = ["ray", "wave", "spectral", "lens"]
+required-features = ["ray", "wave", "spectral", "lens", "pbr"]
 
 [[example]]
 name = "basic_optics"

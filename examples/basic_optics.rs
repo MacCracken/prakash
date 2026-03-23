@@ -7,8 +7,12 @@ fn main() {
         prakash::ray::Medium::AIR.n,
         prakash::ray::Medium::GLASS.n,
         angle_i,
-    ).unwrap();
-    println!("Light entering glass at 30°: refracted to {:.1}°", angle_t.to_degrees());
+    )
+    .unwrap();
+    println!(
+        "Light entering glass at 30°: refracted to {:.1}°",
+        angle_t.to_degrees()
+    );
 
     // Fresnel reflectance
     let r = prakash::ray::fresnel_normal(1.0, 1.52);
@@ -25,5 +29,8 @@ fn main() {
     // Camera lens
     let di = prakash::lens::thin_lens_image_distance(50.0, 2000.0).unwrap();
     let mag = prakash::lens::magnification(2000.0, di);
-    println!("50mm lens, subject at 2m: image at {:.1}mm, mag={:.3}", di, mag);
+    println!(
+        "50mm lens, subject at 2m: image at {:.1}mm, mag={:.3}",
+        di, mag
+    );
 }

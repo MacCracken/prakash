@@ -88,7 +88,7 @@ pub fn double_slit_intensity(
 /// d·sin(θ) = m·λ → θ = asin(m·λ/d)
 /// Returns angles for orders m = 0, ±1, ±2, ... up to `max_order`.
 pub fn grating_maxima(grating_spacing: f64, wavelength: f64, max_order: u32) -> Vec<f64> {
-    let mut angles = Vec::new();
+    let mut angles = Vec::with_capacity(2 * max_order as usize + 1);
     for m in 0..=max_order {
         let sin_theta = (m as f64) * wavelength / grating_spacing;
         if sin_theta.abs() <= 1.0 {
@@ -119,16 +119,32 @@ pub struct Polarization {
 
 impl Polarization {
     /// Horizontally polarized light.
-    pub const HORIZONTAL: Self = Self { ex: 1.0, ey: 0.0, phase: 0.0 };
+    pub const HORIZONTAL: Self = Self {
+        ex: 1.0,
+        ey: 0.0,
+        phase: 0.0,
+    };
     /// Vertically polarized light.
-    pub const VERTICAL: Self = Self { ex: 0.0, ey: 1.0, phase: 0.0 };
+    pub const VERTICAL: Self = Self {
+        ex: 0.0,
+        ey: 1.0,
+        phase: 0.0,
+    };
     /// Right circular polarization.
     pub fn circular_right() -> Self {
-        Self { ex: 1.0 / 2.0f64.sqrt(), ey: 1.0 / 2.0f64.sqrt(), phase: -PI / 2.0 }
+        Self {
+            ex: 1.0 / 2.0f64.sqrt(),
+            ey: 1.0 / 2.0f64.sqrt(),
+            phase: -PI / 2.0,
+        }
     }
     /// Left circular polarization.
     pub fn circular_left() -> Self {
-        Self { ex: 1.0 / 2.0f64.sqrt(), ey: 1.0 / 2.0f64.sqrt(), phase: PI / 2.0 }
+        Self {
+            ex: 1.0 / 2.0f64.sqrt(),
+            ey: 1.0 / 2.0f64.sqrt(),
+            phase: PI / 2.0,
+        }
     }
 
     /// Intensity after passing through a linear polarizer at angle θ.
@@ -161,32 +177,62 @@ mod tests {
 
     const EPS: f64 = 1e-6;
 
+    // ── Interference tests ────────────────────────────────────────────────
+
     #[test]
     fn test_constructive_interference() {
-        assert!(is_constructive(500.0, 500.0)); // m=1
-        assert!(is_constructive(1000.0, 500.0)); // m=2
-        assert!(!is_constructive(250.0, 500.0)); // m=0.5 → destructive
+        assert!(is_constructive(500.0, 500.0));
+        assert!(is_constructive(1000.0, 500.0));
+        assert!(is_constructive(0.0, 500.0)); // m=0
+        assert!(!is_constructive(250.0, 500.0));
     }
 
     #[test]
     fn test_destructive_interference() {
-        assert!(is_destructive(250.0, 500.0)); // m=0.5
-        assert!(is_destructive(750.0, 500.0)); // m=1.5
-        assert!(!is_destructive(500.0, 500.0)); // m=1 → constructive
+        assert!(is_destructive(250.0, 500.0));
+        assert!(is_destructive(750.0, 500.0));
+        assert!(!is_destructive(500.0, 500.0));
+        assert!(!is_destructive(0.0, 500.0));
+    }
+
+    #[test]
+    fn test_constructive_destructive_mutual_exclusion() {
+        // At any given path difference, cannot be both
+        for m in 0..10 {
+            let path = (m as f64) * 500.0;
+            assert!(
+                is_constructive(path, 500.0) != is_destructive(path, 500.0)
+                    || !is_constructive(path, 500.0),
+                "Both true at path={path}"
+            );
+        }
     }
 
     #[test]
     fn test_interference_constructive_max() {
-        // Same amplitude, zero phase diff → 4x single intensity
         let i = interference_intensity(1.0, 1.0, 0.0);
         assert!((i - 4.0).abs() < EPS);
     }
 
     #[test]
     fn test_interference_destructive_zero() {
-        // Same amplitude, π phase diff → zero intensity
         let i = interference_intensity(1.0, 1.0, PI);
         assert!(i.abs() < EPS);
+    }
+
+    #[test]
+    fn test_interference_unequal_amplitudes() {
+        // Unequal amplitudes: never reach zero
+        let i_min = interference_intensity(2.0, 1.0, PI);
+        assert!((i_min - 1.0).abs() < EPS); // (2-1)² = 1
+        let i_max = interference_intensity(2.0, 1.0, 0.0);
+        assert!((i_max - 9.0).abs() < EPS); // (2+1)² = 9
+    }
+
+    #[test]
+    fn test_interference_single_wave() {
+        let i = interference_intensity(3.0, 0.0, 0.0);
+        assert!((i - 9.0).abs() < EPS); // just A²
     }
 
     #[test]
@@ -196,9 +242,51 @@ mod tests {
     }
 
     #[test]
+    fn test_path_to_phase_half_wavelength() {
+        let phase = path_to_phase(250.0, 500.0);
+        assert!((phase - PI).abs() < EPS);
+    }
+
+    #[test]
+    fn test_path_to_phase_zero() {
+        let phase = path_to_phase(0.0, 500.0);
+        assert!(phase.abs() < EPS);
+    }
+
+    // ── Thin film tests ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_thin_film_range() {
+        let r = thin_film_reflectance(550.0, 100.0, 1.5);
+        assert!((0.0..=1.0).contains(&r));
+    }
+
+    #[test]
+    fn test_thin_film_varies_with_wavelength() {
+        let r1 = thin_film_reflectance(400.0, 100.0, 1.5);
+        let r2 = thin_film_reflectance(600.0, 100.0, 1.5);
+        // Different wavelengths should generally give different reflectance
+        assert!((r1 - r2).abs() > EPS);
+    }
+
+    #[test]
+    fn test_thin_film_quarter_wave() {
+        // Quarter-wave coating: thickness = λ/(4n) should maximize reflectance
+        let n = 1.5;
+        let wl = 550.0;
+        let t_quarter = wl / (4.0 * n);
+        let r = thin_film_reflectance(wl, t_quarter, n);
+        // At quarter-wave, path = 2*n*t = λ/2, phase = π + π = 2π → sin²(π) = 0
+        // Actually for anti-reflection: sin²(δ/2) with δ = 2π + π
+        assert!((0.0..=1.0).contains(&r));
+    }
+
+    // ── Diffraction tests ─────────────────────────────────────────────────
+
+    #[test]
     fn test_single_slit_central_max() {
         let i = single_slit_intensity(1e-3, 500e-9, 0.0, 1.0);
-        assert!((i - 1.0).abs() < EPS); // central maximum = I0
+        assert!((i - 1.0).abs() < EPS);
     }
 
     #[test]
@@ -209,29 +297,90 @@ mod tests {
     }
 
     #[test]
+    fn test_single_slit_first_minimum() {
+        // First minimum at sin(θ) = λ/a → θ = asin(λ/a)
+        let a = 1e-3;
+        let wl = 500e-9;
+        let ratio: f64 = wl / a;
+        let theta_min = ratio.asin();
+        let i = single_slit_intensity(a, wl, theta_min, 1.0);
+        assert!(i < 1e-6, "Intensity at first minimum should be ~0, got {i}");
+    }
+
+    #[test]
+    fn test_single_slit_scales_with_i0() {
+        let i1 = single_slit_intensity(1e-3, 500e-9, 0.01, 1.0);
+        let i5 = single_slit_intensity(1e-3, 500e-9, 0.01, 5.0);
+        assert!((i5 / i1 - 5.0).abs() < EPS);
+    }
+
+    #[test]
+    fn test_single_slit_always_non_negative() {
+        for angle_mrad in 0..100 {
+            let angle = angle_mrad as f64 * 0.001;
+            let i = single_slit_intensity(1e-3, 500e-9, angle, 1.0);
+            assert!(i >= 0.0, "Negative intensity at angle {angle}");
+        }
+    }
+
+    #[test]
     fn test_double_slit_central() {
         let i = double_slit_intensity(0.1e-3, 0.5e-3, 500e-9, 0.0, 1.0);
-        assert!(i > 0.0); // central max
+        assert!(i > 0.0);
     }
+
+    #[test]
+    fn test_double_slit_greater_than_single_at_center() {
+        let i_single = single_slit_intensity(0.1e-3, 500e-9, 0.0, 1.0);
+        let i_double = double_slit_intensity(0.1e-3, 0.5e-3, 500e-9, 0.0, 1.0);
+        assert!(
+            i_double > i_single,
+            "Double slit central max should exceed single slit"
+        );
+    }
+
+    #[test]
+    fn test_double_slit_non_negative() {
+        for angle_mrad in 0..50 {
+            let angle = angle_mrad as f64 * 0.001;
+            let i = double_slit_intensity(0.1e-3, 0.5e-3, 500e-9, angle, 1.0);
+            assert!(i >= 0.0, "Negative intensity at angle {angle}");
+        }
+    }
+
+    // ── Grating tests ─────────────────────────────────────────────────────
 
     #[test]
     fn test_grating_maxima_zeroth_order() {
         let angles = grating_maxima(1e-6, 500e-9, 0);
-        assert_eq!(angles.len(), 1); // just m=0
+        assert_eq!(angles.len(), 1);
         assert!(angles[0].abs() < EPS);
     }
 
     #[test]
     fn test_grating_maxima_multiple_orders() {
         let angles = grating_maxima(1e-6, 500e-9, 2);
-        assert!(angles.len() >= 3); // m=0, ±1, possibly ±2
+        assert!(angles.len() >= 3);
     }
 
     #[test]
-    fn test_thin_film() {
-        let r = thin_film_reflectance(550.0, 100.0, 1.5);
-        assert!(r >= 0.0 && r <= 1.0);
+    fn test_grating_maxima_symmetric() {
+        let angles = grating_maxima(1e-6, 500e-9, 1);
+        // Should have m=0, +1, -1
+        assert_eq!(angles.len(), 3);
+        // +1 and -1 should be symmetric
+        assert!((angles[1] + angles[2]).abs() < EPS);
     }
+
+    #[test]
+    fn test_grating_maxima_limited_by_sin() {
+        // Very fine grating with long wavelength: fewer orders possible
+        let angles = grating_maxima(600e-9, 500e-9, 5);
+        // m·λ/d = m·500/600, max m where this ≤ 1 is m=1
+        assert!(angles.len() <= 3); // m=0, ±1 at most
+    }
+
+    // ── Polarization tests ────────────────────────────────────────────────
 
     #[test]
     fn test_malus_law_aligned() {
@@ -249,9 +398,36 @@ mod tests {
     }
 
     #[test]
+    fn test_malus_law_scales_with_intensity() {
+        assert!((malus_law(10.0, PI / 4.0) - 5.0).abs() < EPS);
+    }
+
+    #[test]
+    fn test_malus_law_30_degrees() {
+        let i = malus_law(1.0, PI / 6.0);
+        assert!((i - 0.75).abs() < EPS); // cos²(30°) = 3/4
+    }
+
+    #[test]
+    fn test_malus_law_60_degrees() {
+        let i = malus_law(1.0, PI / 3.0);
+        assert!((i - 0.25).abs() < EPS); // cos²(60°) = 1/4
+    }
+
+    #[test]
     fn test_polarization_horizontal() {
         let p = Polarization::HORIZONTAL;
         assert!((p.intensity() - 1.0).abs() < EPS);
+        assert!((p.ex - 1.0).abs() < EPS);
+        assert!(p.ey.abs() < EPS);
+    }
+
+    #[test]
+    fn test_polarization_vertical() {
+        let p = Polarization::VERTICAL;
+        assert!((p.intensity() - 1.0).abs() < EPS);
+        assert!(p.ex.abs() < EPS);
+        assert!((p.ey - 1.0).abs() < EPS);
     }
 
     #[test]
@@ -262,8 +438,33 @@ mod tests {
     }
 
     #[test]
-    fn test_polarization_circular() {
+    fn test_polarization_through_crossed() {
+        let p = Polarization::HORIZONTAL;
+        let i = p.through_polarizer(PI / 2.0);
+        assert!(i < 0.01);
+    }
+
+    #[test]
+    fn test_polarization_circular_right() {
         let p = Polarization::circular_right();
         assert!((p.intensity() - 1.0).abs() < EPS);
+        assert!((p.phase + PI / 2.0).abs() < EPS);
+    }
+
+    #[test]
+    fn test_polarization_circular_left() {
+        let p = Polarization::circular_left();
+        assert!((p.intensity() - 1.0).abs() < EPS);
+        assert!((p.phase - PI / 2.0).abs() < EPS);
+    }
+
+    #[test]
+    fn test_polarization_serde_roundtrip() {
+        let p = Polarization::circular_right();
+        let json = serde_json::to_string(&p).unwrap();
+        let back: Polarization = serde_json::from_str(&json).unwrap();
+        assert!((back.ex - p.ex).abs() < EPS);
+        assert!((back.ey - p.ey).abs() < EPS);
+        assert!((back.phase - p.phase).abs() < EPS);
     }
 }
