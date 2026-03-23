@@ -276,9 +276,21 @@ impl SellmeierCoefficients {
         let d1 = l2 - self.c1;
         let d2 = l2 - self.c2;
         let d3 = l2 - self.c3;
-        let t1 = if d1.abs() > 1e-15 { self.b1 * l2 / d1 } else { 0.0 };
-        let t2 = if d2.abs() > 1e-15 { self.b2 * l2 / d2 } else { 0.0 };
-        let t3 = if d3.abs() > 1e-15 { self.b3 * l2 / d3 } else { 0.0 };
+        let t1 = if d1.abs() > 1e-15 {
+            self.b1 * l2 / d1
+        } else {
+            0.0
+        };
+        let t2 = if d2.abs() > 1e-15 {
+            self.b2 * l2 / d2
+        } else {
+            0.0
+        };
+        let t3 = if d3.abs() > 1e-15 {
+            self.b3 * l2 / d3
+        } else {
+            0.0
+        };
         let n2 = 1.0 + t1 + t2 + t3;
         // Guard against negative n² (unphysical region between resonances)
         if n2 < 1.0 {

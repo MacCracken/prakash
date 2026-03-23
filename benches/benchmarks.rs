@@ -114,6 +114,49 @@ fn bench_ray(c: &mut Criterion) {
         };
         b.iter(|| trace_surface(black_box(&ray), black_box(&surface)))
     });
+    group.bench_function("trace_sequential_2", |b| {
+        let ray = TraceRay {
+            position: [2.0, 0.0, -50.0],
+            direction: [0.0, 0.0, 1.0],
+            n: 1.0,
+        };
+        let surfaces = [
+            OpticalSurface {
+                shape: SurfaceShape::Sphere { radius: 50.0 },
+                z_position: 0.0,
+                n_after: 1.5,
+                aperture_radius: 25.0,
+            },
+            OpticalSurface {
+                shape: SurfaceShape::Sphere { radius: -50.0 },
+                z_position: 5.0,
+                n_after: 1.0,
+                aperture_radius: 25.0,
+            },
+        ];
+        b.iter(|| trace_sequential(black_box(&ray), black_box(&surfaces)))
+    });
+    group.bench_function("prism_dispersion", |b| {
+        let s = SellmeierCoefficients::BK7;
+        b.iter(|| {
+            prism_dispersion(
+                black_box(std::f64::consts::FRAC_PI_3),
+                black_box(&s),
+                black_box(0.55),
+            )
+        })
+    });
+    group.bench_function("prism_angular_spread", |b| {
+        let s = SellmeierCoefficients::BK7;
+        b.iter(|| {
+            prism_angular_spread(
+                black_box(std::f64::consts::FRAC_PI_3),
+                black_box(&s),
+                black_box(0.486),
+                black_box(0.656),
+            )
+        })
+    });
 
     group.finish();
 }
@@ -144,6 +187,12 @@ fn bench_spectral(c: &mut Criterion) {
     group.bench_function("wavelength_to_frequency", |b| {
         b.iter(|| wavelength_to_frequency(black_box(550.0)))
     });
+    group.bench_function("frequency_to_wavelength", |b| {
+        b.iter(|| frequency_to_wavelength(black_box(5.45e14)))
+    });
+    group.bench_function("photon_energy", |b| {
+        b.iter(|| photon_energy(black_box(550.0)))
+    });
     group.bench_function("rgb_luminance", |b| {
         let rgb = Rgb::new(0.5, 0.7, 0.3);
         b.iter(|| black_box(rgb).luminance())
@@ -151,6 +200,50 @@ fn bench_spectral(c: &mut Criterion) {
     group.bench_function("rgb_to_u8", |b| {
         let rgb = Rgb::new(0.5, 0.7, 0.3);
         b.iter(|| black_box(rgb).to_u8())
+    });
+    group.bench_function("cie_cmf_at", |b| b.iter(|| cie_cmf_at(black_box(555.0))));
+    group.bench_function("cie_cmf_at_interp", |b| {
+        b.iter(|| cie_cmf_at(black_box(557.5)))
+    });
+    group.bench_function("xyz_to_xyy", |b| {
+        let xyz = Xyz::D65_WHITE;
+        b.iter(|| black_box(xyz).to_xyy())
+    });
+    group.bench_function("xyz_to_srgb", |b| {
+        let xyz = Xyz::D65_WHITE;
+        b.iter(|| black_box(xyz).to_srgb())
+    });
+    group.bench_function("xyz_to_linear_srgb", |b| {
+        let xyz = Xyz::D65_WHITE;
+        b.iter(|| black_box(xyz).to_linear_srgb())
+    });
+    group.bench_function("linear_srgb_to_xyz", |b| {
+        let rgb = Rgb::new(0.5, 0.7, 0.3);
+        b.iter(|| linear_srgb_to_xyz(black_box(&rgb)))
+    });
+    group.bench_function("srgb_gamma", |b| {
+        b.iter(|| linear_to_srgb_gamma(black_box(0.5)))
+    });
+    group.bench_function("srgb_gamma_inv", |b| {
+        b.iter(|| srgb_gamma_to_linear(black_box(0.5)))
+    });
+    group.bench_function("cct_from_xy", |b| {
+        b.iter(|| cct_from_xy(black_box(0.3127), black_box(0.3290)))
+    });
+    group.bench_function("spd_blackbody", |b| {
+        b.iter(|| Spd::blackbody(black_box(5778.0)))
+    });
+    group.bench_function("spd_to_xyz", |b| {
+        let spd = Spd::blackbody(5778.0);
+        b.iter(|| black_box(&spd).to_xyz())
+    });
+    group.bench_function("spd_to_srgb", |b| {
+        let spd = Spd::blackbody(5778.0);
+        b.iter(|| black_box(&spd).to_srgb())
+    });
+    group.bench_function("cri", |b| {
+        let spd = illuminant_d65();
+        b.iter(|| color_rendering_index(black_box(&spd)))
     });
 
     group.finish();
@@ -204,6 +297,12 @@ fn bench_wave(c: &mut Criterion) {
         let p = Polarization::HORIZONTAL;
         b.iter(|| black_box(p).through_polarizer(black_box(0.5)))
     });
+    group.bench_function("is_constructive", |b| {
+        b.iter(|| is_constructive(black_box(500.0), black_box(500.0)))
+    });
+    group.bench_function("is_destructive", |b| {
+        b.iter(|| is_destructive(black_box(250.0), black_box(500.0)))
+    });
 
     group.finish();
 }
@@ -239,6 +338,90 @@ fn bench_lens(c: &mut Criterion) {
     });
     group.bench_function("mirror_focal", |b| {
         b.iter(|| mirror_focal_length(black_box(200.0)))
+    });
+    group.bench_function("thick_lens", |b| {
+        b.iter(|| {
+            thick_lens_focal_length(
+                black_box(1.5),
+                black_box(100.0),
+                black_box(-100.0),
+                black_box(10.0),
+            )
+        })
+    });
+    group.bench_function("cardinal_points", |b| {
+        b.iter(|| {
+            cardinal_points(
+                black_box(1.5),
+                black_box(100.0),
+                black_box(-100.0),
+                black_box(10.0),
+            )
+        })
+    });
+    group.bench_function("f_number", |b| {
+        b.iter(|| f_number(black_box(50.0), black_box(25.0)))
+    });
+    group.bench_function("numerical_aperture", |b| {
+        b.iter(|| numerical_aperture(black_box(1.0), black_box(0.5)))
+    });
+    group.bench_function("airy_disk_radius", |b| {
+        b.iter(|| airy_disk_radius(black_box(0.00055), black_box(2.8)))
+    });
+    group.bench_function("field_of_view", |b| {
+        b.iter(|| field_of_view(black_box(36.0), black_box(50.0)))
+    });
+    group.bench_function("mtf_diffraction", |b| {
+        b.iter(|| mtf_diffraction_limited(black_box(500.0), black_box(1000.0)))
+    });
+    group.bench_function("seidel_coefficients", |b| {
+        b.iter(|| {
+            seidel_coefficients(
+                black_box(1.5),
+                black_box(100.0),
+                black_box(0.0),
+                black_box(-1.0),
+            )
+        })
+    });
+    group.bench_function("separated_lenses", |b| {
+        b.iter(|| separated_lenses_focal_length(black_box(50.0), black_box(-80.0), black_box(30.0)))
+    });
+    group.bench_function("aperture_from_f_number", |b| {
+        b.iter(|| aperture_from_f_number(black_box(50.0), black_box(2.8)))
+    });
+    group.bench_function("na_from_f_number", |b| {
+        b.iter(|| na_from_f_number(black_box(2.8)))
+    });
+    group.bench_function("diffraction_limit", |b| {
+        b.iter(|| diffraction_limit(black_box(550e-6), black_box(10.0)))
+    });
+    group.bench_function("field_of_view_diagonal", |b| {
+        b.iter(|| field_of_view_diagonal(black_box(36.0), black_box(24.0), black_box(50.0)))
+    });
+    group.bench_function("mtf_cutoff_frequency", |b| {
+        b.iter(|| mtf_cutoff_frequency(black_box(0.00055), black_box(2.8)))
+    });
+    group.bench_function("shape_factor", |b| {
+        b.iter(|| shape_factor(black_box(100.0), black_box(-100.0)))
+    });
+    group.bench_function("conjugate_factor", |b| {
+        b.iter(|| conjugate_factor(black_box(200.0), black_box(100.0)))
+    });
+    group.bench_function("lsa", |b| {
+        b.iter(|| {
+            longitudinal_spherical_aberration(black_box(10.0), black_box(100.0), black_box(1.5))
+        })
+    });
+    group.bench_function("chromatic_aberration", |b| {
+        b.iter(|| chromatic_aberration(black_box(100.0), black_box(64.0)))
+    });
+    group.bench_function("petzval_sum", |b| {
+        let elements = [(1.5, 100.0), (1.7, -150.0)];
+        b.iter(|| petzval_sum(black_box(&elements)))
+    });
+    group.bench_function("separated_lenses_bfd", |b| {
+        b.iter(|| separated_lenses_bfd(black_box(50.0), black_box(-80.0), black_box(30.0)))
     });
 
     group.finish();
