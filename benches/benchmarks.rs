@@ -651,6 +651,59 @@ fn bench_pbr(c: &mut Criterion) {
             )
         })
     });
+    group.bench_function("sss_burley", |b| {
+        b.iter(|| sss_profile_burley(black_box(0.5), black_box(1.0)))
+    });
+    group.bench_function("sss_gaussian", |b| {
+        b.iter(|| sss_profile_gaussian(black_box(0.5), black_box(1.0)))
+    });
+    group.bench_function("subsurface_diffuse", |b| {
+        b.iter(|| subsurface_diffuse(black_box(0.8), black_box(0.7), black_box(0.5)))
+    });
+    group.bench_function("iridescence_fresnel", |b| {
+        b.iter(|| {
+            iridescence_fresnel(
+                black_box(1.0),
+                black_box(1.3),
+                black_box(1.5),
+                black_box(300.0),
+                black_box(550.0),
+                black_box(0.8),
+            )
+        })
+    });
+    group.bench_function("iridescence_rgb", |b| {
+        b.iter(|| {
+            iridescence_rgb(
+                black_box(1.0),
+                black_box(1.3),
+                black_box(1.5),
+                black_box(300.0),
+                black_box(0.8),
+            )
+        })
+    });
+    group.bench_function("henyey_greenstein", |b| {
+        b.iter(|| henyey_greenstein(black_box(0.5), black_box(0.7)))
+    });
+    group.bench_function("phase_rayleigh", |b| {
+        b.iter(|| phase_rayleigh(black_box(0.5)))
+    });
+    group.bench_function("volume_transmittance", |b| {
+        b.iter(|| volume_transmittance(black_box(0.5), black_box(2.0)))
+    });
+    group.bench_function("inscattering", |b| {
+        b.iter(|| {
+            single_scatter_inscattering(
+                black_box(0.5),
+                black_box(0.8),
+                black_box(0.5),
+                black_box(1.0),
+                black_box(0.5),
+                black_box(1.0),
+            )
+        })
+    });
 
     group.finish();
 }

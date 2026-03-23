@@ -78,12 +78,10 @@ pub fn double_slit_intensity(
     angle: f64,
     i0: f64,
 ) -> f64 {
-    // Single-slit envelope
     let envelope = single_slit_intensity(slit_width, wavelength, angle, 1.0);
-    // Two-slit interference
     let delta = PI * slit_spacing * angle.sin() / wavelength;
     let interference = delta.cos().powi(2);
-    i0 * envelope * interference * 4.0 // 4x for coherent double slit
+    i0 * envelope * interference * 4.0
 }
 
 /// Diffraction grating: angular positions of maxima.

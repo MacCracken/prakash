@@ -305,6 +305,242 @@ pub fn clearcoat_blend(base_brdf: f64, coat_brdf: f64, clearcoat: f64, h_dot_v: 
     (1.0 - fc * clearcoat) * base_brdf + clearcoat * coat_brdf
 }
 
+// ── Subsurface Scattering ─────────────────────────────────────────────────
+
+/// Burley normalized diffusion profile for subsurface scattering.
+///
+/// R(r) = A · [e^(-r/d) + e^(-r/(3d))] / (8π·d·r)
+///
+/// `r` = distance from entry point (same units as `d`).
+/// `d` = mean free path / diffusion distance.
+/// Returns the radial reflectance profile value.
+#[inline]
+pub fn sss_profile_burley(r: f64, d: f64) -> f64 {
+    if r < 1e-15 {
+        // At r=0, return the limiting value
+        return 1.0 / (2.0 * PI * d * d);
+    }
+    let inv_8pd = 1.0 / (8.0 * PI * d);
+    inv_8pd * ((-r / d).exp() + (-r / (3.0 * d)).exp()) / r
+}
+
+/// Gaussian subsurface scattering profile.
+///
+/// R(r) = e^(-r²/(2σ²)) / (2πσ²)
+///
+/// `r` = distance, `sigma` = scattering width.
+#[inline]
+pub fn sss_profile_gaussian(r: f64, sigma: f64) -> f64 {
+    let s2 = sigma * sigma;
+    (-r * r / (2.0 * s2)).exp() / (2.0 * PI * s2)
+}
+
+/// Subsurface scattering diffuse term (Burley approximation).
+///
+/// Approximates the diffuse component for translucent materials.
+/// Uses normalized Burley diffuse with a curvature-dependent term.
+///
+/// `n_dot_l`, `n_dot_v` = standard dot products.
+/// `roughness` = surface roughness (0–1).
+/// Returns the diffuse BRDF value (divide by π already included).
+#[inline]
+pub fn subsurface_diffuse(n_dot_l: f64, n_dot_v: f64, roughness: f64) -> f64 {
+    let ndl = n_dot_l.clamp(0.0, 1.0);
+    let ndv = n_dot_v.clamp(0.0, 1.0);
+    let fl = (1.0 - ndl).powi(5);
+    let fv = (1.0 - ndv).powi(5);
+
+    // Burley diffuse with subsurface approximation
+    let f_ss90 = roughness * roughness;
+    let f_ss = (1.0 + (f_ss90 - 1.0) * fl) * (1.0 + (f_ss90 - 1.0) * fv);
+
+    // Subsurface component: flattens the diffuse response
+    let fss = 1.25 * (f_ss * (1.0 / (ndl + ndv + 1e-15) - 0.5) + 0.5);
+
+    fss / PI
+}
+
+/// Diffuse transmittance for a thin slab (Borshukov approximation).
+///
+/// T ≈ e^(-σ·d) where σ is the extinction coefficient and d is thickness.
+/// Used for ear/nostril translucency effects.
+///
+/// `thickness` and `extinction` in consistent units.
+#[inline]
+pub fn sss_transmittance(thickness: f64, extinction: f64) -> f64 {
+    (-extinction * thickness).exp()
+}
+
+// ── Iridescence ───────────────────────────────────────────────────────────
+
+/// Iridescent thin-film Fresnel reflectance at a single wavelength.
+///
+/// Computes the reflectance of a thin film on a surface, accounting for
+/// interference between reflections at the two film interfaces.
+///
+/// `n_base` = base material IOR, `n_film` = film IOR, `n_outside` = outside IOR (usually 1.0).
+/// `thickness` and `wavelength` in same units. `cos_theta` = cos(incidence angle).
+#[inline]
+pub fn iridescence_fresnel(
+    n_outside: f64,
+    n_film: f64,
+    n_base: f64,
+    thickness: f64,
+    wavelength: f64,
+    cos_theta: f64,
+) -> f64 {
+    let ct = cos_theta.clamp(0.0, 1.0);
+
+    // Snell's law inside the film
+    let sin2_theta = 1.0 - ct * ct;
+    let sin2_film = sin2_theta * (n_outside / n_film) * (n_outside / n_film);
+    if sin2_film >= 1.0 {
+        return 1.0; // TIR at film
+    }
+    let cos_film = (1.0 - sin2_film).sqrt();
+
+    // Fresnel at outside→film interface
+    let r01 = {
+        let a = n_outside * ct;
+        let b = n_film * cos_film;
+        ((a - b) / (a + b)).powi(2)
+    };
+
+    // Fresnel at film→base interface
+    let sin2_base = sin2_theta * (n_outside / n_base) * (n_outside / n_base);
+    let cos_base = if sin2_base < 1.0 {
+        (1.0 - sin2_base).sqrt()
+    } else {
+        0.0
+    };
+    let r12 = {
+        let a = n_film * cos_film;
+        let b = n_base * cos_base;
+        ((a - b) / (a + b + 1e-15)).powi(2)
+    };
+
+    // Phase difference from round trip through film
+    let delta = std::f64::consts::TAU * n_film * thickness * cos_film / wavelength;
+    let cos_d = delta.cos();
+
+    // Airy formula: R = (r01 + r12 + 2√(r01·r12)·cos(2δ)) / (1 + r01·r12 + 2√(r01·r12)·cos(2δ))
+    let sqrt_rr = (r01 * r12).sqrt();
+    let cos_2d = 2.0 * cos_d * cos_d - 1.0; // cos(2δ)
+    let num = r01 + r12 + 2.0 * sqrt_rr * cos_2d;
+    let den = 1.0 + r01 * r12 + 2.0 * sqrt_rr * cos_2d;
+
+    if den < 1e-15 {
+        return 0.0;
+    }
+    (num / den).clamp(0.0, 1.0)
+}
+
+/// Iridescent reflectance as RGB color.
+///
+/// Evaluates the thin-film interference at R, G, B wavelengths
+/// to produce a color-shifted reflection.
+///
+/// Uses representative wavelengths: R=650nm, G=550nm, B=450nm.
+///
+/// `thickness` in nanometers.
+#[inline]
+pub fn iridescence_rgb(
+    n_outside: f64,
+    n_film: f64,
+    n_base: f64,
+    thickness_nm: f64,
+    cos_theta: f64,
+) -> [f64; 3] {
+    [
+        iridescence_fresnel(n_outside, n_film, n_base, thickness_nm, 650.0, cos_theta),
+        iridescence_fresnel(n_outside, n_film, n_base, thickness_nm, 550.0, cos_theta),
+        iridescence_fresnel(n_outside, n_film, n_base, thickness_nm, 450.0, cos_theta),
+    ]
+}
+
+// ── Volumetric Scattering ─────────────────────────────────────────────────
+
+/// Henyey-Greenstein phase function.
+///
+/// p(cos_θ) = (1 − g²) / (4π · (1 + g² − 2g·cos_θ)^(3/2))
+///
+/// `cos_theta` = cosine of scattering angle.
+/// `g` = asymmetry parameter: −1 = full backscatter, 0 = isotropic, +1 = full forward.
+#[inline]
+pub fn henyey_greenstein(cos_theta: f64, g: f64) -> f64 {
+    let g2 = g * g;
+    let denom = 1.0 + g2 - 2.0 * g * cos_theta;
+    (1.0 - g2) / (4.0 * PI * denom * denom.sqrt() + 1e-15)
+}
+
+/// Isotropic phase function: p = 1/(4π).
+#[inline]
+pub fn phase_isotropic() -> f64 {
+    const INV_4PI: f64 = 1.0 / (4.0 * std::f64::consts::PI);
+    INV_4PI
+}
+
+/// Rayleigh scattering phase function.
+///
+/// p(cos_θ) = 3(1 + cos²θ) / (16π)
+///
+/// For particles much smaller than the wavelength (molecules, blue sky).
+#[inline]
+pub fn phase_rayleigh(cos_theta: f64) -> f64 {
+    3.0 * (1.0 + cos_theta * cos_theta) / (16.0 * PI)
+}
+
+/// Extinction coefficient: σ_t = σ_a + σ_s.
+///
+/// `absorption` and `scattering` coefficients in same units (e.g., 1/m).
+#[inline]
+pub fn extinction_coefficient(absorption: f64, scattering: f64) -> f64 {
+    absorption + scattering
+}
+
+/// Transmittance through participating media (Beer-Lambert).
+///
+/// T = e^(-σ_t · d)
+///
+/// `sigma_t` = extinction coefficient, `distance` in consistent units.
+#[inline]
+pub fn volume_transmittance(sigma_t: f64, distance: f64) -> f64 {
+    (-sigma_t * distance).exp()
+}
+
+/// Single-scattering albedo: ω = σ_s / σ_t.
+///
+/// ω = 0 → pure absorption, ω = 1 → pure scattering.
+#[inline]
+pub fn single_scatter_albedo(absorption: f64, scattering: f64) -> f64 {
+    let total = absorption + scattering;
+    if total < 1e-15 {
+        return 0.0;
+    }
+    scattering / total
+}
+
+/// In-scattering contribution for single-scattering approximation.
+///
+/// L_in = σ_s · p(cos_θ) · T(d) · L_light
+///
+/// `scattering` = σ_s coefficient, `cos_theta` = scattering angle,
+/// `g` = HG asymmetry, `sigma_t` = extinction, `distance` = path length,
+/// `light_intensity` = incident light.
+#[inline]
+pub fn single_scatter_inscattering(
+    scattering: f64,
+    cos_theta: f64,
+    g: f64,
+    sigma_t: f64,
+    distance: f64,
+    light_intensity: f64,
+) -> f64 {
+    let phase = henyey_greenstein(cos_theta, g);
+    let transmittance = volume_transmittance(sigma_t, distance);
+    scattering * phase * transmittance * light_intensity
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -793,5 +1029,220 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ── Subsurface scattering tests ───────────────────────────────────────
+
+    #[test]
+    fn test_sss_burley_positive() {
+        for r in [0.0, 0.1, 0.5, 1.0, 5.0] {
+            let v = sss_profile_burley(r, 1.0);
+            assert!(v >= 0.0, "Burley SSS profile negative at r={r}");
+        }
+    }
+
+    #[test]
+    fn test_sss_burley_decreases_with_distance() {
+        let near = sss_profile_burley(0.1, 1.0);
+        let far = sss_profile_burley(2.0, 1.0);
+        assert!(near > far, "SSS profile should decrease with distance");
+    }
+
+    #[test]
+    fn test_sss_burley_wider_d_spreads_more() {
+        let narrow = sss_profile_burley(1.0, 0.5);
+        let wide = sss_profile_burley(1.0, 2.0);
+        // Wider d → more spread → lower peak but higher at distance
+        assert!(
+            (narrow - wide).abs() > EPS,
+            "Different d should give different profiles"
+        );
+    }
+
+    #[test]
+    fn test_sss_gaussian_positive() {
+        let v = sss_profile_gaussian(0.5, 1.0);
+        assert!(v > 0.0);
+    }
+
+    #[test]
+    fn test_sss_gaussian_peak_at_zero() {
+        let peak = sss_profile_gaussian(0.0, 1.0);
+        let off = sss_profile_gaussian(1.0, 1.0);
+        assert!(peak > off);
+    }
+
+    #[test]
+    fn test_sss_gaussian_narrower_sigma_taller() {
+        let narrow = sss_profile_gaussian(0.0, 0.5);
+        let wide = sss_profile_gaussian(0.0, 2.0);
+        assert!(narrow > wide, "Narrower sigma = taller peak");
+    }
+
+    #[test]
+    fn test_subsurface_diffuse_range() {
+        for ndl in [0.1, 0.5, 0.9] {
+            for ndv in [0.1, 0.5, 0.9] {
+                let v = subsurface_diffuse(ndl, ndv, 0.5);
+                assert!(v > 0.0, "SSS diffuse should be positive");
+                assert!(v < 2.0, "SSS diffuse should be bounded");
+            }
+        }
+    }
+
+    #[test]
+    fn test_sss_transmittance() {
+        assert!((sss_transmittance(0.0, 1.0) - 1.0).abs() < EPS);
+        assert!(sss_transmittance(1.0, 1.0) < 1.0);
+        assert!(sss_transmittance(1.0, 1.0) > 0.0);
+    }
+
+    // ── Iridescence tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_iridescence_fresnel_range() {
+        for cos_t in [0.1, 0.3, 0.5, 0.7, 0.9] {
+            let r = iridescence_fresnel(1.0, 1.3, 1.5, 300.0, 550.0, cos_t);
+            assert!(
+                (0.0..=1.0).contains(&r),
+                "Iridescence out of range at cos={cos_t}: {r}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_iridescence_varies_with_wavelength() {
+        let r_red = iridescence_fresnel(1.0, 1.3, 1.5, 300.0, 650.0, 0.8);
+        let r_blue = iridescence_fresnel(1.0, 1.3, 1.5, 300.0, 450.0, 0.8);
+        assert!(
+            (r_red - r_blue).abs() > 0.001,
+            "Iridescence should vary with wavelength"
+        );
+    }
+
+    #[test]
+    fn test_iridescence_varies_with_thickness() {
+        let r1 = iridescence_fresnel(1.0, 1.3, 1.5, 200.0, 550.0, 0.8);
+        let r2 = iridescence_fresnel(1.0, 1.3, 1.5, 400.0, 550.0, 0.8);
+        assert!(
+            (r1 - r2).abs() > 0.001,
+            "Iridescence should vary with thickness"
+        );
+    }
+
+    #[test]
+    fn test_iridescence_varies_with_angle() {
+        let r_normal = iridescence_fresnel(1.0, 1.3, 1.5, 300.0, 550.0, 1.0);
+        let r_grazing = iridescence_fresnel(1.0, 1.3, 1.5, 300.0, 550.0, 0.2);
+        assert!(
+            (r_normal - r_grazing).abs() > 0.01,
+            "Iridescence should vary with angle"
+        );
+    }
+
+    #[test]
+    fn test_iridescence_rgb_produces_color() {
+        let rgb = iridescence_rgb(1.0, 1.3, 1.5, 300.0, 0.8);
+        // Different wavelengths should give different reflectances → color
+        assert!(rgb[0] >= 0.0 && rgb[1] >= 0.0 && rgb[2] >= 0.0);
+        // At least two channels should differ (it's iridescent!)
+        let all_same = (rgb[0] - rgb[1]).abs() < 0.001 && (rgb[1] - rgb[2]).abs() < 0.001;
+        assert!(!all_same, "Iridescence should produce color variation");
+    }
+
+    // ── Volumetric scattering tests ───────────────────────────────────────
+
+    #[test]
+    fn test_hg_isotropic() {
+        // g=0 should match isotropic phase function
+        let p_hg = henyey_greenstein(0.5, 0.0);
+        let p_iso = phase_isotropic();
+        assert!(
+            (p_hg - p_iso).abs() < 0.001,
+            "HG(g=0) should match isotropic: {p_hg} vs {p_iso}"
+        );
+    }
+
+    #[test]
+    fn test_hg_forward_scattering() {
+        // g=0.8: forward scattering should be stronger
+        let p_fwd = henyey_greenstein(1.0, 0.8);
+        let p_back = henyey_greenstein(-1.0, 0.8);
+        assert!(p_fwd > p_back, "Forward > backward for g=0.8");
+    }
+
+    #[test]
+    fn test_hg_backward_scattering() {
+        // g=-0.5: backward scattering should be stronger
+        let p_fwd = henyey_greenstein(1.0, -0.5);
+        let p_back = henyey_greenstein(-1.0, -0.5);
+        assert!(p_back > p_fwd, "Backward > forward for g=-0.5");
+    }
+
+    #[test]
+    fn test_hg_always_positive() {
+        for g in [-0.9, -0.5, 0.0, 0.5, 0.9] {
+            for ct in [-1.0, -0.5, 0.0, 0.5, 1.0] {
+                let p = henyey_greenstein(ct, g);
+                assert!(p >= 0.0, "HG negative at g={g}, cos_theta={ct}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_phase_rayleigh_symmetric() {
+        let p_fwd = phase_rayleigh(1.0);
+        let p_back = phase_rayleigh(-1.0);
+        assert!((p_fwd - p_back).abs() < EPS, "Rayleigh should be symmetric");
+    }
+
+    #[test]
+    fn test_phase_rayleigh_min_at_90() {
+        let p_90 = phase_rayleigh(0.0); // cos(90°) = 0
+        let p_0 = phase_rayleigh(1.0); // cos(0°) = 1
+        assert!(p_0 > p_90, "Rayleigh min at 90°");
+    }
+
+    #[test]
+    fn test_extinction_coefficient() {
+        assert!((extinction_coefficient(0.5, 0.3) - 0.8).abs() < EPS);
+    }
+
+    #[test]
+    fn test_volume_transmittance() {
+        assert!((volume_transmittance(0.0, 10.0) - 1.0).abs() < EPS);
+        assert!(volume_transmittance(1.0, 1.0) < 1.0);
+        assert!(volume_transmittance(1.0, 1.0) > 0.0);
+    }
+
+    #[test]
+    fn test_volume_transmittance_thicker_less() {
+        let t1 = volume_transmittance(0.5, 1.0);
+        let t2 = volume_transmittance(0.5, 3.0);
+        assert!(t2 < t1);
+    }
+
+    #[test]
+    fn test_single_scatter_albedo() {
+        assert!((single_scatter_albedo(0.0, 1.0) - 1.0).abs() < EPS);
+        assert!((single_scatter_albedo(1.0, 0.0)).abs() < EPS);
+        assert!((single_scatter_albedo(0.5, 0.5) - 0.5).abs() < EPS);
+    }
+
+    #[test]
+    fn test_single_scatter_albedo_zero() {
+        assert!((single_scatter_albedo(0.0, 0.0)).abs() < EPS);
+    }
+
+    #[test]
+    fn test_inscattering_positive() {
+        let l = single_scatter_inscattering(0.5, 0.8, 0.5, 1.0, 0.5, 1.0);
+        assert!(l > 0.0, "In-scattering should be positive");
+    }
+
+    #[test]
+    fn test_inscattering_zero_scattering() {
+        let l = single_scatter_inscattering(0.0, 0.8, 0.5, 1.0, 0.5, 1.0);
+        assert!(l.abs() < EPS, "Zero scattering = zero in-scattering");
     }
 }

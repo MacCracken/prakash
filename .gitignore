@@ -35,3 +35,9 @@ criterion/
 # Environment / secrets
 .env
 .env.*
+
+# Property testing regressions
+proptest-regressions/
+
+# Supply chain cache
+supply-chain/.cache/
