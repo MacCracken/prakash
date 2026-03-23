@@ -345,6 +345,39 @@ fn bench_wave(c: &mut Criterion) {
             )
         })
     });
+    group.bench_function("stokes_dop", |b| {
+        let s = StokesVector::new(1.0, 0.5, 0.3, 0.1);
+        b.iter(|| black_box(s).degree_of_polarization())
+    });
+    group.bench_function("mueller_apply", |b| {
+        let m = MuellerMatrix::POLARIZER_HORIZONTAL;
+        let s = StokesVector::unpolarized(1.0);
+        b.iter(|| black_box(m).apply(black_box(&s)))
+    });
+    group.bench_function("mueller_multiply", |b| {
+        let a = MuellerMatrix::POLARIZER_HORIZONTAL;
+        let b_mat = MuellerMatrix::rotation(0.5);
+        b.iter(|| black_box(a).multiply(black_box(&b_mat)))
+    });
+    group.bench_function("mueller_polarizer", |b| {
+        b.iter(|| MuellerMatrix::polarizer(black_box(0.785)))
+    });
+    group.bench_function("mueller_retarder", |b| {
+        b.iter(|| MuellerMatrix::retarder(black_box(std::f64::consts::FRAC_PI_2)))
+    });
+    group.bench_function("mueller_chain_3", |b| {
+        let s = StokesVector::unpolarized(1.0);
+        let elements = [
+            MuellerMatrix::POLARIZER_HORIZONTAL,
+            MuellerMatrix::QUARTER_WAVE_HORIZONTAL,
+            MuellerMatrix::POLARIZER_VERTICAL,
+        ];
+        b.iter(|| mueller_chain(black_box(&s), black_box(&elements)))
+    });
+    group.bench_function("birefringent_retardation", |b| {
+        let mat = BirefringentMaterial::QUARTZ;
+        b.iter(|| mat.retardation(black_box(100.0), black_box(550.0)))
+    });
 
     group.finish();
 }
