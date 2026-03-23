@@ -378,6 +378,56 @@ fn bench_wave(c: &mut Criterion) {
         let mat = BirefringentMaterial::QUARTZ;
         b.iter(|| mat.retardation(black_box(100.0), black_box(550.0)))
     });
+    group.bench_function("fraunhofer_rect", |b| {
+        b.iter(|| {
+            fraunhofer_rect(
+                black_box(1e-3),
+                black_box(1e-3),
+                black_box(550e-9),
+                black_box(0.001),
+                black_box(0.001),
+                black_box(1.0),
+            )
+        })
+    });
+    group.bench_function("fresnel_c", |b| b.iter(|| fresnel_c(black_box(2.0))));
+    group.bench_function("fresnel_s", |b| b.iter(|| fresnel_s(black_box(2.0))));
+    group.bench_function("fresnel_edge", |b| {
+        b.iter(|| fresnel_edge_intensity(black_box(1.0)))
+    });
+    group.bench_function("huygens_fresnel_50", |b| {
+        let aperture: Vec<(f64, f64)> = (0..50).map(|i| ((i as f64 - 25.0) * 1e-5, 1.0)).collect();
+        b.iter(|| {
+            huygens_fresnel_1d(
+                black_box(&aperture),
+                black_box(550e-9),
+                black_box(0.1),
+                black_box(0.0),
+            )
+        })
+    });
+    group.bench_function("coating_reflectance", |b| {
+        b.iter(|| {
+            coating_reflectance(
+                black_box(1.0),
+                black_box(1.38),
+                black_box(1.52),
+                black_box(99.6),
+                black_box(550.0),
+            )
+        })
+    });
+    group.bench_function("multilayer_2", |b| {
+        let layers = [(1.38, 99.6), (2.1, 65.5)];
+        b.iter(|| {
+            multilayer_reflectance(
+                black_box(1.0),
+                black_box(1.52),
+                black_box(&layers),
+                black_box(550.0),
+            )
+        })
+    });
 
     group.finish();
 }
@@ -542,6 +592,65 @@ fn bench_pbr(c: &mut Criterion) {
         b.iter(|| lambert_diffuse_rgb(black_box([0.8, 0.6, 0.4])))
     });
     group.bench_function("ior_to_f0", |b| b.iter(|| ior_to_f0(black_box(1.5))));
+    group.bench_function("ggx_aniso", |b| {
+        b.iter(|| {
+            distribution_ggx_aniso(
+                black_box(0.9),
+                black_box(0.3),
+                black_box(0.2),
+                black_box(0.3),
+                black_box(0.7),
+            )
+        })
+    });
+    group.bench_function("geometry_smith_aniso", |b| {
+        b.iter(|| {
+            geometry_smith_aniso(
+                black_box(0.8),
+                black_box(0.7),
+                black_box(0.3),
+                black_box(0.2),
+                black_box(0.3),
+                black_box(0.2),
+                black_box(0.3),
+                black_box(0.7),
+            )
+        })
+    });
+    group.bench_function("sheen_charlie", |b| {
+        b.iter(|| {
+            sheen_charlie(
+                black_box(0.9),
+                black_box(0.8),
+                black_box(0.7),
+                black_box(0.5),
+            )
+        })
+    });
+    group.bench_function("sheen_ashikhmin", |b| {
+        b.iter(|| sheen_ashikhmin(black_box(0.8), black_box(0.5)))
+    });
+    group.bench_function("clearcoat_brdf", |b| {
+        b.iter(|| {
+            clearcoat_brdf(
+                black_box(0.9),
+                black_box(0.8),
+                black_box(0.7),
+                black_box(0.85),
+                black_box(0.05),
+            )
+        })
+    });
+    group.bench_function("clearcoat_blend", |b| {
+        b.iter(|| {
+            clearcoat_blend(
+                black_box(0.5),
+                black_box(0.3),
+                black_box(0.8),
+                black_box(0.85),
+            )
+        })
+    });
 
     group.finish();
 }

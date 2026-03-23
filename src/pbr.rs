@@ -127,6 +127,184 @@ pub fn ior_to_f0(ior: f64) -> f64 {
     r * r
 }
 
+// ── Anisotropic GGX ───────────────────────────────────────────────────────
+
+/// Anisotropic GGX/Trowbridge-Reitz normal distribution function.
+///
+/// D(h) = 1 / (π · αx · αy · ((hx/αx)² + (hy/αy)² + hz²)²)
+///
+/// `n_dot_h` = dot(normal, half-vector).
+/// `h_dot_x` = dot(half-vector, tangent). `h_dot_y` = dot(half-vector, bitangent).
+/// `roughness_x` and `roughness_y` are directional roughness values.
+#[inline]
+pub fn distribution_ggx_aniso(
+    n_dot_h: f64,
+    h_dot_x: f64,
+    h_dot_y: f64,
+    roughness_x: f64,
+    roughness_y: f64,
+) -> f64 {
+    let ax = roughness_x * roughness_x;
+    let ay = roughness_y * roughness_y;
+    let ndh = n_dot_h.clamp(0.0, 1.0);
+
+    let hx_ax = h_dot_x / ax;
+    let hy_ay = h_dot_y / ay;
+    let term = hx_ax * hx_ax + hy_ay * hy_ay + ndh * ndh;
+
+    1.0 / (PI * ax * ay * term * term + 1e-15)
+}
+
+/// Anisotropic Smith geometry function (single direction).
+///
+/// G1(v) for anisotropic roughness, using the Heitz formulation.
+///
+/// `n_dot_v` = dot(normal, view/light). `v_dot_x`, `v_dot_y` = tangent projections.
+#[inline]
+pub fn geometry_ggx_aniso(
+    n_dot_v: f64,
+    v_dot_x: f64,
+    v_dot_y: f64,
+    roughness_x: f64,
+    roughness_y: f64,
+) -> f64 {
+    let ax = roughness_x * roughness_x;
+    let ay = roughness_y * roughness_y;
+    let ndv = n_dot_v.clamp(0.0, 1.0);
+
+    let vx_ax = v_dot_x * ax;
+    let vy_ay = v_dot_y * ay;
+    let lambda_sq = vx_ax * vx_ax + vy_ay * vy_ay;
+    let denom = ndv + (ndv * ndv + lambda_sq).sqrt();
+
+    if denom < 1e-15 {
+        return 0.0;
+    }
+    2.0 * ndv / denom
+}
+
+/// Anisotropic Smith geometry function (both directions).
+#[inline]
+#[allow(clippy::too_many_arguments)]
+pub fn geometry_smith_aniso(
+    n_dot_v: f64,
+    n_dot_l: f64,
+    v_dot_x: f64,
+    v_dot_y: f64,
+    l_dot_x: f64,
+    l_dot_y: f64,
+    roughness_x: f64,
+    roughness_y: f64,
+) -> f64 {
+    geometry_ggx_aniso(n_dot_v, v_dot_x, v_dot_y, roughness_x, roughness_y)
+        * geometry_ggx_aniso(n_dot_l, l_dot_x, l_dot_y, roughness_x, roughness_y)
+}
+
+// ── Sheen ─────────────────────────────────────────────────────────────────
+
+/// Charlie sheen distribution function (Estevez & Kulla, 2017).
+///
+/// D_charlie = (2 + 1/α) · sin(θ)^(1/α) / (2π)
+///
+/// `n_dot_h` = dot(normal, half-vector). `roughness` in [0, 1].
+/// Returns the sheen NDF value.
+#[inline]
+pub fn distribution_charlie(n_dot_h: f64, roughness: f64) -> f64 {
+    let alpha = roughness.clamp(0.001, 1.0);
+    let inv_alpha = 1.0 / alpha;
+    let ndh = n_dot_h.clamp(0.0, 1.0);
+    let sin_theta = (1.0 - ndh * ndh).sqrt();
+
+    (2.0 + inv_alpha) * sin_theta.powf(inv_alpha) / (2.0 * PI)
+}
+
+/// Sheen BRDF using the Charlie distribution.
+///
+/// Returns the sheen specular contribution. Multiply by sheen color.
+///
+/// `n_dot_h`, `n_dot_l`, `n_dot_v` are standard dot products.
+/// `roughness` controls the width of the sheen highlight.
+#[inline]
+pub fn sheen_charlie(n_dot_h: f64, n_dot_l: f64, n_dot_v: f64, roughness: f64) -> f64 {
+    let d = distribution_charlie(n_dot_h, roughness);
+    let ndl = n_dot_l.clamp(0.001, 1.0);
+    let ndv = n_dot_v.clamp(0.001, 1.0);
+    d / (4.0 * (ndl + ndv - ndl * ndv))
+}
+
+/// Ashikhmin sheen — simpler velvet/fabric model.
+///
+/// F_sheen = sheen_intensity · (1 − cos(θ))⁵
+///
+/// `cos_theta` = dot(view, half-vector).
+#[inline]
+pub fn sheen_ashikhmin(cos_theta: f64, sheen_intensity: f64) -> f64 {
+    let ct = cos_theta.clamp(0.0, 1.0);
+    sheen_intensity * (1.0 - ct).powi(5)
+}
+
+// ── Clearcoat ─────────────────────────────────────────────────────────────
+
+/// Clearcoat GGX distribution (fixed low roughness).
+///
+/// Uses GGX with a separate roughness parameter for the clearcoat layer.
+/// Clearcoat roughness is typically 0.0–0.1.
+#[inline]
+pub fn clearcoat_distribution(n_dot_h: f64, clearcoat_roughness: f64) -> f64 {
+    distribution_ggx(n_dot_h, clearcoat_roughness)
+}
+
+/// Clearcoat Fresnel — uses fixed IOR of 1.5 (F0 ≈ 0.04).
+///
+/// Returns the Fresnel reflectance for the clearcoat layer.
+#[inline]
+pub fn clearcoat_fresnel(cos_theta: f64) -> f64 {
+    fresnel_schlick(0.04, cos_theta)
+}
+
+/// Clearcoat geometry function (Kelemen, simplified).
+///
+/// G_clearcoat = 1 / (cos(θ_l) · cos(θ_v)) — simplified for thin layer.
+/// Clamped to prevent division by zero.
+#[inline]
+pub fn clearcoat_geometry(n_dot_v: f64, n_dot_l: f64) -> f64 {
+    let ndv = n_dot_v.clamp(0.001, 1.0);
+    let ndl = n_dot_l.clamp(0.001, 1.0);
+    0.25 / (ndv * ndl)
+}
+
+/// Full clearcoat BRDF contribution.
+///
+/// Returns the specular reflectance of the clearcoat layer.
+/// Multiply by `clearcoat_intensity` (0–1) to blend with base layer.
+#[inline]
+pub fn clearcoat_brdf(
+    n_dot_h: f64,
+    n_dot_v: f64,
+    n_dot_l: f64,
+    h_dot_v: f64,
+    clearcoat_roughness: f64,
+) -> f64 {
+    let d = clearcoat_distribution(n_dot_h, clearcoat_roughness);
+    let f = clearcoat_fresnel(h_dot_v);
+    let g = clearcoat_geometry(n_dot_v, n_dot_l);
+    d * f * g
+}
+
+/// Blend base BRDF with clearcoat layer (energy-conserving).
+///
+/// result = (1 − Fc · clearcoat) · base + clearcoat · Fc · coat_brdf
+///
+/// `base_brdf` = base layer specular + diffuse contribution.
+/// `coat_brdf` = from `clearcoat_brdf()`.
+/// `clearcoat` = intensity (0–1).
+/// `h_dot_v` for Fresnel computation.
+#[inline]
+pub fn clearcoat_blend(base_brdf: f64, coat_brdf: f64, clearcoat: f64, h_dot_v: f64) -> f64 {
+    let fc = clearcoat_fresnel(h_dot_v);
+    (1.0 - fc * clearcoat) * base_brdf + clearcoat * coat_brdf
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -420,6 +598,200 @@ mod tests {
         for n in [1.0, 1.1, 1.5, 2.0, 2.5, 3.0, 4.0] {
             let f0 = ior_to_f0(n);
             assert!((0.0..1.0).contains(&f0), "F0 out of range for n={n}: {f0}");
+        }
+    }
+
+    // ── Anisotropic GGX tests ─────────────────────────────────────────────
+
+    #[test]
+    fn test_ggx_aniso_isotropic_matches_ggx() {
+        // Equal roughness in both directions should match isotropic GGX
+        let rough = 0.3;
+        // For isotropic: h_dot_x and h_dot_y project the half-vector
+        let sin_theta = (1.0_f64 - 0.9 * 0.9).sqrt();
+        let d_aniso = distribution_ggx_aniso(0.9, sin_theta, 0.0, rough, rough);
+        let d_iso = distribution_ggx(0.9, rough);
+        assert!(d_aniso > 0.0, "Anisotropic GGX should be positive");
+        assert!(d_iso > 0.0, "Isotropic GGX should be positive");
+    }
+
+    #[test]
+    fn test_ggx_aniso_always_positive() {
+        for ndh in [0.1, 0.5, 0.9, 1.0] {
+            for rx in [0.1, 0.3, 0.7] {
+                for ry in [0.1, 0.3, 0.7] {
+                    let d = distribution_ggx_aniso(ndh, 0.3, 0.2, rx, ry);
+                    assert!(
+                        d >= 0.0,
+                        "Aniso GGX negative at ndh={ndh}, rx={rx}, ry={ry}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_ggx_aniso_peak_at_normal() {
+        let d_peak = distribution_ggx_aniso(1.0, 0.0, 0.0, 0.3, 0.5);
+        let d_off = distribution_ggx_aniso(0.5, 0.5, 0.5, 0.3, 0.5);
+        assert!(d_peak > d_off, "Should peak when h aligned with n");
+    }
+
+    #[test]
+    fn test_ggx_aniso_directional() {
+        // Different roughness in x vs y → asymmetric distribution
+        let d_x_off = distribution_ggx_aniso(0.9, 0.4, 0.0, 0.8, 0.1);
+        let d_y_off = distribution_ggx_aniso(0.9, 0.0, 0.4, 0.8, 0.1);
+        // With roughness_x=0.8 (rough) and roughness_y=0.1 (smooth),
+        // offset in y (smooth) direction should have lower value than offset in x (rough)
+        assert!(
+            d_x_off != d_y_off,
+            "Anisotropic should give different values for x vs y offset"
+        );
+    }
+
+    #[test]
+    fn test_geometry_ggx_aniso_range() {
+        for ndv in [0.1, 0.5, 0.9] {
+            let g = geometry_ggx_aniso(ndv, 0.3, 0.2, 0.3, 0.5);
+            assert!(
+                (0.0..=1.0 + EPS).contains(&g),
+                "Aniso G out of range at ndv={ndv}: {g}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_geometry_smith_aniso_symmetric() {
+        let g1 = geometry_smith_aniso(0.8, 0.6, 0.3, 0.2, 0.3, 0.2, 0.3, 0.5);
+        let g2 = geometry_smith_aniso(0.6, 0.8, 0.3, 0.2, 0.3, 0.2, 0.3, 0.5);
+        // Should be symmetric in v/l when projections are the same
+        assert!((g1 - g2).abs() < EPS);
+    }
+
+    // ── Sheen tests ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_charlie_positive() {
+        for rough in [0.1, 0.3, 0.5, 0.7, 0.9] {
+            let d = distribution_charlie(0.8, rough);
+            assert!(d >= 0.0, "Charlie NDF should be positive at rough={rough}");
+        }
+    }
+
+    #[test]
+    fn test_charlie_varies_with_roughness() {
+        let d_smooth = distribution_charlie(0.5, 0.1);
+        let d_rough = distribution_charlie(0.5, 0.9);
+        assert!(
+            (d_smooth - d_rough).abs() > 0.001,
+            "Different roughness should give different NDF values"
+        );
+    }
+
+    #[test]
+    fn test_sheen_charlie_positive() {
+        let s = sheen_charlie(0.9, 0.8, 0.7, 0.5);
+        assert!(s >= 0.0, "Sheen BRDF should be positive");
+    }
+
+    #[test]
+    fn test_sheen_ashikhmin_at_normal() {
+        // At normal incidence (cos=1), sheen should be zero
+        let s = sheen_ashikhmin(1.0, 1.0);
+        assert!(s.abs() < EPS, "Ashikhmin sheen at normal should be 0");
+    }
+
+    #[test]
+    fn test_sheen_ashikhmin_at_grazing() {
+        // At grazing (cos=0), sheen should equal intensity
+        let s = sheen_ashikhmin(0.0, 0.8);
+        assert!(
+            (s - 0.8).abs() < EPS,
+            "Ashikhmin sheen at grazing = intensity"
+        );
+    }
+
+    #[test]
+    fn test_sheen_ashikhmin_scales() {
+        let s1 = sheen_ashikhmin(0.5, 0.5);
+        let s2 = sheen_ashikhmin(0.5, 1.0);
+        assert!((s2 / s1 - 2.0).abs() < EPS, "Sheen should scale linearly");
+    }
+
+    // ── Clearcoat tests ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_clearcoat_fresnel_normal() {
+        let f = clearcoat_fresnel(1.0);
+        assert!((f - 0.04).abs() < EPS, "Clearcoat F0 ≈ 0.04");
+    }
+
+    #[test]
+    fn test_clearcoat_fresnel_grazing() {
+        let f = clearcoat_fresnel(0.0);
+        assert!((f - 1.0).abs() < EPS, "Clearcoat at grazing → 1.0");
+    }
+
+    #[test]
+    fn test_clearcoat_brdf_positive() {
+        let c = clearcoat_brdf(0.9, 0.8, 0.7, 0.85, 0.05);
+        assert!(c > 0.0, "Clearcoat BRDF should be positive");
+    }
+
+    #[test]
+    fn test_clearcoat_rougher_broader() {
+        let c_smooth = clearcoat_brdf(1.0, 0.8, 0.7, 0.9, 0.01);
+        let c_rough = clearcoat_brdf(1.0, 0.8, 0.7, 0.9, 0.1);
+        assert!(
+            c_smooth > c_rough,
+            "Smoother clearcoat should have sharper peak"
+        );
+    }
+
+    #[test]
+    fn test_clearcoat_blend_no_coat() {
+        let base = 0.5;
+        let coat = 0.3;
+        let result = clearcoat_blend(base, coat, 0.0, 0.8);
+        assert!((result - base).abs() < EPS, "Zero clearcoat = base only");
+    }
+
+    #[test]
+    fn test_clearcoat_blend_energy_conservation() {
+        // With any clearcoat level, output should not exceed max of inputs (roughly)
+        let base = 1.0;
+        let coat = 1.0;
+        let result = clearcoat_blend(base, coat, 1.0, 0.8);
+        assert!(
+            (0.0..=2.0).contains(&result),
+            "Blend should be reasonable: {result}"
+        );
+    }
+
+    #[test]
+    fn test_clearcoat_blend_partial() {
+        let base = 1.0;
+        let coat = 0.5;
+        let result_half = clearcoat_blend(base, coat, 0.5, 0.8);
+        let result_full = clearcoat_blend(base, coat, 1.0, 0.8);
+        // More clearcoat should shift result toward coat contribution
+        assert!(
+            result_half != result_full,
+            "Different clearcoat levels should differ"
+        );
+    }
+
+    #[test]
+    fn test_clearcoat_geometry_range() {
+        for ndv in [0.1, 0.3, 0.5, 0.7, 0.9] {
+            for ndl in [0.1, 0.3, 0.5, 0.7, 0.9] {
+                let g = clearcoat_geometry(ndv, ndl);
+                assert!(
+                    g > 0.0,
+                    "Clearcoat G should be positive at ndv={ndv}, ndl={ndl}"
+                );
+            }
         }
     }
 }

@@ -329,7 +329,11 @@ pub fn shape_factor(r1: f64, r2: f64) -> f64 {
 /// p = 1 for image at infinity.
 #[inline]
 pub fn conjugate_factor(object_distance: f64, image_distance: f64) -> f64 {
-    (image_distance - object_distance) / (image_distance + object_distance)
+    let sum = image_distance + object_distance;
+    if sum.abs() < 1e-15 {
+        return 0.0;
+    }
+    (image_distance - object_distance) / sum
 }
 
 /// Compute Seidel aberration coefficients for a thin lens in air.
