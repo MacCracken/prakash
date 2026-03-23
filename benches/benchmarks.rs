@@ -303,6 +303,48 @@ fn bench_wave(c: &mut Criterion) {
     group.bench_function("is_destructive", |b| {
         b.iter(|| is_destructive(black_box(250.0), black_box(500.0)))
     });
+    group.bench_function("coherence_length", |b| {
+        b.iter(|| coherence_length(black_box(550.0), black_box(1.0)))
+    });
+    group.bench_function("coherence_time", |b| {
+        b.iter(|| coherence_time(black_box(550e-9), black_box(1e-9)))
+    });
+    group.bench_function("bessel_j1", |b| b.iter(|| bessel_j1(black_box(3.0))));
+    group.bench_function("bessel_j1_large", |b| b.iter(|| bessel_j1(black_box(15.0))));
+    group.bench_function("airy_pattern", |b| {
+        b.iter(|| {
+            airy_pattern(
+                black_box(10e-3),
+                black_box(550e-9),
+                black_box(1e-5),
+                black_box(1.0),
+            )
+        })
+    });
+    group.bench_function("fp_transmittance", |b| {
+        b.iter(|| {
+            fabry_perot_transmittance(
+                black_box(550e-9),
+                black_box(1e-3),
+                black_box(1.0),
+                black_box(0.0),
+                black_box(0.9),
+            )
+        })
+    });
+    group.bench_function("fp_finesse", |b| {
+        b.iter(|| fabry_perot_finesse(black_box(0.9)))
+    });
+    group.bench_function("fp_resolving_power", |b| {
+        b.iter(|| {
+            fabry_perot_resolving_power(
+                black_box(550e-9),
+                black_box(1e-3),
+                black_box(1.0),
+                black_box(0.9),
+            )
+        })
+    });
 
     group.finish();
 }

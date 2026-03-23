@@ -104,6 +104,7 @@ pub fn combined_focal_length(f1: f64, f2: f64) -> Result<f64> {
 /// Returns (near_limit, far_limit) distances.
 /// `f` = focal length, `N` = f-number, `c` = circle of confusion,
 /// `d` = subject distance.
+#[inline]
 pub fn depth_of_field(focal_length: f64, f_number: f64, coc: f64, subject_dist: f64) -> (f64, f64) {
     let h = (focal_length * focal_length) / (f_number * coc); // hyperfocal distance
     let near = (h * subject_dist) / (h + (subject_dist - focal_length));

@@ -468,21 +468,22 @@ impl Spd {
         let mut x = 0.0;
         let mut y = 0.0;
         let mut z = 0.0;
-        let step = 5.0;
-        let mut wl = 380.0;
-        let mut i = 0usize;
-        while wl <= 780.0 {
-            let power = self.at(wl);
-            let (cx, cy, cz) = CIE_1931_2DEG[i];
+
+        // Fast path: SPD starts at 380nm with 5nm step (aligned with CMF table)
+        let aligned = (self.start_nm - 380.0).abs() < 1e-10 && (self.step_nm - 5.0).abs() < 1e-10;
+
+        for (i, &(cx, cy, cz)) in CIE_1931_2DEG.iter().enumerate() {
+            let power = if aligned && i < self.values.len() {
+                self.values[i]
+            } else {
+                self.at(380.0 + i as f64 * 5.0)
+            };
             x += power * cx;
             y += power * cy;
             z += power * cz;
-            wl += step;
-            i += 1;
         }
-        // Normalize so that equal-energy white gives Y=1
-        let k = step; // integration weight
-        Xyz::new(x * k, y * k, z * k)
+        // Integration weight = step size
+        Xyz::new(x * 5.0, y * 5.0, z * 5.0)
     }
 
     /// Convert this SPD to sRGB color.
