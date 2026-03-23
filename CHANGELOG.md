@@ -1,21 +1,60 @@
 # Changelog
 
-## [0.22.3] - 2026-03-23
+## [0.23.3] - 2026-03-23
+
+### Added — ray V0.2: Optical Systems
+- 3D vector refraction (`refract_3d`) and 3D Snell's law with Fresnel reflectance (`snell_3d`)
+- Sequential ray tracing through multiple optical surfaces (`trace_surface`, `trace_sequential`)
+- Optical surface types: `SurfaceShape` (Sphere/Plane), `OpticalSurface`, `TraceRay`, `TraceHit`
+- Cauchy dispersion model (`CauchyCoefficients`) with BK7 and fused silica presets
+- Sellmeier dispersion model (`SellmeierCoefficients`) with 6 presets (BK7, SF11, fused silica, sapphire, water, diamond)
+- Abbe number calculation from Sellmeier coefficients
+- Fraunhofer spectral line constants (D, F, C)
+- Prism deviation, dispersion, and angular spread functions
+
+### Added — lens V0.2: Advanced Optics
+- Thick lens equation and cardinal points (FFD, BFD, principal planes)
+- F-number, aperture diameter, numerical aperture, NA from f-number
+- Diffraction limit (Rayleigh criterion) and Airy disk radius
+- Field of view (horizontal and diagonal)
+- Diffraction-limited MTF (cutoff frequency and modulation curve)
+- Seidel aberration coefficients (spherical, coma, astigmatism, field curvature, distortion)
+- Shape factor and conjugate factor for lens analysis
+- Longitudinal spherical aberration, chromatic aberration
+- Petzval sum and Petzval radius for field curvature analysis
+- Separated two-lens system (focal length, BFD)
+- System magnification for multi-element systems
+
+### Added — spectral V0.2: Color Science
+- CIE 1931 2° standard observer color matching functions (81 entries, 380–780nm @ 5nm)
+- `Xyz` tristimulus type with XYZ↔xyY and XYZ↔sRGB conversions
+- sRGB gamma correction (linear↔gamma) with proper IEC 61966-2-1 transfer function
+- Linear sRGB↔XYZ matrix conversions (D65 white point)
+- Correlated color temperature from xy chromaticity (McCamy's approximation)
+- CIE CMF interpolation at arbitrary wavelengths
+- `Spd` spectral power distribution type with interpolation, XYZ integration, and sRGB conversion
+- Blackbody SPD generator
+- Standard illuminants: D65, D50, A, F2, F11
+- Color Rendering Index (CRI Ra) calculation
 
 ### Fixed
-- ai: replaced `anyhow` dependency with native `PrakashError` — `DaimonClient::new()` now returns `Result` instead of panicking
-- ai: `register_agent()` now returns `Result` with proper error context instead of `anyhow::Result`
+- ai: replaced `anyhow` dependency with native `PrakashError`
+- ai: `DaimonClient::new()` returns `Result` instead of panicking
+- spectral: `wavelength_to_rgb` rejects NaN input
+- spectral: `Rgb::to_u8` now rounds instead of truncating (0.999→255)
+- lens: `depth_of_field` returns `f64::INFINITY` at hyperfocal distance instead of negative
+- lens: `shape_factor` guards against division by zero when r1 == r2
+- lens: `optical_power` and `combined_focal_length` return `Result` for zero inputs
+- ray: `critical_angle` uses static error string instead of allocating on hot path
+- ray: Sellmeier `n_at` guards against resonance pole division-by-zero and negative n²
+- pbr: fixed operator precedence in GGX, Beckmann, and geometry functions
 
 ### Changed
-- Expanded test suite: 92 → 212 tests with edge cases, boundary conditions, property checks, cross-module validation, and serde roundtrips
-- Expanded benchmarks: 24 → 47 benchmarked functions covering all public APIs
-- spectral: precomputed Planck radiation constants (PLANCK_C1, PLANCK_C2) — eliminates per-call multiply chain
-- ray: `deg_to_rad`/`rad_to_deg` now use stdlib `to_radians()`/`to_degrees()` for precision
-- wave: `grating_maxima` preallocates Vec capacity
-- pbr: fixed operator precedence in `distribution_ggx`, `distribution_beckmann`, and `geometry_schlick_ggx` — `.max()` was binding to wrong subexpression, replaced with `+ epsilon` guards
-- lens: `optical_power` and `combined_focal_length` now return `Result` to prevent division-by-zero panics
-- spectral: `wavelength_to_rgb` now correctly rejects NaN input (was passing through range check due to NaN comparison semantics)
-- Integration tests now include cross-module consistency checks (ray↔pbr F0 agreement, Snell transitivity, spectral energy ordering)
+- Test suite: 92 → 330 tests
+- Benchmarks: 24 → 95 benchmarked functions
+- Performance improvements across all modules via `#[inline]`, precomputed constants, eliminated redundant computation
+- `snell_3d` delegates to `refract_3d` (single source of truth)
+- Sequential ray trace sphere intersection assumes normalized direction (eliminates redundant dot product)
 
 ## [0.1.0] - 2026-03-23
 
