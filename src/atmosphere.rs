@@ -25,8 +25,8 @@ pub const SCALE_HEIGHT_MIE: f64 = 1200.0;
 /// Typical sea-level Mie scattering coefficient (1/m) for clear atmosphere.
 const BETA_M_SEA_LEVEL: f64 = 21.0e-6;
 
-/// Representative wavelengths for RGB channels (meters): R=680nm, G=550nm, B=440nm.
-const RGB_WAVELENGTHS: [f64; 3] = [680e-9, 550e-9, 440e-9];
+/// Representative wavelengths for RGB channels (meters): R=650nm, G=550nm, B=450nm.
+const RGB_WAVELENGTHS: [f64; 3] = [650e-9, 550e-9, 450e-9];
 
 /// Precomputed numerator for Rayleigh cross-section: (8π³/3) · (n²−1)² / N².
 const RAYLEIGH_PREFACTOR: f64 = {
@@ -81,6 +81,8 @@ pub fn rayleigh_scattering_at_altitude(wavelength_m: f64, altitude_m: f64) -> f6
 /// p(θ) = 3(1 + cos²θ) / (16π)
 ///
 /// `cos_theta` = cosine of scattering angle.
+///
+/// Equivalent to [`crate::pbr::phase_rayleigh`] (available under the `pbr` feature).
 #[must_use]
 #[inline]
 pub fn rayleigh_phase(cos_theta: f64) -> f64 {
@@ -232,7 +234,7 @@ pub fn sky_radiance_single_scatter(
 /// Sky color as RGB for a given sun position and viewing direction.
 ///
 /// Uses single-scattering Rayleigh + Mie model at three representative
-/// wavelengths (R=680nm, G=550nm, B=440nm).
+/// wavelengths (R=650nm, G=550nm, B=450nm).
 ///
 /// `sun_zenith` in radians (0 = overhead, π/2 = horizon).
 /// `scattering_angle` in radians (angle between sun and view direction).
@@ -325,8 +327,9 @@ pub fn sunset_gradient(
 #[must_use]
 #[inline]
 pub fn scattering_angle(sun_zenith: f64, view_zenith: f64, azimuth_diff: f64) -> f64 {
-    let cos_gamma = sun_zenith.cos() * view_zenith.cos()
-        + sun_zenith.sin() * view_zenith.sin() * azimuth_diff.cos();
+    let (sin_s, cos_s) = sun_zenith.sin_cos();
+    let (sin_v, cos_v) = view_zenith.sin_cos();
+    let cos_gamma = cos_s * cos_v + sin_s * sin_v * azimuth_diff.cos();
     cos_gamma.clamp(-1.0, 1.0).acos()
 }
 

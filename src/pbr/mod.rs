@@ -3,7 +3,7 @@
 //! These are the math functions behind PBR shading models. They produce
 //! reflectance values that feed into rendering pipelines (aethersafta/kiran).
 
-use std::f64::consts::PI;
+use std::f64::consts::{FRAC_1_PI, PI};
 
 // ── Fresnel-Schlick ─────────────────────────────────────────────────────────
 
@@ -123,14 +123,18 @@ pub fn cook_torrance(
 #[must_use]
 #[inline]
 pub fn lambert_diffuse(albedo: f64) -> f64 {
-    albedo / PI
+    albedo * FRAC_1_PI
 }
 
 /// Lambertian diffuse for RGB albedo.
 #[must_use]
 #[inline]
 pub fn lambert_diffuse_rgb(albedo: [f64; 3]) -> [f64; 3] {
-    [albedo[0] / PI, albedo[1] / PI, albedo[2] / PI]
+    [
+        albedo[0] * FRAC_1_PI,
+        albedo[1] * FRAC_1_PI,
+        albedo[2] * FRAC_1_PI,
+    ]
 }
 
 // ── IOR to F0 ───────────────────────────────────────────────────────────────

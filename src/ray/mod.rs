@@ -211,9 +211,28 @@ pub fn snell_3d(
     let ratio = n1 / n2;
     let sin2_t = ratio * ratio * (1.0 - cos_i * cos_i);
 
-    let refracted = refract_3d(direction, normal, n1, n2)?;
+    if sin2_t > 1.0 {
+        let ca = if n1 > n2 {
+            (n2 / n1).asin()
+        } else {
+            std::f64::consts::FRAC_PI_2
+        };
+        return Err(PrakashError::TotalInternalReflection {
+            angle_deg: cos_i.acos().to_degrees(),
+            critical_deg: ca.to_degrees(),
+            n1,
+            n2,
+        });
+    }
 
     let cos_t = (1.0 - sin2_t).sqrt();
+    let factor = ratio * cos_i - cos_t;
+    let refracted = [
+        ratio * direction[0] + factor * normal[0],
+        ratio * direction[1] + factor * normal[1],
+        ratio * direction[2] + factor * normal[2],
+    ];
+
     let rs = fresnel_s(n1, n2, cos_i, cos_t);
     let rp = fresnel_p(n1, n2, cos_i, cos_t);
     let reflectance = 0.5 * (rs + rp);
@@ -232,7 +251,8 @@ pub fn fresnel_s(n1: f64, n2: f64, cos_i: f64, cos_t: f64) -> f64 {
     if den.abs() < 1e-15 {
         return 1.0;
     }
-    (num / den).powi(2)
+    let r = num / den;
+    r * r
 }
 
 /// Fresnel reflectance for p-polarized light (TM mode).
@@ -244,7 +264,8 @@ pub fn fresnel_p(n1: f64, n2: f64, cos_i: f64, cos_t: f64) -> f64 {
     if den.abs() < 1e-15 {
         return 1.0;
     }
-    (num / den).powi(2)
+    let r = num / den;
+    r * r
 }
 
 /// Average Fresnel reflectance for unpolarized light.
@@ -253,9 +274,18 @@ pub fn fresnel_p(n1: f64, n2: f64, cos_i: f64, cos_t: f64) -> f64 {
 #[must_use = "returns the Fresnel reflectance"]
 #[inline]
 pub fn fresnel_unpolarized(n1: f64, n2: f64, incident_angle: f64) -> Result<f64> {
-    let cos_i = incident_angle.cos();
-    let refracted = snell(n1, n2, incident_angle)?;
-    let cos_t = refracted.cos();
+    let (sin_i, cos_i) = incident_angle.sin_cos();
+    let sin_t = (n1 / n2) * sin_i;
+    if sin_t.abs() > 1.0 {
+        let critical = critical_angle(n1, n2)?;
+        return Err(PrakashError::TotalInternalReflection {
+            angle_deg: incident_angle.to_degrees(),
+            critical_deg: critical.to_degrees(),
+            n1,
+            n2,
+        });
+    }
+    let cos_t = (1.0 - sin_t * sin_t).sqrt();
     Ok(0.5 * (fresnel_s(n1, n2, cos_i, cos_t) + fresnel_p(n1, n2, cos_i, cos_t)))
 }
 

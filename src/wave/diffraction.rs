@@ -108,6 +108,7 @@ pub fn fresnel_s(x: f64) -> f64 {
 }
 
 /// Auxiliary functions f(x) and g(x) for Fresnel integrals (x ≥ 1).
+#[inline]
 fn fresnel_fg(x: f64) -> (f64, f64) {
     let x2 = x * x;
     let x3 = x2 * x;
@@ -116,6 +117,34 @@ fn fresnel_fg(x: f64) -> (f64, f64) {
     let f = (1.0 + 0.926 * x2) / (2.0 + 1.792 * x2 + 3.104 * x4) / x;
     let g = 1.0 / (2.0 + 4.142 * x2 + 3.492 * x4 + 6.670 * x2 * x4) / x3;
     (f, g)
+}
+
+/// Compute both Fresnel C and S integrals together, sharing work.
+///
+/// Returns `(C(x), S(x))` where:
+/// - C(x) = ∫₀ˣ cos(πt²/2) dt
+/// - S(x) = ∫₀ˣ sin(πt²/2) dt
+#[must_use]
+#[inline]
+pub fn fresnel_cs(x: f64) -> (f64, f64) {
+    let ax = x.abs();
+    let (c, s) = if ax < 1.0 {
+        let x2 = ax * ax;
+        let t = std::f64::consts::FRAC_PI_2 * x2;
+        let t2 = t * t;
+        let c_val = ax * (1.0 - t2 / 20.0 + t2 * t2 / 1680.0);
+        let s_val =
+            ax * x2 * (std::f64::consts::FRAC_PI_2 / 3.0) * (1.0 - t2 / 42.0 + t2 * t2 / 3960.0);
+        (c_val, s_val)
+    } else {
+        let pi_x2 = std::f64::consts::FRAC_PI_2 * ax * ax;
+        let (f, g) = fresnel_fg(ax);
+        let (sin_px2, cos_px2) = pi_x2.sin_cos();
+        let c_val = 0.5 + f * sin_px2 - g * cos_px2;
+        let s_val = 0.5 - f * cos_px2 - g * sin_px2;
+        (c_val, s_val)
+    };
+    if x < 0.0 { (-c, -s) } else { (c, s) }
 }
 
 /// Fresnel straight-edge diffraction intensity.
@@ -130,8 +159,9 @@ fn fresnel_fg(x: f64) -> (f64, f64) {
 #[must_use]
 #[inline]
 pub fn fresnel_edge_intensity(u: f64) -> f64 {
-    let c = fresnel_c(u) + 0.5;
-    let s = fresnel_s(u) + 0.5;
+    let (fc, fs) = fresnel_cs(u);
+    let c = fc + 0.5;
+    let s = fs + 0.5;
     (c * c + s * s) / 2.0
 }
 

@@ -115,7 +115,7 @@ impl StokesVector {
 /// A 4×4 Mueller matrix for transforming Stokes vectors.
 ///
 /// Stored in row-major order: `m[row][col]`.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct MuellerMatrix {
     pub m: [[f64; 4]; 4],
 }
@@ -156,8 +156,7 @@ impl MuellerMatrix {
     #[must_use]
     #[inline]
     pub fn polarizer(angle: f64) -> Self {
-        let c2 = (2.0 * angle).cos();
-        let s2 = (2.0 * angle).sin();
+        let (s2, c2) = (2.0 * angle).sin_cos();
         let cs = c2 * s2;
         Self::new([
             [0.5, 0.5 * c2, 0.5 * s2, 0.0],
@@ -202,8 +201,7 @@ impl MuellerMatrix {
     #[must_use]
     #[inline]
     pub fn rotation(angle: f64) -> Self {
-        let c2 = (2.0 * angle).cos();
-        let s2 = (2.0 * angle).sin();
+        let (s2, c2) = (2.0 * angle).sin_cos();
         Self::new([
             [1.0, 0.0, 0.0, 0.0],
             [0.0, c2, s2, 0.0],

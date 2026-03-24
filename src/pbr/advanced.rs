@@ -364,7 +364,11 @@ pub fn iridescence_rgb(
 pub fn henyey_greenstein(cos_theta: f64, g: f64) -> f64 {
     let g2 = g * g;
     let denom = 1.0 + g2 - 2.0 * g * cos_theta;
-    (1.0 - g2) / (4.0 * PI * denom * denom.sqrt() + 1e-15)
+    let denom_full = denom * denom.sqrt();
+    if denom_full < 1e-15 {
+        return 0.0;
+    }
+    (1.0 - g2) / (4.0 * PI * denom_full)
 }
 
 /// Isotropic phase function: p = 1/(4π).
@@ -523,7 +527,8 @@ pub fn split_sum_scale_bias(n_dot_v: f64, roughness: f64) -> (f64, f64) {
     let r = roughness;
 
     // Analytical fit (Lazarov, 2013)
-    let x = r.min(1.0) * r.min(1.0);
+    let rc = r.min(1.0);
+    let x = rc * rc;
 
     let scale = {
         let s1 = -0.024 * x + 0.132;

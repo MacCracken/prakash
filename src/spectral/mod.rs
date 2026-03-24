@@ -16,6 +16,12 @@ pub const PLANCK_H: f64 = 6.626_070_15e-34;
 /// Boltzmann constant in J/K.
 pub const BOLTZMANN_K: f64 = 1.380_649e-23;
 
+/// Representative wavelengths for RGB channels (nanometers): R=650nm, G=550nm, B=450nm.
+pub const RGB_WAVELENGTHS_NM: [f64; 3] = [650.0, 550.0, 450.0];
+
+/// Representative wavelengths for RGB channels (meters): R=650nm, G=550nm, B=450nm.
+pub const RGB_WAVELENGTHS_M: [f64; 3] = [650e-9, 550e-9, 450e-9];
+
 /// RGB color with floating-point components (0.0–1.0).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Rgb {

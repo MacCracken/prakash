@@ -85,9 +85,19 @@ pub fn double_slit_intensity(
     angle: f64,
     i0: f64,
 ) -> f64 {
-    let envelope = single_slit_intensity(slit_width, wavelength, angle, 1.0);
-    let delta = PI * slit_spacing * angle.sin() / wavelength;
-    let interference = delta.cos().powi(2);
+    let sin_angle = angle.sin();
+    // Single-slit envelope (sinc² term)
+    let beta = PI * slit_width * sin_angle / wavelength;
+    let envelope = if beta.abs() < 1e-10 {
+        1.0
+    } else {
+        let sinc = beta.sin() / beta;
+        sinc * sinc
+    };
+    // Two-slit interference (cos² term)
+    let delta = PI * slit_spacing * sin_angle / wavelength;
+    let cos_delta = delta.cos();
+    let interference = cos_delta * cos_delta;
     i0 * envelope * interference * 4.0
 }
 
@@ -141,20 +151,20 @@ impl Polarization {
     };
     /// Right circular polarization.
     #[must_use]
-    pub fn circular_right() -> Self {
+    pub const fn circular_right() -> Self {
         Self {
-            ex: 1.0 / 2.0f64.sqrt(),
-            ey: 1.0 / 2.0f64.sqrt(),
-            phase: -PI / 2.0,
+            ex: std::f64::consts::FRAC_1_SQRT_2,
+            ey: std::f64::consts::FRAC_1_SQRT_2,
+            phase: -std::f64::consts::FRAC_PI_2,
         }
     }
     /// Left circular polarization.
     #[must_use]
-    pub fn circular_left() -> Self {
+    pub const fn circular_left() -> Self {
         Self {
-            ex: 1.0 / 2.0f64.sqrt(),
-            ey: 1.0 / 2.0f64.sqrt(),
-            phase: PI / 2.0,
+            ex: std::f64::consts::FRAC_1_SQRT_2,
+            ey: std::f64::consts::FRAC_1_SQRT_2,
+            phase: std::f64::consts::FRAC_PI_2,
         }
     }
 
