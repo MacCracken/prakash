@@ -704,6 +704,21 @@ fn bench_pbr(c: &mut Criterion) {
             )
         })
     });
+    group.bench_function("sample_ggx", |b| {
+        b.iter(|| sample_ggx(black_box(0.3), black_box(0.5), black_box(0.5)))
+    });
+    group.bench_function("sample_ggx_pdf", |b| {
+        b.iter(|| sample_ggx_pdf(black_box(0.9), black_box(0.8), black_box(0.3)))
+    });
+    group.bench_function("sample_cosine", |b| {
+        b.iter(|| sample_cosine_hemisphere(black_box(0.5), black_box(0.5)))
+    });
+    group.bench_function("split_sum", |b| {
+        b.iter(|| split_sum_scale_bias(black_box(0.8), black_box(0.3)))
+    });
+    group.bench_function("integrate_brdf_64", |b| {
+        b.iter(|| integrate_brdf_lut(black_box(0.5), black_box(0.3), black_box(64)))
+    });
 
     group.finish();
 }

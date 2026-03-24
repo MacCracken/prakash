@@ -416,6 +416,168 @@ pub fn single_scatter_inscattering(
     scattering * phase * transmittance * light_intensity
 }
 
+// ── Importance Sampling ───────────────────────────────────────────────────
+
+/// Sample a half-vector from the GGX normal distribution.
+///
+/// Uses the inverse CDF method with two uniform random numbers ξ₁, ξ₂ ∈ [0, 1).
+///
+/// Returns the half-vector in tangent space: [x, y, z] where z is aligned with the normal.
+///
+/// θ = atan(α · √ξ₁ / √(1 − ξ₁)), φ = 2π · ξ₂
+#[inline]
+pub fn sample_ggx(roughness: f64, xi1: f64, xi2: f64) -> [f64; 3] {
+    let a = roughness * roughness;
+    let a2 = a * a;
+
+    // Spherical coordinates from GGX inverse CDF
+    let cos_theta = ((1.0 - xi1) / (1.0 + (a2 - 1.0) * xi1)).sqrt();
+    let sin_theta = (1.0 - cos_theta * cos_theta).sqrt().max(0.0);
+    let phi = std::f64::consts::TAU * xi2;
+
+    let (sin_phi, cos_phi) = phi.sin_cos();
+    [sin_theta * cos_phi, sin_theta * sin_phi, cos_theta]
+}
+
+/// PDF of the GGX importance-sampled half-vector.
+///
+/// pdf = D(h) · n·h / (4 · h·v)
+///
+/// Used to weight samples in Monte Carlo integration.
+#[inline]
+pub fn sample_ggx_pdf(n_dot_h: f64, h_dot_v: f64, roughness: f64) -> f64 {
+    let d = distribution_ggx(n_dot_h, roughness);
+    let ndh = n_dot_h.clamp(0.0, 1.0);
+    let hdv = h_dot_v.clamp(0.001, 1.0);
+    d * ndh / (4.0 * hdv)
+}
+
+/// Sample a direction from a cosine-weighted hemisphere (for diffuse).
+///
+/// Uses Malley's method: uniform disk → project to hemisphere.
+/// Returns direction in tangent space [x, y, z].
+#[inline]
+pub fn sample_cosine_hemisphere(xi1: f64, xi2: f64) -> [f64; 3] {
+    let r = xi1.sqrt();
+    let phi = std::f64::consts::TAU * xi2;
+    let (sin_phi, cos_phi) = phi.sin_cos();
+    let x = r * cos_phi;
+    let y = r * sin_phi;
+    let z = (1.0 - xi1).sqrt().max(0.0);
+    [x, y, z]
+}
+
+/// PDF of cosine-weighted hemisphere sampling.
+///
+/// pdf = cos(θ) / π = n·l / π
+#[inline]
+pub fn sample_cosine_pdf(n_dot_l: f64) -> f64 {
+    n_dot_l.clamp(0.0, 1.0) / PI
+}
+
+// ── Environment Map / Split-Sum ───────────────────────────────────────────
+
+/// Split-sum scale and bias for the specular IBL approximation.
+///
+/// The split-sum approximation factors the rendering equation into:
+///   L_spec ≈ pre_filtered_color · (F0 · scale + bias)
+///
+/// This function computes (scale, bias) via an analytical fit
+/// (Karis, 2013 — UE4 approach).
+///
+/// `n_dot_v` = cos(θ) between normal and view. `roughness` in [0, 1].
+/// Returns (scale, bias) both in [0, 1].
+#[inline]
+pub fn split_sum_scale_bias(n_dot_v: f64, roughness: f64) -> (f64, f64) {
+    let ndv = n_dot_v.clamp(0.0, 1.0);
+    let r = roughness;
+
+    // Analytical fit (Lazarov, 2013)
+    let x = r.min(1.0) * r.min(1.0);
+
+    let scale = {
+        let s1 = -0.024 * x + 0.132;
+        let s2 = s1 * x + (-0.333);
+        let s3 = s2 * x + 0.998;
+        let t1 = -1.613 * ndv + 2.227;
+        let t2 = t1.min(1.0);
+        s3 * t2
+    };
+
+    let bias = {
+        let b1 = 0.042 * x + (-0.1);
+        let b2 = b1 * x + 0.03;
+        let b3 = b2 * x + (-0.002);
+        let t1 = 3.09 * ndv + (-1.929);
+        let t2 = t1.max(0.0);
+        b3 * t2
+    };
+
+    (scale.clamp(0.0, 1.0), bias.clamp(0.0, 1.0))
+}
+
+/// Environment map mip level from roughness.
+///
+/// LOD = roughness · max_lod
+///
+/// For pre-filtered environment maps, each mip level corresponds to
+/// a progressively rougher convolution.
+#[inline]
+pub fn env_map_lod(roughness: f64, max_lod: f64) -> f64 {
+    roughness * max_lod
+}
+
+/// Numerical BRDF integration for IBL lookup table generation.
+///
+/// Integrates the split-sum BRDF for a given (n·v, roughness) pair
+/// using importance-sampled GGX.
+///
+/// Returns (scale, bias) — the two channels of the BRDF LUT texture.
+/// `num_samples` controls quality (typical: 1024).
+pub fn integrate_brdf_lut(n_dot_v: f64, roughness: f64, num_samples: u32) -> (f64, f64) {
+    let ndv = n_dot_v.clamp(0.001, 1.0);
+    // View vector in tangent space
+    let v = [(1.0 - ndv * ndv).sqrt(), 0.0, ndv];
+
+    let mut scale = 0.0;
+    let mut bias = 0.0;
+    let inv_samples = 1.0 / num_samples as f64;
+
+    for i in 0..num_samples {
+        // Quasi-random sequence (Hammersley)
+        let xi1 = i as f64 * inv_samples;
+        let xi2 = radical_inverse_vdc(i);
+
+        let h = sample_ggx(roughness, xi1, xi2);
+        // Reflect view around half-vector to get light direction
+        let v_dot_h = (v[0] * h[0] + v[1] * h[1] + v[2] * h[2]).max(0.0);
+        let l = [
+            2.0 * v_dot_h * h[0] - v[0],
+            2.0 * v_dot_h * h[1] - v[1],
+            2.0 * v_dot_h * h[2] - v[2],
+        ];
+        let n_dot_l = l[2].max(0.0);
+        let n_dot_h = h[2].max(0.0);
+
+        if n_dot_l > 0.0 {
+            let g = super::geometry_smith(ndv, n_dot_l, roughness);
+            let g_vis = (g * v_dot_h) / (n_dot_h * ndv + 1e-15);
+            let fc = (1.0 - v_dot_h).powi(5);
+
+            scale += g_vis * (1.0 - fc);
+            bias += g_vis * fc;
+        }
+    }
+
+    (scale * inv_samples, bias * inv_samples)
+}
+
+/// Van der Corput radical inverse (base 2) for Hammersley sequence.
+#[inline]
+fn radical_inverse_vdc(bits: u32) -> f64 {
+    bits.reverse_bits() as f64 * 2.328_306_436_538_696_3e-10 // / 0x100000000
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -827,5 +989,150 @@ mod tests {
     fn test_inscattering_zero_scattering() {
         let l = single_scatter_inscattering(0.0, 0.8, 0.5, 1.0, 0.5, 1.0);
         assert!(l.abs() < EPS, "Zero scattering = zero in-scattering");
+    }
+
+    // ── Importance sampling tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_sample_ggx_normalized() {
+        let h = sample_ggx(0.3, 0.5, 0.5);
+        let len = (h[0] * h[0] + h[1] * h[1] + h[2] * h[2]).sqrt();
+        assert!(
+            (len - 1.0).abs() < 0.01,
+            "Sampled vector should be unit length"
+        );
+    }
+
+    #[test]
+    fn test_sample_ggx_hemisphere() {
+        // z component should always be positive (upper hemisphere)
+        for i in 0..20 {
+            let xi1 = i as f64 / 20.0;
+            let h = sample_ggx(0.5, xi1, 0.3);
+            assert!(h[2] >= 0.0, "Half-vector should be in upper hemisphere");
+        }
+    }
+
+    #[test]
+    fn test_sample_ggx_smooth_concentrates() {
+        // Smooth surface → samples near normal (z ≈ 1)
+        let h = sample_ggx(0.01, 0.5, 0.0);
+        assert!(
+            h[2] > 0.9,
+            "Smooth surface should sample near normal, got z={}",
+            h[2]
+        );
+    }
+
+    #[test]
+    fn test_sample_ggx_rough_spreads() {
+        // Rough surface → samples spread out
+        let h = sample_ggx(0.9, 0.5, 0.0);
+        assert!(h[2] < 0.9, "Rough surface should spread samples");
+    }
+
+    #[test]
+    fn test_sample_ggx_pdf_positive() {
+        let pdf = sample_ggx_pdf(0.9, 0.8, 0.3);
+        assert!(pdf > 0.0, "PDF should be positive");
+    }
+
+    #[test]
+    fn test_sample_ggx_pdf_matches_distribution() {
+        // PDF at the peak (n·h = 1, h·v ≈ 1) should be high for smooth surfaces
+        let pdf_smooth = sample_ggx_pdf(1.0, 1.0, 0.01);
+        let pdf_rough = sample_ggx_pdf(1.0, 1.0, 0.9);
+        assert!(pdf_smooth > pdf_rough, "Smooth should have higher peak PDF");
+    }
+
+    #[test]
+    fn test_sample_cosine_hemisphere_normalized() {
+        let d = sample_cosine_hemisphere(0.5, 0.5);
+        let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        assert!((len - 1.0).abs() < 0.01, "Should be unit length");
+    }
+
+    #[test]
+    fn test_sample_cosine_hemisphere_upper() {
+        for i in 0..20 {
+            let xi1 = i as f64 / 20.0;
+            let d = sample_cosine_hemisphere(xi1, 0.3);
+            assert!(d[2] >= 0.0, "Should be in upper hemisphere");
+        }
+    }
+
+    #[test]
+    fn test_sample_cosine_pdf_at_normal() {
+        let pdf = sample_cosine_pdf(1.0);
+        assert!((pdf - 1.0 / PI).abs() < EPS);
+    }
+
+    #[test]
+    fn test_sample_cosine_pdf_at_grazing() {
+        let pdf = sample_cosine_pdf(0.0);
+        assert!(pdf.abs() < EPS);
+    }
+
+    // ── Environment map / split-sum tests ─────────────────────────────────
+
+    #[test]
+    fn test_split_sum_range() {
+        for ndv_i in 1..=10 {
+            for rough_i in 0..=10 {
+                let ndv = ndv_i as f64 / 10.0;
+                let rough = rough_i as f64 / 10.0;
+                let (scale, bias) = split_sum_scale_bias(ndv, rough);
+                assert!(
+                    (0.0..=1.0).contains(&scale),
+                    "Scale out of range at ndv={ndv}, rough={rough}: {scale}"
+                );
+                assert!(
+                    (0.0..=1.0).contains(&bias),
+                    "Bias out of range at ndv={ndv}, rough={rough}: {bias}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_split_sum_smooth_normal_high_scale() {
+        let (scale, _) = split_sum_scale_bias(1.0, 0.0);
+        assert!(
+            scale > 0.5,
+            "Smooth at normal: scale should be significant, got {scale}"
+        );
+    }
+
+    #[test]
+    fn test_env_map_lod() {
+        assert!((env_map_lod(0.0, 8.0)).abs() < EPS);
+        assert!((env_map_lod(1.0, 8.0) - 8.0).abs() < EPS);
+        assert!((env_map_lod(0.5, 8.0) - 4.0).abs() < EPS);
+    }
+
+    #[test]
+    fn test_integrate_brdf_lut_range() {
+        let (scale, bias) = integrate_brdf_lut(0.5, 0.3, 64);
+        assert!(scale >= 0.0, "Scale should be non-negative");
+        assert!(bias >= 0.0, "Bias should be non-negative");
+        assert!(scale + bias <= 2.0, "Scale+bias should be reasonable");
+    }
+
+    #[test]
+    fn test_integrate_brdf_lut_smooth_vs_rough() {
+        let (scale_smooth, _) = integrate_brdf_lut(0.8, 0.1, 64);
+        let (scale_rough, _) = integrate_brdf_lut(0.8, 0.9, 64);
+        assert!(
+            scale_smooth > scale_rough,
+            "Smooth should have higher scale: {scale_smooth} vs {scale_rough}"
+        );
+    }
+
+    #[test]
+    fn test_integrate_brdf_lut_deterministic() {
+        let (s1, b1) = integrate_brdf_lut(0.5, 0.3, 64);
+        let (s2, b2) = integrate_brdf_lut(0.5, 0.3, 64);
+        assert!((s1 - s2).abs() < EPS, "Should be deterministic");
+        assert!((b1 - b2).abs() < EPS, "Should be deterministic");
     }
 }
