@@ -12,123 +12,157 @@ Prakash does NOT own:
 - **Math primitives** → hisab (vectors, geometry, calculus)
 - **Color science beyond spectral** → ranga (ICC profiles, gamut mapping)
 
-## V0.1 — Foundation (done, 2026-03-22)
+## V0.1 — Foundation (done)
 
 ### ray
-- 12 material prefractive indices (vacuum, air, water, glass, diamond, etc.)
-- Snell's law with total internal reflection detection
-- Critical angle calculation
-- Reflection (2D and 3D vector reflection)
-- Fresnel equations (s-polarized, p-polarized, unpolarized, normal incidence)
-- Brewster's angle
-- Beer-Lambert attenuation
+- [x] 12 material refractive indices (vacuum, air, water, glass, diamond, etc.)
+- [x] Snell's law with total internal reflection detection
+- [x] Critical angle calculation
+- [x] Reflection (2D and 3D vector reflection)
+- [x] Fresnel equations (s-polarized, p-polarized, unpolarized, normal incidence)
+- [x] Brewster's angle
+- [x] Beer-Lambert attenuation
 
 ### wave
-- Two-wave interference intensity
-- Constructive/destructive interference detection
-- Path difference ↔ phase difference
-- Thin film interference
-- Single-slit diffraction (sinc² envelope)
-- Double-slit diffraction (envelope × interference)
-- Diffraction grating maxima (multiple orders)
-- Polarization state (Jones vector)
-- Malus's law
+- [x] Two-wave interference intensity
+- [x] Constructive/destructive interference detection
+- [x] Path difference ↔ phase difference
+- [x] Thin film interference
+- [x] Single-slit diffraction (sinc² envelope)
+- [x] Double-slit diffraction (envelope × interference)
+- [x] Diffraction grating maxima (multiple orders)
+- [x] Polarization state (Jones vector)
+- [x] Malus's law
 
 ### spectral
-- Wavelength → RGB (CIE 1931 piecewise approximation)
-- Planck's blackbody radiation
-- Wien's displacement law (peak wavelength)
-- Color temperature → RGB (Tanner Helland algorithm)
-- Wavelength ↔ frequency conversion
-- Photon energy (Joules and eV)
-- Physical constants (c, h, k)
+- [x] Wavelength → RGB (CIE 1931 piecewise approximation)
+- [x] Planck's blackbody radiation
+- [x] Wien's displacement law (peak wavelength)
+- [x] Color temperature → RGB (Tanner Helland algorithm)
+- [x] Wavelength ↔ frequency conversion
+- [x] Photon energy (Joules and eV)
+- [x] Physical constants (c, h, k)
 
 ### lens
-- Thin lens equation (image distance from focal + object distance)
-- Magnification
-- Lensmaker's equation (focal from radii + refractive index)
-- Optical power (diopters)
-- Mirror focal length and image distance
-- Combined focal length (two lenses in contact)
-- Lens classification (converging/diverging)
-- Depth of field
+- [x] Thin lens equation (image distance from focal + object distance)
+- [x] Magnification
+- [x] Lensmaker's equation (focal from radii + refractive index)
+- [x] Optical power (diopters)
+- [x] Mirror focal length and image distance
+- [x] Combined focal length (two lenses in contact)
+- [x] Lens classification (converging/diverging)
+- [x] Depth of field
 
 ### pbr
-- Fresnel-Schlick approximation (scalar and RGB)
-- GGX/Trowbridge-Reitz normal distribution function
-- Beckmann normal distribution function
-- Schlick-GGX geometry function
-- Smith's geometry function
-- Cook-Torrance specular BRDF
-- Lambert diffuse BRDF (scalar and RGB)
-- IOR → F0 conversion
+- [x] Fresnel-Schlick approximation (scalar and RGB)
+- [x] GGX/Trowbridge-Reitz normal distribution function
+- [x] Beckmann normal distribution function
+- [x] Schlick-GGX geometry function
+- [x] Smith's geometry function
+- [x] Cook-Torrance specular BRDF
+- [x] Lambert diffuse BRDF (scalar and RGB)
+- [x] IOR → F0 conversion
 
-## V0.2 — Optical Systems
+## V0.2 — Optical Systems (done)
 
 ### ray
-- [ ] Snell's law for 3D vectors (not just angles)
-- [ ] Ray tracing through multiple surfaces (sequential ray trace)
-- [ ] Dispersion: wavelength-dependent refractive index (Cauchy/Sellmeier equations)
-- [ ] Prism dispersion (angular spread by wavelength)
+- [x] Snell's law for 3D vectors (not just angles)
+- [x] Ray tracing through multiple surfaces (sequential ray trace)
+- [x] Dispersion: wavelength-dependent refractive index (Cauchy/Sellmeier equations)
+- [x] Prism dispersion (angular spread by wavelength)
+- [x] Abbe number calculation
+- [x] Sellmeier presets: BK7, SF11, fused silica, sapphire, water, diamond
 
 ### lens
-- [ ] Thick lens equation
-- [ ] Lens aberrations: spherical, chromatic, coma, astigmatism, distortion, field curvature
-- [ ] Multi-element lens system (sequential surfaces)
-- [ ] Aperture and f-number effects
-- [ ] MTF (Modulation Transfer Function) calculation
+- [x] Thick lens equation
+- [x] Cardinal points (FFD, BFD, principal planes)
+- [x] Lens aberrations: spherical, chromatic, coma, astigmatism, distortion, field curvature (Seidel coefficients)
+- [x] Multi-element lens system (separated lenses, system magnification)
+- [x] Aperture, f-number, numerical aperture
+- [x] MTF (Modulation Transfer Function) calculation
+- [x] Diffraction limit, Airy disk radius
+- [x] Field of view (horizontal and diagonal)
+- [x] Petzval sum and field curvature
 
 ### spectral
-- [ ] CIE XYZ color matching functions (tabulated, interpolated)
-- [ ] XYZ ↔ sRGB conversion matrix
-- [ ] Spectral power distribution (SPD) type with integration
-- [ ] Standard illuminants (D50, D65, A, F-series)
-- [ ] Color rendering index (CRI) calculation
+- [x] CIE 1931 2° standard observer (81-entry table, interpolated)
+- [x] XYZ ↔ sRGB conversion matrix (D65 white point)
+- [x] sRGB gamma correction (IEC 61966-2-1)
+- [x] XYZ ↔ xyY chromaticity
+- [x] Spectral power distribution (SPD) type with integration
+- [x] Standard illuminants (D50, D65, A, F2, F11)
+- [x] Color rendering index (CRI Ra) calculation
+- [x] Correlated color temperature from chromaticity (McCamy)
 
-## V0.3 — Wave Optics Expansion
+## V0.3 — Wave Optics Expansion (done)
 
 ### wave
-- [ ] Huygens-Fresnel diffraction integral (numerical)
-- [ ] Fraunhofer diffraction (far-field patterns)
-- [ ] Fresnel diffraction (near-field patterns)
-- [ ] Circular aperture diffraction (Airy disk, Rayleigh criterion)
-- [ ] Coherence length and time
-- [ ] Fabry-Pérot interferometer (cavity resonance)
-- [ ] Anti-reflection coating design (quarter-wave, multi-layer)
-- [ ] Stokes parameters and Mueller matrices (full polarization calculus)
-- [ ] Birefringence (ordinary/extraordinary rays)
+- [x] Coherence length and time (temporal + spatial)
+- [x] Circular aperture diffraction (Bessel J₁, Airy pattern, Rayleigh criterion)
+- [x] Fabry-Pérot interferometer (transmittance, finesse, FSR, resolving power)
+- [x] Stokes parameters (7 constructors, degree of polarization, ellipticity, orientation)
+- [x] Mueller matrices (polarizers, wave plates, retarder, rotation, chain application)
+- [x] Birefringence (calcite, quartz, rutile, mica; retardation, wave plate thickness)
+- [x] Fraunhofer diffraction (rectangular aperture, 1D arbitrary aperture)
+- [x] Fresnel diffraction (Fresnel integrals C/S, straight-edge, Fresnel number)
+- [x] Huygens-Fresnel diffraction integral (1D numerical)
+- [x] Anti-reflection coatings (quarter-wave, V-coat, multi-layer transfer matrix)
 
-## V0.4 — Advanced PBR
+## V0.4 — Advanced PBR (done)
 
 ### pbr
-- [ ] Subsurface scattering (BSSRDF approximation)
-- [ ] Anisotropic GGX (for brushed metals, hair)
-- [ ] Sheen (for fabric, velvet)
-- [ ] Clearcoat (for car paint, lacquered surfaces)
-- [ ] Iridescence (thin-film on surface — pearls, soap bubbles, beetle shells)
-- [ ] Volumetric scattering (Henyey-Greenstein phase function, participating media)
-- [ ] Importance sampling for GGX distribution
-- [ ] Environment map sampling (pre-filtered, split-sum)
+- [x] Anisotropic GGX NDF and Smith geometry
+- [x] Sheen: Charlie distribution + Ashikhmin velvet
+- [x] Clearcoat: distribution, Fresnel, geometry, energy-conserving blend
+- [x] Subsurface scattering: Burley + Gaussian profiles, SSS diffuse, transmittance
+- [x] Iridescence: thin-film Fresnel (Airy formula), RGB color shift
+- [x] Volumetric scattering: Henyey-Greenstein, Rayleigh, isotropic phase; extinction, transmittance, albedo, in-scattering
+- [x] Importance sampling: GGX half-vector + PDF, cosine hemisphere + PDF
+- [x] Environment map: split-sum scale/bias, mip LOD, BRDF LUT integration (Hammersley)
 
-## V0.5 — Simulation & Visualization
+## V0.25 — Atmospheric Optics
 
-- [ ] Ray tracer: recursive ray tracing through hisab geometry (spheres, planes, triangles)
-- [ ] Optical bench simulator: define surfaces, trace rays, compute image
-- [ ] Spectrum visualization: SPD → RGB image strip
-- [ ] Interference pattern visualization: 2D intensity maps
-- [ ] Diffraction pattern computation: far-field intensity from arbitrary aperture shape
-- [ ] Atmospheric scattering (Rayleigh for sky color, Mie for clouds/fog)
+- [ ] Rayleigh scattering coefficient (λ⁻⁴ wavelength dependence)
+- [ ] Rayleigh sky color at arbitrary sun angle
+- [ ] Mie scattering for aerosols (extinction + phase function)
+- [ ] Optical depth and air mass calculation
+- [ ] Sunset/sunrise color gradient model
 
-## V1.0 — Stable API
+## V0.26 — Simulation Primitives
 
-- [ ] API stabilization and review
-- [ ] Comprehensive documentation with physics explanations
-- [ ] Criterion benchmarks with CSV history
-- [ ] Feature gates optimized (minimize compile time for partial usage)
-- [ ] Published to crates.io
+- [ ] Recursive ray tracer (reflect/refract through hisab geometry)
+- [ ] Ray fan generator (marginal, chief, meridional rays)
+- [ ] Spot diagram computation (ray bundle through optical system)
+- [ ] Optical path difference (OPD) calculation
+
+## V0.27 — Optical Bench
+
+- [ ] Optical system builder (chain of surfaces with spacings)
+- [ ] System cardinal point finder (trace marginal + chief rays)
+- [ ] Paraxial ray trace (y-nu method)
+- [ ] System prescription format (serialize/deserialize)
+
+## V0.28 — Pattern Computation
+
+- [ ] 2D diffraction pattern from arbitrary aperture (FFT-based)
+- [ ] Interference pattern generator (N-source, 2D grid)
+- [ ] SPD → RGB strip visualization data
+- [ ] PSF (point spread function) from wavefront
+
+## V0.29 — Examples & Documentation
+
 - [ ] Example: physically accurate rainbow simulation
-- [ ] Example: camera lens simulator
-- [ ] Example: PBR material preview
+- [ ] Example: camera lens simulator (multi-element trace + spot diagram)
+- [ ] Example: PBR material preview (Cook-Torrance + clearcoat + iridescence)
+- [ ] Physics explanations in module-level documentation
+
+## V1.0 — Stable Release
+
+- [ ] API review: naming consistency, parameter ordering
+- [ ] `#[must_use]` on pure functions and accessors
+- [ ] Feature gate audit (minimize compile time for partial usage)
+- [ ] Documentation coverage check (all public items documented)
+- [ ] README update with full feature matrix
 
 ## Consumers
 
