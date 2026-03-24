@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.24.3] - 2026-03-23
+
+### Added — wave V0.3: Wave Optics Expansion
+- Coherence: temporal coherence length/time, spatial coherence angle/area, coherence ratio
+- Circular aperture diffraction: Bessel J₁ (Abramowitz & Stegun rational approximation), Airy pattern, first zero, Rayleigh criterion
+- Fabry-Pérot interferometer: transmittance (Airy function), finesse, FSR (Hz and wavelength), resolving power
+- Stokes vectors with 7 polarization state constructors and degree of polarization
+- Mueller matrices: identity, horizontal/vertical polarizer, arbitrary-angle polarizer, quarter/half-wave plates, general retarder, rotation, matrix multiply, chain application
+- Birefringent materials: calcite, quartz, rutile, mica presets; retardation, quarter/half-wave thickness, Mueller generation
+- Fraunhofer diffraction: rectangular aperture, 1D arbitrary aperture (numerical DFT)
+- Fresnel diffraction: Fresnel number, Fresnel C(x)/S(x) integrals, straight-edge intensity, Fresnel parameter, Huygens-Fresnel 1D numerical integral
+- Anti-reflection coatings: ideal AR index, quarter-wave thickness, single-layer reflectance, V-coat, multi-layer transfer matrix method
+
+### Added — pbr V0.4: Advanced PBR
+- Anisotropic GGX NDF and Smith geometry (directional roughness)
+- Sheen: Charlie distribution (Estevez & Kulla 2017) and Ashikhmin velvet model
+- Clearcoat: GGX distribution, fixed-IOR Fresnel, Kelemen geometry, energy-conserving blend
+- Subsurface scattering: Burley normalized diffusion profile, Gaussian profile, SSS diffuse term, thin-slab transmittance
+- Iridescence: thin-film Fresnel (Airy formula) at single wavelength and RGB, angle/thickness/wavelength-dependent color
+- Volumetric scattering: Henyey-Greenstein phase function, Rayleigh phase, isotropic phase, extinction, transmittance, single-scatter albedo, in-scattering
+- GGX importance sampling: half-vector sampling, PDF, cosine-weighted hemisphere sampling
+- Environment map: split-sum scale/bias (Lazarov analytical fit), mip LOD from roughness, numerical BRDF LUT integration (Hammersley sequence)
+
+### Changed — Infrastructure
+- Module refactoring: wave, ray, pbr, spectral split into submodules (largest file: 2174→956 lines)
+- CI/CD: GitHub Actions workflows (ci.yml, release.yml) — fmt, clippy, test (Linux/macOS), MSRV 1.89, coverage, docs, security audit, deny, semver check
+- Added: SECURITY.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md, deny.toml, codecov.yml
+- Added: scripts/bench-history.sh (CSV tracking + benchmarks.md generation), scripts/version-bump.sh
+- Makefile: added `all`, `semver` targets
+- Test suite: 330 → 487 tests
+- Benchmarks: 95 → 137 functions
+- Performance: SPD→XYZ 80% faster (aligned fast path), Fresnel edge 15%, CRI 41%, numerous #[inline] additions
+- Bug fixes: Rgb::to_u8 rounding, depth_of_field hyperfocal, shape_factor div-by-zero, conjugate_factor div-by-zero
+
 ## [0.23.3] - 2026-03-23
 
 ### Added — ray V0.2: Optical Systems
