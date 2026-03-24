@@ -43,7 +43,7 @@ impl DaimonClient {
             .timeout(std::time::Duration::from_secs(30))
             .build()
             .map_err(|e| PrakashError::InvalidParameter {
-                reason: format!("failed to build HTTP client: {e}"),
+                reason: format!("failed to build HTTP client: {e}").into(),
             })?;
         Ok(Self { config, client })
     }
@@ -60,13 +60,13 @@ impl DaimonClient {
             .send()
             .await
             .map_err(|e| PrakashError::InvalidParameter {
-                reason: format!("registration request failed: {e}"),
+                reason: format!("registration request failed: {e}").into(),
             })?;
         let data: serde_json::Value =
             resp.json()
                 .await
                 .map_err(|e| PrakashError::InvalidParameter {
-                    reason: format!("invalid registration response: {e}"),
+                    reason: format!("invalid registration response: {e}").into(),
                 })?;
         Ok(data["agent_id"].as_str().unwrap_or("unknown").to_string())
     }

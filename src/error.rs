@@ -1,5 +1,7 @@
 //! Error types for prakash.
 
+use std::borrow::Cow;
+
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum PrakashError {
@@ -26,10 +28,10 @@ pub enum PrakashError {
     InvalidFocalLength { focal_mm: f64 },
 
     #[error("division by zero in optical calculation: {context}")]
-    DivisionByZero { context: String },
+    DivisionByZero { context: Cow<'static, str> },
 
     #[error("invalid parameter: {reason}")]
-    InvalidParameter { reason: String },
+    InvalidParameter { reason: Cow<'static, str> },
 }
 
 pub type Result<T> = std::result::Result<T, PrakashError>;

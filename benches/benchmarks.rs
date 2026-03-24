@@ -578,6 +578,7 @@ fn bench_pbr(c: &mut Criterion) {
         b.iter(|| {
             cook_torrance(
                 black_box(0.9),
+                black_box(0.85),
                 black_box(0.8),
                 black_box(0.7),
                 black_box(0.3),

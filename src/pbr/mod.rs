@@ -98,13 +98,18 @@ pub fn geometry_smith(n_dot_v: f64, n_dot_l: f64, roughness: f64) -> f64 {
 ///
 /// Returns the specular reflectance multiplier.
 ///
-/// **Note:** This uses `h·v ≈ n·h` as an approximation for the Fresnel term.
-/// This is accurate for near-normal viewing but diverges at grazing angles.
-/// For more precise control, compute D/F/G components separately.
+/// `n_dot_h` = dot(normal, half-vector), `h_dot_v` = dot(half-vector, view),
+/// `n_dot_v` = dot(normal, view), `n_dot_l` = dot(normal, light).
 #[must_use]
 #[inline]
-pub fn cook_torrance(n_dot_h: f64, n_dot_v: f64, n_dot_l: f64, roughness: f64, f0: f64) -> f64 {
-    let h_dot_v = n_dot_h; // approximation: h·v ≈ n·h for visualization
+pub fn cook_torrance(
+    n_dot_h: f64,
+    h_dot_v: f64,
+    n_dot_v: f64,
+    n_dot_l: f64,
+    roughness: f64,
+    f0: f64,
+) -> f64 {
     let d = distribution_ggx(n_dot_h, roughness);
     let f = fresnel_schlick(f0, h_dot_v);
     let g = geometry_smith(n_dot_v, n_dot_l, roughness);
@@ -339,15 +344,15 @@ mod tests {
 
     #[test]
     fn test_cook_torrance_positive() {
-        let spec = cook_torrance(0.9, 0.8, 0.7, 0.3, 0.04);
+        let spec = cook_torrance(0.9, 0.85, 0.8, 0.7, 0.3, 0.04);
         assert!(spec > 0.0);
     }
 
     #[test]
     fn test_cook_torrance_rougher_is_broader() {
         // At same geometry, rougher surface should have lower peak
-        let smooth = cook_torrance(1.0, 0.8, 0.7, 0.1, 0.04);
-        let rough = cook_torrance(1.0, 0.8, 0.7, 0.9, 0.04);
+        let smooth = cook_torrance(1.0, 0.9, 0.8, 0.7, 0.1, 0.04);
+        let rough = cook_torrance(1.0, 0.9, 0.8, 0.7, 0.9, 0.04);
         assert!(
             smooth > rough,
             "Smooth surface should have higher specular peak"
@@ -356,8 +361,8 @@ mod tests {
 
     #[test]
     fn test_cook_torrance_metal_higher() {
-        let dielectric = cook_torrance(0.9, 0.8, 0.7, 0.3, 0.04);
-        let metal = cook_torrance(0.9, 0.8, 0.7, 0.3, 0.95);
+        let dielectric = cook_torrance(0.9, 0.85, 0.8, 0.7, 0.3, 0.04);
+        let metal = cook_torrance(0.9, 0.85, 0.8, 0.7, 0.3, 0.95);
         assert!(
             metal > dielectric,
             "Metal should have higher specular reflectance"
