@@ -85,7 +85,7 @@ pub fn rayleigh_scattering_at_altitude(wavelength_m: f64, altitude_m: f64) -> f6
 /// Equivalent to [`crate::pbr::phase_rayleigh`] (available under the `pbr` feature).
 #[must_use]
 #[inline]
-pub fn rayleigh_phase(cos_theta: f64) -> f64 {
+pub fn phase_rayleigh(cos_theta: f64) -> f64 {
     3.0 * (1.0 + cos_theta * cos_theta) / (16.0 * PI)
 }
 
@@ -218,7 +218,7 @@ pub fn sky_radiance_single_scatter(
     let beta_m = mie_scattering_coefficient(wavelength_m);
 
     // Rayleigh contribution
-    let phase_r = rayleigh_phase(cos_scatter);
+    let phase_r = phase_rayleigh(cos_scatter);
     let radiance_r = beta_r * phase_r;
 
     // Mie contribution
@@ -295,7 +295,7 @@ pub fn sunset_gradient(
 
     // Lift angle-dependent computations out of per-wavelength loop
     let cos_scatter = angular_distance_to_sun.cos();
-    let phase_r = rayleigh_phase(cos_scatter);
+    let phase_r = phase_rayleigh(cos_scatter);
     let phase_m = mie_phase_cornette_shanks(cos_scatter, MIE_G_DEFAULT);
     let sun_air_mass = air_mass(sun_zenith);
     let view_air_mass = air_mass(view_zenith);
@@ -409,21 +409,21 @@ mod tests {
     }
 
     #[test]
-    fn test_rayleigh_phase_symmetric() {
-        let p_fwd = rayleigh_phase(1.0);
-        let p_back = rayleigh_phase(-1.0);
+    fn test_phase_rayleigh_symmetric() {
+        let p_fwd = phase_rayleigh(1.0);
+        let p_back = phase_rayleigh(-1.0);
         assert!((p_fwd - p_back).abs() < EPS);
     }
 
     #[test]
-    fn test_rayleigh_phase_min_at_90() {
-        let p_90 = rayleigh_phase(0.0);
-        let p_0 = rayleigh_phase(1.0);
+    fn test_phase_rayleigh_min_at_90() {
+        let p_90 = phase_rayleigh(0.0);
+        let p_0 = phase_rayleigh(1.0);
         assert!(p_0 > p_90);
     }
 
     #[test]
-    fn test_rayleigh_phase_normalizes() {
+    fn test_phase_rayleigh_normalizes() {
         // Phase function should integrate to 1 over 4π steradians
         // Numerical check: ∫ p(θ) sin(θ) dθ dφ = 1 (over θ=0..π, φ=0..2π)
         let n = 1000;
@@ -431,7 +431,7 @@ mod tests {
         for i in 0..n {
             let theta = PI * (i as f64 + 0.5) / n as f64;
             let cos_t = theta.cos();
-            integral += rayleigh_phase(cos_t) * theta.sin() * 2.0 * PI * (PI / n as f64);
+            integral += phase_rayleigh(cos_t) * theta.sin() * 2.0 * PI * (PI / n as f64);
         }
         assert!(
             (integral - 1.0).abs() < 0.01,

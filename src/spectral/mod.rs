@@ -5,8 +5,9 @@ use tracing::trace;
 
 use crate::error::{PrakashError, Result};
 
-/// Visible light range in nanometers.
+/// Minimum visible wavelength (nm).
 pub const VISIBLE_MIN_NM: f64 = 380.0;
+/// Maximum visible wavelength (nm).
 pub const VISIBLE_MAX_NM: f64 = 780.0;
 
 /// Speed of light in m/s.
@@ -31,12 +32,15 @@ pub struct Rgb {
 }
 
 impl Rgb {
+    /// Create a new RGB color.
     #[must_use]
     pub const fn new(r: f64, g: f64, b: f64) -> Self {
         Self { r, g, b }
     }
 
+    /// Black (0, 0, 0).
     pub const BLACK: Rgb = Rgb::new(0.0, 0.0, 0.0);
+    /// White (1, 1, 1).
     pub const WHITE: Rgb = Rgb::new(1.0, 1.0, 1.0);
 
     /// Clamp all components to 0.0–1.0.

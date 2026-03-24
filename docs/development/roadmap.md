@@ -156,13 +156,13 @@ Prakash does NOT own:
 - [x] Example: PBR material preview (Cook-Torrance + clearcoat + iridescence)
 - [ ] Physics explanations in module-level documentation (deferred to V1.0)
 
-## V1.0 — Stable Release
+## V1.0 — Stable Release (done)
 
-- [ ] API review: naming consistency, parameter ordering
-- [ ] `#[must_use]` on pure functions and accessors
-- [ ] Feature gate audit (minimize compile time for partial usage)
-- [ ] Documentation coverage check (all public items documented)
-- [ ] README update with full feature matrix
+- [x] API review: naming consistency, parameter ordering
+- [x] `#[must_use]` on pure functions and accessors
+- [x] Feature gate audit (minimize compile time for partial usage)
+- [x] Documentation coverage check (all public items documented)
+- [x] README update with full feature matrix
 
 ## Consumers
 

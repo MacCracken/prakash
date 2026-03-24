@@ -271,8 +271,9 @@ pub fn diffraction_pattern_circular(grid_size: usize, radius: f64) -> Pattern2D 
 /// A point source for interference pattern computation.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PointSource {
-    /// Position (x, y) in the source plane.
+    /// Position x-coordinate in the source plane.
     pub x: f64,
+    /// Position y-coordinate in the source plane.
     pub y: f64,
     /// Amplitude.
     pub amplitude: f64,
@@ -355,11 +356,16 @@ pub fn interference_pattern(
 
 // ── SPD → RGB Strip ─────────────────────────────────────────────────────────
 
-/// An RGB color triplet (0.0–1.0).
+/// An RGB color triplet for spectrum visualization.
+///
+/// Separate from [`crate::spectral::Rgb`] to avoid requiring the `spectral` feature.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StripColor {
+    /// Red component (0.0--1.0).
     pub r: f64,
+    /// Green component (0.0--1.0).
     pub g: f64,
+    /// Blue component (0.0--1.0).
     pub b: f64,
 }
 

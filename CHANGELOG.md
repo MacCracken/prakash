@@ -13,6 +13,13 @@
 - Scattering angle utility (zenith/azimuth → angular separation)
 - New `atmosphere` feature gate
 
+### Changed — V1.0: Stable Release
+- API review: renamed `fresnel_c`/`fresnel_s`/`fresnel_cs` (diffraction integrals) to `fresnel_integral_c`/`fresnel_integral_s`/`fresnel_integral_cs` to resolve name collision with Fresnel reflectance functions in `ray` module
+- API review: renamed `atmosphere::rayleigh_phase` to `atmosphere::phase_rayleigh` for consistency with `pbr::phase_rayleigh`
+- API review: renamed `coating_reflectance` params from `n1/n2/n3` to `n_incident/n_coating/n_substrate`
+- Documentation: added `///` doc comments to all ~24 previously undocumented public items (Medium constants, Rgb/Xyz constructors, StripColor fields, etc.)
+- README: full rewrite with module table, feature flags, examples, architecture, consumer crates
+
 ### Added — examples V0.29: Examples
 - `rainbow`: physically accurate rainbow via Sellmeier water dispersion, minimum deviation angles, ANSI color spectrum
 - `camera_lens`: cemented doublet prescription, paraxial analysis, full trace, spot diagrams, OPD fan, recursive ghost reflections

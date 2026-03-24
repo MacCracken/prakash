@@ -118,6 +118,7 @@ pub struct Xyz {
 }
 
 impl Xyz {
+    /// Create new XYZ tristimulus values.
     #[must_use]
     #[inline]
     pub const fn new(x: f64, y: f64, z: f64) -> Self {

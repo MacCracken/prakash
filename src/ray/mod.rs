@@ -19,50 +19,62 @@ pub struct Medium {
 }
 
 impl Medium {
+    /// Vacuum (n = 1.0).
     pub const VACUUM: Medium = Medium {
         n: 1.0,
         name: "vacuum",
     };
+    /// Air at STP (n = 1.000293).
     pub const AIR: Medium = Medium {
         n: 1.000293,
         name: "air",
     };
+    /// Water (n = 1.333).
     pub const WATER: Medium = Medium {
         n: 1.333,
         name: "water",
     };
+    /// Generic glass (n = 1.52).
     pub const GLASS: Medium = Medium {
         n: 1.52,
         name: "glass",
     };
+    /// Crown glass (n = 1.523).
     pub const CROWN_GLASS: Medium = Medium {
         n: 1.523,
         name: "crown glass",
     };
+    /// Flint glass (n = 1.62).
     pub const FLINT_GLASS: Medium = Medium {
         n: 1.62,
         name: "flint glass",
     };
+    /// Diamond (n = 2.417).
     pub const DIAMOND: Medium = Medium {
         n: 2.417,
         name: "diamond",
     };
+    /// Ice (n = 1.31).
     pub const ICE: Medium = Medium {
         n: 1.31,
         name: "ice",
     };
+    /// Quartz (n = 1.544).
     pub const QUARTZ: Medium = Medium {
         n: 1.544,
         name: "quartz",
     };
+    /// Sapphire (n = 1.77).
     pub const SAPPHIRE: Medium = Medium {
         n: 1.77,
         name: "sapphire",
     };
+    /// Acrylic (n = 1.49).
     pub const ACRYLIC: Medium = Medium {
         n: 1.49,
         name: "acrylic",
     };
+    /// Polycarbonate (n = 1.585).
     pub const POLYCARBONATE: Medium = Medium {
         n: 1.585,
         name: "polycarbonate",

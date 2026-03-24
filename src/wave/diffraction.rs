@@ -67,9 +67,12 @@ pub fn fresnel_number(aperture_radius: f64, wavelength: f64, distance: f64) -> f
 ///
 /// Accurate to ~1e-6 for all x. Uses rational approximation
 /// (Abramowitz & Stegun, 7.3.19–7.3.20).
+///
+/// Not to be confused with [`crate::ray::fresnel_s`] / [`crate::ray::fresnel_p`]
+/// (Fresnel reflectance coefficients).
 #[must_use]
 #[inline]
-pub fn fresnel_c(x: f64) -> f64 {
+pub fn fresnel_integral_c(x: f64) -> f64 {
     let ax = x.abs();
     let result = if ax < 1.0 {
         // Small x: power series converges fast
@@ -90,9 +93,11 @@ pub fn fresnel_c(x: f64) -> f64 {
 /// Fresnel sine integral S(x) — polynomial approximation.
 ///
 /// S(x) = ∫₀ˣ sin(πt²/2) dt
+///
+/// Not to be confused with [`crate::ray::fresnel_s`] (Fresnel reflectance coefficient).
 #[must_use]
 #[inline]
-pub fn fresnel_s(x: f64) -> f64 {
+pub fn fresnel_integral_s(x: f64) -> f64 {
     let ax = x.abs();
     let result = if ax < 1.0 {
         let x2 = ax * ax;
@@ -126,7 +131,7 @@ fn fresnel_fg(x: f64) -> (f64, f64) {
 /// - S(x) = ∫₀ˣ sin(πt²/2) dt
 #[must_use]
 #[inline]
-pub fn fresnel_cs(x: f64) -> (f64, f64) {
+pub fn fresnel_integral_cs(x: f64) -> (f64, f64) {
     let ax = x.abs();
     let (c, s) = if ax < 1.0 {
         let x2 = ax * ax;
@@ -159,7 +164,7 @@ pub fn fresnel_cs(x: f64) -> (f64, f64) {
 #[must_use]
 #[inline]
 pub fn fresnel_edge_intensity(u: f64) -> f64 {
-    let (fc, fs) = fresnel_cs(u);
+    let (fc, fs) = fresnel_integral_cs(u);
     let c = fc + 0.5;
     let s = fs + 0.5;
     (c * c + s * s) / 2.0
@@ -231,20 +236,26 @@ pub fn ar_quarter_wave_thickness(wavelength: f64, n_coating: f64) -> f64 {
 /// Reflectance of a single-layer thin film coating at normal incidence.
 ///
 /// Uses the exact thin-film formula:
-/// R = [(n₁·n₃ − n₂²)² · sin²(δ)] / [(n₁·n₃ + n₂²)² · sin²(δ) + n₂²·(n₁+n₃)²·cos²(δ)]
+/// R = [(n_i·n_s − n_c²)² · sin²(δ)] / [(n_i·n_s + n_c²)² · sin²(δ) + n_c²·(n_i+n_s)²·cos²(δ)]
 ///
-/// where δ = 2π·n₂·d/λ is the phase thickness.
+/// where δ = 2π·n_c·d/λ is the phase thickness.
 ///
-/// `n1` = incident medium, `n2` = coating, `n3` = substrate,
+/// `n_incident` = incident medium, `n_coating` = coating, `n_substrate` = substrate,
 /// `thickness` and `wavelength` in same units.
 #[must_use]
 #[inline]
-pub fn coating_reflectance(n1: f64, n2: f64, n3: f64, thickness: f64, wavelength: f64) -> f64 {
-    let delta = std::f64::consts::TAU * n2 * thickness / wavelength;
+pub fn coating_reflectance(
+    n_incident: f64,
+    n_coating: f64,
+    n_substrate: f64,
+    thickness: f64,
+    wavelength: f64,
+) -> f64 {
+    let delta = std::f64::consts::TAU * n_coating * thickness / wavelength;
     let (sin_d, cos_d) = delta.sin_cos();
-    let a = n1 * n3 - n2 * n2;
-    let b = n1 * n3 + n2 * n2;
-    let c = n2 * (n1 + n3);
+    let a = n_incident * n_substrate - n_coating * n_coating;
+    let b = n_incident * n_substrate + n_coating * n_coating;
+    let c = n_coating * (n_incident + n_substrate);
     (a * a * sin_d * sin_d) / (b * b * sin_d * sin_d + c * c * cos_d * cos_d)
 }
 
@@ -392,49 +403,49 @@ mod tests {
 
     #[test]
     fn test_fresnel_c_at_zero() {
-        assert!(fresnel_c(0.0).abs() < EPS);
+        assert!(fresnel_integral_c(0.0).abs() < EPS);
     }
 
     #[test]
     fn test_fresnel_s_at_zero() {
-        assert!(fresnel_s(0.0).abs() < EPS);
+        assert!(fresnel_integral_s(0.0).abs() < EPS);
     }
 
     #[test]
     fn test_fresnel_c_converges_to_half() {
         // C(∞) → 0.5
-        let c = fresnel_c(10.0);
+        let c = fresnel_integral_c(10.0);
         assert!((c - 0.5).abs() < 0.05, "C(10) should be ≈0.5, got {c}");
     }
 
     #[test]
     fn test_fresnel_s_converges_to_half() {
         // S(∞) → 0.5
-        let s = fresnel_s(10.0);
+        let s = fresnel_integral_s(10.0);
         assert!((s - 0.5).abs() < 0.05, "S(10) should be ≈0.5, got {s}");
     }
 
     #[test]
     fn test_fresnel_c_odd_function() {
-        assert!((fresnel_c(-2.0) + fresnel_c(2.0)).abs() < 0.01);
+        assert!((fresnel_integral_c(-2.0) + fresnel_integral_c(2.0)).abs() < 0.01);
     }
 
     #[test]
     fn test_fresnel_s_odd_function() {
-        assert!((fresnel_s(-2.0) + fresnel_s(2.0)).abs() < 0.01);
+        assert!((fresnel_integral_s(-2.0) + fresnel_integral_s(2.0)).abs() < 0.01);
     }
 
     #[test]
     fn test_fresnel_c_known_value() {
         // C(1) ≈ 0.7799
-        let c = fresnel_c(1.0);
+        let c = fresnel_integral_c(1.0);
         assert!((c - 0.7799).abs() < 0.01, "C(1) ≈ 0.7799, got {c}");
     }
 
     #[test]
     fn test_fresnel_s_known_value() {
         // S(1) ≈ 0.4383
-        let s = fresnel_s(1.0);
+        let s = fresnel_integral_s(1.0);
         assert!((s - 0.4383).abs() < 0.01, "S(1) ≈ 0.4383, got {s}");
     }
 

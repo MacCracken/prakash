@@ -28,6 +28,7 @@ pub struct ParaxialRay {
 }
 
 impl ParaxialRay {
+    /// Create a paraxial ray with given height and optical direction cosine.
     #[must_use]
     #[inline]
     pub const fn new(y: f64, nu: f64) -> Self {

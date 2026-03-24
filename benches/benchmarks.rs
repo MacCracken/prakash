@@ -468,8 +468,12 @@ fn bench_wave(c: &mut Criterion) {
             )
         })
     });
-    group.bench_function("fresnel_c", |b| b.iter(|| fresnel_c(black_box(2.0))));
-    group.bench_function("fresnel_s", |b| b.iter(|| fresnel_s(black_box(2.0))));
+    group.bench_function("fresnel_integral_c", |b| {
+        b.iter(|| fresnel_integral_c(black_box(2.0)))
+    });
+    group.bench_function("fresnel_integral_s", |b| {
+        b.iter(|| fresnel_integral_s(black_box(2.0)))
+    });
     group.bench_function("fresnel_edge", |b| {
         b.iter(|| fresnel_edge_intensity(black_box(1.0)))
     });
@@ -848,8 +852,8 @@ fn bench_atmosphere(c: &mut Criterion) {
     group.bench_function("rayleigh_at_altitude", |b| {
         b.iter(|| rayleigh_scattering_at_altitude(black_box(550e-9), black_box(5000.0)))
     });
-    group.bench_function("rayleigh_phase", |b| {
-        b.iter(|| rayleigh_phase(black_box(0.5)))
+    group.bench_function("phase_rayleigh", |b| {
+        b.iter(|| phase_rayleigh(black_box(0.5)))
     });
     group.bench_function("mie_phase_cornette_shanks", |b| {
         b.iter(|| mie_phase_cornette_shanks(black_box(0.5), black_box(0.76)))
