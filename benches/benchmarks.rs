@@ -158,6 +158,84 @@ fn bench_ray(c: &mut Criterion) {
         })
     });
 
+    // ── Simulation primitives ────────────────────────────────────────────
+    let biconvex = [
+        OpticalSurface {
+            shape: SurfaceShape::Sphere { radius: 100.0 },
+            z_position: 0.0,
+            n_after: 1.5,
+            aperture_radius: 25.0,
+        },
+        OpticalSurface {
+            shape: SurfaceShape::Sphere { radius: -100.0 },
+            z_position: 5.0,
+            n_after: 1.0,
+            aperture_radius: 25.0,
+        },
+    ];
+    let on_axis = TraceRay {
+        position: [0.0, 0.0, -50.0],
+        direction: [0.0, 0.0, 1.0],
+        n: 1.0,
+    };
+    group.bench_function("trace_recursive_2", |b| {
+        b.iter(|| {
+            trace_recursive(
+                black_box(&on_axis),
+                black_box(&biconvex),
+                black_box(&TraceConfig::default()),
+            )
+        })
+    });
+    group.bench_function("ray_fan_meridional_21", |b| {
+        b.iter(|| {
+            ray_fan_meridional(
+                black_box(10.0),
+                black_box(21),
+                black_box(0.0),
+                black_box(-50.0),
+            )
+        })
+    });
+    group.bench_function("ray_bundle_3x8", |b| {
+        b.iter(|| {
+            ray_bundle(
+                black_box(10.0),
+                black_box(3),
+                black_box(8),
+                black_box(0.0),
+                black_box(-50.0),
+            )
+        })
+    });
+    group.bench_function("spot_diagram_2x6", |b| {
+        b.iter(|| {
+            spot_diagram(
+                black_box(&biconvex),
+                black_box(5.0),
+                black_box(2),
+                black_box(6),
+                black_box(0.0),
+                black_box(-50.0),
+                black_box(200.0),
+            )
+        })
+    });
+    group.bench_function("optical_path_length", |b| {
+        b.iter(|| optical_path_length(black_box(&on_axis), black_box(&biconvex), black_box(200.0)))
+    });
+    let prescription = Prescription::new("bench")
+        .add_surface(100.0, 5.0, 1.5, 25.0)
+        .add_surface(-100.0, 0.0, 1.0, 25.0);
+    group.bench_function("paraxial_trace_2", |b| {
+        let surfaces = prescription.to_paraxial_surfaces();
+        let ray = ParaxialRay::marginal(10.0);
+        b.iter(|| paraxial_trace(black_box(&ray), black_box(&surfaces)))
+    });
+    group.bench_function("find_system_properties", |b| {
+        b.iter(|| find_system_properties(black_box(&prescription)))
+    });
+
     group.finish();
 }
 

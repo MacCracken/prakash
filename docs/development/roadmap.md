@@ -128,19 +128,19 @@ Prakash does NOT own:
 - [x] Optical depth and air mass calculation
 - [x] Sunset/sunrise color gradient model
 
-## V0.26 — Simulation Primitives
+## V0.26 — Simulation Primitives (done)
 
-- [ ] Recursive ray tracer (reflect/refract through hisab geometry)
-- [ ] Ray fan generator (marginal, chief, meridional rays)
-- [ ] Spot diagram computation (ray bundle through optical system)
-- [ ] Optical path difference (OPD) calculation
+- [x] Recursive ray tracer (reflect/refract through optical surfaces)
+- [x] Ray fan generator (meridional, sagittal, radial bundle)
+- [x] Spot diagram computation (ray bundle through optical system + RMS radius)
+- [x] Optical path difference (OPD) calculation (single ray, fan)
 
-## V0.27 — Optical Bench
+## V0.27 — Optical Bench (done)
 
-- [ ] Optical system builder (chain of surfaces with spacings)
-- [ ] System cardinal point finder (trace marginal + chief rays)
-- [ ] Paraxial ray trace (y-nu method)
-- [ ] System prescription format (serialize/deserialize)
+- [x] Optical system builder (Prescription with builder API + common presets)
+- [x] System cardinal point finder (trace marginal + chief rays, EFL/BFD/FFD/power)
+- [x] Paraxial ray trace (y-nu method: refract, transfer, full trace)
+- [x] System prescription format (serialize/deserialize via serde)
 
 ## V0.28 — Pattern Computation
 

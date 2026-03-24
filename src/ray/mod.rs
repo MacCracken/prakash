@@ -339,9 +339,13 @@ pub fn rad_to_deg(rad: f64) -> f64 {
 }
 
 mod dispersion;
+mod simulate;
+mod system;
 mod trace;
 
 pub use dispersion::*;
+pub use simulate::*;
+pub use system::*;
 pub use trace::*;
 
 #[cfg(test)]

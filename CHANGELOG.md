@@ -13,6 +13,19 @@
 - Scattering angle utility (zenith/azimuth → angular separation)
 - New `atmosphere` feature gate
 
+### Added — ray/system V0.27: Optical Bench
+- Paraxial ray trace (y-nu method): `ParaxialRay`, `paraxial_refract`, `paraxial_transfer`, `paraxial_trace`
+- Prescription builder: `Prescription` with fluent `.add_surface()` API, `to_trace_surfaces()`, `to_paraxial_surfaces()`
+- System cardinal point finder: `find_system_properties()` — EFL, BFD, FFD, power, pupil positions from paraxial marginal ray trace
+- Common prescriptions: `prescription_biconvex`, `prescription_planoconvex`, `prescription_doublet` (achromatic)
+- Full serde support for `Prescription` and `PrescriptionSurface`
+
+### Added — ray/simulate V0.26: Simulation Primitives
+- Recursive ray tracer: follows both reflected and refracted paths at each interface, energy tracking, configurable max depth and min energy threshold
+- Ray fan generators: meridional (y-z plane), sagittal (x-z plane), radial bundle (concentric rings), all with field angle support
+- Spot diagram: traces ray bundle through optical system to image plane, computes RMS spot radius
+- Optical path length/difference (OPD): per-ray OPL through system, OPD relative to chief ray, full fan OPD computation
+
 ### Changed — Code Quality Audit
 - `#[must_use]` on all 190+ public pure functions across all modules
 - `#[non_exhaustive]` on `SurfaceShape` and `LensType` enums (were missing)
