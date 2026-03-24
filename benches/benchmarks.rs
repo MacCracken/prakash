@@ -724,12 +724,65 @@ fn bench_pbr(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_atmosphere(c: &mut Criterion) {
+    use prakash::atmosphere::*;
+    use std::f64::consts::PI;
+    let mut group = c.benchmark_group("atmosphere");
+
+    group.bench_function("rayleigh_cross_section", |b| {
+        b.iter(|| rayleigh_cross_section(black_box(550e-9)))
+    });
+    group.bench_function("rayleigh_scattering_coeff", |b| {
+        b.iter(|| rayleigh_scattering_coefficient(black_box(550e-9)))
+    });
+    group.bench_function("rayleigh_at_altitude", |b| {
+        b.iter(|| rayleigh_scattering_at_altitude(black_box(550e-9), black_box(5000.0)))
+    });
+    group.bench_function("rayleigh_phase", |b| {
+        b.iter(|| rayleigh_phase(black_box(0.5)))
+    });
+    group.bench_function("mie_phase_cornette_shanks", |b| {
+        b.iter(|| mie_phase_cornette_shanks(black_box(0.5), black_box(0.76)))
+    });
+    group.bench_function("air_mass", |b| b.iter(|| air_mass(black_box(1.2))));
+    group.bench_function("air_mass_horizon", |b| {
+        b.iter(|| air_mass(black_box(PI / 2.0)))
+    });
+    group.bench_function("optical_depth_rayleigh", |b| {
+        b.iter(|| optical_depth_rayleigh(black_box(550e-9)))
+    });
+    group.bench_function("atmospheric_transmittance", |b| {
+        b.iter(|| atmospheric_transmittance(black_box(550e-9), black_box(1.0)))
+    });
+    group.bench_function("sky_color_rgb", |b| {
+        b.iter(|| sky_color_rgb(black_box(0.5), black_box(PI / 2.0)))
+    });
+    group.bench_function("sunlight_color", |b| {
+        b.iter(|| sunlight_color(black_box(85.0_f64.to_radians())))
+    });
+    group.bench_function("sunset_gradient", |b| {
+        b.iter(|| {
+            sunset_gradient(
+                black_box(85.0_f64.to_radians()),
+                black_box(10.0_f64.to_radians()),
+                black_box(0.3),
+            )
+        })
+    });
+    group.bench_function("scattering_angle", |b| {
+        b.iter(|| scattering_angle(black_box(0.5), black_box(1.0), black_box(0.8)))
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_ray,
     bench_spectral,
     bench_wave,
     bench_lens,
-    bench_pbr
+    bench_pbr,
+    bench_atmosphere
 );
 criterion_main!(benches);

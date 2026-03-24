@@ -1,6 +1,6 @@
 [package]
 name = "prakash"
-version = "0.23.3"
+version = "0.24.3"
 edition = "2024"
 rust-version = "1.89"
 license = "GPL-3.0"
@@ -20,9 +20,10 @@ wave = []
 spectral = []
 lens = []
 pbr = []
+atmosphere = []
 ai = ["dep:reqwest", "dep:tokio", "dep:serde_json"]
 logging = ["dep:tracing-subscriber"]
-full = ["ray", "wave", "spectral", "lens", "pbr", "ai", "logging"]
+full = ["ray", "wave", "spectral", "lens", "pbr", "atmosphere", "ai", "logging"]
 
 [dependencies]
 hisab = "0.22.3"
@@ -43,11 +44,11 @@ criterion = { version = "0.5", features = ["html_reports"] }
 [[bench]]
 name = "benchmarks"
 harness = false
-required-features = ["ray", "wave", "spectral", "lens", "pbr"]
+required-features = ["ray", "wave", "spectral", "lens", "pbr", "atmosphere"]
 
 [[test]]
 name = "integration"
-required-features = ["ray", "wave", "spectral", "lens", "pbr"]
+required-features = ["ray", "wave", "spectral", "lens", "pbr", "atmosphere"]
 
 [[example]]
 name = "basic_optics"

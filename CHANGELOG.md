@@ -1,5 +1,28 @@
 # Changelog
 
+## [Unreleased]
+
+### Added — atmosphere V0.25: Atmospheric Optics
+- Rayleigh scattering: cross-section (λ⁻⁴), sea-level coefficient, altitude-dependent coefficient, phase function
+- Mie scattering: sea-level coefficient, altitude-dependent coefficient, Cornette-Shanks phase function (improved Henyey-Greenstein)
+- Air mass: Kasten & Young (1989) formula (accurate through horizon)
+- Optical depth: Rayleigh (wavelength-dependent), Mie, total atmospheric transmittance
+- Sky color: single-scattering RGB model (Rayleigh + Mie), per-wavelength radiance
+- Sunlight color: atmospheric transmittance filter (overhead white → sunset red)
+- Sunset/sunrise gradient: view-angle-dependent sky color with sun/view path attenuation
+- Scattering angle utility (zenith/azimuth → angular separation)
+- New `atmosphere` feature gate
+
+### Changed — Code Quality Audit
+- `#[must_use]` on all 190+ public pure functions across all modules
+- `#[non_exhaustive]` on `SurfaceShape` and `LensType` enums (were missing)
+- `tracing::trace!` instrumentation on 10 key entry-point functions
+- Error variants `DivisionByZero` and `InvalidParameter`: `String` → `Cow<'static, str>` (zero-alloc for static messages)
+- `cook_torrance`: added explicit `h_dot_v` parameter (was using `n_dot_h` approximation)
+- Performance: precomputed Rayleigh prefactor constant, lifted air-mass out of per-wavelength loops
+- Test suite: 487 → 528 tests
+- Benchmarks: 137 → 150 functions
+
 ## [0.23.3] - 2026-03-23
 
 ### Added — wave V0.3: Wave Optics Expansion

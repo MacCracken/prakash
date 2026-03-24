@@ -120,13 +120,13 @@ Prakash does NOT own:
 - [x] Importance sampling: GGX half-vector + PDF, cosine hemisphere + PDF
 - [x] Environment map: split-sum scale/bias, mip LOD, BRDF LUT integration (Hammersley)
 
-## V0.25 — Atmospheric Optics
+## V0.25 — Atmospheric Optics (done)
 
-- [ ] Rayleigh scattering coefficient (λ⁻⁴ wavelength dependence)
-- [ ] Rayleigh sky color at arbitrary sun angle
-- [ ] Mie scattering for aerosols (extinction + phase function)
-- [ ] Optical depth and air mass calculation
-- [ ] Sunset/sunrise color gradient model
+- [x] Rayleigh scattering coefficient (λ⁻⁴ wavelength dependence)
+- [x] Rayleigh sky color at arbitrary sun angle
+- [x] Mie scattering for aerosols (extinction + phase function)
+- [x] Optical depth and air mass calculation
+- [x] Sunset/sunrise color gradient model
 
 ## V0.26 — Simulation Primitives
 

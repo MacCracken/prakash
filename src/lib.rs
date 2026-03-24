@@ -13,6 +13,7 @@
 //! - [`spectral`] — Wavelength ↔ RGB, blackbody radiation, color temperature, spectral power
 //! - [`lens`] — Lens/mirror geometry: focal length, magnification, thin lens, aberrations
 //! - [`pbr`] — Physically-based rendering: BRDF, Cook-Torrance, Fresnel-Schlick
+//! - [`atmosphere`] — Atmospheric optics: Rayleigh/Mie scattering, sky color, air mass
 //! - [`error`] — Error types
 
 pub mod error;
@@ -31,6 +32,9 @@ pub mod lens;
 
 #[cfg(feature = "pbr")]
 pub mod pbr;
+
+#[cfg(feature = "atmosphere")]
+pub mod atmosphere;
 
 #[cfg(feature = "logging")]
 pub mod logging;
