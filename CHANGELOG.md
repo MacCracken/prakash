@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.24.3] - 2026-03-23
+## [0.23.3] - 2026-03-23
 
 ### Added — wave V0.3: Wave Optics Expansion
 - Coherence: temporal coherence length/time, spatial coherence angle/area, coherence ratio
