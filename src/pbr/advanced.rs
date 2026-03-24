@@ -1,6 +1,7 @@
 //! Advanced PBR: anisotropic GGX, sheen, clearcoat, subsurface scattering, iridescence, volumetric.
 
 use std::f64::consts::PI;
+use tracing::trace;
 
 use super::{distribution_ggx, fresnel_schlick};
 
@@ -11,6 +12,7 @@ use super::{distribution_ggx, fresnel_schlick};
 /// `n_dot_h` = dot(normal, half-vector).
 /// `h_dot_x` = dot(half-vector, tangent). `h_dot_y` = dot(half-vector, bitangent).
 /// `roughness_x` and `roughness_y` are directional roughness values.
+#[must_use]
 #[inline]
 pub fn distribution_ggx_aniso(
     n_dot_h: f64,
@@ -35,6 +37,7 @@ pub fn distribution_ggx_aniso(
 /// G1(v) for anisotropic roughness, using the Heitz formulation.
 ///
 /// `n_dot_v` = dot(normal, view/light). `v_dot_x`, `v_dot_y` = tangent projections.
+#[must_use]
 #[inline]
 pub fn geometry_ggx_aniso(
     n_dot_v: f64,
@@ -59,6 +62,7 @@ pub fn geometry_ggx_aniso(
 }
 
 /// Anisotropic Smith geometry function (both directions).
+#[must_use]
 #[inline]
 #[allow(clippy::too_many_arguments)]
 pub fn geometry_smith_aniso(
@@ -83,6 +87,7 @@ pub fn geometry_smith_aniso(
 ///
 /// `n_dot_h` = dot(normal, half-vector). `roughness` in [0, 1].
 /// Returns the sheen NDF value.
+#[must_use]
 #[inline]
 pub fn distribution_charlie(n_dot_h: f64, roughness: f64) -> f64 {
     let alpha = roughness.clamp(0.001, 1.0);
@@ -99,6 +104,7 @@ pub fn distribution_charlie(n_dot_h: f64, roughness: f64) -> f64 {
 ///
 /// `n_dot_h`, `n_dot_l`, `n_dot_v` are standard dot products.
 /// `roughness` controls the width of the sheen highlight.
+#[must_use]
 #[inline]
 pub fn sheen_charlie(n_dot_h: f64, n_dot_l: f64, n_dot_v: f64, roughness: f64) -> f64 {
     let d = distribution_charlie(n_dot_h, roughness);
@@ -112,6 +118,7 @@ pub fn sheen_charlie(n_dot_h: f64, n_dot_l: f64, n_dot_v: f64, roughness: f64) -
 /// F_sheen = sheen_intensity · (1 − cos(θ))⁵
 ///
 /// `cos_theta` = dot(view, half-vector).
+#[must_use]
 #[inline]
 pub fn sheen_ashikhmin(cos_theta: f64, sheen_intensity: f64) -> f64 {
     let ct = cos_theta.clamp(0.0, 1.0);
@@ -124,6 +131,7 @@ pub fn sheen_ashikhmin(cos_theta: f64, sheen_intensity: f64) -> f64 {
 ///
 /// Uses GGX with a separate roughness parameter for the clearcoat layer.
 /// Clearcoat roughness is typically 0.0–0.1.
+#[must_use]
 #[inline]
 pub fn clearcoat_distribution(n_dot_h: f64, clearcoat_roughness: f64) -> f64 {
     distribution_ggx(n_dot_h, clearcoat_roughness)
@@ -132,6 +140,7 @@ pub fn clearcoat_distribution(n_dot_h: f64, clearcoat_roughness: f64) -> f64 {
 /// Clearcoat Fresnel — uses fixed IOR of 1.5 (F0 ≈ 0.04).
 ///
 /// Returns the Fresnel reflectance for the clearcoat layer.
+#[must_use]
 #[inline]
 pub fn clearcoat_fresnel(cos_theta: f64) -> f64 {
     fresnel_schlick(0.04, cos_theta)
@@ -141,6 +150,7 @@ pub fn clearcoat_fresnel(cos_theta: f64) -> f64 {
 ///
 /// G_clearcoat = 1 / (cos(θ_l) · cos(θ_v)) — simplified for thin layer.
 /// Clamped to prevent division by zero.
+#[must_use]
 #[inline]
 pub fn clearcoat_geometry(n_dot_v: f64, n_dot_l: f64) -> f64 {
     let ndv = n_dot_v.clamp(0.001, 1.0);
@@ -152,6 +162,7 @@ pub fn clearcoat_geometry(n_dot_v: f64, n_dot_l: f64) -> f64 {
 ///
 /// Returns the specular reflectance of the clearcoat layer.
 /// Multiply by `clearcoat_intensity` (0–1) to blend with base layer.
+#[must_use]
 #[inline]
 pub fn clearcoat_brdf(
     n_dot_h: f64,
@@ -174,6 +185,7 @@ pub fn clearcoat_brdf(
 /// `coat_brdf` = from `clearcoat_brdf()`.
 /// `clearcoat` = intensity (0–1).
 /// `h_dot_v` for Fresnel computation.
+#[must_use]
 #[inline]
 pub fn clearcoat_blend(base_brdf: f64, coat_brdf: f64, clearcoat: f64, h_dot_v: f64) -> f64 {
     let fc = clearcoat_fresnel(h_dot_v);
@@ -189,6 +201,7 @@ pub fn clearcoat_blend(base_brdf: f64, coat_brdf: f64, clearcoat: f64, h_dot_v: 
 /// `r` = distance from entry point (same units as `d`).
 /// `d` = mean free path / diffusion distance.
 /// Returns the radial reflectance profile value.
+#[must_use]
 #[inline]
 pub fn sss_profile_burley(r: f64, d: f64) -> f64 {
     if r < 1e-15 {
@@ -204,6 +217,7 @@ pub fn sss_profile_burley(r: f64, d: f64) -> f64 {
 /// R(r) = e^(-r²/(2σ²)) / (2πσ²)
 ///
 /// `r` = distance, `sigma` = scattering width.
+#[must_use]
 #[inline]
 pub fn sss_profile_gaussian(r: f64, sigma: f64) -> f64 {
     let s2 = sigma * sigma;
@@ -218,6 +232,7 @@ pub fn sss_profile_gaussian(r: f64, sigma: f64) -> f64 {
 /// `n_dot_l`, `n_dot_v` = standard dot products.
 /// `roughness` = surface roughness (0–1).
 /// Returns the diffuse BRDF value (divide by π already included).
+#[must_use]
 #[inline]
 pub fn subsurface_diffuse(n_dot_l: f64, n_dot_v: f64, roughness: f64) -> f64 {
     let ndl = n_dot_l.clamp(0.0, 1.0);
@@ -241,6 +256,7 @@ pub fn subsurface_diffuse(n_dot_l: f64, n_dot_v: f64, roughness: f64) -> f64 {
 /// Used for ear/nostril translucency effects.
 ///
 /// `thickness` and `extinction` in consistent units.
+#[must_use]
 #[inline]
 pub fn sss_transmittance(thickness: f64, extinction: f64) -> f64 {
     (-extinction * thickness).exp()
@@ -255,6 +271,7 @@ pub fn sss_transmittance(thickness: f64, extinction: f64) -> f64 {
 ///
 /// `n_base` = base material IOR, `n_film` = film IOR, `n_outside` = outside IOR (usually 1.0).
 /// `thickness` and `wavelength` in same units. `cos_theta` = cos(incidence angle).
+#[must_use]
 #[inline]
 pub fn iridescence_fresnel(
     n_outside: f64,
@@ -318,6 +335,7 @@ pub fn iridescence_fresnel(
 /// Uses representative wavelengths: R=650nm, G=550nm, B=450nm.
 ///
 /// `thickness` in nanometers.
+#[must_use]
 #[inline]
 pub fn iridescence_rgb(
     n_outside: f64,
@@ -341,6 +359,7 @@ pub fn iridescence_rgb(
 ///
 /// `cos_theta` = cosine of scattering angle.
 /// `g` = asymmetry parameter: −1 = full backscatter, 0 = isotropic, +1 = full forward.
+#[must_use]
 #[inline]
 pub fn henyey_greenstein(cos_theta: f64, g: f64) -> f64 {
     let g2 = g * g;
@@ -349,6 +368,7 @@ pub fn henyey_greenstein(cos_theta: f64, g: f64) -> f64 {
 }
 
 /// Isotropic phase function: p = 1/(4π).
+#[must_use]
 #[inline]
 pub fn phase_isotropic() -> f64 {
     const INV_4PI: f64 = 1.0 / (4.0 * std::f64::consts::PI);
@@ -360,6 +380,7 @@ pub fn phase_isotropic() -> f64 {
 /// p(cos_θ) = 3(1 + cos²θ) / (16π)
 ///
 /// For particles much smaller than the wavelength (molecules, blue sky).
+#[must_use]
 #[inline]
 pub fn phase_rayleigh(cos_theta: f64) -> f64 {
     3.0 * (1.0 + cos_theta * cos_theta) / (16.0 * PI)
@@ -368,6 +389,7 @@ pub fn phase_rayleigh(cos_theta: f64) -> f64 {
 /// Extinction coefficient: σ_t = σ_a + σ_s.
 ///
 /// `absorption` and `scattering` coefficients in same units (e.g., 1/m).
+#[must_use]
 #[inline]
 pub fn extinction_coefficient(absorption: f64, scattering: f64) -> f64 {
     absorption + scattering
@@ -378,6 +400,7 @@ pub fn extinction_coefficient(absorption: f64, scattering: f64) -> f64 {
 /// T = e^(-σ_t · d)
 ///
 /// `sigma_t` = extinction coefficient, `distance` in consistent units.
+#[must_use]
 #[inline]
 pub fn volume_transmittance(sigma_t: f64, distance: f64) -> f64 {
     (-sigma_t * distance).exp()
@@ -386,6 +409,7 @@ pub fn volume_transmittance(sigma_t: f64, distance: f64) -> f64 {
 /// Single-scattering albedo: ω = σ_s / σ_t.
 ///
 /// ω = 0 → pure absorption, ω = 1 → pure scattering.
+#[must_use]
 #[inline]
 pub fn single_scatter_albedo(absorption: f64, scattering: f64) -> f64 {
     let total = absorption + scattering;
@@ -402,6 +426,7 @@ pub fn single_scatter_albedo(absorption: f64, scattering: f64) -> f64 {
 /// `scattering` = σ_s coefficient, `cos_theta` = scattering angle,
 /// `g` = HG asymmetry, `sigma_t` = extinction, `distance` = path length,
 /// `light_intensity` = incident light.
+#[must_use]
 #[inline]
 pub fn single_scatter_inscattering(
     scattering: f64,
@@ -425,6 +450,7 @@ pub fn single_scatter_inscattering(
 /// Returns the half-vector in tangent space: [x, y, z] where z is aligned with the normal.
 ///
 /// θ = atan(α · √ξ₁ / √(1 − ξ₁)), φ = 2π · ξ₂
+#[must_use]
 #[inline]
 pub fn sample_ggx(roughness: f64, xi1: f64, xi2: f64) -> [f64; 3] {
     let a = roughness * roughness;
@@ -444,6 +470,7 @@ pub fn sample_ggx(roughness: f64, xi1: f64, xi2: f64) -> [f64; 3] {
 /// pdf = D(h) · n·h / (4 · h·v)
 ///
 /// Used to weight samples in Monte Carlo integration.
+#[must_use]
 #[inline]
 pub fn sample_ggx_pdf(n_dot_h: f64, h_dot_v: f64, roughness: f64) -> f64 {
     let d = distribution_ggx(n_dot_h, roughness);
@@ -456,6 +483,7 @@ pub fn sample_ggx_pdf(n_dot_h: f64, h_dot_v: f64, roughness: f64) -> f64 {
 ///
 /// Uses Malley's method: uniform disk → project to hemisphere.
 /// Returns direction in tangent space [x, y, z].
+#[must_use]
 #[inline]
 pub fn sample_cosine_hemisphere(xi1: f64, xi2: f64) -> [f64; 3] {
     let r = xi1.sqrt();
@@ -470,6 +498,7 @@ pub fn sample_cosine_hemisphere(xi1: f64, xi2: f64) -> [f64; 3] {
 /// PDF of cosine-weighted hemisphere sampling.
 ///
 /// pdf = cos(θ) / π = n·l / π
+#[must_use]
 #[inline]
 pub fn sample_cosine_pdf(n_dot_l: f64) -> f64 {
     n_dot_l.clamp(0.0, 1.0) / PI
@@ -487,6 +516,7 @@ pub fn sample_cosine_pdf(n_dot_l: f64) -> f64 {
 ///
 /// `n_dot_v` = cos(θ) between normal and view. `roughness` in [0, 1].
 /// Returns (scale, bias) both in [0, 1].
+#[must_use]
 #[inline]
 pub fn split_sum_scale_bias(n_dot_v: f64, roughness: f64) -> (f64, f64) {
     let ndv = n_dot_v.clamp(0.0, 1.0);
@@ -522,6 +552,7 @@ pub fn split_sum_scale_bias(n_dot_v: f64, roughness: f64) -> (f64, f64) {
 ///
 /// For pre-filtered environment maps, each mip level corresponds to
 /// a progressively rougher convolution.
+#[must_use]
 #[inline]
 pub fn env_map_lod(roughness: f64, max_lod: f64) -> f64 {
     roughness * max_lod
@@ -534,7 +565,9 @@ pub fn env_map_lod(roughness: f64, max_lod: f64) -> f64 {
 ///
 /// Returns (scale, bias) — the two channels of the BRDF LUT texture.
 /// `num_samples` controls quality (typical: 1024).
+#[must_use]
 pub fn integrate_brdf_lut(n_dot_v: f64, roughness: f64, num_samples: u32) -> (f64, f64) {
+    trace!(n_dot_v, roughness, num_samples, "integrate_brdf_lut");
     let ndv = n_dot_v.clamp(0.001, 1.0);
     // View vector in tangent space
     let v = [(1.0 - ndv * ndv).sqrt(), 0.0, ndv];

@@ -1,6 +1,7 @@
 //! Lens and mirror geometry — focal length, magnification, thin lens equation, aberrations.
 
 use serde::{Deserialize, Serialize};
+use tracing::trace;
 
 use crate::error::{PrakashError, Result};
 
@@ -8,6 +9,7 @@ use crate::error::{PrakashError, Result};
 ///
 /// Given focal length and object distance, returns image distance.
 /// Positive di = real image (opposite side), negative = virtual image (same side).
+#[must_use = "returns the computed image distance"]
 #[inline]
 pub fn thin_lens_image_distance(focal_length: f64, object_distance: f64) -> Result<f64> {
     let denom = object_distance - focal_length;
@@ -23,6 +25,7 @@ pub fn thin_lens_image_distance(focal_length: f64, object_distance: f64) -> Resu
 ///
 /// Positive M = upright image, negative = inverted.
 /// |M| > 1 = magnified, |M| < 1 = diminished.
+#[must_use]
 #[inline]
 pub fn magnification(object_distance: f64, image_distance: f64) -> f64 {
     -image_distance / object_distance
@@ -33,6 +36,7 @@ pub fn magnification(object_distance: f64, image_distance: f64) -> f64 {
 /// 1/f = (n-1) · (1/R1 - 1/R2)
 ///
 /// Convention: R > 0 if center of curvature is to the right.
+#[must_use = "returns the computed focal length"]
 #[inline]
 pub fn lensmaker_focal_length(n: f64, r1: f64, r2: f64) -> Result<f64> {
     let power = (n - 1.0) * (1.0 / r1 - 1.0 / r2);
@@ -45,6 +49,7 @@ pub fn lensmaker_focal_length(n: f64, r1: f64, r2: f64) -> Result<f64> {
 }
 
 /// Optical power in diopters (1/f in meters).
+#[must_use = "returns the computed optical power"]
 #[inline]
 pub fn optical_power(focal_length_m: f64) -> Result<f64> {
     if focal_length_m.abs() < 1e-15 {
@@ -56,12 +61,14 @@ pub fn optical_power(focal_length_m: f64) -> Result<f64> {
 }
 
 /// Mirror focal length from radius of curvature: f = R/2.
+#[must_use]
 #[inline]
 pub fn mirror_focal_length(radius: f64) -> f64 {
     radius / 2.0
 }
 
 /// Mirror equation (same form as thin lens): 1/f = 1/do + 1/di.
+#[must_use = "returns the computed image distance"]
 #[inline]
 pub fn mirror_image_distance(focal_length: f64, object_distance: f64) -> Result<f64> {
     thin_lens_image_distance(focal_length, object_distance)
@@ -69,6 +76,7 @@ pub fn mirror_image_distance(focal_length: f64, object_distance: f64) -> Result<
 
 /// Lens type classification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum LensType {
     /// Converging (positive focal length): biconvex, plano-convex, positive meniscus.
     Converging,
@@ -77,6 +85,7 @@ pub enum LensType {
 }
 
 /// Classify a lens by its focal length.
+#[must_use]
 #[inline]
 pub fn classify_lens(focal_length: f64) -> LensType {
     if focal_length > 0.0 {
@@ -88,6 +97,7 @@ pub fn classify_lens(focal_length: f64) -> LensType {
 
 /// Two thin lenses in contact: combined focal length.
 /// 1/f = 1/f1 + 1/f2
+#[must_use = "returns the combined focal length"]
 #[inline]
 pub fn combined_focal_length(f1: f64, f2: f64) -> Result<f64> {
     let sum = f1 + f2;
@@ -104,6 +114,7 @@ pub fn combined_focal_length(f1: f64, f2: f64) -> Result<f64> {
 /// Returns (near_limit, far_limit) distances.
 /// `f` = focal length, `N` = f-number, `c` = circle of confusion,
 /// `d` = subject distance.
+#[must_use]
 #[inline]
 pub fn depth_of_field(focal_length: f64, f_number: f64, coc: f64, subject_dist: f64) -> (f64, f64) {
     let h = (focal_length * focal_length) / (f_number * coc); // hyperfocal distance
@@ -125,6 +136,7 @@ pub fn depth_of_field(focal_length: f64, f_number: f64, coc: f64, subject_dist: 
 ///
 /// `n` = refractive index, `r1`/`r2` = radii of curvature, `d` = center thickness.
 /// Sign convention: R > 0 if center of curvature is to the right.
+#[must_use = "returns the computed focal length"]
 #[inline]
 pub fn thick_lens_focal_length(n: f64, r1: f64, r2: f64, thickness: f64) -> Result<f64> {
     let nm1 = n - 1.0;
@@ -157,8 +169,10 @@ pub struct CardinalPoints {
 /// Compute cardinal points for a thick lens.
 ///
 /// `n` = refractive index, `r1`/`r2` = radii of curvature, `d` = center thickness.
+#[must_use = "returns the computed cardinal points"]
 #[inline]
 pub fn cardinal_points(n: f64, r1: f64, r2: f64, thickness: f64) -> Result<CardinalPoints> {
+    trace!(n, r1, r2, thickness, "cardinal_points");
     let f = thick_lens_focal_length(n, r1, r2, thickness)?;
     let nm1 = n - 1.0;
 
@@ -191,12 +205,14 @@ pub fn cardinal_points(n: f64, r1: f64, r2: f64, thickness: f64) -> Result<Cardi
 /// F-number (focal ratio): N = f / D.
 ///
 /// `focal_length` and `aperture_diameter` in same units.
+#[must_use]
 #[inline]
 pub fn f_number(focal_length: f64, aperture_diameter: f64) -> f64 {
     focal_length / aperture_diameter
 }
 
 /// Aperture diameter from f-number: D = f / N.
+#[must_use]
 #[inline]
 pub fn aperture_from_f_number(focal_length: f64, f_num: f64) -> f64 {
     focal_length / f_num
@@ -206,6 +222,7 @@ pub fn aperture_from_f_number(focal_length: f64, f_num: f64) -> f64 {
 ///
 /// `half_angle` is the half-angle of the maximum cone of light (radians).
 /// `n` is the refractive index of the medium (1.0 for air).
+#[must_use]
 #[inline]
 pub fn numerical_aperture(n: f64, half_angle: f64) -> f64 {
     n * half_angle.sin()
@@ -214,6 +231,7 @@ pub fn numerical_aperture(n: f64, half_angle: f64) -> f64 {
 /// Approximate NA from f-number (paraxial): NA ≈ 1 / (2·N).
 ///
 /// Valid for small angles in air (n=1).
+#[must_use]
 #[inline]
 pub fn na_from_f_number(f_num: f64) -> f64 {
     1.0 / (2.0 * f_num)
@@ -224,6 +242,7 @@ pub fn na_from_f_number(f_num: f64) -> f64 {
 /// θ = 1.22 · λ / D (radians)
 ///
 /// `wavelength` and `aperture_diameter` in same units.
+#[must_use]
 #[inline]
 pub fn diffraction_limit(wavelength: f64, aperture_diameter: f64) -> f64 {
     1.22 * wavelength / aperture_diameter
@@ -234,6 +253,7 @@ pub fn diffraction_limit(wavelength: f64, aperture_diameter: f64) -> f64 {
 /// r_airy = 1.22 · λ · N (where N is f-number)
 ///
 /// `wavelength` in same units as desired output.
+#[must_use]
 #[inline]
 pub fn airy_disk_radius(wavelength: f64, f_num: f64) -> f64 {
     1.22 * wavelength * f_num
@@ -246,6 +266,7 @@ pub fn airy_disk_radius(wavelength: f64, f_num: f64) -> f64 {
 /// FOV = 2 · arctan(sensor_size / (2·f))
 ///
 /// `sensor_size` and `focal_length` in same units. Returns radians.
+#[must_use]
 #[inline]
 pub fn field_of_view(sensor_size: f64, focal_length: f64) -> f64 {
     2.0 * (sensor_size / (2.0 * focal_length)).atan()
@@ -254,6 +275,7 @@ pub fn field_of_view(sensor_size: f64, focal_length: f64) -> f64 {
 /// Diagonal field of view from sensor dimensions.
 ///
 /// `width` and `height` are sensor dimensions, same units as `focal_length`.
+#[must_use]
 #[inline]
 pub fn field_of_view_diagonal(width: f64, height: f64, focal_length: f64) -> f64 {
     field_of_view(width.hypot(height), focal_length)
@@ -266,6 +288,7 @@ pub fn field_of_view_diagonal(width: f64, height: f64, focal_length: f64) -> f64
 /// f_cutoff = 1 / (λ · N)
 ///
 /// `wavelength` and result in consistent units. Typically λ in mm → f in cycles/mm.
+#[must_use]
 #[inline]
 pub fn mtf_cutoff_frequency(wavelength: f64, f_num: f64) -> f64 {
     1.0 / (wavelength * f_num)
@@ -277,6 +300,7 @@ pub fn mtf_cutoff_frequency(wavelength: f64, f_num: f64) -> f64 {
 ///
 /// `spatial_freq` is the spatial frequency, `cutoff_freq` is from `mtf_cutoff_frequency`.
 /// Returns modulation (0.0–1.0). Returns 0.0 for frequencies above cutoff.
+#[must_use]
 #[inline]
 pub fn mtf_diffraction_limited(spatial_freq: f64, cutoff_freq: f64) -> f64 {
     let v = spatial_freq / cutoff_freq;
@@ -314,6 +338,7 @@ pub struct SeidelCoefficients {
 ///
 /// q = 0 for equi-convex, q = 1 for plano-convex (flat on right),
 /// q = -1 for plano-convex (flat on left).
+#[must_use]
 #[inline]
 pub fn shape_factor(r1: f64, r2: f64) -> f64 {
     let denom = r2 - r1;
@@ -327,6 +352,7 @@ pub fn shape_factor(r1: f64, r2: f64) -> f64 {
 ///
 /// p = -1 for object at infinity, p = 0 for symmetric conjugates (2f-2f),
 /// p = 1 for image at infinity.
+#[must_use]
 #[inline]
 pub fn conjugate_factor(object_distance: f64, image_distance: f64) -> f64 {
     let sum = image_distance + object_distance;
@@ -342,8 +368,10 @@ pub fn conjugate_factor(object_distance: f64, image_distance: f64) -> f64 {
 /// `p` = conjugate factor (position factor).
 ///
 /// The coefficients are normalized to the lens power.
+#[must_use]
 #[inline]
 pub fn seidel_coefficients(n: f64, focal_length: f64, q: f64, p: f64) -> SeidelCoefficients {
+    trace!(n, focal_length, q, p, "seidel_coefficients");
     let phi = 1.0 / focal_length; // optical power
 
     // Spherical aberration: depends on shape and conjugate
@@ -382,6 +410,7 @@ pub fn seidel_coefficients(n: f64, focal_length: f64, q: f64, p: f64) -> SeidelC
 ///
 /// `ray_height` is the height at which the ray enters the lens.
 /// Returns the axial shift of the focus point.
+#[must_use]
 #[inline]
 pub fn longitudinal_spherical_aberration(ray_height: f64, focal_length: f64, n: f64) -> f64 {
     // For a simple equi-convex lens (q=0, p=-1 for object at infinity)
@@ -396,6 +425,7 @@ pub fn longitudinal_spherical_aberration(ray_height: f64, focal_length: f64, n: 
 ///
 /// Returns the axial distance between F-line and C-line focal points.
 /// `focal_length` in desired units, `abbe_v` (V number) from ray module.
+#[must_use]
 #[inline]
 pub fn chromatic_aberration(focal_length: f64, abbe_v: f64) -> f64 {
     focal_length / abbe_v
@@ -407,6 +437,7 @@ pub fn chromatic_aberration(focal_length: f64, abbe_v: f64) -> f64 {
 ///
 /// The Petzval radius of curvature is R_p = -1/S.
 /// A flat field requires S = 0.
+#[must_use]
 #[inline]
 pub fn petzval_sum(elements: &[(f64, f64)]) -> f64 {
     elements.iter().map(|(n, f)| 1.0 / (n * f)).sum()
@@ -415,6 +446,7 @@ pub fn petzval_sum(elements: &[(f64, f64)]) -> f64 {
 /// Petzval radius of curvature from the Petzval sum.
 ///
 /// R_p = -1 / S. Returns `None` if the sum is zero (flat field).
+#[must_use]
 #[inline]
 pub fn petzval_radius(petzval_sum: f64) -> Option<f64> {
     if petzval_sum.abs() < 1e-15 {
@@ -431,6 +463,7 @@ pub fn petzval_radius(petzval_sum: f64) -> Option<f64> {
 /// 1/f = 1/f₁ + 1/f₂ − d/(f₁·f₂)
 ///
 /// Returns the effective focal length of the system.
+#[must_use = "returns the effective focal length"]
 #[inline]
 pub fn separated_lenses_focal_length(f1: f64, f2: f64, separation: f64) -> Result<f64> {
     let power = 1.0 / f1 + 1.0 / f2 - separation / (f1 * f2);
@@ -445,6 +478,7 @@ pub fn separated_lenses_focal_length(f1: f64, f2: f64, separation: f64) -> Resul
 /// Back focal distance of a two-lens system.
 ///
 /// BFD = f · (1 − d/f₁)
+#[must_use = "returns the back focal distance"]
 #[inline]
 pub fn separated_lenses_bfd(f1: f64, f2: f64, separation: f64) -> Result<f64> {
     let f = separated_lenses_focal_length(f1, f2, separation)?;
@@ -454,6 +488,7 @@ pub fn separated_lenses_bfd(f1: f64, f2: f64, separation: f64) -> Result<f64> {
 /// System magnification for a multi-element system.
 ///
 /// Total magnification is the product of individual magnifications.
+#[must_use]
 #[inline]
 pub fn system_magnification(magnifications: &[f64]) -> f64 {
     magnifications.iter().product()

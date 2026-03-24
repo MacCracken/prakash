@@ -1,6 +1,7 @@
 //! CIE color science: XYZ tristimulus, color matching functions, SPD, illuminants, CRI.
 
 use serde::{Deserialize, Serialize};
+use tracing::trace;
 
 use super::{Rgb, planck_radiance};
 
@@ -117,6 +118,7 @@ pub struct Xyz {
 }
 
 impl Xyz {
+    #[must_use]
     #[inline]
     pub const fn new(x: f64, y: f64, z: f64) -> Self {
         Self { x, y, z }
@@ -125,6 +127,7 @@ impl Xyz {
     /// Convert to CIE xyY chromaticity coordinates.
     ///
     /// Returns (x, y, Y) where x,y are chromaticity and Y is luminance.
+    #[must_use]
     #[inline]
     pub fn to_xyy(self) -> (f64, f64, f64) {
         let sum = self.x + self.y + self.z;
@@ -135,6 +138,7 @@ impl Xyz {
     }
 
     /// Create from xyY chromaticity coordinates.
+    #[must_use]
     #[inline]
     pub fn from_xyy(cx: f64, cy: f64, big_y: f64) -> Self {
         if cy < 1e-15 {
@@ -150,6 +154,7 @@ impl Xyz {
     /// Convert to linear sRGB (not gamma-corrected).
     ///
     /// Uses the sRGB/Rec.709 conversion matrix (D65 white point).
+    #[must_use]
     #[inline]
     pub fn to_linear_srgb(self) -> Rgb {
         Rgb::new(
@@ -160,6 +165,7 @@ impl Xyz {
     }
 
     /// Convert to sRGB with gamma correction and clamping.
+    #[must_use]
     pub fn to_srgb(self) -> Rgb {
         let linear = self.to_linear_srgb();
         Rgb::new(
@@ -177,6 +183,7 @@ impl Xyz {
 }
 
 /// Convert linear sRGB to XYZ (inverse of the sRGB matrix).
+#[must_use]
 #[inline]
 pub fn linear_srgb_to_xyz(rgb: &Rgb) -> Xyz {
     Xyz::new(
@@ -187,6 +194,7 @@ pub fn linear_srgb_to_xyz(rgb: &Rgb) -> Xyz {
 }
 
 /// sRGB gamma correction: linear → sRGB.
+#[must_use]
 #[inline]
 pub fn linear_to_srgb_gamma(c: f64) -> f64 {
     if c <= 0.003_130_8 {
@@ -197,6 +205,7 @@ pub fn linear_to_srgb_gamma(c: f64) -> f64 {
 }
 
 /// sRGB inverse gamma: sRGB → linear.
+#[must_use]
 #[inline]
 pub fn srgb_gamma_to_linear(c: f64) -> f64 {
     if c <= 0.040_45 {
@@ -210,6 +219,7 @@ pub fn srgb_gamma_to_linear(c: f64) -> f64 {
 ///
 /// Valid for ~3000K–50000K. Input is CIE 1931 (x, y) chromaticity.
 /// Returns temperature in Kelvin.
+#[must_use]
 #[inline]
 pub fn cct_from_xy(cx: f64, cy: f64) -> f64 {
     let n = (cx - 0.3320) / (0.1858 - cy);
@@ -220,6 +230,7 @@ pub fn cct_from_xy(cx: f64, cy: f64) -> f64 {
 ///
 /// Uses linear interpolation between the 5nm tabulated values.
 /// Returns (x̄, ȳ, z̄). Returns (0,0,0) outside 380–780nm.
+#[must_use]
 #[inline]
 pub fn cie_cmf_at(wavelength_nm: f64) -> (f64, f64, f64) {
     if !(380.0..=780.0).contains(&wavelength_nm) {
@@ -257,6 +268,7 @@ pub struct Spd {
 
 impl Spd {
     /// Create a new SPD from uniform samples.
+    #[must_use]
     pub fn new(start_nm: f64, step_nm: f64, values: Vec<f64>) -> Self {
         Self {
             start_nm,
@@ -266,12 +278,14 @@ impl Spd {
     }
 
     /// End wavelength (inclusive).
+    #[must_use]
     #[inline]
     pub fn end_nm(&self) -> f64 {
         self.start_nm + self.step_nm * (self.values.len() as f64 - 1.0)
     }
 
     /// Interpolate the SPD at an arbitrary wavelength.
+    #[must_use]
     #[inline]
     pub fn at(&self, wavelength_nm: f64) -> f64 {
         if wavelength_nm < self.start_nm || wavelength_nm > self.end_nm() {
@@ -289,7 +303,14 @@ impl Spd {
     /// Integrate this SPD against the CIE 1931 CMFs to get XYZ tristimulus values.
     ///
     /// Uses 5nm integration steps over the visible range.
+    #[must_use]
     pub fn to_xyz(&self) -> Xyz {
+        trace!(
+            start_nm = self.start_nm,
+            step_nm = self.step_nm,
+            samples = self.values.len(),
+            "spd_to_xyz"
+        );
         let mut x = 0.0;
         let mut y = 0.0;
         let mut z = 0.0;
@@ -312,6 +333,7 @@ impl Spd {
     }
 
     /// Convert this SPD to sRGB color.
+    #[must_use]
     pub fn to_srgb(&self) -> Rgb {
         let xyz = self.to_xyz();
         // Normalize to Y=1 for white point
@@ -321,6 +343,7 @@ impl Spd {
     }
 
     /// Blackbody SPD at a given temperature, sampled at 5nm from 380–780nm.
+    #[must_use]
     pub fn blackbody(temperature_k: f64) -> Self {
         let mut values = Vec::with_capacity(81);
         let mut wl = 380.0;
@@ -423,7 +446,9 @@ pub fn illuminant_f11() -> Spd {
 /// daylight for CCT >= 5000K). Returns Ra (0–100, 100 = perfect rendering).
 ///
 /// This is a simplified CRI that uses the chromaticity shift method.
+#[must_use]
 pub fn color_rendering_index(test_spd: &Spd) -> f64 {
+    trace!("color_rendering_index");
     let test_xyz = test_spd.to_xyz();
     let (tx, ty, _) = test_xyz.to_xyy();
     let test_cct = cct_from_xy(tx, ty);

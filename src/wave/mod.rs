@@ -9,12 +9,14 @@ use std::f64::consts::PI;
 ///
 /// Given amplitudes A1, A2 and phase difference δ (radians):
 /// I = A1² + A2² + 2·A1·A2·cos(δ)
+#[must_use]
 #[inline]
 pub fn interference_intensity(a1: f64, a2: f64, phase_diff: f64) -> f64 {
     a1 * a1 + a2 * a2 + 2.0 * a1 * a2 * phase_diff.cos()
 }
 
 /// Constructive interference condition: path difference = m·λ.
+#[must_use]
 #[inline]
 pub fn is_constructive(path_diff: f64, wavelength: f64) -> bool {
     let m = path_diff / wavelength;
@@ -22,6 +24,7 @@ pub fn is_constructive(path_diff: f64, wavelength: f64) -> bool {
 }
 
 /// Destructive interference condition: path difference = (m + 0.5)·λ.
+#[must_use]
 #[inline]
 pub fn is_destructive(path_diff: f64, wavelength: f64) -> bool {
     let m = path_diff / wavelength - 0.5;
@@ -30,6 +33,7 @@ pub fn is_destructive(path_diff: f64, wavelength: f64) -> bool {
 
 /// Phase difference from path difference and wavelength.
 /// δ = 2π·Δ/λ
+#[must_use]
 #[inline]
 pub fn path_to_phase(path_diff: f64, wavelength: f64) -> f64 {
     std::f64::consts::TAU * path_diff / wavelength
@@ -41,6 +45,7 @@ pub fn path_to_phase(path_diff: f64, wavelength: f64) -> f64 {
 /// refractive index `n_film`, at near-normal incidence.
 ///
 /// Returns intensity as a fraction of incident (0.0–1.0 approximate).
+#[must_use]
 #[inline]
 pub fn thin_film_reflectance(wavelength_nm: f64, thickness_nm: f64, n_film: f64) -> f64 {
     let path = 2.0 * n_film * thickness_nm;
@@ -56,6 +61,7 @@ pub fn thin_film_reflectance(wavelength_nm: f64, thickness_nm: f64, n_film: f64)
 ///
 /// I(θ) = I0 · (sin(β)/β)² where β = π·a·sin(θ)/λ
 /// `slit_width` and `wavelength` in same units.
+#[must_use]
 #[inline]
 pub fn single_slit_intensity(slit_width: f64, wavelength: f64, angle: f64, i0: f64) -> f64 {
     let beta = PI * slit_width * angle.sin() / wavelength;
@@ -70,6 +76,7 @@ pub fn single_slit_intensity(slit_width: f64, wavelength: f64, angle: f64, i0: f
 ///
 /// Combines single-slit envelope with two-slit interference.
 /// `slit_width`: width of each slit, `slit_spacing`: center-to-center distance.
+#[must_use]
 #[inline]
 pub fn double_slit_intensity(
     slit_width: f64,
@@ -88,6 +95,7 @@ pub fn double_slit_intensity(
 ///
 /// d·sin(θ) = m·λ → θ = asin(m·λ/d)
 /// Returns angles for orders m = 0, ±1, ±2, ... up to `max_order`.
+#[must_use]
 pub fn grating_maxima(grating_spacing: f64, wavelength: f64, max_order: u32) -> Vec<f64> {
     let mut angles = Vec::with_capacity(2 * max_order as usize + 1);
     for m in 0..=max_order {
@@ -132,6 +140,7 @@ impl Polarization {
         phase: 0.0,
     };
     /// Right circular polarization.
+    #[must_use]
     pub fn circular_right() -> Self {
         Self {
             ex: 1.0 / 2.0f64.sqrt(),
@@ -140,6 +149,7 @@ impl Polarization {
         }
     }
     /// Left circular polarization.
+    #[must_use]
     pub fn circular_left() -> Self {
         Self {
             ex: 1.0 / 2.0f64.sqrt(),
@@ -150,6 +160,7 @@ impl Polarization {
 
     /// Intensity after passing through a linear polarizer at angle θ.
     /// Malus's law: I = I0 · cos²(θ - polarization_angle)
+    #[must_use]
     #[inline]
     pub fn through_polarizer(&self, polarizer_angle: f64) -> f64 {
         let pol_angle = self.ey.atan2(self.ex);
@@ -158,6 +169,7 @@ impl Polarization {
     }
 
     /// Total intensity.
+    #[must_use]
     #[inline]
     pub fn intensity(&self) -> f64 {
         self.ex * self.ex + self.ey * self.ey
@@ -167,6 +179,7 @@ impl Polarization {
 /// Malus's law: intensity after a polarizer at angle θ relative to polarization.
 ///
 /// I = I0 · cos²(θ)
+#[must_use]
 #[inline]
 pub fn malus_law(intensity: f64, angle: f64) -> f64 {
     intensity * angle.cos().powi(2)
@@ -180,6 +193,7 @@ pub fn malus_law(intensity: f64, angle: f64) -> f64 {
 ///
 /// `center_wavelength` and `bandwidth` in same units (e.g., nm or m).
 /// Returns coherence length in the same units.
+#[must_use]
 #[inline]
 pub fn coherence_length(center_wavelength: f64, bandwidth: f64) -> f64 {
     center_wavelength * center_wavelength / bandwidth
@@ -191,6 +205,7 @@ pub fn coherence_length(center_wavelength: f64, bandwidth: f64) -> f64 {
 ///
 /// `center_wavelength_m` and `bandwidth_m` in meters.
 /// Returns coherence time in seconds.
+#[must_use]
 #[inline]
 pub fn coherence_time(center_wavelength_m: f64, bandwidth_m: f64) -> f64 {
     coherence_length(center_wavelength_m, bandwidth_m) / 299_792_458.0
@@ -202,6 +217,7 @@ pub fn coherence_time(center_wavelength_m: f64, bandwidth_m: f64) -> f64 {
 ///
 /// `wavelength` and `source_diameter` in same units.
 /// Returns the coherence angle in radians.
+#[must_use]
 #[inline]
 pub fn spatial_coherence_angle(wavelength: f64, source_diameter: f64) -> f64 {
     wavelength / source_diameter
@@ -213,6 +229,7 @@ pub fn spatial_coherence_angle(wavelength: f64, source_diameter: f64) -> f64 {
 ///
 /// `wavelength`, `distance`, and `source_diameter` in same units.
 /// Returns the coherence area in the same units squared.
+#[must_use]
 #[inline]
 pub fn coherence_area(wavelength: f64, distance: f64, source_diameter: f64) -> f64 {
     let l = wavelength * distance / source_diameter;
@@ -222,6 +239,7 @@ pub fn coherence_area(wavelength: f64, distance: f64, source_diameter: f64) -> f
 /// Number of coherence lengths that fit in a given path difference.
 ///
 /// A visibility metric: values >> 1 mean the source is incoherent at this path difference.
+#[must_use]
 #[inline]
 pub fn coherence_ratio(path_difference: f64, center_wavelength: f64, bandwidth: f64) -> f64 {
     path_difference / coherence_length(center_wavelength, bandwidth)
@@ -233,6 +251,7 @@ pub fn coherence_ratio(path_difference: f64, center_wavelength: f64, bandwidth: 
 ///
 /// Accurate to ~1e-7 for all x. Uses polynomial approximation for |x| < 8
 /// and asymptotic expansion for |x| >= 8.
+#[must_use]
 #[inline]
 pub fn bessel_j1(x: f64) -> f64 {
     let ax = x.abs();
@@ -270,6 +289,7 @@ pub fn bessel_j1(x: f64) -> f64 {
 ///
 /// `aperture_diameter` and `wavelength` in same units.
 /// `angle` in radians. Returns intensity relative to `i0`.
+#[must_use]
 #[inline]
 pub fn airy_pattern(aperture_diameter: f64, wavelength: f64, angle: f64, i0: f64) -> f64 {
     let x = PI * aperture_diameter * angle.sin() / wavelength;
@@ -285,6 +305,7 @@ pub fn airy_pattern(aperture_diameter: f64, wavelength: f64, angle: f64, i0: f64
 /// θ₁ = 1.2196·λ/D (radians)
 ///
 /// More precise than the commonly quoted 1.22 factor.
+#[must_use]
 #[inline]
 pub fn airy_first_zero(wavelength: f64, aperture_diameter: f64) -> f64 {
     // First zero of J1 is at x = 3.8317..., so sin(θ) = 3.8317λ/(πD) ≈ 1.2197λ/D
@@ -297,6 +318,7 @@ pub fn airy_first_zero(wavelength: f64, aperture_diameter: f64) -> f64 {
 /// falls on the first zero of the other: θ_R = 1.22·λ/D
 ///
 /// Returns minimum resolvable angle in radians.
+#[must_use]
 #[inline]
 pub fn rayleigh_criterion(wavelength: f64, aperture_diameter: f64) -> f64 {
     1.22 * wavelength / aperture_diameter
@@ -309,6 +331,7 @@ pub fn rayleigh_criterion(wavelength: f64, aperture_diameter: f64) -> f64 {
 /// F = 4R / (1 − R)²
 ///
 /// `reflectance` is the mirror reflectivity (0.0–1.0).
+#[must_use]
 #[inline]
 pub fn fabry_perot_finesse_coefficient(reflectance: f64) -> f64 {
     4.0 * reflectance / ((1.0 - reflectance) * (1.0 - reflectance))
@@ -319,6 +342,7 @@ pub fn fabry_perot_finesse_coefficient(reflectance: f64) -> f64 {
 /// F = π·√R / (1 − R)
 ///
 /// Higher finesse means sharper transmission peaks.
+#[must_use]
 #[inline]
 pub fn fabry_perot_finesse(reflectance: f64) -> f64 {
     PI * reflectance.sqrt() / (1.0 - reflectance)
@@ -333,6 +357,7 @@ pub fn fabry_perot_finesse(reflectance: f64) -> f64 {
 /// `n` = refractive index of cavity, `thickness` = mirror separation,
 /// `wavelength` and `thickness` in same units, `angle` = incidence angle (radians),
 /// `reflectance` = mirror reflectivity.
+#[must_use]
 #[inline]
 pub fn fabry_perot_transmittance(
     wavelength: f64,
@@ -354,6 +379,7 @@ pub fn fabry_perot_transmittance(
 ///
 /// `thickness_m` in meters, `n` = refractive index of cavity.
 /// Returns FSR in Hz.
+#[must_use]
 #[inline]
 pub fn fabry_perot_fsr(thickness_m: f64, n: f64) -> f64 {
     299_792_458.0 / (2.0 * n * thickness_m)
@@ -364,6 +390,7 @@ pub fn fabry_perot_fsr(thickness_m: f64, n: f64) -> f64 {
 /// Δλ = λ² / (2·n·d)
 ///
 /// `wavelength` and `thickness` in same units.
+#[must_use]
 #[inline]
 pub fn fabry_perot_fsr_wavelength(wavelength: f64, thickness: f64, n: f64) -> f64 {
     wavelength * wavelength / (2.0 * n * thickness)
@@ -374,6 +401,7 @@ pub fn fabry_perot_fsr_wavelength(wavelength: f64, thickness: f64, n: f64) -> f6
 /// R = m · F where m = 2·n·d/λ (order number) and F is finesse.
 ///
 /// `wavelength` and `thickness` in same units.
+#[must_use]
 #[inline]
 pub fn fabry_perot_resolving_power(
     wavelength: f64,

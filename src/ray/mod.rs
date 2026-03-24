@@ -3,6 +3,7 @@
 //! All angles in radians unless suffixed with `_deg`.
 
 use serde::{Deserialize, Serialize};
+use tracing::trace;
 
 use crate::error::{PrakashError, Result};
 
@@ -68,6 +69,7 @@ impl Medium {
     };
 
     /// Custom medium with a given refractive index.
+    #[must_use = "returns the constructed Medium"]
     pub fn custom(n: f64, name: &'static str) -> Result<Self> {
         if n < 1.0 {
             return Err(PrakashError::InvalidRefractiveIndex { n });
@@ -82,8 +84,10 @@ impl Medium {
 ///
 /// Returns the refracted angle in radians, or `TotalInternalReflection` error
 /// if the angle exceeds the critical angle.
+#[must_use = "returns the refracted angle"]
 #[inline]
 pub fn snell(n1: f64, n2: f64, incident_angle: f64) -> Result<f64> {
+    trace!(n1, n2, incident_angle, "snell");
     let sin_t = (n1 / n2) * incident_angle.sin();
     if sin_t.abs() > 1.0 {
         let critical = critical_angle(n1, n2)?;
@@ -100,6 +104,7 @@ pub fn snell(n1: f64, n2: f64, incident_angle: f64) -> Result<f64> {
 /// Critical angle for total internal reflection (n1 > n2).
 ///
 /// Returns the angle in radians beyond which all light is reflected.
+#[must_use = "returns the critical angle"]
 #[inline]
 pub fn critical_angle(n1: f64, n2: f64) -> Result<f64> {
     if n1 <= n2 {
@@ -113,6 +118,7 @@ pub fn critical_angle(n1: f64, n2: f64) -> Result<f64> {
 // ── Reflection ──────────────────────────────────────────────────────────────
 
 /// Angle of reflection equals angle of incidence.
+#[must_use]
 #[inline]
 pub fn reflect_angle(incident_angle: f64) -> f64 {
     incident_angle
@@ -121,6 +127,7 @@ pub fn reflect_angle(incident_angle: f64) -> f64 {
 /// Reflect a 2D direction vector about a surface normal.
 ///
 /// Both vectors should be normalized.
+#[must_use]
 #[inline]
 pub fn reflect_2d(direction: [f64; 2], normal: [f64; 2]) -> [f64; 2] {
     let dot = direction[0] * normal[0] + direction[1] * normal[1];
@@ -131,6 +138,7 @@ pub fn reflect_2d(direction: [f64; 2], normal: [f64; 2]) -> [f64; 2] {
 }
 
 /// Reflect a 3D direction vector about a surface normal.
+#[must_use]
 #[inline]
 pub fn reflect_3d(direction: [f64; 3], normal: [f64; 3]) -> [f64; 3] {
     let dot = direction[0] * normal[0] + direction[1] * normal[1] + direction[2] * normal[2];
@@ -151,6 +159,7 @@ pub fn reflect_3d(direction: [f64; 3], normal: [f64; 3]) -> [f64; 3] {
 /// where cos_θi = −d·n and cos_θt = √(1 − (n1/n2)²(1 − cos²_θi)).
 ///
 /// Returns `TotalInternalReflection` if the discriminant is negative.
+#[must_use = "returns the refracted direction"]
 #[inline]
 pub fn refract_3d(direction: [f64; 3], normal: [f64; 3], n1: f64, n2: f64) -> Result<[f64; 3]> {
     let ratio = n1 / n2;
@@ -190,6 +199,7 @@ pub fn refract_3d(direction: [f64; 3], normal: [f64; 3], n1: f64, n2: f64) -> Re
 ///
 /// Both `direction` and `normal` should be normalized. The normal should
 /// point outward (toward the incident side).
+#[must_use = "returns the refracted direction and reflectance"]
 #[inline]
 pub fn snell_3d(
     direction: [f64; 3],
@@ -214,6 +224,7 @@ pub fn snell_3d(
 // ── Fresnel Equations ───────────────────────────────────────────────────────
 
 /// Fresnel reflectance for s-polarized light (TE mode).
+#[must_use]
 #[inline]
 pub fn fresnel_s(n1: f64, n2: f64, cos_i: f64, cos_t: f64) -> f64 {
     let num = n1 * cos_i - n2 * cos_t;
@@ -225,6 +236,7 @@ pub fn fresnel_s(n1: f64, n2: f64, cos_i: f64, cos_t: f64) -> f64 {
 }
 
 /// Fresnel reflectance for p-polarized light (TM mode).
+#[must_use]
 #[inline]
 pub fn fresnel_p(n1: f64, n2: f64, cos_i: f64, cos_t: f64) -> f64 {
     let num = n2 * cos_i - n1 * cos_t;
@@ -238,6 +250,7 @@ pub fn fresnel_p(n1: f64, n2: f64, cos_i: f64, cos_t: f64) -> f64 {
 /// Average Fresnel reflectance for unpolarized light.
 ///
 /// Returns the fraction of light reflected (0.0 = none, 1.0 = total reflection).
+#[must_use = "returns the Fresnel reflectance"]
 #[inline]
 pub fn fresnel_unpolarized(n1: f64, n2: f64, incident_angle: f64) -> Result<f64> {
     let cos_i = incident_angle.cos();
@@ -249,6 +262,7 @@ pub fn fresnel_unpolarized(n1: f64, n2: f64, incident_angle: f64) -> Result<f64>
 /// Fresnel reflectance at normal incidence (θ = 0).
 ///
 /// Simplified: R = ((n1 - n2) / (n1 + n2))²
+#[must_use]
 #[inline]
 pub fn fresnel_normal(n1: f64, n2: f64) -> f64 {
     let r = (n1 - n2) / (n1 + n2);
@@ -260,6 +274,7 @@ pub fn fresnel_normal(n1: f64, n2: f64) -> f64 {
 /// Brewster's angle — the angle at which reflected light is fully polarized.
 ///
 /// At this angle, p-polarized reflectance is zero.
+#[must_use]
 #[inline]
 pub fn brewster_angle(n1: f64, n2: f64) -> f64 {
     (n2 / n1).atan()
@@ -271,6 +286,7 @@ pub fn brewster_angle(n1: f64, n2: f64) -> f64 {
 /// with absorption coefficient `alpha`.
 ///
 /// I = I0 * exp(-alpha * d)
+#[must_use]
 #[inline]
 pub fn beer_lambert(intensity: f64, alpha: f64, distance: f64) -> f64 {
     intensity * (-alpha * distance).exp()
@@ -279,12 +295,14 @@ pub fn beer_lambert(intensity: f64, alpha: f64, distance: f64) -> f64 {
 // ── Utility ─────────────────────────────────────────────────────────────────
 
 /// Convert degrees to radians.
+#[must_use]
 #[inline]
 pub fn deg_to_rad(deg: f64) -> f64 {
     deg.to_radians()
 }
 
 /// Convert radians to degrees.
+#[must_use]
 #[inline]
 pub fn rad_to_deg(rad: f64) -> f64 {
     rad.to_degrees()

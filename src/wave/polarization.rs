@@ -17,54 +17,63 @@ pub struct StokesVector {
 }
 
 impl StokesVector {
+    #[must_use]
     #[inline]
     pub const fn new(s0: f64, s1: f64, s2: f64, s3: f64) -> Self {
         Self { s0, s1, s2, s3 }
     }
 
     /// Unpolarized light of given intensity.
+    #[must_use]
     #[inline]
     pub const fn unpolarized(intensity: f64) -> Self {
         Self::new(intensity, 0.0, 0.0, 0.0)
     }
 
     /// Horizontally polarized light.
+    #[must_use]
     #[inline]
     pub const fn horizontal(intensity: f64) -> Self {
         Self::new(intensity, intensity, 0.0, 0.0)
     }
 
     /// Vertically polarized light.
+    #[must_use]
     #[inline]
     pub const fn vertical(intensity: f64) -> Self {
         Self::new(intensity, -intensity, 0.0, 0.0)
     }
 
     /// +45° linearly polarized light.
+    #[must_use]
     #[inline]
     pub const fn diagonal_plus(intensity: f64) -> Self {
         Self::new(intensity, 0.0, intensity, 0.0)
     }
 
     /// −45° linearly polarized light.
+    #[must_use]
     #[inline]
     pub const fn diagonal_minus(intensity: f64) -> Self {
         Self::new(intensity, 0.0, -intensity, 0.0)
     }
 
     /// Right circular polarization.
+    #[must_use]
     #[inline]
     pub const fn circular_right(intensity: f64) -> Self {
         Self::new(intensity, 0.0, 0.0, intensity)
     }
 
     /// Left circular polarization.
+    #[must_use]
     #[inline]
     pub const fn circular_left(intensity: f64) -> Self {
         Self::new(intensity, 0.0, 0.0, -intensity)
     }
 
     /// Degree of polarization (0.0 = unpolarized, 1.0 = fully polarized).
+    #[must_use]
     #[inline]
     pub fn degree_of_polarization(&self) -> f64 {
         if self.s0.abs() < 1e-15 {
@@ -74,6 +83,7 @@ impl StokesVector {
     }
 
     /// Total intensity.
+    #[must_use]
     #[inline]
     pub fn intensity(&self) -> f64 {
         self.s0
@@ -81,6 +91,7 @@ impl StokesVector {
 
     /// Ellipticity angle χ: tan(2χ) = S3 / √(S1² + S2²).
     /// χ = 0 for linear, ±π/4 for circular.
+    #[must_use]
     #[inline]
     pub fn ellipticity_angle(&self) -> f64 {
         let linear_part = (self.s1 * self.s1 + self.s2 * self.s2).sqrt();
@@ -92,6 +103,7 @@ impl StokesVector {
 
     /// Orientation angle ψ of the polarization ellipse: tan(2ψ) = S2/S1.
     /// Range: [−π/2, π/2].
+    #[must_use]
     #[inline]
     pub fn orientation_angle(&self) -> f64 {
         0.5 * self.s2.atan2(self.s1)
@@ -110,6 +122,7 @@ pub struct MuellerMatrix {
 
 impl MuellerMatrix {
     /// Create a Mueller matrix from a 4×4 array (row-major).
+    #[must_use]
     #[inline]
     pub const fn new(m: [[f64; 4]; 4]) -> Self {
         Self { m }
@@ -140,6 +153,7 @@ impl MuellerMatrix {
     ]);
 
     /// Linear polarizer at arbitrary angle θ (radians).
+    #[must_use]
     #[inline]
     pub fn polarizer(angle: f64) -> Self {
         let c2 = (2.0 * angle).cos();
@@ -170,6 +184,7 @@ impl MuellerMatrix {
     ]);
 
     /// General linear retarder with fast axis horizontal and retardance δ (radians).
+    #[must_use]
     #[inline]
     pub fn retarder(retardance: f64) -> Self {
         let c = retardance.cos();
@@ -184,6 +199,7 @@ impl MuellerMatrix {
 
     /// Rotation matrix: rotates the reference frame by angle θ.
     /// Used to orient optical elements at arbitrary angles.
+    #[must_use]
     #[inline]
     pub fn rotation(angle: f64) -> Self {
         let c2 = (2.0 * angle).cos();
@@ -197,6 +213,7 @@ impl MuellerMatrix {
     }
 
     /// Apply this Mueller matrix to a Stokes vector.
+    #[must_use]
     #[inline]
     pub fn apply(&self, s: &StokesVector) -> StokesVector {
         let sv = [s.s0, s.s1, s.s2, s.s3];
@@ -222,6 +239,7 @@ impl MuellerMatrix {
 
     /// Multiply two Mueller matrices: self · other.
     /// Result represents applying `other` first, then `self`.
+    #[must_use]
     #[inline]
     pub fn multiply(&self, other: &MuellerMatrix) -> MuellerMatrix {
         let mut result = [[0.0; 4]; 4];
@@ -238,6 +256,7 @@ impl MuellerMatrix {
 }
 
 /// Apply a chain of Mueller matrices to a Stokes vector (left to right = first to last).
+#[must_use]
 #[inline]
 pub fn mueller_chain(stokes: &StokesVector, elements: &[MuellerMatrix]) -> StokesVector {
     let mut s = *stokes;
@@ -263,6 +282,7 @@ pub struct BirefringentMaterial {
 impl BirefringentMaterial {
     /// Birefringence: Δn = n_e − n_o.
     /// Positive = positive uniaxial, negative = negative uniaxial.
+    #[must_use]
     #[inline]
     pub fn birefringence(&self) -> f64 {
         self.n_e - self.n_o
@@ -273,6 +293,7 @@ impl BirefringentMaterial {
     /// δ = 2π · d · |n_e − n_o| / λ (radians)
     ///
     /// `thickness` and `wavelength` in same units.
+    #[must_use]
     #[inline]
     pub fn retardation(&self, thickness: f64, wavelength: f64) -> f64 {
         std::f64::consts::TAU * thickness * self.birefringence().abs() / wavelength
@@ -281,6 +302,7 @@ impl BirefringentMaterial {
     /// Thickness needed for a quarter-wave plate at a given wavelength.
     ///
     /// d = λ / (4·|Δn|)
+    #[must_use]
     #[inline]
     pub fn quarter_wave_thickness(&self, wavelength: f64) -> f64 {
         wavelength / (4.0 * self.birefringence().abs())
@@ -289,6 +311,7 @@ impl BirefringentMaterial {
     /// Thickness needed for a half-wave plate at a given wavelength.
     ///
     /// d = λ / (2·|Δn|)
+    #[must_use]
     #[inline]
     pub fn half_wave_thickness(&self, wavelength: f64) -> f64 {
         wavelength / (2.0 * self.birefringence().abs())
@@ -296,6 +319,7 @@ impl BirefringentMaterial {
 
     /// Mueller matrix for this birefringent material at a given thickness and wavelength.
     /// Fast axis horizontal.
+    #[must_use]
     #[inline]
     pub fn to_mueller(&self, thickness: f64, wavelength: f64) -> MuellerMatrix {
         MuellerMatrix::retarder(self.retardation(thickness, wavelength))

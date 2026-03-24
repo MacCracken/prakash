@@ -1,6 +1,7 @@
 //! Spectral math — wavelength ↔ RGB, blackbody radiation, color temperature.
 
 use serde::{Deserialize, Serialize};
+use tracing::trace;
 
 use crate::error::{PrakashError, Result};
 
@@ -24,6 +25,7 @@ pub struct Rgb {
 }
 
 impl Rgb {
+    #[must_use]
     pub const fn new(r: f64, g: f64, b: f64) -> Self {
         Self { r, g, b }
     }
@@ -32,6 +34,7 @@ impl Rgb {
     pub const WHITE: Rgb = Rgb::new(1.0, 1.0, 1.0);
 
     /// Clamp all components to 0.0–1.0.
+    #[must_use]
     #[inline]
     pub fn clamp(self) -> Self {
         Self {
@@ -42,6 +45,7 @@ impl Rgb {
     }
 
     /// Convert to 8-bit sRGB.
+    #[must_use]
     #[inline]
     pub fn to_u8(self) -> [u8; 3] {
         let c = self.clamp();
@@ -53,6 +57,7 @@ impl Rgb {
     }
 
     /// Luminance (perceived brightness, Rec. 709).
+    #[must_use]
     #[inline]
     pub fn luminance(self) -> f64 {
         0.2126 * self.r + 0.7152 * self.g + 0.0722 * self.b
@@ -63,8 +68,10 @@ impl Rgb {
 ///
 /// Uses a piecewise linear approximation of the CIE 1931 color matching functions.
 /// Only valid for visible range (380–780 nm).
+#[must_use = "returns the computed RGB color"]
 #[inline]
 pub fn wavelength_to_rgb(wavelength_nm: f64) -> Result<Rgb> {
+    trace!(wavelength_nm, "wavelength_to_rgb");
     if !(VISIBLE_MIN_NM..=VISIBLE_MAX_NM).contains(&wavelength_nm) {
         return Err(PrakashError::WavelengthOutOfRange { nm: wavelength_nm });
     }
@@ -105,6 +112,7 @@ const PLANCK_C2: f64 = PLANCK_H * SPEED_OF_LIGHT / BOLTZMANN_K;
 /// and wavelength λ (meters).
 ///
 /// Returns spectral radiance in W·sr⁻¹·m⁻³.
+#[must_use]
 #[inline]
 pub fn planck_radiance(wavelength_m: f64, temperature_k: f64) -> f64 {
     let lambda5 = wavelength_m.powi(5);
@@ -114,6 +122,7 @@ pub fn planck_radiance(wavelength_m: f64, temperature_k: f64) -> f64 {
 /// Wien's displacement law: peak wavelength (meters) for a blackbody at temperature T (Kelvin).
 ///
 /// λ_max = b / T, where b ≈ 2.898 × 10⁻³ m·K
+#[must_use]
 #[inline]
 pub fn wien_peak(temperature_k: f64) -> f64 {
     2.897_771_955e-3 / temperature_k
@@ -122,8 +131,10 @@ pub fn wien_peak(temperature_k: f64) -> f64 {
 /// Approximate color temperature (Kelvin) from correlated color temperature.
 ///
 /// Converts a color temperature to an RGB color using Tanner Helland's algorithm.
+#[must_use]
 #[inline]
 pub fn color_temperature_to_rgb(kelvin: f64) -> Rgb {
+    trace!(kelvin, "color_temperature_to_rgb");
     let temp = (kelvin / 100.0).clamp(10.0, 400.0);
 
     let r = if temp <= 66.0 {
@@ -154,24 +165,28 @@ pub fn color_temperature_to_rgb(kelvin: f64) -> Rgb {
 }
 
 /// Wavelength (nm) to frequency (Hz).
+#[must_use]
 #[inline]
 pub fn wavelength_to_frequency(wavelength_nm: f64) -> f64 {
     SPEED_OF_LIGHT / (wavelength_nm * 1e-9)
 }
 
 /// Frequency (Hz) to wavelength (nm).
+#[must_use]
 #[inline]
 pub fn frequency_to_wavelength(frequency_hz: f64) -> f64 {
     (SPEED_OF_LIGHT / frequency_hz) * 1e9
 }
 
 /// Photon energy (Joules) for a given wavelength (nm).
+#[must_use]
 #[inline]
 pub fn photon_energy(wavelength_nm: f64) -> f64 {
     PLANCK_H * wavelength_to_frequency(wavelength_nm)
 }
 
 /// Photon energy in electron-volts for a given wavelength (nm).
+#[must_use]
 #[inline]
 pub fn photon_energy_ev(wavelength_nm: f64) -> f64 {
     photon_energy(wavelength_nm) / 1.602_176_634e-19

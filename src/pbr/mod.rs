@@ -13,6 +13,7 @@ use std::f64::consts::PI;
 ///
 /// `f0` = reflectance at normal incidence (e.g. 0.04 for dielectrics, 0.95 for metals).
 /// `cos_theta` = dot(view, half-vector), clamped to [0, 1].
+#[must_use]
 #[inline]
 pub fn fresnel_schlick(f0: f64, cos_theta: f64) -> f64 {
     let ct = cos_theta.clamp(0.0, 1.0);
@@ -20,6 +21,7 @@ pub fn fresnel_schlick(f0: f64, cos_theta: f64) -> f64 {
 }
 
 /// Fresnel-Schlick for RGB reflectance (per-channel F0).
+#[must_use]
 #[inline]
 pub fn fresnel_schlick_rgb(f0: [f64; 3], cos_theta: f64) -> [f64; 3] {
     let ct = cos_theta.clamp(0.0, 1.0);
@@ -39,6 +41,7 @@ pub fn fresnel_schlick_rgb(f0: [f64; 3], cos_theta: f64) -> [f64; 3] {
 ///
 /// `n_dot_h` = dot(normal, half-vector).
 /// `roughness` = material roughness (0 = mirror, 1 = fully rough).
+#[must_use]
 #[inline]
 pub fn distribution_ggx(n_dot_h: f64, roughness: f64) -> f64 {
     let a = roughness * roughness;
@@ -51,6 +54,7 @@ pub fn distribution_ggx(n_dot_h: f64, roughness: f64) -> f64 {
 /// Beckmann normal distribution function.
 ///
 /// Alternative to GGX, sharper specular highlights.
+#[must_use]
 #[inline]
 pub fn distribution_beckmann(n_dot_h: f64, roughness: f64) -> f64 {
     let a = roughness * roughness;
@@ -68,6 +72,7 @@ pub fn distribution_beckmann(n_dot_h: f64, roughness: f64) -> f64 {
 /// G1(v) = n·v / (n·v · (1 - k) + k)
 ///
 /// `k` depends on whether this is direct or IBL lighting.
+#[must_use]
 #[inline]
 pub fn geometry_schlick_ggx(n_dot_v: f64, roughness: f64) -> f64 {
     let r = roughness + 1.0;
@@ -79,6 +84,7 @@ pub fn geometry_schlick_ggx(n_dot_v: f64, roughness: f64) -> f64 {
 /// Smith's geometry function — combines view and light directions.
 ///
 /// G(l, v) = G1(n·v) · G1(n·l)
+#[must_use]
 #[inline]
 pub fn geometry_smith(n_dot_v: f64, n_dot_l: f64, roughness: f64) -> f64 {
     geometry_schlick_ggx(n_dot_v, roughness) * geometry_schlick_ggx(n_dot_l, roughness)
@@ -91,6 +97,11 @@ pub fn geometry_smith(n_dot_v: f64, n_dot_l: f64, roughness: f64) -> f64 {
 /// f_spec = D · F · G / (4 · (n·v) · (n·l))
 ///
 /// Returns the specular reflectance multiplier.
+///
+/// **Note:** This uses `h·v ≈ n·h` as an approximation for the Fresnel term.
+/// This is accurate for near-normal viewing but diverges at grazing angles.
+/// For more precise control, compute D/F/G components separately.
+#[must_use]
 #[inline]
 pub fn cook_torrance(n_dot_h: f64, n_dot_v: f64, n_dot_l: f64, roughness: f64, f0: f64) -> f64 {
     let h_dot_v = n_dot_h; // approximation: h·v ≈ n·h for visualization
@@ -104,12 +115,14 @@ pub fn cook_torrance(n_dot_h: f64, n_dot_v: f64, n_dot_l: f64, roughness: f64, f
 // ── Lambert Diffuse ─────────────────────────────────────────────────────────
 
 /// Lambertian diffuse BRDF: f_diff = albedo / π.
+#[must_use]
 #[inline]
 pub fn lambert_diffuse(albedo: f64) -> f64 {
     albedo / PI
 }
 
 /// Lambertian diffuse for RGB albedo.
+#[must_use]
 #[inline]
 pub fn lambert_diffuse_rgb(albedo: [f64; 3]) -> [f64; 3] {
     [albedo[0] / PI, albedo[1] / PI, albedo[2] / PI]
@@ -121,6 +134,7 @@ pub fn lambert_diffuse_rgb(albedo: [f64; 3]) -> [f64; 3] {
 ///
 /// F0 = ((n1 - n2) / (n1 + n2))²
 /// For most materials, n1 = 1.0 (air).
+#[must_use]
 #[inline]
 pub fn ior_to_f0(ior: f64) -> f64 {
     let r = (1.0 - ior) / (1.0 + ior);

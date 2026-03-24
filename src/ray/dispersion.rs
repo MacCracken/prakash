@@ -20,6 +20,7 @@ impl CauchyCoefficients {
     /// Refractive index at a given wavelength (micrometers).
     ///
     /// Wavelength must be positive. Returns `b` coefficient for very large wavelengths.
+    #[must_use]
     #[inline]
     pub fn n_at(&self, wavelength_um: f64) -> f64 {
         debug_assert!(wavelength_um > 0.0, "wavelength must be positive");
@@ -60,6 +61,7 @@ impl SellmeierCoefficients {
     ///
     /// Returns n >= 1.0 for valid wavelengths away from resonance poles.
     /// Near resonances (λ² ≈ Cᵢ), results may be unphysical.
+    #[must_use]
     #[inline]
     pub fn n_at(&self, wavelength_um: f64) -> f64 {
         let l2 = wavelength_um * wavelength_um;
@@ -162,6 +164,7 @@ pub const FRAUNHOFER_C: f64 = 0.656_27; // Hydrogen C-line (red)
 ///
 /// Higher V means lower dispersion. Crown glasses typically V > 50,
 /// flint glasses V < 50.
+#[must_use]
 #[inline]
 pub fn abbe_number(sellmeier: &SellmeierCoefficients) -> f64 {
     let n_d = sellmeier.n_at(FRAUNHOFER_D);
@@ -178,6 +181,7 @@ pub fn abbe_number(sellmeier: &SellmeierCoefficients) -> f64 {
 ///   δ_min = 2·arcsin(n·sin(A/2)) − A
 ///
 /// `apex_angle` is in radians.
+#[must_use = "returns the minimum deviation angle"]
 #[inline]
 pub fn prism_deviation(apex_angle: f64, n: f64) -> Result<f64> {
     let sin_half_a = (apex_angle / 2.0).sin();
@@ -199,6 +203,7 @@ pub fn prism_deviation(apex_angle: f64, n: f64) -> Result<f64> {
 /// the refractive index at the specified wavelength.
 ///
 /// `apex_angle` is in radians, `wavelength_um` is in micrometers.
+#[must_use = "returns the deviation angle"]
 #[inline]
 pub fn prism_dispersion(
     apex_angle: f64,
@@ -214,6 +219,7 @@ pub fn prism_dispersion(
 /// Returns (deviation_short, deviation_long, angular_spread) in radians.
 /// The angular spread is the difference in deviation between the shortest
 /// and longest wavelengths.
+#[must_use = "returns the angular spread"]
 #[inline]
 pub fn prism_angular_spread(
     apex_angle: f64,

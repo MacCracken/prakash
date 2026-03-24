@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use tracing::trace;
+
 use super::snell_3d;
 use crate::error::{PrakashError, Result};
 
@@ -9,6 +11,7 @@ use crate::error::{PrakashError, Result};
 
 /// An optical surface for sequential ray tracing.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum SurfaceShape {
     /// Spherical surface with given radius of curvature.
     /// Positive radius means center of curvature is to the right (along +z).
@@ -58,8 +61,14 @@ pub struct TraceHit {
 ///
 /// The surface is centered on the optical axis (z-axis) at the given z position.
 /// For spherical surfaces, the center of curvature is at z_position + radius.
+#[must_use = "returns the trace hit result"]
 #[inline]
 pub fn trace_surface(ray: &TraceRay, surface: &OpticalSurface) -> Result<TraceHit> {
+    trace!(
+        z = surface.z_position,
+        n_after = surface.n_after,
+        "trace_surface"
+    );
     // Find intersection point
     let (hit_point, normal) = match surface.shape {
         SurfaceShape::Plane => {
@@ -179,11 +188,13 @@ pub fn trace_surface(ray: &TraceRay, surface: &OpticalSurface) -> Result<TraceHi
 ///
 /// Returns the list of hits at each surface. The ray propagates through
 /// surfaces in order, refracting at each interface.
+#[must_use = "returns the trace hits"]
 #[inline]
 pub fn trace_sequential(
     initial_ray: &TraceRay,
     surfaces: &[OpticalSurface],
 ) -> Result<Vec<TraceHit>> {
+    trace!(num_surfaces = surfaces.len(), "trace_sequential");
     let mut hits = Vec::with_capacity(surfaces.len());
     let mut current_ray = *initial_ray;
 

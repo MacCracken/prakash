@@ -1,5 +1,7 @@
 //! Advanced diffraction (Fraunhofer, Fresnel, Huygens-Fresnel) and anti-reflection coatings.
 
+use tracing::trace;
+
 use super::single_slit_intensity;
 
 /// Fraunhofer diffraction pattern for a rectangular aperture.
@@ -8,6 +10,7 @@ use super::single_slit_intensity;
 ///
 /// `width` and `height` are aperture dimensions, same units as `wavelength`.
 /// `angle_x` and `angle_y` in radians.
+#[must_use]
 #[inline]
 pub fn fraunhofer_rect(
     width: f64,
@@ -30,6 +33,7 @@ pub fn fraunhofer_rect(
 /// `aperture` is a slice of (position, complex_amplitude) pairs across the aperture.
 /// `wavelength` and positions in same units. `angle` in radians.
 /// Returns intensity (proportional to |E|²).
+#[must_use]
 #[inline]
 pub fn fraunhofer_1d(aperture: &[(f64, f64)], wavelength: f64, angle: f64) -> f64 {
     let k_sin = std::f64::consts::TAU * angle.sin() / wavelength;
@@ -51,6 +55,7 @@ pub fn fraunhofer_1d(aperture: &[(f64, f64)], wavelength: f64, angle: f64) -> f6
 /// Fraunhofer (N_F ≪ 1) regime.
 ///
 /// `aperture_radius`, `wavelength`, and `distance` in same units.
+#[must_use]
 #[inline]
 pub fn fresnel_number(aperture_radius: f64, wavelength: f64, distance: f64) -> f64 {
     aperture_radius * aperture_radius / (wavelength * distance)
@@ -62,6 +67,7 @@ pub fn fresnel_number(aperture_radius: f64, wavelength: f64, distance: f64) -> f
 ///
 /// Accurate to ~1e-6 for all x. Uses rational approximation
 /// (Abramowitz & Stegun, 7.3.19–7.3.20).
+#[must_use]
 #[inline]
 pub fn fresnel_c(x: f64) -> f64 {
     let ax = x.abs();
@@ -84,6 +90,7 @@ pub fn fresnel_c(x: f64) -> f64 {
 /// Fresnel sine integral S(x) — polynomial approximation.
 ///
 /// S(x) = ∫₀ˣ sin(πt²/2) dt
+#[must_use]
 #[inline]
 pub fn fresnel_s(x: f64) -> f64 {
     let ax = x.abs();
@@ -120,6 +127,7 @@ fn fresnel_fg(x: f64) -> (f64, f64) {
 ///
 /// `u` is the dimensionless Fresnel parameter: u = x·√(2/(λ·z))
 /// where x is distance from geometric shadow edge.
+#[must_use]
 #[inline]
 pub fn fresnel_edge_intensity(u: f64) -> f64 {
     let c = fresnel_c(u) + 0.5;
@@ -133,6 +141,7 @@ pub fn fresnel_edge_intensity(u: f64) -> f64 {
 ///
 /// `x` = lateral distance from geometric shadow edge (positive = illuminated side).
 /// `wavelength` and `distance` in same units as `x`.
+#[must_use]
 #[inline]
 pub fn fresnel_parameter(x: f64, wavelength: f64, distance: f64) -> f64 {
     x * (2.0 / (wavelength * distance)).sqrt()
@@ -148,6 +157,7 @@ pub fn fresnel_parameter(x: f64, wavelength: f64, distance: f64) -> f64 {
 /// `aperture` is a slice of (position, amplitude) pairs.
 /// `wavelength` and all positions in same units.
 /// `z` is the propagation distance to the observation plane.
+#[must_use]
 #[inline]
 pub fn huygens_fresnel_1d(aperture: &[(f64, f64)], wavelength: f64, z: f64, x_obs: f64) -> f64 {
     let k = std::f64::consts::TAU / wavelength;
@@ -171,6 +181,7 @@ pub fn huygens_fresnel_1d(aperture: &[(f64, f64)], wavelength: f64, z: f64, x_ob
 /// n_coating = √(n₁ · n₂)
 ///
 /// For air (n₁=1) to glass (n₂=1.52): n_coating ≈ 1.233 (MgF₂ ≈ 1.38 is closest practical).
+#[must_use]
 #[inline]
 pub fn ar_ideal_index(n1: f64, n2: f64) -> f64 {
     (n1 * n2).sqrt()
@@ -181,6 +192,7 @@ pub fn ar_ideal_index(n1: f64, n2: f64) -> f64 {
 /// d = λ / (4 · n_coating)
 ///
 /// `wavelength` and result in same units.
+#[must_use]
 #[inline]
 pub fn ar_quarter_wave_thickness(wavelength: f64, n_coating: f64) -> f64 {
     wavelength / (4.0 * n_coating)
@@ -195,6 +207,7 @@ pub fn ar_quarter_wave_thickness(wavelength: f64, n_coating: f64) -> f64 {
 ///
 /// `n1` = incident medium, `n2` = coating, `n3` = substrate,
 /// `thickness` and `wavelength` in same units.
+#[must_use]
 #[inline]
 pub fn coating_reflectance(n1: f64, n2: f64, n3: f64, thickness: f64, wavelength: f64) -> f64 {
     let delta = std::f64::consts::TAU * n2 * thickness / wavelength;
@@ -211,6 +224,7 @@ pub fn coating_reflectance(n1: f64, n2: f64, n3: f64, thickness: f64, wavelength
 /// R = [(n₁·n₃ − n₂²) / (n₁·n₃ + n₂²)]²
 ///
 /// Returns zero when n₂ = √(n₁·n₃) (ideal AR).
+#[must_use]
 #[inline]
 pub fn vcoat_reflectance(n1: f64, n2: f64, n3: f64) -> f64 {
     let num = n1 * n3 - n2 * n2;
@@ -226,12 +240,17 @@ pub fn vcoat_reflectance(n1: f64, n2: f64, n3: f64) -> f64 {
 /// `n_incident` = incident medium index, `n_substrate` = substrate index.
 /// `layers` = slice of (n, thickness) from outermost to innermost.
 /// `wavelength` in same units as thickness.
+#[must_use]
 pub fn multilayer_reflectance(
     n_incident: f64,
     n_substrate: f64,
     layers: &[(f64, f64)],
     wavelength: f64,
 ) -> f64 {
+    trace!(
+        num_layers = layers.len(),
+        wavelength, "multilayer_reflectance"
+    );
     // Transfer matrix method: M = Π Mᵢ where Mᵢ = [[cos δᵢ, -j sin δᵢ/nᵢ], [-j nᵢ sin δᵢ, cos δᵢ]]
     // Track real/imag parts of 2×2 matrix entries
     // M = [[m11, m12], [m21, m22]] where m12 and m21 are imaginary
