@@ -507,6 +507,38 @@ fn bench_wave(c: &mut Criterion) {
         })
     });
 
+    // ── Pattern computation ─────────────────────────────────────────────
+    group.bench_function("diffraction_2d_16", |b| {
+        let aperture = vec![1.0; 16 * 16];
+        b.iter(|| diffraction_pattern_2d(black_box(&aperture), black_box(16), black_box(16)))
+    });
+    group.bench_function("diffraction_circular_32", |b| {
+        b.iter(|| diffraction_pattern_circular(black_box(32), black_box(8.0)))
+    });
+    group.bench_function("interference_2src_16x16", |b| {
+        let sources = [
+            PointSource::new(-0.5e-3, 0.0, 1.0, 0.0),
+            PointSource::new(0.5e-3, 0.0, 1.0, 0.0),
+        ];
+        b.iter(|| {
+            interference_pattern(
+                black_box(&sources),
+                black_box(0.5e-6),
+                black_box(1.0),
+                black_box((-5e-3, 5e-3)),
+                black_box((-5e-3, 5e-3)),
+                black_box(16),
+                black_box(16),
+            )
+        })
+    });
+    group.bench_function("spectrum_strip_100", |b| {
+        b.iter(|| spectrum_strip(black_box(100)))
+    });
+    group.bench_function("psf_32", |b| {
+        b.iter(|| psf_diffraction_limited(black_box(32), black_box(8.0)))
+    });
+
     group.finish();
 }
 

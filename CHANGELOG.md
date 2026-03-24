@@ -13,6 +13,20 @@
 - Scattering angle utility (zenith/azimuth → angular separation)
 - New `atmosphere` feature gate
 
+### Added — examples V0.29: Examples
+- `rainbow`: physically accurate rainbow via Sellmeier water dispersion, minimum deviation angles, ANSI color spectrum
+- `camera_lens`: cemented doublet prescription, paraxial analysis, full trace, spot diagrams, OPD fan, recursive ghost reflections
+- `pbr_materials`: Fresnel-Schlick vs angle, Cook-Torrance roughness sweep, clearcoat blend, iridescence, SSS profiles, sheen, phase functions, importance sampling
+
+### Added — wave/pattern V0.28: Pattern Computation
+- 2D diffraction pattern from arbitrary aperture via radix-2 Cooley-Tukey FFT (inline, no external dep)
+- Circular aperture diffraction pattern (generates Airy pattern)
+- N-source interference pattern on 2D grid (complex amplitude summation with 1/r falloff)
+- Visible spectrum RGB strip generator (full 380–780nm range + custom wavelength range)
+- PSF from wavefront error: pupil function × exp(i·k·OPD) → 2D FFT → intensity
+- Diffraction-limited PSF convenience function
+- `Pattern2D` grid type with get/set, max_intensity, normalized view
+
 ### Added — ray/system V0.27: Optical Bench
 - Paraxial ray trace (y-nu method): `ParaxialRay`, `paraxial_refract`, `paraxial_transfer`, `paraxial_trace`
 - Prescription builder: `Prescription` with fluent `.add_surface()` API, `to_trace_surfaces()`, `to_paraxial_surfaces()`

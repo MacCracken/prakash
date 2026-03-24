@@ -53,3 +53,15 @@ required-features = ["ray", "wave", "spectral", "lens", "pbr", "atmosphere"]
 [[example]]
 name = "basic_optics"
 required-features = ["ray", "spectral", "lens"]
+
+[[example]]
+name = "rainbow"
+required-features = ["ray", "spectral"]
+
+[[example]]
+name = "camera_lens"
+required-features = ["ray", "spectral", "lens"]
+
+[[example]]
+name = "pbr_materials"
+required-features = ["pbr"]

@@ -425,9 +425,11 @@ pub fn fabry_perot_resolving_power(
 }
 
 mod diffraction;
+mod pattern;
 mod polarization;
 
 pub use diffraction::*;
+pub use pattern::*;
 pub use polarization::*;
 
 #[cfg(test)]

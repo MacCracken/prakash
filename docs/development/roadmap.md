@@ -142,19 +142,19 @@ Prakash does NOT own:
 - [x] Paraxial ray trace (y-nu method: refract, transfer, full trace)
 - [x] System prescription format (serialize/deserialize via serde)
 
-## V0.28 — Pattern Computation
+## V0.28 — Pattern Computation (done)
 
-- [ ] 2D diffraction pattern from arbitrary aperture (FFT-based)
-- [ ] Interference pattern generator (N-source, 2D grid)
-- [ ] SPD → RGB strip visualization data
-- [ ] PSF (point spread function) from wavefront
+- [x] 2D diffraction pattern from arbitrary aperture (FFT-based, radix-2 Cooley-Tukey)
+- [x] Interference pattern generator (N-source, 2D grid, complex amplitude summation)
+- [x] SPD → RGB strip visualization data (full spectrum + custom range)
+- [x] PSF (point spread function) from wavefront (pupil function + OPD → FFT → |E|²)
 
-## V0.29 — Examples & Documentation
+## V0.29 — Examples & Documentation (done)
 
-- [ ] Example: physically accurate rainbow simulation
-- [ ] Example: camera lens simulator (multi-element trace + spot diagram)
-- [ ] Example: PBR material preview (Cook-Torrance + clearcoat + iridescence)
-- [ ] Physics explanations in module-level documentation
+- [x] Example: physically accurate rainbow simulation
+- [x] Example: camera lens simulator (multi-element trace + spot diagram)
+- [x] Example: PBR material preview (Cook-Torrance + clearcoat + iridescence)
+- [ ] Physics explanations in module-level documentation (deferred to V1.0)
 
 ## V1.0 — Stable Release
 
