@@ -214,6 +214,7 @@ pub fn prism_dispersion(
 /// Returns (deviation_short, deviation_long, angular_spread) in radians.
 /// The angular spread is the difference in deviation between the shortest
 /// and longest wavelengths.
+#[inline]
 pub fn prism_angular_spread(
     apex_angle: f64,
     sellmeier: &SellmeierCoefficients,

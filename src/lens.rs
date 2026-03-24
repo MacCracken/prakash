@@ -407,6 +407,7 @@ pub fn chromatic_aberration(focal_length: f64, abbe_v: f64) -> f64 {
 ///
 /// The Petzval radius of curvature is R_p = -1/S.
 /// A flat field requires S = 0.
+#[inline]
 pub fn petzval_sum(elements: &[(f64, f64)]) -> f64 {
     elements.iter().map(|(n, f)| 1.0 / (n * f)).sum()
 }
@@ -444,6 +445,7 @@ pub fn separated_lenses_focal_length(f1: f64, f2: f64, separation: f64) -> Resul
 /// Back focal distance of a two-lens system.
 ///
 /// BFD = f · (1 − d/f₁)
+#[inline]
 pub fn separated_lenses_bfd(f1: f64, f2: f64, separation: f64) -> Result<f64> {
     let f = separated_lenses_focal_length(f1, f2, separation)?;
     Ok(f * (1.0 - separation / f1))
@@ -452,6 +454,7 @@ pub fn separated_lenses_bfd(f1: f64, f2: f64, separation: f64) -> Result<f64> {
 /// System magnification for a multi-element system.
 ///
 /// Total magnification is the product of individual magnifications.
+#[inline]
 pub fn system_magnification(magnifications: &[f64]) -> f64 {
     magnifications.iter().product()
 }

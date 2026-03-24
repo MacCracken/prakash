@@ -179,6 +179,7 @@ pub fn trace_surface(ray: &TraceRay, surface: &OpticalSurface) -> Result<TraceHi
 ///
 /// Returns the list of hits at each surface. The ray propagates through
 /// surfaces in order, refracting at each interface.
+#[inline]
 pub fn trace_sequential(
     initial_ray: &TraceRay,
     surfaces: &[OpticalSurface],
