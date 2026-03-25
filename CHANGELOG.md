@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.1.0] - 2026-03-25
 
 ### Changed — P1 Post-V1.0 Audit
 - **Polarization consolidation**: added `From<Polarization> for StokesVector` (Jones → Stokes conversion)
