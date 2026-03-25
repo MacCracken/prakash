@@ -36,8 +36,8 @@ let transmitted = malus_law(1.0, std::f64::consts::FRAC_PI_4); // 50%
 
 | Module | Description |
 |--------|-------------|
-| `ray` | Geometric optics: Snell's law, Fresnel equations (s/p/normal/unpolarized), reflection (2D/3D), critical angle, Brewster angle, Beer-Lambert, total internal reflection. 12 built-in materials with refractive indices. Sequential ray tracer, optical system builder, paraxial analysis, cardinal point finder. |
-| `wave` | Wave optics: interference intensity, single/double slit diffraction, diffraction grating, thin film reflectance, Malus's law, polarization (Jones vectors/calculus). 2D Fraunhofer diffraction (FFT), multi-source interference patterns, PSF from wavefront error. |
+| `ray` | Geometric optics: Snell's law, Fresnel equations (real and complex refractive index), reflection (2D/3D), critical angle, Brewster angle, Beer-Lambert, total internal reflection. Complex Fresnel for metals/absorbing media. 12 built-in materials. Sequential ray tracer with polarization tracking, optical system builder, paraxial analysis, cardinal point finder. |
+| `wave` | Wave optics: interference, single/double slit diffraction, gratings, thin film reflectance, Malus's law, polarization (Jones/Stokes/Mueller). Zernike polynomials for wavefront decomposition. 2D Fraunhofer diffraction (FFT), multi-source interference, PSF from wavefront error. Gaussian beams and ABCD matrices (via bijli). |
 | `spectral` | Wavelength to RGB conversion, Planck blackbody radiance, Wien displacement law, color temperature to RGB, photon energy (J and eV), wavelength/frequency conversion. CIE 1931 2-degree observer, XYZ tristimulus, SPD integration, standard illuminants (A/D50/D65/E/F2/F11), color rendering index (CRI). Physical constants (c, h, k_B). |
 | `lens` | Thin lens equation, magnification, lensmaker's equation, combined focal length, depth of field, f-number/NA, mirror focal length, lens classification. |
 | `pbr` | Physically-based rendering: Fresnel-Schlick, GGX/Beckmann NDF, geometry Smith, Cook-Torrance specular BRDF, Lambert diffuse, IOR-to-F0 conversion. Full metallic-roughness pipeline. |
@@ -54,7 +54,8 @@ let transmitted = malus_law(1.0, std::f64::consts::FRAC_PI_4); // 50%
 | `lens` | yes | Thin lens, lensmaker, mirrors, depth of field |
 | `pbr` | no | Cook-Torrance BRDF, Fresnel-Schlick, GGX/Beckmann NDF |
 | `atmosphere` | no | Rayleigh/Mie scattering, sky color, air mass |
-| `ai` | no | Daimon/hoosh integration (network deps) |
+| `bijli-backend` | yes | EM-correct Fresnel/Snell via bijli, polarization bridge, Gaussian beam/ABCD, Mie scattering |
+| `ai` | no | AI-assisted optics queries (reqwest/tokio) |
 | `logging` | no | Structured logging via `PRAKASH_LOG` env var |
 | `full` | -- | Enables all features |
 
@@ -78,6 +79,7 @@ cargo run --example basic_optics --features ray,spectral,lens
 ```
 prakash (this crate)
   +-- hisab (math: vectors, geometry, calculus, numerical methods)
+  +-- bijli (electromagnetism: Fresnel, Snell, polarization, Gaussian beams, Mie scattering) [optional, default]
 ```
 
 ## Consumer Crates

@@ -133,11 +133,25 @@ const PLANCK_C2: f64 = PLANCK_H * SPEED_OF_LIGHT / BOLTZMANN_K;
 /// and wavelength λ (meters).
 ///
 /// Returns spectral radiance in W·sr⁻¹·m⁻³.
+///
+/// Uses `exp_m1()` for numerical stability when hc/(λkT) is small, and
+/// the Wien approximation when the exponent exceeds 500 to avoid overflow.
+/// Returns 0.0 for T ≤ 0.
 #[must_use]
 #[inline]
 pub fn planck_radiance(wavelength_m: f64, temperature_k: f64) -> f64 {
+    if temperature_k <= 0.0 {
+        return 0.0;
+    }
+    let x = PLANCK_C2 / (wavelength_m * temperature_k);
     let lambda5 = wavelength_m.powi(5);
-    PLANCK_C1 / (lambda5 * ((PLANCK_C2 / (wavelength_m * temperature_k)).exp() - 1.0))
+    if x > 500.0 {
+        // Wien approximation: exp(x) >> 1, so exp(x) - 1 ≈ exp(x)
+        PLANCK_C1 / (lambda5 * x.exp())
+    } else {
+        // exp_m1 avoids catastrophic cancellation when x is small
+        PLANCK_C1 / (lambda5 * x.exp_m1())
+    }
 }
 
 /// Wien's displacement law: peak wavelength (meters) for a blackbody at temperature T (Kelvin).
@@ -393,6 +407,36 @@ mod tests {
     fn test_planck_hotter_means_more_radiance() {
         let wl = 500e-9;
         assert!(planck_radiance(wl, 6000.0) > planck_radiance(wl, 3000.0));
+    }
+
+    #[test]
+    fn test_planck_zero_temperature() {
+        assert_eq!(planck_radiance(500e-9, 0.0), 0.0);
+        assert_eq!(planck_radiance(500e-9, -100.0), 0.0);
+    }
+
+    #[test]
+    fn test_planck_extreme_low_temperature() {
+        // UV at room temp — very large exponent, should not panic or be NaN
+        let r = planck_radiance(100e-9, 300.0);
+        assert!(r.is_finite());
+        assert!(r >= 0.0);
+    }
+
+    #[test]
+    fn test_planck_extreme_high_temperature() {
+        // IR at 100,000 K — small exponent, expm1 regime
+        let r = planck_radiance(10e-6, 100_000.0);
+        assert!(r.is_finite());
+        assert!(r > 0.0);
+    }
+
+    #[test]
+    fn test_planck_wien_approximation_regime() {
+        // x > 500 branch: short wavelength at low temperature
+        let r = planck_radiance(50e-9, 100.0);
+        assert!(r.is_finite());
+        assert!(r >= 0.0);
     }
 
     #[test]

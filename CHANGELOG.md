@@ -24,8 +24,16 @@
 - **Material bridge**: `Medium::permittivity()` (n² = ε_r)
 - **Error bridge**: `From<BijliError> for PrakashError`
 - **Fallback**: all original implementations retained behind `#[cfg(not(feature = "bijli-backend"))]`
-- 14 bijli integration tests, 14 new integration tests total (Jones→Stokes, Spd Cow, bijli equivalence)
-- 2 new benchmarks (`jones_to_stokes`, `illuminant_d65_cow`)
+
+### Added — P1 Accuracy & Completeness (from physics research audit)
+- **Planck numerical stability**: replaced `exp()-1.0` with `exp_m1()`, Wien approximation for x>500, T≤0 guard
+- **Complex Fresnel equations**: `ComplexMedium` type, `fresnel_s_complex`/`fresnel_p_complex`/`fresnel_unpolarized_complex`/`fresnel_normal_complex` for metals and absorbing media. Presets: gold, silver, copper, aluminum at 550nm
+- **Zernike polynomials** (`wave::zernike` module): radial polynomial R_n^m, full Z_n^m evaluation, Noll index ↔ (n,m) conversion, `ZernikeWavefront` (evaluate, to_grid, RMS error, peak-to-valley, Strehl ratio), named constructors (defocus, spherical, coma_x/y, astigmatism_0/45)
+- **Polarization ray tracing**: `trace_sequential_polarized` tracks cumulative s/p Fresnel transmittance per surface, `PolarizedTraceHit` output with R_p/R_s ratio
+
+### Tests
+- 655 unit tests, 26 integration tests (up from 598 + 10)
+- Bijli equivalence tests (14), complex Fresnel tests (12), Zernike tests (23), polarization trace tests (4), Planck edge case tests (4)
 
 ## [1.0.0] - 2026-03-24
 

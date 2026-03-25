@@ -210,6 +210,83 @@ pub fn trace_sequential(
     Ok(hits)
 }
 
+// ── Polarization Ray Tracing ─────────────────────────────────────────────
+
+/// Result of polarization-aware ray tracing through a surface.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PolarizedTraceHit {
+    /// The geometric trace hit (position, normal, refracted ray, reflectance).
+    pub hit: TraceHit,
+    /// Cumulative Fresnel reflectance ratio R_p / R_s at this surface.
+    ///
+    /// Values > 1 mean p-polarization reflects more, < 1 means s reflects more.
+    /// At Brewster's angle, R_p ≈ 0 while R_s > 0.
+    pub rp_over_rs: f64,
+    /// Cumulative s-polarization transmittance through all surfaces so far.
+    pub transmittance_s: f64,
+    /// Cumulative p-polarization transmittance through all surfaces so far.
+    pub transmittance_p: f64,
+}
+
+/// Trace a ray through a sequence of optical surfaces with polarization tracking.
+///
+/// At each surface, computes the s- and p-polarized Fresnel transmittances
+/// separately, accumulating through the system. This enables polarization-dependent
+/// analysis (e.g., finding Brewster windows, polarization-sensitive coatings).
+///
+/// Returns the geometric trace hits augmented with polarization data.
+#[must_use = "returns the polarized trace hits"]
+pub fn trace_sequential_polarized(
+    initial_ray: &TraceRay,
+    surfaces: &[OpticalSurface],
+) -> Result<Vec<PolarizedTraceHit>> {
+    trace!(num_surfaces = surfaces.len(), "trace_sequential_polarized");
+    let mut results = Vec::with_capacity(surfaces.len());
+    let mut current_ray = *initial_ray;
+    let mut cum_ts = 1.0;
+    let mut cum_tp = 1.0;
+
+    for surface in surfaces {
+        let hit = trace_surface(&current_ray, surface)?;
+
+        // Compute s and p reflectance from the dot products
+        let cos_i = {
+            let d = &current_ray.direction;
+            let n = &hit.normal;
+            -(d[0] * n[0] + d[1] * n[1] + d[2] * n[2]).abs()
+        };
+        let cos_t = {
+            let d = &hit.ray_after.direction;
+            let n = &hit.normal;
+            -(d[0] * n[0] + d[1] * n[1] + d[2] * n[2]).abs()
+        };
+
+        let n1 = current_ray.n;
+        let n2 = surface.n_after;
+
+        let rs = super::fresnel_s(n1, n2, cos_i, cos_t);
+        let rp = super::fresnel_p(n1, n2, cos_i, cos_t);
+
+        let ts = 1.0 - rs;
+        let tp = 1.0 - rp;
+        cum_ts *= ts;
+        cum_tp *= tp;
+
+        let rp_over_rs = if rs > 1e-15 { rp / rs } else { 0.0 };
+
+        results.push(PolarizedTraceHit {
+            hit,
+            rp_over_rs,
+            transmittance_s: cum_ts,
+            transmittance_p: cum_tp,
+        });
+
+        current_ray = hit.ray_after;
+    }
+
+    Ok(results)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -341,5 +418,114 @@ mod tests {
         };
         let hits = trace_sequential(&ray, &[]).unwrap();
         assert!(hits.is_empty());
+    }
+
+    // ── Polarization ray tracing tests ───────────────────────────────────
+
+    #[test]
+    fn test_polarized_trace_normal_incidence() {
+        let ray = TraceRay {
+            position: [0.0, 0.0, 0.0],
+            direction: [0.0, 0.0, 1.0],
+            n: 1.0,
+        };
+        let surface = OpticalSurface {
+            shape: SurfaceShape::Plane,
+            z_position: 10.0,
+            n_after: 1.5,
+            aperture_radius: 5.0,
+        };
+        let results = trace_sequential_polarized(&ray, &[surface]).unwrap();
+        assert_eq!(results.len(), 1);
+        // At normal incidence, s and p should be equal
+        assert!(
+            (results[0].transmittance_s - results[0].transmittance_p).abs() < 0.01,
+            "s and p should match at normal incidence"
+        );
+        // Transmittance should be close to 1 - R_normal ≈ 0.96
+        assert!(results[0].transmittance_s > 0.9);
+    }
+
+    #[test]
+    fn test_polarized_trace_oblique() {
+        // Off-axis ray — s and p should differ
+        let s2 = 1.0 / 2.0f64.sqrt();
+        let ray = TraceRay {
+            position: [-5.0, 0.0, 0.0],
+            direction: [s2, 0.0, s2], // 45° incidence
+            n: 1.0,
+        };
+        let surface = OpticalSurface {
+            shape: SurfaceShape::Plane,
+            z_position: 5.0,
+            n_after: 1.5,
+            aperture_radius: 10.0,
+        };
+        let results = trace_sequential_polarized(&ray, &[surface]).unwrap();
+        // At 45°, s-reflectance should be higher than p-reflectance
+        assert!(
+            results[0].transmittance_s < results[0].transmittance_p,
+            "s should transmit less than p at 45°: Ts={}, Tp={}",
+            results[0].transmittance_s,
+            results[0].transmittance_p
+        );
+    }
+
+    #[test]
+    fn test_polarized_trace_multi_surface() {
+        let ray = TraceRay {
+            position: [0.0, 0.0, 0.0],
+            direction: [0.0, 0.0, 1.0],
+            n: 1.0,
+        };
+        let surfaces = [
+            OpticalSurface {
+                shape: SurfaceShape::Plane,
+                z_position: 10.0,
+                n_after: 1.5,
+                aperture_radius: 5.0,
+            },
+            OpticalSurface {
+                shape: SurfaceShape::Plane,
+                z_position: 20.0,
+                n_after: 1.0,
+                aperture_radius: 5.0,
+            },
+        ];
+        let results = trace_sequential_polarized(&ray, &surfaces).unwrap();
+        assert_eq!(results.len(), 2);
+        // After two surfaces, transmittance should be reduced
+        assert!(results[1].transmittance_s < results[0].transmittance_s);
+        // Cumulative: T_total = T_surface1 × T_surface2
+        let t1 = results[0].transmittance_s;
+        let t2_single = 1.0 - crate::ray::fresnel_normal(1.5, 1.0);
+        assert!(
+            (results[1].transmittance_s - t1 * t2_single).abs() < 0.01,
+            "Cumulative transmittance should multiply"
+        );
+    }
+
+    #[test]
+    fn test_polarized_trace_transmittance_range() {
+        let ray = TraceRay {
+            position: [0.0, 0.0, 0.0],
+            direction: [0.0, 0.0, 1.0],
+            n: 1.0,
+        };
+        let surface = OpticalSurface {
+            shape: SurfaceShape::Plane,
+            z_position: 10.0,
+            n_after: 1.5,
+            aperture_radius: 5.0,
+        };
+        let results = trace_sequential_polarized(&ray, &[surface]).unwrap();
+        assert!(
+            (0.0..=1.0).contains(&results[0].transmittance_s),
+            "Ts out of range"
+        );
+        assert!(
+            (0.0..=1.0).contains(&results[0].transmittance_p),
+            "Tp out of range"
+        );
     }
 }

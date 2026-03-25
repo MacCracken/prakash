@@ -466,6 +466,8 @@ pub fn fabry_perot_resolving_power(
 mod diffraction;
 mod pattern;
 mod polarization;
+/// Zernike polynomials for wavefront decomposition and aberration analysis.
+pub mod zernike;
 
 pub use diffraction::*;
 pub use pattern::*;

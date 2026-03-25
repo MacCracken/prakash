@@ -29,7 +29,7 @@ Prakash does NOT own:
 
 ## Engineering Backlog
 
-### P1 — Post-V1.0 Audit
+### P1 — Post-V1.0 Audit (complete)
 
 - [x] Consolidate duplicate `Polarization` (Jones) and `StokesVector` — added `From<Polarization> for StokesVector` conversion
 - [x] Consolidate `diffraction_limit` (lens) and `rayleigh_criterion` (wave) — cross-referenced docs, both kept for domain clarity
@@ -47,17 +47,43 @@ Prakash does NOT own:
 - [ ] ranga: chromatic aberration filter needs `SellmeierCoefficients` — verify import path works
 - [ ] joshua: atmospheric scattering API review with simulation team — does `sunset_gradient` cover their use cases?
 
+### P1 — Accuracy & Completeness (promoted from research audit)
+
+- [x] **Planck `expm1()` fix**: `exp_m1()` for numerical stability, Wien approximation for x>500, T≤0 guard
+- [x] **Complex Fresnel equations**: `ComplexMedium`, `fresnel_s_complex`/`fresnel_p_complex`/`fresnel_unpolarized_complex`/`fresnel_normal_complex` with presets for gold, silver, copper, aluminum
+- [x] **Zernike polynomials**: `wave::zernike` module — radial polynomials, full Z_n^m, Noll index conversion, `ZernikeWavefront` (evaluate, to_grid, RMS, P-V, Strehl), named aberrations (defocus, spherical, coma, astigmatism)
+- [x] **Polarization ray tracing**: `trace_sequential_polarized` — tracks s/p transmittance per surface, cumulative through system, `PolarizedTraceHit` output
+
+### P2 — Important Gaps (from research audit)
+
+- [ ] **Photometric functions**: V(λ) luminous efficiency (photopic + scotopic), luminous flux from SPD, luminous efficacy, illuminance — radiometry→photometry bridge
+- [ ] **CIE 2015 cone-fundamental observers**: 2-deg and 10-deg, plus CIE 1964 10-deg for legacy. More accurate than 1931 in blue region
+- [ ] **Transfer matrix method upgrade**: oblique incidence, complex n layers, separate s/p polarization output, transmittance (not just reflectance)
+- [ ] **Chromatic aberration expansion**: lateral (transverse) CA, secondary spectrum, partial dispersion ratio
+- [ ] **Polychromatic MTF**: weighted sum of monochromatic MTFs at multiple wavelengths; through-focus MTF
+- [ ] **King correction factor**: wavelength-dependent correction for Rayleigh scattering (~4.8% systematic), `rayleigh_cross_section_corrected()`
+- [ ] **Fiber optics**: fiber NA, V-number, mode count, mode field diameter (Marcuse), coupling efficiency
+- [ ] **Additional dispersion models**: Herzberger (IR materials), Schott (legacy catalogs), Conrady (quick fits), generic `DispersionModel` enum
+
 ### P2 — Research & Future Features
 
-- [ ] Polarization ray tracing: track polarization state through sequential trace (Jones matrix per surface)
 - [ ] Gradient-index (GRIN) optics: curved ray paths through variable-n media
-- [ ] Zernike polynomials for wavefront decomposition (feeds into PSF/MTF analysis)
 - [ ] Diffractive optical elements (DOE): phase gratings, holographic elements
+- [ ] Vectorial diffraction (Richards-Wolf): high-NA focusing beyond scalar theory
+- [ ] Hermite-Gaussian and Laguerre-Gaussian beam modes (HG_mn, LG_pl)
+- [ ] Beam quality factor M² and propagation ratio
+- [ ] GPU-friendly API: `f32` variants of hot-path functions for shader-side computation
+- [ ] Higher-order (5th-order Buchdahl) monochromatic aberrations
+- [ ] Wavefront aberration coefficients (W_040, W_131, etc.) from Seidel sums
+- [ ] Aberrated MTF from generalized pupil function autocorrelation
+
+### P3 — Advanced / Demand-Gated
+
 - [ ] Fluorescence: Stokes shift, excitation/emission spectra
 - [ ] Non-linear optics: second-harmonic generation, Kerr effect (if joshua needs it)
-- [ ] GPU-friendly API: `f32` variants of hot-path functions for shader-side computation
-- [ ] Full Mie theory: exact solution for spheres (currently using Cornette-Shanks approximation)
-- [ ] CIE 2015 10° observer (supplement to existing 1931 2°)
+- [ ] Orbital angular momentum (OAM) of light — Laguerre-Gaussian modes carry OAM
+- [ ] Metamaterials and negative refractive index
+- [ ] Age-dependent CIE observer model (CIE 2006)
 
 ### P3 — Infrastructure
 
@@ -81,7 +107,7 @@ Prakash does NOT own:
 
 | Feature | prakash | other |
 |---------|---------|-------|
-| Fresnel reflectance math | Yes | — |
+| Fresnel reflectance math | Yes (delegates to bijli) | bijli (EM foundation) |
 | Pixel-level image filter | — | ranga |
 | wgpu shader code | — | aethersafta |
 | 3D scene graph | — | kiran |
@@ -89,3 +115,6 @@ Prakash does NOT own:
 | Ray-geometry intersection | — | hisab (geo module) |
 | Color space conversion (ICC) | — | ranga |
 | Spectral → RGB conversion | Yes | — |
+| Polarization formalism | Yes (bridge to bijli) | bijli (Jones/Mueller) |
+| Gaussian beam / ABCD | Re-export from bijli | bijli (beam module) |
+| Mie scattering (exact) | Re-export from bijli | bijli (scattering module) |

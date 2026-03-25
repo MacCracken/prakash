@@ -433,6 +433,168 @@ fn brewster_angle_impl(n1: f64, n2: f64) -> f64 {
     (n2 / n1).atan()
 }
 
+// ── Complex Fresnel (absorbing media) ────────────────────────────────────────
+
+/// Medium with complex refractive index for absorbing materials (metals, semiconductors).
+///
+/// The complex refractive index is **n~ = n + ik** where:
+/// - `n` = real part (phase velocity ratio)
+/// - `k` = extinction coefficient (absorption)
+///
+/// For dielectrics, k = 0. For metals, k is typically 1–10.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ComplexMedium {
+    /// Real part of the refractive index.
+    pub n: f64,
+    /// Extinction coefficient (imaginary part of the refractive index).
+    pub k: f64,
+    /// Human-readable name.
+    pub name: &'static str,
+}
+
+impl ComplexMedium {
+    /// Gold at 550nm (visible).
+    pub const GOLD_550NM: Self = Self {
+        n: 0.43,
+        k: 2.46,
+        name: "gold (550nm)",
+    };
+    /// Silver at 550nm (visible).
+    pub const SILVER_550NM: Self = Self {
+        n: 0.059,
+        k: 3.33,
+        name: "silver (550nm)",
+    };
+    /// Copper at 550nm (visible).
+    pub const COPPER_550NM: Self = Self {
+        n: 1.13,
+        k: 2.60,
+        name: "copper (550nm)",
+    };
+    /// Aluminum at 550nm (visible).
+    pub const ALUMINUM_550NM: Self = Self {
+        n: 0.96,
+        k: 6.69,
+        name: "aluminum (550nm)",
+    };
+
+    /// Create a dielectric (non-absorbing) complex medium from a real refractive index.
+    #[must_use]
+    #[inline]
+    pub const fn dielectric(n: f64, name: &'static str) -> Self {
+        Self { n, k: 0.0, name }
+    }
+}
+
+/// Fresnel reflectance at normal incidence for absorbing media.
+///
+/// R = ((n₁ − n₂)² + k₂²) / ((n₁ + n₂)² + k₂²)
+///
+/// `n1` = incident medium (real, e.g., air = 1.0),
+/// `medium` = absorbing medium with complex refractive index.
+#[must_use]
+#[inline]
+pub fn fresnel_normal_complex(n1: f64, medium: &ComplexMedium) -> f64 {
+    let dn = n1 - medium.n;
+    let dp = n1 + medium.n;
+    let k2 = medium.k * medium.k;
+    (dn * dn + k2) / (dp * dp + k2)
+}
+
+/// Fresnel reflectance for s-polarized light on an absorbing medium.
+///
+/// Uses the full complex Snell's law to compute the transmitted complex angle,
+/// then evaluates the Fresnel coefficient for s-polarization.
+///
+/// Returns `R_s = |r_s|²`.
+#[must_use]
+#[inline]
+pub fn fresnel_s_complex(n1: f64, medium: &ComplexMedium, incident_angle: f64) -> f64 {
+    let (sin_i, cos_i) = incident_angle.sin_cos();
+    let sin2_i = sin_i * sin_i;
+
+    // Complex cos(theta_t) via Snell's law: cos²(θt) = 1 - (n1/n~)² sin²(θi)
+    // n~ = n + ik, so (n1/n~)² is complex division
+    let n2_sq = medium.n * medium.n - medium.k * medium.k; // Re(n~²)
+    let n2_im = 2.0 * medium.n * medium.k; // Im(n~²)
+    let denom = n2_sq * n2_sq + n2_im * n2_im; // |n~²|²
+
+    // (n1² sin²θi) / n~²  (complex division)
+    let n1_sin2 = n1 * n1 * sin2_i;
+    let u = 1.0 - n1_sin2 * n2_sq / denom; // Re(cos²θt)
+    let v = n1_sin2 * n2_im / denom; // Im(cos²θt)
+
+    // cos(θt) = sqrt(u + iv) — take the principal square root
+    let mag = (u * u + v * v).sqrt();
+    let cos_t_re = ((mag + u) / 2.0).sqrt();
+    let cos_t_im = if v >= 0.0 {
+        ((mag - u) / 2.0).sqrt()
+    } else {
+        -((mag - u) / 2.0).sqrt()
+    };
+
+    // r_s = (n1 cos θi - n~ cos θt) / (n1 cos θi + n~ cos θt)
+    // n~ cos θt = (n·cos_t_re - k·cos_t_im) + i(n·cos_t_im + k·cos_t_re)
+    let nt_re = medium.n * cos_t_re - medium.k * cos_t_im;
+    let nt_im = medium.n * cos_t_im + medium.k * cos_t_re;
+
+    let num_re = n1 * cos_i - nt_re;
+    let num_im = -nt_im;
+    let den_re = n1 * cos_i + nt_re;
+    let den_im = nt_im;
+
+    // |r_s|² = |num|² / |den|²
+    (num_re * num_re + num_im * num_im) / (den_re * den_re + den_im * den_im + 1e-30)
+}
+
+/// Fresnel reflectance for p-polarized light on an absorbing medium.
+///
+/// Uses the full complex Snell's law.
+/// Returns `R_p = |r_p|²`.
+#[must_use]
+#[inline]
+pub fn fresnel_p_complex(n1: f64, medium: &ComplexMedium, incident_angle: f64) -> f64 {
+    let (sin_i, cos_i) = incident_angle.sin_cos();
+    let sin2_i = sin_i * sin_i;
+
+    let n2_sq = medium.n * medium.n - medium.k * medium.k;
+    let n2_im = 2.0 * medium.n * medium.k;
+    let denom = n2_sq * n2_sq + n2_im * n2_im;
+
+    let n1_sin2 = n1 * n1 * sin2_i;
+    let u = 1.0 - n1_sin2 * n2_sq / denom;
+    let v = n1_sin2 * n2_im / denom;
+
+    let mag = (u * u + v * v).sqrt();
+    let cos_t_re = ((mag + u) / 2.0).sqrt();
+    let cos_t_im = if v >= 0.0 {
+        ((mag - u) / 2.0).sqrt()
+    } else {
+        -((mag - u) / 2.0).sqrt()
+    };
+
+    // r_p = (n~ cos θi - n1 cos θt) / (n~ cos θi + n1 cos θt)
+    let nci_re = medium.n * cos_i;
+    let nci_im = medium.k * cos_i;
+
+    let num_re = nci_re - n1 * cos_t_re;
+    let num_im = nci_im - n1 * cos_t_im;
+    let den_re = nci_re + n1 * cos_t_re;
+    let den_im = nci_im + n1 * cos_t_im;
+
+    (num_re * num_re + num_im * num_im) / (den_re * den_re + den_im * den_im + 1e-30)
+}
+
+/// Average Fresnel reflectance for unpolarized light on an absorbing medium.
+///
+/// R = (R_s + R_p) / 2
+#[must_use]
+#[inline]
+pub fn fresnel_unpolarized_complex(n1: f64, medium: &ComplexMedium, incident_angle: f64) -> f64 {
+    0.5 * (fresnel_s_complex(n1, medium, incident_angle)
+        + fresnel_p_complex(n1, medium, incident_angle))
+}
+
 // ── Attenuation ─────────────────────────────────────────────────────────────
 
 /// Beer-Lambert law: intensity after traveling distance `d` through a medium
@@ -1023,5 +1185,129 @@ mod tests {
             reflectance > 0.3,
             "Grazing angle should have high reflectance, got {reflectance}"
         );
+    }
+
+    // ── Complex Fresnel tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_complex_medium_dielectric() {
+        let m = ComplexMedium::dielectric(1.52, "glass");
+        assert!((m.n - 1.52).abs() < EPS);
+        assert!(m.k.abs() < EPS);
+    }
+
+    #[test]
+    fn test_fresnel_normal_complex_dielectric_matches_real() {
+        // For k=0, complex Fresnel should match real Fresnel
+        let m = ComplexMedium::dielectric(1.52, "glass");
+        let r_complex = fresnel_normal_complex(1.0, &m);
+        let r_real = fresnel_normal(1.0, 1.52);
+        assert!(
+            (r_complex - r_real).abs() < 0.001,
+            "Complex Fresnel for dielectric should match real: {r_complex} vs {r_real}"
+        );
+    }
+
+    #[test]
+    fn test_fresnel_normal_complex_gold() {
+        // Gold at 550nm: n=0.43, k=2.46 → R ≈ 0.82
+        let r = fresnel_normal_complex(1.0, &ComplexMedium::GOLD_550NM);
+        assert!(
+            (r - 0.82).abs() < 0.05,
+            "Gold normal reflectance ≈ 0.82, got {r}"
+        );
+    }
+
+    #[test]
+    fn test_fresnel_normal_complex_silver() {
+        // Silver at 550nm: very high reflectance
+        let r = fresnel_normal_complex(1.0, &ComplexMedium::SILVER_550NM);
+        assert!(r > 0.9, "Silver should be highly reflective, got {r}");
+    }
+
+    #[test]
+    fn test_fresnel_normal_complex_aluminum() {
+        // Aluminum at 550nm: very high reflectance
+        let r = fresnel_normal_complex(1.0, &ComplexMedium::ALUMINUM_550NM);
+        assert!(r > 0.9, "Aluminum should be highly reflective, got {r}");
+    }
+
+    #[test]
+    fn test_fresnel_s_complex_normal_incidence_matches() {
+        // At normal incidence (θ=0), s and p should equal fresnel_normal_complex
+        let m = ComplexMedium::GOLD_550NM;
+        let r_normal = fresnel_normal_complex(1.0, &m);
+        let r_s = fresnel_s_complex(1.0, &m, 0.0);
+        let r_p = fresnel_p_complex(1.0, &m, 0.0);
+        assert!(
+            (r_s - r_normal).abs() < 0.01,
+            "s at θ=0 should match normal: {r_s} vs {r_normal}"
+        );
+        assert!(
+            (r_p - r_normal).abs() < 0.01,
+            "p at θ=0 should match normal: {r_p} vs {r_normal}"
+        );
+    }
+
+    #[test]
+    fn test_fresnel_complex_dielectric_matches_real_at_angle() {
+        // For k=0, complex s/p should match real s/p
+        let m = ComplexMedium::dielectric(1.52, "glass");
+        let angle = deg_to_rad(30.0);
+        let r_unpol_complex = fresnel_unpolarized_complex(1.0, &m, angle);
+        let r_unpol_real = fresnel_unpolarized(1.0, 1.52, angle).unwrap();
+        assert!(
+            (r_unpol_complex - r_unpol_real).abs() < 0.01,
+            "Complex unpolarized should match real for dielectric: {r_unpol_complex} vs {r_unpol_real}"
+        );
+    }
+
+    #[test]
+    fn test_fresnel_complex_grazing_high_reflectance() {
+        // At grazing incidence, all materials should be highly reflective
+        let m = ComplexMedium::dielectric(1.52, "glass");
+        let r = fresnel_unpolarized_complex(1.0, &m, deg_to_rad(85.0));
+        assert!(r > 0.5, "Grazing should have high reflectance, got {r}");
+    }
+
+    #[test]
+    fn test_fresnel_complex_range_valid() {
+        // Reflectance should always be in [0, 1]
+        let metals = [
+            ComplexMedium::GOLD_550NM,
+            ComplexMedium::SILVER_550NM,
+            ComplexMedium::COPPER_550NM,
+            ComplexMedium::ALUMINUM_550NM,
+        ];
+        for m in &metals {
+            for deg in (0..=85).step_by(5) {
+                let angle = deg_to_rad(deg as f64);
+                let r_s = fresnel_s_complex(1.0, m, angle);
+                let r_p = fresnel_p_complex(1.0, m, angle);
+                assert!(
+                    (0.0..=1.0 + 0.001).contains(&r_s),
+                    "R_s out of range for {} at {deg}°: {r_s}",
+                    m.name
+                );
+                assert!(
+                    (0.0..=1.0 + 0.001).contains(&r_p),
+                    "R_p out of range for {} at {deg}°: {r_p}",
+                    m.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_fresnel_complex_metal_always_high() {
+        // Metals should have high reflectance at all angles
+        let m = ComplexMedium::ALUMINUM_550NM;
+        for deg in (0..=80).step_by(10) {
+            let r = fresnel_unpolarized_complex(1.0, &m, deg_to_rad(deg as f64));
+            assert!(
+                r > 0.8,
+                "Aluminum reflectance should be >0.8, got {r} at {deg}°"
+            );
+        }
     }
 }
