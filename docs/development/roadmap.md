@@ -31,16 +31,17 @@ Prakash does NOT own:
 
 ### P1 — Post-V1.0 Audit
 
-- [ ] Consolidate duplicate `Polarization` (Jones) and `StokesVector` — add `From<Polarization> for StokesVector` conversion
-- [ ] Consolidate `diffraction_limit` (lens) and `rayleigh_criterion` (wave) — identical implementations in two modules
-- [ ] Consolidate `beer_lambert` (ray) and `volume_transmittance` (pbr) — document relationship or unify
-- [ ] Unit-suffix audit: establish convention for wavelength params (`_nm` vs `_m` vs `_um`) and enforce across all modules
-- [ ] `Spd` type: consider `Cow<'_, [f64]>` or generic over storage to avoid Vec allocation in illuminant functions
-- [ ] Evaluate `#![warn(missing_docs)]` in lib.rs for compile-time doc enforcement
-- [ ] Wavefront parameter ordering: move wavelength to consistent position across all wave/diffraction functions
+- [x] Consolidate duplicate `Polarization` (Jones) and `StokesVector` — added `From<Polarization> for StokesVector` conversion
+- [x] Consolidate `diffraction_limit` (lens) and `rayleigh_criterion` (wave) — cross-referenced docs, both kept for domain clarity
+- [x] Consolidate `beer_lambert` (ray) and `volume_transmittance` (pbr) — cross-referenced docs showing equivalence
+- [x] Unit-suffix audit: documented convention (`_nm`/`_m`/`_um`/unsuffixed) in lib.rs module docs
+- [x] `Spd` type: changed to `Cow<'static, [f64]>` — illuminant functions now zero-alloc with `from_static()`
+- [x] `#![warn(missing_docs)]` enabled in lib.rs — all 55 gaps fixed
+- [x] Wavefront parameter ordering: wavelength-first convention across all wave/diffraction functions
 
 ### P1 — Consumer Integration Gaps
 
+- [x] bijli EM backend: scalar Snell/Fresnel/Brewster delegate to bijli, polarization bridge (StokesVector/MuellerMatrix/JonesVector), Gaussian beam + ABCD re-exports, Mie scattering re-export, Medium::permittivity()
 - [ ] hisab geometry bridge: adapter types between prakash `TraceRay`/`[f64;3]` and hisab `Ray`/`Vec3` (f32↔f64)
 - [ ] kiran: verify Cook-Torrance `h_dot_v` parameter migration (breaking change from pre-V1.0)
 - [ ] ranga: chromatic aberration filter needs `SellmeierCoefficients` — verify import path works

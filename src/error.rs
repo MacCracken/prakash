@@ -2,39 +2,87 @@
 
 use std::borrow::Cow;
 
+/// Errors that can occur during optical computations.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum PrakashError {
+    /// Total internal reflection — incident angle exceeds the critical angle.
     #[error(
         "total internal reflection: incident angle {angle_deg:.1}° exceeds critical angle {critical_deg:.1}° (n1={n1}, n2={n2})"
     )]
     TotalInternalReflection {
+        /// Incident angle in degrees.
         angle_deg: f64,
+        /// Critical angle in degrees.
         critical_deg: f64,
+        /// Refractive index of the incident medium.
         n1: f64,
+        /// Refractive index of the transmitting medium.
         n2: f64,
     },
 
+    /// Refractive index is below the physical minimum of 1.0.
     #[error("invalid refractive index: {n} (must be >= 1.0)")]
-    InvalidRefractiveIndex { n: f64 },
+    InvalidRefractiveIndex {
+        /// The invalid refractive index value.
+        n: f64,
+    },
 
+    /// Wavelength is outside the visible range (380–780 nm).
     #[error("wavelength out of visible range: {nm} nm (visible: 380-780 nm)")]
-    WavelengthOutOfRange { nm: f64 },
+    WavelengthOutOfRange {
+        /// The out-of-range wavelength in nanometers.
+        nm: f64,
+    },
 
+    /// Angle is outside the valid range for the operation.
     #[error("invalid angle: {degrees}° (must be 0-90 for surface interactions)")]
-    InvalidAngle { degrees: f64 },
+    InvalidAngle {
+        /// The invalid angle in degrees.
+        degrees: f64,
+    },
 
+    /// Negative focal length where a positive one is required.
     #[error("negative focal length not supported for this lens type: {focal_mm} mm")]
-    InvalidFocalLength { focal_mm: f64 },
+    InvalidFocalLength {
+        /// The invalid focal length in millimeters.
+        focal_mm: f64,
+    },
 
+    /// Division by zero in an optical calculation.
     #[error("division by zero in optical calculation: {context}")]
-    DivisionByZero { context: Cow<'static, str> },
+    DivisionByZero {
+        /// Description of the calculation context.
+        context: Cow<'static, str>,
+    },
 
+    /// A parameter is outside the valid range for the operation.
     #[error("invalid parameter: {reason}")]
-    InvalidParameter { reason: Cow<'static, str> },
+    InvalidParameter {
+        /// Explanation of why the parameter is invalid.
+        reason: Cow<'static, str>,
+    },
 }
 
+/// Convenience alias for `Result<T, PrakashError>`.
 pub type Result<T> = std::result::Result<T, PrakashError>;
+
+#[cfg(feature = "bijli-backend")]
+impl From<bijli::BijliError> for PrakashError {
+    fn from(e: bijli::BijliError) -> Self {
+        match e {
+            bijli::BijliError::DivisionByZero { context } => PrakashError::DivisionByZero {
+                context: context.into(),
+            },
+            bijli::BijliError::InvalidParameter { reason } => PrakashError::InvalidParameter {
+                reason: reason.into(),
+            },
+            other => PrakashError::InvalidParameter {
+                reason: other.to_string().into(),
+            },
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

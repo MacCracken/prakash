@@ -1,5 +1,7 @@
 //! CIE color science: XYZ tristimulus, color matching functions, SPD, illuminants, CRI.
 
+use std::borrow::Cow;
+
 use serde::{Deserialize, Serialize};
 use tracing::trace;
 
@@ -112,8 +114,11 @@ pub const CIE_1931_2DEG: [(f64, f64, f64); 81] = [
 /// CIE XYZ tristimulus values.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Xyz {
+    /// X tristimulus value.
     pub x: f64,
+    /// Y tristimulus value (luminance).
     pub y: f64,
+    /// Z tristimulus value.
     pub z: f64,
 }
 
@@ -256,25 +261,37 @@ pub fn cie_cmf_at(wavelength_nm: f64) -> (f64, f64, f64) {
 
 /// A spectral power distribution (SPD).
 ///
-/// Stores relative power at uniform wavelength intervals.
+/// Stores relative power at uniform wavelength intervals. Uses
+/// [`Cow`] storage so that standard illuminant data can be borrowed
+/// from static arrays without allocating.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Spd {
     /// Start wavelength in nm.
     pub start_nm: f64,
     /// Wavelength step in nm.
     pub step_nm: f64,
-    /// Relative power values.
-    pub values: Vec<f64>,
+    /// Relative power values (borrowed from static data or owned).
+    pub values: Cow<'static, [f64]>,
 }
 
 impl Spd {
-    /// Create a new SPD from uniform samples.
+    /// Create a new SPD from owned samples.
     #[must_use]
     pub fn new(start_nm: f64, step_nm: f64, values: Vec<f64>) -> Self {
         Self {
             start_nm,
             step_nm,
-            values,
+            values: Cow::Owned(values),
+        }
+    }
+
+    /// Create a new SPD that borrows from a static slice (zero allocation).
+    #[must_use]
+    pub const fn from_static(start_nm: f64, step_nm: f64, values: &'static [f64]) -> Self {
+        Self {
+            start_nm,
+            step_nm,
+            values: Cow::Borrowed(values),
         }
     }
 
@@ -402,14 +419,18 @@ pub const ILLUMINANT_F11_DATA: [f64; 81] = [
 
 /// CIE Standard Illuminant D65 (daylight, ~6504K).
 ///
-/// Relative SPD at 5nm intervals, 380–780nm.
-pub fn illuminant_d65() -> Spd {
-    Spd::new(380.0, 5.0, ILLUMINANT_D65_DATA.to_vec())
+/// Relative SPD at 5nm intervals, 380–780nm. Borrows static data (zero allocation).
+#[must_use]
+pub const fn illuminant_d65() -> Spd {
+    Spd::from_static(380.0, 5.0, &ILLUMINANT_D65_DATA)
 }
 
 /// CIE Standard Illuminant D50 (horizon daylight, ~5003K).
-pub fn illuminant_d50() -> Spd {
-    Spd::new(380.0, 5.0, ILLUMINANT_D50_DATA.to_vec())
+///
+/// Borrows static data (zero allocation).
+#[must_use]
+pub const fn illuminant_d50() -> Spd {
+    Spd::from_static(380.0, 5.0, &ILLUMINANT_D50_DATA)
 }
 
 /// CIE Standard Illuminant A (incandescent, ~2856K).
@@ -426,13 +447,19 @@ pub fn illuminant_a() -> Spd {
 }
 
 /// CIE Standard Illuminant F2 (cool white fluorescent).
-pub fn illuminant_f2() -> Spd {
-    Spd::new(380.0, 5.0, ILLUMINANT_F2_DATA.to_vec())
+///
+/// Borrows static data (zero allocation).
+#[must_use]
+pub const fn illuminant_f2() -> Spd {
+    Spd::from_static(380.0, 5.0, &ILLUMINANT_F2_DATA)
 }
 
 /// CIE Standard Illuminant F11 (narrow-band fluorescent, ~4000K).
-pub fn illuminant_f11() -> Spd {
-    Spd::new(380.0, 5.0, ILLUMINANT_F11_DATA.to_vec())
+///
+/// Borrows static data (zero allocation).
+#[must_use]
+pub const fn illuminant_f11() -> Spd {
+    Spd::from_static(380.0, 5.0, &ILLUMINANT_F11_DATA)
 }
 
 // ── CRI (Color Rendering Index) ───────────────────────────────────────────
@@ -829,5 +856,81 @@ mod tests {
             cri_d65 > cri_f11,
             "Daylight CRI ({cri_d65}) should exceed narrow-band fluorescent ({cri_f11})"
         );
+    }
+
+    // ── Spd Cow storage tests ─────────────────────────────────────────────
+
+    #[test]
+    fn test_spd_from_static_borrows() {
+        let spd = Spd::from_static(380.0, 5.0, &ILLUMINANT_D65_DATA);
+        assert!(matches!(spd.values, std::borrow::Cow::Borrowed(_)));
+        assert_eq!(spd.values.len(), 81);
+    }
+
+    #[test]
+    fn test_spd_new_owns() {
+        let spd = Spd::new(380.0, 5.0, vec![1.0, 2.0, 3.0]);
+        assert!(matches!(spd.values, std::borrow::Cow::Owned(_)));
+    }
+
+    #[test]
+    fn test_illuminant_d65_is_borrowed() {
+        let d65 = illuminant_d65();
+        assert!(
+            matches!(d65.values, std::borrow::Cow::Borrowed(_)),
+            "illuminant_d65 should borrow static data"
+        );
+    }
+
+    #[test]
+    fn test_illuminant_d50_is_borrowed() {
+        let d50 = illuminant_d50();
+        assert!(matches!(d50.values, std::borrow::Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn test_illuminant_f2_is_borrowed() {
+        let f2 = illuminant_f2();
+        assert!(matches!(f2.values, std::borrow::Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn test_illuminant_f11_is_borrowed() {
+        let f11 = illuminant_f11();
+        assert!(matches!(f11.values, std::borrow::Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn test_spd_blackbody_is_owned() {
+        let bb = Spd::blackbody(5778.0);
+        assert!(matches!(bb.values, std::borrow::Cow::Owned(_)));
+    }
+
+    #[test]
+    fn test_spd_cow_clone_borrowed_stays_borrowed() {
+        let d65 = illuminant_d65();
+        let cloned = d65.clone();
+        assert!(matches!(cloned.values, std::borrow::Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn test_spd_cow_serde_roundtrip() {
+        let d65 = illuminant_d65();
+        let json = serde_json::to_string(&d65).unwrap();
+        let back: Spd = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.values.len(), 81);
+        assert!((back.values[0] - d65.values[0]).abs() < EPS);
+    }
+
+    #[test]
+    fn test_spd_cow_to_xyz_identical() {
+        // Borrowed and owned should produce identical XYZ
+        let borrowed = illuminant_d65();
+        let owned = Spd::new(380.0, 5.0, ILLUMINANT_D65_DATA.to_vec());
+        let xyz_b = borrowed.to_xyz();
+        let xyz_o = owned.to_xyz();
+        assert!((xyz_b.x - xyz_o.x).abs() < EPS);
+        assert!((xyz_b.y - xyz_o.y).abs() < EPS);
+        assert!((xyz_b.z - xyz_o.z).abs() < EPS);
     }
 }

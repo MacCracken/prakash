@@ -4,9 +4,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{PrakashError, Result};
 
+/// Configuration for the daimon AI agent service.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaimonConfig {
+    /// HTTP endpoint URL for the daimon service.
     pub endpoint: String,
+    /// Optional API key for authentication.
     pub api_key: Option<String>,
 }
 
@@ -19,8 +22,10 @@ impl Default for DaimonConfig {
     }
 }
 
+/// Configuration for the hoosh AI orchestrator service.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HooshConfig {
+    /// HTTP endpoint URL for the hoosh service.
     pub endpoint: String,
 }
 
@@ -32,12 +37,14 @@ impl Default for HooshConfig {
     }
 }
 
+/// HTTP client for the daimon AI agent service.
 pub struct DaimonClient {
     config: DaimonConfig,
     client: reqwest::Client,
 }
 
 impl DaimonClient {
+    /// Create a new daimon client from configuration.
     pub fn new(config: DaimonConfig) -> Result<Self> {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
@@ -48,6 +55,7 @@ impl DaimonClient {
         Ok(Self { config, client })
     }
 
+    /// Register this crate as an agent with the daimon service.
     pub async fn register_agent(&self) -> Result<String> {
         let body = serde_json::json!({
             "name": "prakash",

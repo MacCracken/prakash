@@ -1,5 +1,32 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed — P1 Post-V1.0 Audit
+- **Polarization consolidation**: added `From<Polarization> for StokesVector` (Jones → Stokes conversion)
+- **Duplicate function docs**: cross-referenced `diffraction_limit`/`rayleigh_criterion` and `beer_lambert`/`volume_transmittance`
+- **Spd zero-alloc illuminants**: `Spd.values` changed from `Vec<f64>` to `Cow<'static, [f64]>`; illuminant functions now borrow static data via `Spd::from_static()`
+- **`#![warn(missing_docs)]`** enabled — all public items now documented
+- **Wavelength parameter ordering**: standardized wavelength-first convention across all wave/diffraction functions (`single_slit_intensity`, `double_slit_intensity`, `grating_maxima`, `airy_pattern`, `path_to_phase`, `fraunhofer_rect`, `fresnel_number`, `fresnel_parameter`, `coating_reflectance`, `multilayer_reflectance`)
+- **Unit-suffix convention** documented in lib.rs: `_nm`/`_m`/`_um` for specific units, unsuffixed for generic
+
+### Updated
+- hisab 0.22 → 1.1
+- criterion 0.5 → 0.8 (migrated from `criterion::black_box` to `std::hint::black_box`)
+- reqwest 0.12 → 0.13 (switched from native-tls to rustls)
+
+### Added — Bijli EM Backend (`bijli-backend` feature)
+- **Dependency**: bijli 0.24 (path dep during development, optional `bijli-backend` feature, default on)
+- **Scalar optics delegation**: `snell`, `critical_angle`, `brewster_angle`, `fresnel_normal`, `fresnel_unpolarized` delegate to bijli's EM-correct implementations with trig-free Fresnel variants
+- **Constants**: `SPEED_OF_LIGHT` re-exported from `bijli::field` (single source of truth)
+- **Polarization bridge**: bidirectional `From` impls for `StokesVector` and `MuellerMatrix`, `From<Polarization> for JonesVector`
+- **New re-exports**: `JonesVector`, `JonesMatrix`, `Complex` (Jones formalism), `GaussianBeam`, `AbcdMatrix`, `ResonatorStability` (beam optics), `mie`, `MieResult`, `em_rayleigh_cross_section` (exact Mie scattering)
+- **Material bridge**: `Medium::permittivity()` (n² = ε_r)
+- **Error bridge**: `From<BijliError> for PrakashError`
+- **Fallback**: all original implementations retained behind `#[cfg(not(feature = "bijli-backend"))]`
+- 14 bijli integration tests, 14 new integration tests total (Jones→Stokes, Spd Cow, bijli equivalence)
+- 2 new benchmarks (`jones_to_stokes`, `illuminant_d65_cow`)
+
 ## [1.0.0] - 2026-03-24
 
 ### Added — atmosphere V0.25: Atmospheric Optics

@@ -11,6 +11,14 @@ pub const VISIBLE_MIN_NM: f64 = 380.0;
 pub const VISIBLE_MAX_NM: f64 = 780.0;
 
 /// Speed of light in m/s.
+///
+/// When the `bijli-backend` feature is enabled, this is re-exported from
+/// [`bijli::field::SPEED_OF_LIGHT`] for a single source of truth.
+#[cfg(feature = "bijli-backend")]
+pub use bijli::field::SPEED_OF_LIGHT;
+
+/// Speed of light in m/s.
+#[cfg(not(feature = "bijli-backend"))]
 pub const SPEED_OF_LIGHT: f64 = 299_792_458.0;
 /// Planck's constant in J·s.
 pub const PLANCK_H: f64 = 6.626_070_15e-34;
@@ -26,8 +34,11 @@ pub const RGB_WAVELENGTHS_M: [f64; 3] = [650e-9, 550e-9, 450e-9];
 /// RGB color with floating-point components (0.0–1.0).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Rgb {
+    /// Red channel (0.0–1.0).
     pub r: f64,
+    /// Green channel (0.0–1.0).
     pub g: f64,
+    /// Blue channel (0.0–1.0).
     pub b: f64,
 }
 

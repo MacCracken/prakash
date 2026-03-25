@@ -242,6 +242,9 @@ pub fn na_from_f_number(f_num: f64) -> f64 {
 /// θ = 1.22 · λ / D (radians)
 ///
 /// `wavelength` and `aperture_diameter` in same units.
+///
+/// This is the same formula as [`wave::rayleigh_criterion`](crate::wave::rayleigh_criterion),
+/// provided here for ergonomic use in lens/imaging contexts.
 #[must_use]
 #[inline]
 pub fn diffraction_limit(wavelength: f64, aperture_diameter: f64) -> f64 {

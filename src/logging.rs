@@ -1,9 +1,15 @@
 //! Structured logging for prakash via `PRAKASH_LOG` env var.
 
+/// Initialize tracing with the default `info` level.
+///
+/// Uses `PRAKASH_LOG` env var to override the filter.
 pub fn init() {
     init_with_level("info");
 }
 
+/// Initialize tracing with a custom default level (e.g., `"debug"`, `"trace"`).
+///
+/// Uses `PRAKASH_LOG` env var to override the filter.
 pub fn init_with_level(default_level: &str) {
     use tracing_subscriber::EnvFilter;
     use tracing_subscriber::fmt;

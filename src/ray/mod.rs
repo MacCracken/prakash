@@ -88,6 +88,16 @@ impl Medium {
         }
         Ok(Self { n, name })
     }
+
+    /// Relative dielectric permittivity (ε_r = n²).
+    ///
+    /// Bridges prakash's optical refractive index to bijli's electromagnetic
+    /// permittivity representation. For non-magnetic materials, n = √ε_r.
+    #[must_use]
+    #[inline]
+    pub fn permittivity(&self) -> f64 {
+        self.n * self.n
+    }
 }
 
 // ── Snell's Law ─────────────────────────────────────────────────────────────
@@ -96,10 +106,35 @@ impl Medium {
 ///
 /// Returns the refracted angle in radians, or `TotalInternalReflection` error
 /// if the angle exceeds the critical angle.
+///
+/// Delegates to [`bijli::wave::snell_refraction_angle`] when the `bijli-backend` feature is enabled.
 #[must_use = "returns the refracted angle"]
 #[inline]
 pub fn snell(n1: f64, n2: f64, incident_angle: f64) -> Result<f64> {
     trace!(n1, n2, incident_angle, "snell");
+    snell_impl(n1, n2, incident_angle)
+}
+
+#[cfg(feature = "bijli-backend")]
+#[inline]
+fn snell_impl(n1: f64, n2: f64, incident_angle: f64) -> Result<f64> {
+    match bijli::wave::snell_refraction_angle(n1, n2, incident_angle)? {
+        Some(angle) => Ok(angle),
+        None => {
+            let ca = critical_angle(n1, n2).unwrap_or(0.0);
+            Err(PrakashError::TotalInternalReflection {
+                angle_deg: incident_angle.to_degrees(),
+                critical_deg: ca.to_degrees(),
+                n1,
+                n2,
+            })
+        }
+    }
+}
+
+#[cfg(not(feature = "bijli-backend"))]
+#[inline]
+fn snell_impl(n1: f64, n2: f64, incident_angle: f64) -> Result<f64> {
     let sin_t = (n1 / n2) * incident_angle.sin();
     if sin_t.abs() > 1.0 {
         let critical = critical_angle(n1, n2)?;
@@ -116,9 +151,28 @@ pub fn snell(n1: f64, n2: f64, incident_angle: f64) -> Result<f64> {
 /// Critical angle for total internal reflection (n1 > n2).
 ///
 /// Returns the angle in radians beyond which all light is reflected.
+///
+/// Delegates to [`bijli::wave::critical_angle`] when the `bijli-backend` feature is enabled.
 #[must_use = "returns the critical angle"]
 #[inline]
 pub fn critical_angle(n1: f64, n2: f64) -> Result<f64> {
+    critical_angle_impl(n1, n2)
+}
+
+#[cfg(feature = "bijli-backend")]
+#[inline]
+fn critical_angle_impl(n1: f64, n2: f64) -> Result<f64> {
+    match bijli::wave::critical_angle(n1, n2)? {
+        Some(angle) => Ok(angle),
+        None => Err(PrakashError::InvalidParameter {
+            reason: "critical angle requires n1 > n2".into(),
+        }),
+    }
+}
+
+#[cfg(not(feature = "bijli-backend"))]
+#[inline]
+fn critical_angle_impl(n1: f64, n2: f64) -> Result<f64> {
     if n1 <= n2 {
         return Err(PrakashError::InvalidParameter {
             reason: "critical angle requires n1 > n2".into(),
@@ -283,9 +337,35 @@ pub fn fresnel_p(n1: f64, n2: f64, cos_i: f64, cos_t: f64) -> f64 {
 /// Average Fresnel reflectance for unpolarized light.
 ///
 /// Returns the fraction of light reflected (0.0 = none, 1.0 = total reflection).
+///
+/// Delegates to [`bijli::wave::reflectance_unpolarized`] when the `bijli-backend` feature is enabled.
 #[must_use = "returns the Fresnel reflectance"]
 #[inline]
 pub fn fresnel_unpolarized(n1: f64, n2: f64, incident_angle: f64) -> Result<f64> {
+    fresnel_unpolarized_impl(n1, n2, incident_angle)
+}
+
+#[cfg(feature = "bijli-backend")]
+#[inline]
+fn fresnel_unpolarized_impl(n1: f64, n2: f64, incident_angle: f64) -> Result<f64> {
+    // Check for TIR first — bijli returns Ok(1.0) for TIR, but prakash returns an error
+    let sin_t = (n1 / n2) * incident_angle.sin();
+    if sin_t.abs() > 1.0 {
+        let ca = critical_angle(n1, n2).unwrap_or(0.0);
+        return Err(PrakashError::TotalInternalReflection {
+            angle_deg: incident_angle.to_degrees(),
+            critical_deg: ca.to_degrees(),
+            n1,
+            n2,
+        });
+    }
+    let cos_theta_i = incident_angle.cos();
+    Ok(bijli::wave::reflectance_unpolarized(n1, n2, cos_theta_i)?)
+}
+
+#[cfg(not(feature = "bijli-backend"))]
+#[inline]
+fn fresnel_unpolarized_impl(n1: f64, n2: f64, incident_angle: f64) -> Result<f64> {
     let (sin_i, cos_i) = incident_angle.sin_cos();
     let sin_t = (n1 / n2) * sin_i;
     if sin_t.abs() > 1.0 {
@@ -304,9 +384,26 @@ pub fn fresnel_unpolarized(n1: f64, n2: f64, incident_angle: f64) -> Result<f64>
 /// Fresnel reflectance at normal incidence (θ = 0).
 ///
 /// Simplified: R = ((n1 - n2) / (n1 + n2))²
+///
+/// Delegates to [`bijli::wave::reflectance_normal`] when the `bijli-backend` feature is enabled.
 #[must_use]
 #[inline]
 pub fn fresnel_normal(n1: f64, n2: f64) -> f64 {
+    fresnel_normal_impl(n1, n2)
+}
+
+#[cfg(feature = "bijli-backend")]
+#[inline]
+fn fresnel_normal_impl(n1: f64, n2: f64) -> f64 {
+    bijli::wave::reflectance_normal(n1, n2).unwrap_or_else(|_| {
+        let r = (n1 - n2) / (n1 + n2);
+        r * r
+    })
+}
+
+#[cfg(not(feature = "bijli-backend"))]
+#[inline]
+fn fresnel_normal_impl(n1: f64, n2: f64) -> f64 {
     let r = (n1 - n2) / (n1 + n2);
     r * r
 }
@@ -316,9 +413,23 @@ pub fn fresnel_normal(n1: f64, n2: f64) -> f64 {
 /// Brewster's angle — the angle at which reflected light is fully polarized.
 ///
 /// At this angle, p-polarized reflectance is zero.
+///
+/// Delegates to [`bijli::wave::brewster_angle`] when the `bijli-backend` feature is enabled.
 #[must_use]
 #[inline]
 pub fn brewster_angle(n1: f64, n2: f64) -> f64 {
+    brewster_angle_impl(n1, n2)
+}
+
+#[cfg(feature = "bijli-backend")]
+#[inline]
+fn brewster_angle_impl(n1: f64, n2: f64) -> f64 {
+    bijli::wave::brewster_angle(n1, n2).unwrap_or_else(|_| (n2 / n1).atan())
+}
+
+#[cfg(not(feature = "bijli-backend"))]
+#[inline]
+fn brewster_angle_impl(n1: f64, n2: f64) -> f64 {
     (n2 / n1).atan()
 }
 
@@ -327,7 +438,10 @@ pub fn brewster_angle(n1: f64, n2: f64) -> f64 {
 /// Beer-Lambert law: intensity after traveling distance `d` through a medium
 /// with absorption coefficient `alpha`.
 ///
-/// I = I0 * exp(-alpha * d)
+/// I = I₀ · exp(−α · d)
+///
+/// Related: [`pbr::volume_transmittance`](crate::pbr::advanced::volume_transmittance) returns
+/// the transmittance factor alone (equivalent to `beer_lambert(1.0, σt, d)`).
 #[must_use]
 #[inline]
 pub fn beer_lambert(intensity: f64, alpha: f64, distance: f64) -> f64 {

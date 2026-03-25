@@ -12,7 +12,9 @@ use crate::error::{PrakashError, Result};
 /// Wavelength λ is in micrometers.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct CauchyCoefficients {
+    /// Constant term of the Cauchy equation.
     pub b: f64,
+    /// Dispersive coefficient (μm²).
     pub c: f64,
 }
 
@@ -48,11 +50,17 @@ impl CauchyCoefficients {
 /// Wavelength λ is in micrometers. Cᵢ values are in μm².
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct SellmeierCoefficients {
+    /// First oscillator strength.
     pub b1: f64,
+    /// First resonance wavelength squared (μm²).
     pub c1: f64,
+    /// Second oscillator strength.
     pub b2: f64,
+    /// Second resonance wavelength squared (μm²).
     pub c2: f64,
+    /// Third oscillator strength.
     pub b3: f64,
+    /// Third resonance wavelength squared (μm²).
     pub c3: f64,
 }
 
@@ -153,10 +161,12 @@ impl SellmeierCoefficients {
     };
 }
 
-/// Fraunhofer spectral lines used for Abbe number calculation (in micrometers).
-pub const FRAUNHOFER_D: f64 = 0.587_56; // Helium d-line (yellow)
-pub const FRAUNHOFER_F: f64 = 0.486_13; // Hydrogen F-line (blue)
-pub const FRAUNHOFER_C: f64 = 0.656_27; // Hydrogen C-line (red)
+/// Fraunhofer d-line (helium yellow) wavelength in micrometers.
+pub const FRAUNHOFER_D: f64 = 0.587_56;
+/// Fraunhofer F-line (hydrogen blue) wavelength in micrometers.
+pub const FRAUNHOFER_F: f64 = 0.486_13;
+/// Fraunhofer C-line (hydrogen red) wavelength in micrometers.
+pub const FRAUNHOFER_C: f64 = 0.656_27;
 
 /// Abbe number (constringence) — a measure of a material's dispersion.
 ///

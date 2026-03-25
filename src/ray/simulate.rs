@@ -20,11 +20,16 @@ pub enum TraceEvent {
     /// Ray refracted through a surface. `reflectance` is the Fresnel reflectance
     /// at this interface (the reflected energy that spawned a sibling branch).
     Refraction {
+        /// Fresnel reflectance at this interface.
         reflectance: f64,
+        /// Index of the surface in the optical system.
         surface_idx: usize,
     },
     /// Ray reflected off a surface.
-    Reflection { surface_idx: usize },
+    Reflection {
+        /// Index of the surface in the optical system.
+        surface_idx: usize,
+    },
     /// Ray escaped the system (no more surfaces hit).
     Escaped,
     /// Recursion depth or energy limit reached.

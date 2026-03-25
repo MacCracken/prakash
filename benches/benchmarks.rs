@@ -1,4 +1,6 @@
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use std::hint::black_box;
+
+use criterion::{Criterion, criterion_group, criterion_main};
 use std::f64::consts::FRAC_PI_6;
 
 fn bench_ray(c: &mut Criterion) {
@@ -308,6 +310,7 @@ fn bench_spectral(c: &mut Criterion) {
     group.bench_function("cct_from_xy", |b| {
         b.iter(|| cct_from_xy(black_box(0.3127), black_box(0.3290)))
     });
+    group.bench_function("illuminant_d65_cow", |b| b.iter(illuminant_d65));
     group.bench_function("spd_blackbody", |b| {
         b.iter(|| Spd::blackbody(black_box(5778.0)))
     });
@@ -337,8 +340,8 @@ fn bench_wave(c: &mut Criterion) {
     group.bench_function("single_slit", |b| {
         b.iter(|| {
             single_slit_intensity(
-                black_box(1e-3),
                 black_box(500e-9),
+                black_box(1e-3),
                 black_box(0.01),
                 black_box(1.0),
             )
@@ -347,9 +350,9 @@ fn bench_wave(c: &mut Criterion) {
     group.bench_function("double_slit", |b| {
         b.iter(|| {
             double_slit_intensity(
+                black_box(500e-9),
                 black_box(0.1e-3),
                 black_box(0.5e-3),
-                black_box(500e-9),
                 black_box(0.01),
                 black_box(1.0),
             )
@@ -365,7 +368,7 @@ fn bench_wave(c: &mut Criterion) {
         b.iter(|| path_to_phase(black_box(500.0), black_box(500.0)))
     });
     group.bench_function("grating_maxima_3", |b| {
-        b.iter(|| grating_maxima(black_box(1e-6), black_box(500e-9), black_box(3)))
+        b.iter(|| grating_maxima(black_box(500e-9), black_box(1e-6), black_box(3)))
     });
     group.bench_function("polarization_intensity", |b| {
         let p = Polarization::circular_right();
@@ -392,8 +395,8 @@ fn bench_wave(c: &mut Criterion) {
     group.bench_function("airy_pattern", |b| {
         b.iter(|| {
             airy_pattern(
-                black_box(10e-3),
                 black_box(550e-9),
+                black_box(10e-3),
                 black_box(1e-5),
                 black_box(1.0),
             )
@@ -437,6 +440,10 @@ fn bench_wave(c: &mut Criterion) {
         let b_mat = MuellerMatrix::rotation(0.5);
         b.iter(|| black_box(a).multiply(black_box(&b_mat)))
     });
+    group.bench_function("jones_to_stokes", |b| {
+        let p = Polarization::circular_right();
+        b.iter(|| StokesVector::from(black_box(p)))
+    });
     group.bench_function("mueller_polarizer", |b| {
         b.iter(|| MuellerMatrix::polarizer(black_box(0.785)))
     });
@@ -459,9 +466,9 @@ fn bench_wave(c: &mut Criterion) {
     group.bench_function("fraunhofer_rect", |b| {
         b.iter(|| {
             fraunhofer_rect(
-                black_box(1e-3),
-                black_box(1e-3),
                 black_box(550e-9),
+                black_box(1e-3),
+                black_box(1e-3),
                 black_box(0.001),
                 black_box(0.001),
                 black_box(1.0),
@@ -491,11 +498,11 @@ fn bench_wave(c: &mut Criterion) {
     group.bench_function("coating_reflectance", |b| {
         b.iter(|| {
             coating_reflectance(
+                black_box(550.0),
                 black_box(1.0),
                 black_box(1.38),
                 black_box(1.52),
                 black_box(99.6),
-                black_box(550.0),
             )
         })
     });
@@ -503,10 +510,10 @@ fn bench_wave(c: &mut Criterion) {
         let layers = [(1.38, 99.6), (2.1, 65.5)];
         b.iter(|| {
             multilayer_reflectance(
+                black_box(550.0),
                 black_box(1.0),
                 black_box(1.52),
                 black_box(&layers),
-                black_box(550.0),
             )
         })
     });

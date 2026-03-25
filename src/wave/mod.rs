@@ -35,7 +35,7 @@ pub fn is_destructive(path_diff: f64, wavelength: f64) -> bool {
 /// δ = 2π·Δ/λ
 #[must_use]
 #[inline]
-pub fn path_to_phase(path_diff: f64, wavelength: f64) -> f64 {
+pub fn path_to_phase(wavelength: f64, path_diff: f64) -> f64 {
     std::f64::consts::TAU * path_diff / wavelength
 }
 
@@ -59,11 +59,11 @@ pub fn thin_film_reflectance(wavelength_nm: f64, thickness_nm: f64, n_film: f64)
 
 /// Single-slit diffraction: intensity at angle θ.
 ///
-/// I(θ) = I0 · (sin(β)/β)² where β = π·a·sin(θ)/λ
-/// `slit_width` and `wavelength` in same units.
+/// I(θ) = I₀ · (sin(β)/β)² where β = π·a·sin(θ)/λ
+/// `wavelength` and `slit_width` in same units.
 #[must_use]
 #[inline]
-pub fn single_slit_intensity(slit_width: f64, wavelength: f64, angle: f64, i0: f64) -> f64 {
+pub fn single_slit_intensity(wavelength: f64, slit_width: f64, angle: f64, i0: f64) -> f64 {
     let beta = PI * slit_width * angle.sin() / wavelength;
     if beta.abs() < 1e-10 {
         return i0; // central maximum
@@ -79,9 +79,9 @@ pub fn single_slit_intensity(slit_width: f64, wavelength: f64, angle: f64, i0: f
 #[must_use]
 #[inline]
 pub fn double_slit_intensity(
+    wavelength: f64,
     slit_width: f64,
     slit_spacing: f64,
-    wavelength: f64,
     angle: f64,
     i0: f64,
 ) -> f64 {
@@ -106,7 +106,7 @@ pub fn double_slit_intensity(
 /// d·sin(θ) = m·λ → θ = asin(m·λ/d)
 /// Returns angles for orders m = 0, ±1, ±2, ... up to `max_order`.
 #[must_use]
-pub fn grating_maxima(grating_spacing: f64, wavelength: f64, max_order: u32) -> Vec<f64> {
+pub fn grating_maxima(wavelength: f64, grating_spacing: f64, max_order: u32) -> Vec<f64> {
     let mut angles = Vec::with_capacity(2 * max_order as usize + 1);
     for m in 0..=max_order {
         let sin_theta = (m as f64) * wavelength / grating_spacing;
@@ -183,6 +183,42 @@ impl Polarization {
     #[inline]
     pub fn intensity(&self) -> f64 {
         self.ex * self.ex + self.ey * self.ey
+    }
+}
+
+impl From<Polarization> for StokesVector {
+    /// Convert a Jones-style polarization state to a Stokes vector.
+    ///
+    /// The mapping follows the standard Jones → Stokes conversion:
+    /// - S₀ = |Ex|² + |Ey|² (total intensity)
+    /// - S₁ = |Ex|² − |Ey|² (horizontal vs vertical preference)
+    /// - S₂ = 2·|Ex|·|Ey|·cos(δ) (diagonal preference)
+    /// - S₃ = 2·|Ex|·|Ey|·sin(δ) (circular preference)
+    #[inline]
+    fn from(p: Polarization) -> Self {
+        let ex2 = p.ex * p.ex;
+        let ey2 = p.ey * p.ey;
+        Self::new(
+            ex2 + ey2,
+            ex2 - ey2,
+            2.0 * p.ex * p.ey * p.phase.cos(),
+            2.0 * p.ex * p.ey * p.phase.sin(),
+        )
+    }
+}
+
+#[cfg(feature = "bijli-backend")]
+impl From<Polarization> for bijli::polarization::JonesVector {
+    /// Convert a prakash `Polarization` to a bijli `JonesVector`.
+    ///
+    /// Maps `(ex, ey, phase)` to complex Jones vector `[Ex, Ey·e^(iδ)]`.
+    #[inline]
+    fn from(p: Polarization) -> Self {
+        use bijli::polarization::Complex;
+        bijli::polarization::JonesVector::new(
+            Complex::real(p.ex),
+            Complex::from_polar(p.ey, p.phase),
+        )
     }
 }
 
@@ -297,11 +333,11 @@ pub fn bessel_j1(x: f64) -> f64 {
 ///
 /// I(θ) = I₀ · [2·J₁(x)/x]² where x = π·D·sin(θ)/λ
 ///
-/// `aperture_diameter` and `wavelength` in same units.
+/// `wavelength` and `aperture_diameter` in same units.
 /// `angle` in radians. Returns intensity relative to `i0`.
 #[must_use]
 #[inline]
-pub fn airy_pattern(aperture_diameter: f64, wavelength: f64, angle: f64, i0: f64) -> f64 {
+pub fn airy_pattern(wavelength: f64, aperture_diameter: f64, angle: f64, i0: f64) -> f64 {
     let x = PI * aperture_diameter * angle.sin() / wavelength;
     if x.abs() < 1e-10 {
         return i0; // central maximum
@@ -328,6 +364,9 @@ pub fn airy_first_zero(wavelength: f64, aperture_diameter: f64) -> f64 {
 /// falls on the first zero of the other: θ_R = 1.22·λ/D
 ///
 /// Returns minimum resolvable angle in radians.
+///
+/// This is the same formula as [`lens::diffraction_limit`](crate::lens::diffraction_limit),
+/// provided here for wave-optics contexts.
 #[must_use]
 #[inline]
 pub fn rayleigh_criterion(wavelength: f64, aperture_diameter: f64) -> f64 {
@@ -432,6 +471,20 @@ pub use diffraction::*;
 pub use pattern::*;
 pub use polarization::*;
 
+// ── Bijli re-exports ────────────────────────────────────────────────────────
+
+/// Jones vector, Jones matrix, and complex number types from bijli.
+///
+/// Available when the `bijli-backend` feature is enabled.
+#[cfg(feature = "bijli-backend")]
+pub use bijli::polarization::{Complex, JonesMatrix, JonesVector};
+
+/// Gaussian beam propagation and ABCD ray transfer matrices from bijli.
+///
+/// Available when the `bijli-backend` feature is enabled.
+#[cfg(feature = "bijli-backend")]
+pub use bijli::beam::{AbcdMatrix, GaussianBeam, ResonatorStability, resonator_stability};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -496,19 +549,19 @@ mod tests {
 
     #[test]
     fn test_path_to_phase() {
-        let phase = path_to_phase(500.0, 500.0);
+        let phase = path_to_phase(500.0, 500.0); // wavelength=500, path=500
         assert!((phase - 2.0 * PI).abs() < EPS);
     }
 
     #[test]
     fn test_path_to_phase_half_wavelength() {
-        let phase = path_to_phase(250.0, 500.0);
+        let phase = path_to_phase(500.0, 250.0);
         assert!((phase - PI).abs() < EPS);
     }
 
     #[test]
     fn test_path_to_phase_zero() {
-        let phase = path_to_phase(0.0, 500.0);
+        let phase = path_to_phase(500.0, 0.0);
         assert!(phase.abs() < EPS);
     }
 
@@ -544,14 +597,14 @@ mod tests {
 
     #[test]
     fn test_single_slit_central_max() {
-        let i = single_slit_intensity(1e-3, 500e-9, 0.0, 1.0);
+        let i = single_slit_intensity(500e-9, 1e-3, 0.0, 1.0);
         assert!((i - 1.0).abs() < EPS);
     }
 
     #[test]
     fn test_single_slit_decreases_off_axis() {
-        let i_center = single_slit_intensity(1e-3, 500e-9, 0.0, 1.0);
-        let i_off = single_slit_intensity(1e-3, 500e-9, 0.01, 1.0);
+        let i_center = single_slit_intensity(500e-9, 1e-3, 0.0, 1.0);
+        let i_off = single_slit_intensity(500e-9, 1e-3, 0.01, 1.0);
         assert!(i_off < i_center);
     }
 
@@ -562,14 +615,14 @@ mod tests {
         let wl = 500e-9;
         let ratio: f64 = wl / a;
         let theta_min = ratio.asin();
-        let i = single_slit_intensity(a, wl, theta_min, 1.0);
+        let i = single_slit_intensity(wl, a, theta_min, 1.0);
         assert!(i < 1e-6, "Intensity at first minimum should be ~0, got {i}");
     }
 
     #[test]
     fn test_single_slit_scales_with_i0() {
-        let i1 = single_slit_intensity(1e-3, 500e-9, 0.01, 1.0);
-        let i5 = single_slit_intensity(1e-3, 500e-9, 0.01, 5.0);
+        let i1 = single_slit_intensity(500e-9, 1e-3, 0.01, 1.0);
+        let i5 = single_slit_intensity(500e-9, 1e-3, 0.01, 5.0);
         assert!((i5 / i1 - 5.0).abs() < EPS);
     }
 
@@ -577,21 +630,21 @@ mod tests {
     fn test_single_slit_always_non_negative() {
         for angle_mrad in 0..100 {
             let angle = angle_mrad as f64 * 0.001;
-            let i = single_slit_intensity(1e-3, 500e-9, angle, 1.0);
+            let i = single_slit_intensity(500e-9, 1e-3, angle, 1.0);
             assert!(i >= 0.0, "Negative intensity at angle {angle}");
         }
     }
 
     #[test]
     fn test_double_slit_central() {
-        let i = double_slit_intensity(0.1e-3, 0.5e-3, 500e-9, 0.0, 1.0);
+        let i = double_slit_intensity(500e-9, 0.1e-3, 0.5e-3, 0.0, 1.0);
         assert!(i > 0.0);
     }
 
     #[test]
     fn test_double_slit_greater_than_single_at_center() {
-        let i_single = single_slit_intensity(0.1e-3, 500e-9, 0.0, 1.0);
-        let i_double = double_slit_intensity(0.1e-3, 0.5e-3, 500e-9, 0.0, 1.0);
+        let i_single = single_slit_intensity(500e-9, 0.1e-3, 0.0, 1.0);
+        let i_double = double_slit_intensity(500e-9, 0.1e-3, 0.5e-3, 0.0, 1.0);
         assert!(
             i_double > i_single,
             "Double slit central max should exceed single slit"
@@ -602,7 +655,7 @@ mod tests {
     fn test_double_slit_non_negative() {
         for angle_mrad in 0..50 {
             let angle = angle_mrad as f64 * 0.001;
-            let i = double_slit_intensity(0.1e-3, 0.5e-3, 500e-9, angle, 1.0);
+            let i = double_slit_intensity(500e-9, 0.1e-3, 0.5e-3, angle, 1.0);
             assert!(i >= 0.0, "Negative intensity at angle {angle}");
         }
     }
@@ -611,20 +664,20 @@ mod tests {
 
     #[test]
     fn test_grating_maxima_zeroth_order() {
-        let angles = grating_maxima(1e-6, 500e-9, 0);
+        let angles = grating_maxima(500e-9, 1e-6, 0);
         assert_eq!(angles.len(), 1);
         assert!(angles[0].abs() < EPS);
     }
 
     #[test]
     fn test_grating_maxima_multiple_orders() {
-        let angles = grating_maxima(1e-6, 500e-9, 2);
+        let angles = grating_maxima(500e-9, 1e-6, 2);
         assert!(angles.len() >= 3);
     }
 
     #[test]
     fn test_grating_maxima_symmetric() {
-        let angles = grating_maxima(1e-6, 500e-9, 1);
+        let angles = grating_maxima(500e-9, 1e-6, 1);
         // Should have m=0, +1, -1
         assert_eq!(angles.len(), 3);
         // +1 and -1 should be symmetric
@@ -634,7 +687,7 @@ mod tests {
     #[test]
     fn test_grating_maxima_limited_by_sin() {
         // Very fine grating with long wavelength: fewer orders possible
-        let angles = grating_maxima(600e-9, 500e-9, 5);
+        let angles = grating_maxima(500e-9, 600e-9, 5);
         // m·λ/d = m·500/600, max m where this ≤ 1 is m=1
         assert!(angles.len() <= 3); // m=0, ±1 at most
     }
@@ -725,6 +778,93 @@ mod tests {
         assert!((back.ex - p.ex).abs() < EPS);
         assert!((back.ey - p.ey).abs() < EPS);
         assert!((back.phase - p.phase).abs() < EPS);
+    }
+
+    // ── Polarization → StokesVector conversion tests ────────────────────
+
+    #[test]
+    fn test_jones_to_stokes_horizontal() {
+        let p = Polarization::HORIZONTAL;
+        let s = StokesVector::from(p);
+        assert!((s.s0 - 1.0).abs() < EPS, "S0 should be 1.0");
+        assert!((s.s1 - 1.0).abs() < EPS, "S1 should be 1.0 for horizontal");
+        assert!(s.s2.abs() < EPS, "S2 should be 0");
+        assert!(s.s3.abs() < EPS, "S3 should be 0");
+    }
+
+    #[test]
+    fn test_jones_to_stokes_vertical() {
+        let p = Polarization::VERTICAL;
+        let s = StokesVector::from(p);
+        assert!((s.s0 - 1.0).abs() < EPS);
+        assert!((s.s1 + 1.0).abs() < EPS, "S1 should be -1.0 for vertical");
+        assert!(s.s2.abs() < EPS);
+        assert!(s.s3.abs() < EPS);
+    }
+
+    #[test]
+    fn test_jones_to_stokes_circular_right() {
+        let p = Polarization::circular_right();
+        let s = StokesVector::from(p);
+        assert!((s.s0 - 1.0).abs() < EPS);
+        assert!(s.s1.abs() < EPS, "Circular should have no H/V preference");
+        assert!(
+            s.s2.abs() < EPS,
+            "Circular should have no diagonal preference"
+        );
+        assert!(
+            (s.s3 + 1.0).abs() < 0.01,
+            "S3 should be -1 for right circular (phase = -π/2)"
+        );
+    }
+
+    #[test]
+    fn test_jones_to_stokes_circular_left() {
+        let p = Polarization::circular_left();
+        let s = StokesVector::from(p);
+        assert!((s.s0 - 1.0).abs() < EPS);
+        assert!(s.s1.abs() < EPS);
+        assert!(s.s2.abs() < EPS);
+        assert!(
+            (s.s3 - 1.0).abs() < 0.01,
+            "S3 should be +1 for left circular (phase = +π/2)"
+        );
+    }
+
+    #[test]
+    fn test_jones_to_stokes_intensity_preserved() {
+        // For any Jones vector, S0 should equal total intensity
+        let p = Polarization {
+            ex: 0.8,
+            ey: 0.6,
+            phase: 0.5,
+        };
+        let s = StokesVector::from(p);
+        assert!((s.s0 - p.intensity()).abs() < EPS);
+    }
+
+    #[test]
+    fn test_jones_to_stokes_degree_of_polarization() {
+        // Any pure Jones state should produce a fully polarized Stokes vector (DOP = 1)
+        let states = [
+            Polarization::HORIZONTAL,
+            Polarization::VERTICAL,
+            Polarization::circular_right(),
+            Polarization::circular_left(),
+            Polarization {
+                ex: 0.8,
+                ey: 0.6,
+                phase: 1.0,
+            },
+        ];
+        for p in &states {
+            let s = StokesVector::from(*p);
+            let dop = s.degree_of_polarization();
+            assert!(
+                (dop - 1.0).abs() < 0.01,
+                "Pure Jones state should be fully polarized, got DOP={dop}"
+            );
+        }
     }
 
     // ── Coherence tests ───────────────────────────────────────────────────
@@ -840,14 +980,14 @@ mod tests {
 
     #[test]
     fn test_airy_central_maximum() {
-        let i = airy_pattern(10e-3, 550e-9, 0.0, 1.0);
+        let i = airy_pattern(550e-9, 10e-3, 0.0, 1.0);
         assert!((i - 1.0).abs() < EPS);
     }
 
     #[test]
     fn test_airy_decreases_off_axis() {
-        let i_center = airy_pattern(10e-3, 550e-9, 0.0, 1.0);
-        let i_off = airy_pattern(10e-3, 550e-9, 1e-5, 1.0);
+        let i_center = airy_pattern(550e-9, 10e-3, 0.0, 1.0);
+        let i_off = airy_pattern(550e-9, 10e-3, 1e-5, 1.0);
         assert!(i_off < i_center);
     }
 
@@ -856,7 +996,7 @@ mod tests {
         let d = 10e-3;
         let wl = 550e-9;
         let theta_zero = airy_first_zero(wl, d);
-        let i_at_zero = airy_pattern(d, wl, theta_zero, 1.0);
+        let i_at_zero = airy_pattern(wl, d, theta_zero, 1.0);
         assert!(
             i_at_zero < 0.001,
             "Intensity at first zero should be ~0, got {i_at_zero}"
@@ -869,15 +1009,15 @@ mod tests {
         let wl = 550e-9;
         for i in 0..100 {
             let angle = i as f64 * 1e-5;
-            let intensity = airy_pattern(d, wl, angle, 1.0);
+            let intensity = airy_pattern(wl, d, angle, 1.0);
             assert!(intensity >= 0.0, "Negative intensity at angle {angle}");
         }
     }
 
     #[test]
     fn test_airy_scales_with_i0() {
-        let i1 = airy_pattern(10e-3, 550e-9, 1e-5, 1.0);
-        let i5 = airy_pattern(10e-3, 550e-9, 1e-5, 5.0);
+        let i1 = airy_pattern(550e-9, 10e-3, 1e-5, 1.0);
+        let i5 = airy_pattern(550e-9, 10e-3, 1e-5, 5.0);
         assert!((i5 / i1 - 5.0).abs() < EPS);
     }
 

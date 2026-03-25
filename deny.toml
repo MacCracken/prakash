@@ -12,21 +12,20 @@ ignore = []
 allow = [
     "MIT",
     "Apache-2.0",
-    "BSD-2-Clause",
     "BSD-3-Clause",
     "ISC",
     "Unicode-3.0",
     "GPL-3.0",
+    "GPL-3.0-only",
     "Apache-2.0 WITH LLVM-exception",
     "CDLA-Permissive-2.0",
-    "Zlib",
-    "OpenSSL",
 ]
 
 [bans]
 multiple-versions = "warn"
-wildcards = "deny"
+wildcards = "warn"
 highlight = "all"
+allow-wildcard-paths = true
 
 [sources]
 unknown-registry = "deny"

@@ -15,7 +15,10 @@ use crate::error::{PrakashError, Result};
 pub enum SurfaceShape {
     /// Spherical surface with given radius of curvature.
     /// Positive radius means center of curvature is to the right (along +z).
-    Sphere { radius: f64 },
+    Sphere {
+        /// Radius of curvature (positive = center to the right).
+        radius: f64,
+    },
     /// Flat surface (infinite radius of curvature).
     Plane,
 }

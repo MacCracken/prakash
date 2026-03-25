@@ -13,15 +13,15 @@ use super::single_slit_intensity;
 #[must_use]
 #[inline]
 pub fn fraunhofer_rect(
+    wavelength: f64,
     width: f64,
     height: f64,
-    wavelength: f64,
     angle_x: f64,
     angle_y: f64,
     i0: f64,
 ) -> f64 {
-    single_slit_intensity(width, wavelength, angle_x, 1.0)
-        * single_slit_intensity(height, wavelength, angle_y, 1.0)
+    single_slit_intensity(wavelength, width, angle_x, 1.0)
+        * single_slit_intensity(wavelength, height, angle_y, 1.0)
         * i0
 }
 
@@ -57,7 +57,7 @@ pub fn fraunhofer_1d(aperture: &[(f64, f64)], wavelength: f64, angle: f64) -> f6
 /// `aperture_radius`, `wavelength`, and `distance` in same units.
 #[must_use]
 #[inline]
-pub fn fresnel_number(aperture_radius: f64, wavelength: f64, distance: f64) -> f64 {
+pub fn fresnel_number(wavelength: f64, aperture_radius: f64, distance: f64) -> f64 {
     aperture_radius * aperture_radius / (wavelength * distance)
 }
 
@@ -178,7 +178,7 @@ pub fn fresnel_edge_intensity(u: f64) -> f64 {
 /// `wavelength` and `distance` in same units as `x`.
 #[must_use]
 #[inline]
-pub fn fresnel_parameter(x: f64, wavelength: f64, distance: f64) -> f64 {
+pub fn fresnel_parameter(wavelength: f64, x: f64, distance: f64) -> f64 {
     x * (2.0 / (wavelength * distance)).sqrt()
 }
 
@@ -245,11 +245,11 @@ pub fn ar_quarter_wave_thickness(wavelength: f64, n_coating: f64) -> f64 {
 #[must_use]
 #[inline]
 pub fn coating_reflectance(
+    wavelength: f64,
     n_incident: f64,
     n_coating: f64,
     n_substrate: f64,
     thickness: f64,
-    wavelength: f64,
 ) -> f64 {
     let delta = std::f64::consts::TAU * n_coating * thickness / wavelength;
     let (sin_d, cos_d) = delta.sin_cos();
@@ -283,10 +283,10 @@ pub fn vcoat_reflectance(n1: f64, n2: f64, n3: f64) -> f64 {
 /// `wavelength` in same units as thickness.
 #[must_use]
 pub fn multilayer_reflectance(
+    wavelength: f64,
     n_incident: f64,
     n_substrate: f64,
     layers: &[(f64, f64)],
-    wavelength: f64,
 ) -> f64 {
     trace!(
         num_layers = layers.len(),
@@ -338,23 +338,23 @@ mod tests {
 
     #[test]
     fn test_fraunhofer_rect_central_max() {
-        let i = fraunhofer_rect(1e-3, 1e-3, 550e-9, 0.0, 0.0, 1.0);
+        let i = fraunhofer_rect(550e-9, 1e-3, 1e-3, 0.0, 0.0, 1.0);
         assert!((i - 1.0).abs() < EPS);
     }
 
     #[test]
     fn test_fraunhofer_rect_decreases_off_axis() {
-        let i_center = fraunhofer_rect(1e-3, 1e-3, 550e-9, 0.0, 0.0, 1.0);
-        let i_off = fraunhofer_rect(1e-3, 1e-3, 550e-9, 0.001, 0.0, 1.0);
+        let i_center = fraunhofer_rect(550e-9, 1e-3, 1e-3, 0.0, 0.0, 1.0);
+        let i_off = fraunhofer_rect(550e-9, 1e-3, 1e-3, 0.001, 0.0, 1.0);
         assert!(i_off < i_center);
     }
 
     #[test]
     fn test_fraunhofer_rect_separable() {
         // Rectangular pattern = product of two 1D patterns
-        let ix = single_slit_intensity(1e-3, 550e-9, 0.001, 1.0);
-        let iy = single_slit_intensity(0.5e-3, 550e-9, 0.002, 1.0);
-        let i_rect = fraunhofer_rect(1e-3, 0.5e-3, 550e-9, 0.001, 0.002, 1.0);
+        let ix = single_slit_intensity(550e-9, 1e-3, 0.001, 1.0);
+        let iy = single_slit_intensity(550e-9, 0.5e-3, 0.002, 1.0);
+        let i_rect = fraunhofer_rect(550e-9, 1e-3, 0.5e-3, 0.001, 0.002, 1.0);
         assert!((i_rect - ix * iy).abs() < EPS);
     }
 
@@ -390,14 +390,14 @@ mod tests {
     #[test]
     fn test_fresnel_number_far_field() {
         // Small aperture, large distance → N_F ≪ 1 (Fraunhofer regime)
-        let nf = fresnel_number(0.1e-3, 550e-9, 1.0);
+        let nf = fresnel_number(550e-9, 0.1e-3, 1.0);
         assert!(nf < 1.0, "Should be Fraunhofer regime, N_F={nf}");
     }
 
     #[test]
     fn test_fresnel_number_near_field() {
         // Large aperture, short distance → N_F ≫ 1 (Fresnel regime)
-        let nf = fresnel_number(5e-3, 550e-9, 0.01);
+        let nf = fresnel_number(550e-9, 5e-3, 0.01);
         assert!(nf > 1.0, "Should be Fresnel regime, N_F={nf}");
     }
 
@@ -472,7 +472,7 @@ mod tests {
 
     #[test]
     fn test_fresnel_parameter() {
-        let u = fresnel_parameter(1e-3, 550e-9, 1.0);
+        let u = fresnel_parameter(550e-9, 1e-3, 1.0);
         assert!(u > 0.0);
         assert!(u.is_finite());
     }
@@ -535,7 +535,7 @@ mod tests {
         let n3 = 1.52;
         let wl = 550.0;
         let d = ar_quarter_wave_thickness(wl, n2);
-        let r_coating = coating_reflectance(n1, n2, n3, d, wl);
+        let r_coating = coating_reflectance(wl, n1, n2, n3, d);
         let r_vcoat = vcoat_reflectance(n1, n2, n3);
         assert!(
             (r_coating - r_vcoat).abs() < 0.001,
@@ -549,8 +549,8 @@ mod tests {
         let n2 = 1.38;
         let n3 = 1.52;
         let d = ar_quarter_wave_thickness(550.0, n2);
-        let r_design = coating_reflectance(1.0, n2, n3, d, 550.0);
-        let r_off = coating_reflectance(1.0, n2, n3, d, 450.0);
+        let r_design = coating_reflectance(550.0, 1.0, n2, n3, d);
+        let r_off = coating_reflectance(450.0, 1.0, n2, n3, d);
         assert!(
             (r_design - r_off).abs() > 0.001,
             "Reflectance should vary with wavelength"
@@ -563,7 +563,7 @@ mod tests {
         let n3 = 1.52;
         let d = ar_quarter_wave_thickness(550.0, n2);
         for wl_nm in (400..=700).step_by(10) {
-            let r = coating_reflectance(1.0, n2, n3, d, wl_nm as f64);
+            let r = coating_reflectance(wl_nm as f64, 1.0, n2, n3, d);
             assert!(
                 (0.0..=1.0).contains(&r),
                 "Reflectance out of range at {wl_nm}nm: {r}"
@@ -578,8 +578,8 @@ mod tests {
         let n3 = 1.52;
         let wl = 550.0;
         let d = ar_quarter_wave_thickness(wl, n2);
-        let r_single = coating_reflectance(n1, n2, n3, d, wl);
-        let r_multi = multilayer_reflectance(n1, n3, &[(n2, d)], wl);
+        let r_single = coating_reflectance(wl, n1, n2, n3, d);
+        let r_multi = multilayer_reflectance(wl, n1, n3, &[(n2, d)]);
         assert!(
             (r_single - r_multi).abs() < 0.001,
             "Single layer should match: coating={r_single}, multi={r_multi}"
@@ -589,7 +589,7 @@ mod tests {
     #[test]
     fn test_multilayer_no_layers() {
         // No coating → bare interface
-        let r = multilayer_reflectance(1.0, 1.52, &[], 550.0);
+        let r = multilayer_reflectance(550.0, 1.0, 1.52, &[]);
         let r_bare = ((1.0_f64 - 1.52) / (1.0 + 1.52)).powi(2);
         assert!(
             (r - r_bare).abs() < 0.001,
@@ -605,7 +605,7 @@ mod tests {
         let n_zro2 = 2.1;
         let d1 = ar_quarter_wave_thickness(wl, n_zro2);
         let d2 = ar_quarter_wave_thickness(wl, n_mgf2);
-        let r = multilayer_reflectance(1.0, 1.52, &[(n_mgf2, d2), (n_zro2, d1)], wl);
+        let r = multilayer_reflectance(wl, 1.0, 1.52, &[(n_mgf2, d2), (n_zro2, d1)]);
         assert!(
             (0.0..=1.0).contains(&r),
             "Two-layer reflectance should be in [0,1], got {r}"
@@ -618,7 +618,7 @@ mod tests {
         let d = ar_quarter_wave_thickness(wl, 1.38);
         let layers = [(1.38, d), (2.1, ar_quarter_wave_thickness(wl, 2.1))];
         for wl_nm in (400..=700).step_by(10) {
-            let r = multilayer_reflectance(1.0, 1.52, &layers, wl_nm as f64);
+            let r = multilayer_reflectance(wl_nm as f64, 1.0, 1.52, &layers);
             assert!(
                 (0.0..=1.0 + EPS).contains(&r),
                 "Reflectance out of range at {wl_nm}nm: {r}"

@@ -401,9 +401,12 @@ pub fn extinction_coefficient(absorption: f64, scattering: f64) -> f64 {
 
 /// Transmittance through participating media (Beer-Lambert).
 ///
-/// T = e^(-σ_t · d)
+/// T = e^(−σ_t · d)
 ///
 /// `sigma_t` = extinction coefficient, `distance` in consistent units.
+///
+/// This is the transmittance factor from the Beer-Lambert law. Equivalent to
+/// [`ray::beer_lambert`](crate::ray::beer_lambert)`(1.0, sigma_t, distance)`.
 #[must_use]
 #[inline]
 pub fn volume_transmittance(sigma_t: f64, distance: f64) -> f64 {
