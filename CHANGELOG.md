@@ -47,15 +47,25 @@
 - Spot diagram: traces ray bundle through optical system to image plane, computes RMS spot radius
 - Optical path length/difference (OPD): per-ray OPL through system, OPD relative to chief ray, full fan OPD computation
 
-### Changed — Code Quality Audit
+### Changed — Code Quality & Performance Audit
 - `#[must_use]` on all 190+ public pure functions across all modules
 - `#[non_exhaustive]` on `SurfaceShape` and `LensType` enums (were missing)
-- `tracing::trace!` instrumentation on 10 key entry-point functions
+- `tracing::trace!` instrumentation on key entry-point functions
 - Error variants `DivisionByZero` and `InvalidParameter`: `String` → `Cow<'static, str>` (zero-alloc for static messages)
 - `cook_torrance`: added explicit `h_dot_v` parameter (was using `n_dot_h` approximation)
-- Performance: precomputed Rayleigh prefactor constant, lifted air-mass out of per-wavelength loops
-- Test suite: 487 → 528 tests
-- Benchmarks: 137 → 150 functions
+- `MuellerMatrix`: added `Serialize`/`Deserialize` derives
+- `Polarization::circular_right/left`: now `const fn` using `FRAC_1_SQRT_2`
+- Performance: `snell_3d` inlined refraction (eliminated duplicate trig), `fresnel_unpolarized` cos(asin(x))→sqrt, `sin_cos()` in 5 functions, `fresnel_integral_cs` combined function, `lambert_diffuse` div→mul, precomputed Rayleigh prefactor, illuminant data as `pub const` arrays
+- Canonical `RGB_WAVELENGTHS_NM`/`RGB_WAVELENGTHS_M` constants in spectral module (650/550/450nm)
+- Test suite: 487 → 608 tests
+- Benchmarks: 137 → 162 functions
+
+### Quality
+- 608 tests (598 unit + 10 integration), 162 criterion benchmarks
+- Zero `unwrap()`/`panic!()` in library code
+- `#[must_use]` on all 190+ pure functions, `#[non_exhaustive]` on all public enums
+- `tracing` instrumentation on key entry points
+- Full P(-1) scaffold hardening + development loop audit
 
 ## [0.23.3] - 2026-03-23
 

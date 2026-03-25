@@ -11,7 +11,7 @@ readme = "README.md"
 documentation = "https://docs.rs/prakash"
 keywords = ["optics", "light", "ray-tracing", "pbr", "physics"]
 categories = ["science", "rendering", "simulation"]
-exclude = [".claude/", ".github/", "docs/", "scripts/"]
+exclude = [".claude/", ".github/", "docs/", "scripts/", "bench-history.csv", "benchmarks.md"]
 
 [features]
 default = ["ray", "wave", "spectral", "lens"]

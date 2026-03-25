@@ -154,7 +154,7 @@ Prakash does NOT own:
 - [x] Example: physically accurate rainbow simulation
 - [x] Example: camera lens simulator (multi-element trace + spot diagram)
 - [x] Example: PBR material preview (Cook-Torrance + clearcoat + iridescence)
-- [ ] Physics explanations in module-level documentation (deferred to V1.0)
+- [x] Module-level documentation (covered in V1.0 doc coverage pass)
 
 ## V1.0 — Stable Release (done)
 

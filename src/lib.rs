@@ -2,18 +2,18 @@
 //!
 //! Sanskrit: प्रकाश (prakash) — light, illumination, to make visible
 //!
-//! Provides ray optics, wave optics, spectral math, lens geometry, and
-//! physically-based rendering primitives. Built on [hisab](https://crates.io/crates/hisab)
-//! for math foundations.
+//! Provides ray optics, wave optics, spectral math, lens geometry,
+//! physically-based rendering, and atmospheric optics. Built on
+//! [hisab](https://crates.io/crates/hisab) for math foundations.
 //!
 //! # Modules
 //!
-//! - [`ray`] — Geometric optics: reflection, refraction, Snell's law, Fresnel, total internal reflection
-//! - [`wave`] — Wave optics: interference, diffraction, polarization
-//! - [`spectral`] — Wavelength ↔ RGB, blackbody radiation, color temperature, spectral power
-//! - [`lens`] — Lens/mirror geometry: focal length, magnification, thin lens, aberrations
-//! - [`pbr`] — Physically-based rendering: BRDF, Cook-Torrance, Fresnel-Schlick
-//! - [`atmosphere`] — Atmospheric optics: Rayleigh/Mie scattering, sky color, air mass
+//! - [`ray`] — Geometric optics: reflection, refraction, Snell's law, Fresnel, dispersion, sequential/recursive ray tracing, ray fans, spot diagrams, OPD
+//! - [`wave`] — Wave optics: interference, diffraction, polarization (Jones/Stokes/Mueller), coherence, Fabry-Pérot, anti-reflection coatings, 2D patterns, PSF
+//! - [`spectral`] — Wavelength ↔ RGB, blackbody radiation, CIE 1931, SPD, illuminants, CRI, color temperature
+//! - [`lens`] — Lens/mirror geometry: thin/thick lens, aberrations (Seidel), MTF, DoF, Petzval, multi-element systems
+//! - [`pbr`] — PBR shading: Cook-Torrance, GGX, sheen, clearcoat, SSS, iridescence, volumetric, importance sampling, environment maps
+//! - [`atmosphere`] — Atmospheric optics: Rayleigh/Mie scattering, sky color, air mass, optical depth, sunset model
 //! - [`error`] — Error types
 
 pub mod error;
