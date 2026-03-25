@@ -12,157 +12,59 @@ Prakash does NOT own:
 - **Math primitives** → hisab (vectors, geometry, calculus)
 - **Color science beyond spectral** → ranga (ICC profiles, gamut mapping)
 
-## V0.1 — Foundation (done)
+## Completed
 
-### ray
-- [x] 12 material refractive indices (vacuum, air, water, glass, diamond, etc.)
-- [x] Snell's law with total internal reflection detection
-- [x] Critical angle calculation
-- [x] Reflection (2D and 3D vector reflection)
-- [x] Fresnel equations (s-polarized, p-polarized, unpolarized, normal incidence)
-- [x] Brewster's angle
-- [x] Beer-Lambert attenuation
+| Phase | Release | Summary |
+|-------|---------|---------|
+| V0.1 | Foundation | Ray optics (Snell, Fresnel, Beer-Lambert), wave basics (interference, diffraction, polarization), spectral (Planck, Wien, CIE), lens (thin lens, DoF), PBR (Cook-Torrance, GGX, Lambert) |
+| V0.2 | Optical Systems | 3D refraction, sequential ray trace, Cauchy/Sellmeier dispersion, thick lens, cardinal points, Seidel aberrations, MTF, CIE 1931, SPD, illuminants, CRI |
+| V0.3 | Wave Optics Expansion | Coherence, Airy/Bessel, Fabry-Pérot, Stokes/Mueller, birefringence, Fraunhofer/Fresnel diffraction, Huygens-Fresnel, AR coatings |
+| V0.4 | Advanced PBR | Anisotropic GGX, sheen, clearcoat, SSS, iridescence, volumetric scattering, importance sampling, environment maps |
+| V0.25 | Atmospheric Optics | Rayleigh/Mie scattering, sky color, air mass (Kasten & Young), optical depth, sunset gradient |
+| V0.26 | Simulation Primitives | Recursive ray tracer, ray fans (meridional/sagittal/bundle), spot diagrams + RMS, OPD |
+| V0.27 | Optical Bench | Paraxial y-nu trace, Prescription builder, system cardinal point finder, common presets (biconvex, planoconvex, doublet) |
+| V0.28 | Pattern Computation | 2D FFT diffraction, N-source interference, spectrum strips, PSF from wavefront |
+| V0.29 | Examples & Documentation | Rainbow simulation, camera lens simulator, PBR material preview, module docs |
+| V1.0 | Stable Release | API review (naming, params), `#[must_use]`/`#[non_exhaustive]` audit, feature gate audit, doc coverage, README, architecture docs |
 
-### wave
-- [x] Two-wave interference intensity
-- [x] Constructive/destructive interference detection
-- [x] Path difference ↔ phase difference
-- [x] Thin film interference
-- [x] Single-slit diffraction (sinc² envelope)
-- [x] Double-slit diffraction (envelope × interference)
-- [x] Diffraction grating maxima (multiple orders)
-- [x] Polarization state (Jones vector)
-- [x] Malus's law
+## Engineering Backlog
 
-### spectral
-- [x] Wavelength → RGB (CIE 1931 piecewise approximation)
-- [x] Planck's blackbody radiation
-- [x] Wien's displacement law (peak wavelength)
-- [x] Color temperature → RGB (Tanner Helland algorithm)
-- [x] Wavelength ↔ frequency conversion
-- [x] Photon energy (Joules and eV)
-- [x] Physical constants (c, h, k)
+### P1 — Post-V1.0 Audit
 
-### lens
-- [x] Thin lens equation (image distance from focal + object distance)
-- [x] Magnification
-- [x] Lensmaker's equation (focal from radii + refractive index)
-- [x] Optical power (diopters)
-- [x] Mirror focal length and image distance
-- [x] Combined focal length (two lenses in contact)
-- [x] Lens classification (converging/diverging)
-- [x] Depth of field
+- [ ] Consolidate duplicate `Polarization` (Jones) and `StokesVector` — add `From<Polarization> for StokesVector` conversion
+- [ ] Consolidate `diffraction_limit` (lens) and `rayleigh_criterion` (wave) — identical implementations in two modules
+- [ ] Consolidate `beer_lambert` (ray) and `volume_transmittance` (pbr) — document relationship or unify
+- [ ] Unit-suffix audit: establish convention for wavelength params (`_nm` vs `_m` vs `_um`) and enforce across all modules
+- [ ] `Spd` type: consider `Cow<'_, [f64]>` or generic over storage to avoid Vec allocation in illuminant functions
+- [ ] Evaluate `#![warn(missing_docs)]` in lib.rs for compile-time doc enforcement
+- [ ] Wavefront parameter ordering: move wavelength to consistent position across all wave/diffraction functions
 
-### pbr
-- [x] Fresnel-Schlick approximation (scalar and RGB)
-- [x] GGX/Trowbridge-Reitz normal distribution function
-- [x] Beckmann normal distribution function
-- [x] Schlick-GGX geometry function
-- [x] Smith's geometry function
-- [x] Cook-Torrance specular BRDF
-- [x] Lambert diffuse BRDF (scalar and RGB)
-- [x] IOR → F0 conversion
+### P1 — Consumer Integration Gaps
 
-## V0.2 — Optical Systems (done)
+- [ ] hisab geometry bridge: adapter types between prakash `TraceRay`/`[f64;3]` and hisab `Ray`/`Vec3` (f32↔f64)
+- [ ] kiran: verify Cook-Torrance `h_dot_v` parameter migration (breaking change from pre-V1.0)
+- [ ] ranga: chromatic aberration filter needs `SellmeierCoefficients` — verify import path works
+- [ ] joshua: atmospheric scattering API review with simulation team — does `sunset_gradient` cover their use cases?
 
-### ray
-- [x] Snell's law for 3D vectors (not just angles)
-- [x] Ray tracing through multiple surfaces (sequential ray trace)
-- [x] Dispersion: wavelength-dependent refractive index (Cauchy/Sellmeier equations)
-- [x] Prism dispersion (angular spread by wavelength)
-- [x] Abbe number calculation
-- [x] Sellmeier presets: BK7, SF11, fused silica, sapphire, water, diamond
+### P2 — Research & Future Features
 
-### lens
-- [x] Thick lens equation
-- [x] Cardinal points (FFD, BFD, principal planes)
-- [x] Lens aberrations: spherical, chromatic, coma, astigmatism, distortion, field curvature (Seidel coefficients)
-- [x] Multi-element lens system (separated lenses, system magnification)
-- [x] Aperture, f-number, numerical aperture
-- [x] MTF (Modulation Transfer Function) calculation
-- [x] Diffraction limit, Airy disk radius
-- [x] Field of view (horizontal and diagonal)
-- [x] Petzval sum and field curvature
+- [ ] Polarization ray tracing: track polarization state through sequential trace (Jones matrix per surface)
+- [ ] Gradient-index (GRIN) optics: curved ray paths through variable-n media
+- [ ] Zernike polynomials for wavefront decomposition (feeds into PSF/MTF analysis)
+- [ ] Diffractive optical elements (DOE): phase gratings, holographic elements
+- [ ] Fluorescence: Stokes shift, excitation/emission spectra
+- [ ] Non-linear optics: second-harmonic generation, Kerr effect (if joshua needs it)
+- [ ] GPU-friendly API: `f32` variants of hot-path functions for shader-side computation
+- [ ] Full Mie theory: exact solution for spheres (currently using Cornette-Shanks approximation)
+- [ ] CIE 2015 10° observer (supplement to existing 1931 2°)
 
-### spectral
-- [x] CIE 1931 2° standard observer (81-entry table, interpolated)
-- [x] XYZ ↔ sRGB conversion matrix (D65 white point)
-- [x] sRGB gamma correction (IEC 61966-2-1)
-- [x] XYZ ↔ xyY chromaticity
-- [x] Spectral power distribution (SPD) type with integration
-- [x] Standard illuminants (D50, D65, A, F2, F11)
-- [x] Color rendering index (CRI Ra) calculation
-- [x] Correlated color temperature from chromaticity (McCamy)
+### P3 — Infrastructure
 
-## V0.3 — Wave Optics Expansion (done)
-
-### wave
-- [x] Coherence length and time (temporal + spatial)
-- [x] Circular aperture diffraction (Bessel J₁, Airy pattern, Rayleigh criterion)
-- [x] Fabry-Pérot interferometer (transmittance, finesse, FSR, resolving power)
-- [x] Stokes parameters (7 constructors, degree of polarization, ellipticity, orientation)
-- [x] Mueller matrices (polarizers, wave plates, retarder, rotation, chain application)
-- [x] Birefringence (calcite, quartz, rutile, mica; retardation, wave plate thickness)
-- [x] Fraunhofer diffraction (rectangular aperture, 1D arbitrary aperture)
-- [x] Fresnel diffraction (Fresnel integrals C/S, straight-edge, Fresnel number)
-- [x] Huygens-Fresnel diffraction integral (1D numerical)
-- [x] Anti-reflection coatings (quarter-wave, V-coat, multi-layer transfer matrix)
-
-## V0.4 — Advanced PBR (done)
-
-### pbr
-- [x] Anisotropic GGX NDF and Smith geometry
-- [x] Sheen: Charlie distribution + Ashikhmin velvet
-- [x] Clearcoat: distribution, Fresnel, geometry, energy-conserving blend
-- [x] Subsurface scattering: Burley + Gaussian profiles, SSS diffuse, transmittance
-- [x] Iridescence: thin-film Fresnel (Airy formula), RGB color shift
-- [x] Volumetric scattering: Henyey-Greenstein, Rayleigh, isotropic phase; extinction, transmittance, albedo, in-scattering
-- [x] Importance sampling: GGX half-vector + PDF, cosine hemisphere + PDF
-- [x] Environment map: split-sum scale/bias, mip LOD, BRDF LUT integration (Hammersley)
-
-## V0.25 — Atmospheric Optics (done)
-
-- [x] Rayleigh scattering coefficient (λ⁻⁴ wavelength dependence)
-- [x] Rayleigh sky color at arbitrary sun angle
-- [x] Mie scattering for aerosols (extinction + phase function)
-- [x] Optical depth and air mass calculation
-- [x] Sunset/sunrise color gradient model
-
-## V0.26 — Simulation Primitives (done)
-
-- [x] Recursive ray tracer (reflect/refract through optical surfaces)
-- [x] Ray fan generator (meridional, sagittal, radial bundle)
-- [x] Spot diagram computation (ray bundle through optical system + RMS radius)
-- [x] Optical path difference (OPD) calculation (single ray, fan)
-
-## V0.27 — Optical Bench (done)
-
-- [x] Optical system builder (Prescription with builder API + common presets)
-- [x] System cardinal point finder (trace marginal + chief rays, EFL/BFD/FFD/power)
-- [x] Paraxial ray trace (y-nu method: refract, transfer, full trace)
-- [x] System prescription format (serialize/deserialize via serde)
-
-## V0.28 — Pattern Computation (done)
-
-- [x] 2D diffraction pattern from arbitrary aperture (FFT-based, radix-2 Cooley-Tukey)
-- [x] Interference pattern generator (N-source, 2D grid, complex amplitude summation)
-- [x] SPD → RGB strip visualization data (full spectrum + custom range)
-- [x] PSF (point spread function) from wavefront (pupil function + OPD → FFT → |E|²)
-
-## V0.29 — Examples & Documentation (done)
-
-- [x] Example: physically accurate rainbow simulation
-- [x] Example: camera lens simulator (multi-element trace + spot diagram)
-- [x] Example: PBR material preview (Cook-Torrance + clearcoat + iridescence)
-- [x] Module-level documentation (covered in V1.0 doc coverage pass)
-
-## V1.0 — Stable Release (done)
-
-- [x] API review: naming consistency, parameter ordering
-- [x] `#[must_use]` on pure functions and accessors
-- [x] Feature gate audit (minimize compile time for partial usage)
-- [x] Documentation coverage check (all public items documented)
-- [x] README update with full feature matrix
+- [ ] `cargo semver-checks` in CI — catch breaking changes automatically
+- [ ] Property-based testing (proptest) for numerical functions — catch edge cases
+- [ ] Benchmark regression CI gate — fail on >10% regression
+- [ ] Doc tests for key functions (at least one per module)
+- [ ] Coverage gate in CI (target: 85%+)
 
 ## Consumers
 

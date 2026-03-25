@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.0] - 2026-03-24
 
 ### Added — atmosphere V0.25: Atmospheric Optics
 - Rayleigh scattering: cross-section (λ⁻⁴), sea-level coefficient, altitude-dependent coefficient, phase function
@@ -101,7 +101,7 @@
 - Performance: SPD→XYZ 80% faster (aligned fast path), Fresnel edge 15%, CRI 41%, numerous #[inline] additions
 - Bug fixes: Rgb::to_u8 rounding, depth_of_field hyperfocal, shape_factor div-by-zero, conjugate_factor div-by-zero
 
-## [0.23.3] - 2026-03-23
+## [0.22.3] - 2026-03-23
 
 ### Added — ray V0.2: Optical Systems
 - 3D vector refraction (`refract_3d`) and 3D Snell's law with Fresnel reflectance (`snell_3d`)
