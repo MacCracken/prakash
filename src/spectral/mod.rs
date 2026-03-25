@@ -89,6 +89,12 @@ impl Rgb {
 ///
 /// Uses a piecewise linear approximation of the CIE 1931 color matching functions.
 /// Only valid for visible range (380–780 nm).
+///
+/// ```
+/// # use prakash::spectral::wavelength_to_rgb;
+/// let green = wavelength_to_rgb(550.0).unwrap();
+/// assert!(green.g > green.r); // 550nm is green
+/// ```
 #[must_use = "returns the computed RGB color"]
 #[inline]
 pub fn wavelength_to_rgb(wavelength_nm: f64) -> Result<Rgb> {
@@ -229,6 +235,10 @@ pub fn photon_energy_ev(wavelength_nm: f64) -> f64 {
 
 mod cie;
 pub use cie::*;
+
+/// Photometry — radiometric-to-photometric conversion via V(λ).
+pub mod photometry;
+pub use photometry::*;
 
 #[cfg(test)]
 mod tests {

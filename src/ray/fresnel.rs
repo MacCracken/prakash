@@ -85,6 +85,12 @@ fn fresnel_unpolarized_impl(n1: f64, n2: f64, incident_angle: f64) -> Result<f64
 /// Simplified: R = ((n1 - n2) / (n1 + n2))²
 ///
 /// Delegates to [`bijli::wave::reflectance_normal`] when the `bijli-backend` feature is enabled.
+///
+/// ```
+/// # use prakash::ray::fresnel_normal;
+/// let r = fresnel_normal(1.0, 1.52); // air→glass ≈ 4%
+/// assert!((r - 0.04).abs() < 0.01);
+/// ```
 #[must_use]
 #[inline]
 pub fn fresnel_normal(n1: f64, n2: f64) -> f64 {

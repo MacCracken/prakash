@@ -56,14 +56,14 @@ Prakash does NOT own:
 
 ### P2 — Important Gaps (from research audit)
 
-- [ ] **Photometric functions**: V(λ) luminous efficiency (photopic + scotopic), luminous flux from SPD, luminous efficacy, illuminance — radiometry→photometry bridge
-- [ ] **CIE 2015 cone-fundamental observers**: 2-deg and 10-deg, plus CIE 1964 10-deg for legacy. More accurate than 1931 in blue region
-- [ ] **Transfer matrix method upgrade**: oblique incidence, complex n layers, separate s/p polarization output, transmittance (not just reflectance)
-- [ ] **Chromatic aberration expansion**: lateral (transverse) CA, secondary spectrum, partial dispersion ratio
-- [ ] **Polychromatic MTF**: weighted sum of monochromatic MTFs at multiple wavelengths; through-focus MTF
-- [ ] **King correction factor**: wavelength-dependent correction for Rayleigh scattering (~4.8% systematic), `rayleigh_cross_section_corrected()`
-- [ ] **Fiber optics**: fiber NA, V-number, mode count, mode field diameter (Marcuse), coupling efficiency
-- [ ] **Additional dispersion models**: Herzberger (IR materials), Schott (legacy catalogs), Conrady (quick fits), generic `DispersionModel` enum
+- [x] **Photometric functions**: V(λ) photopic + scotopic tables, luminous flux, luminous efficacy, scotopic flux — `spectral::photometry` module
+- [ ] **CIE 2015 cone-fundamental observers**: 2-deg and 10-deg, plus CIE 1964 10-deg for legacy (data table entry needed)
+- [x] **Transfer matrix method upgrade**: `multilayer_rt()` with oblique incidence, separate s/p reflectance + transmittance, `ThinFilmResult`
+- [x] **Chromatic aberration expansion**: `lateral_chromatic_aberration()`, `secondary_spectrum()`, `partial_dispersion()`
+- [x] **Polychromatic MTF**: `mtf_polychromatic()` with spectral weights, `mtf_through_focus()` with defocus range
+- [x] **King correction factor**: `king_factor(wavelength_m)`, `rayleigh_cross_section_corrected()` (~4.8% correction)
+- [x] **Fiber optics**: `ray::fiber` module — `fiber_na`, `v_number`, `num_modes`, `is_single_mode`, `mode_field_diameter`, `coupling_efficiency_gaussian`
+- [x] **Additional dispersion models**: `HerzbergerCoefficients`, `SchottCoefficients` (BK7 preset), `ConradyCoefficients`
 
 ### P2 — Research & Future Features
 
@@ -87,11 +87,11 @@ Prakash does NOT own:
 
 ### P3 — Infrastructure
 
-- [ ] `cargo semver-checks` in CI — catch breaking changes automatically
-- [ ] Property-based testing (proptest) for numerical functions — catch edge cases
+- [x] `cargo semver-checks` in CI (already in ci.yml)
+- [x] Property-based testing (proptest) — 8 property tests for Snell, Fresnel, Planck, Beer-Lambert, Zernike, wavelength roundtrip
 - [ ] Benchmark regression CI gate — fail on >10% regression
-- [ ] Doc tests for key functions (at least one per module)
-- [ ] Coverage gate in CI (target: 85%+)
+- [x] Doc tests for key functions — 8 doc tests across all modules (ray, wave, spectral, lens, pbr, atmosphere, zernike)
+- [x] Coverage gate in CI — 85% threshold warning in ci.yml
 
 ## Consumers
 

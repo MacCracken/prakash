@@ -13,6 +13,14 @@ use std::f64::consts::{FRAC_1_PI, PI};
 ///
 /// `f0` = reflectance at normal incidence (e.g. 0.04 for dielectrics, 0.95 for metals).
 /// `cos_theta` = dot(view, half-vector), clamped to [0, 1].
+///
+/// ```
+/// # use prakash::pbr::fresnel_schlick;
+/// let f = fresnel_schlick(0.04, 1.0); // normal incidence
+/// assert!((f - 0.04).abs() < 1e-6);
+/// let f_grazing = fresnel_schlick(0.04, 0.0); // grazing angle → 1.0
+/// assert!((f_grazing - 1.0).abs() < 1e-6);
+/// ```
 #[must_use]
 #[inline]
 pub fn fresnel_schlick(f0: f64, cos_theta: f64) -> f64 {

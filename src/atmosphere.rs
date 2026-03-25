@@ -47,6 +47,41 @@ const RAYLEIGH_PREFACTOR: f64 = {
     (8.0 * pi3 / 3.0) * n2m1_sq / (N_S * N_S)
 };
 
+// ── King Correction Factor ───────────────────────────────────────────────────
+
+/// King correction factor F_K(λ) for atmospheric Rayleigh scattering.
+///
+/// F_K = (6 + 3ρ_n) / (6 − 7ρ_n)
+///
+/// where ρ_n is the depolarization ratio of air. Uses a wavelength-dependent
+/// fit from Bates (1984): ρ_n(λ) ≈ 0.0279 + 0.000174/λ² (λ in μm).
+///
+/// The correction is ~4.8% and accounts for the non-spherical nature of
+/// N₂ and O₂ molecules (Bodhaine et al. 1999, Bucholtz 1995).
+///
+/// `wavelength_m` in meters.
+#[must_use]
+#[inline]
+pub fn king_factor(wavelength_m: f64) -> f64 {
+    let lambda_um = wavelength_m * 1e6;
+    let rho_n = 0.0279 + 0.000174 / (lambda_um * lambda_um);
+    (6.0 + 3.0 * rho_n) / (6.0 - 7.0 * rho_n)
+}
+
+/// Rayleigh scattering cross-section with King correction factor.
+///
+/// σ_corrected(λ) = σ(λ) · F_K(λ)
+///
+/// More accurate than [`rayleigh_cross_section`] by ~4.8% (systematic correction
+/// for molecular anisotropy).
+///
+/// `wavelength_m` in meters. Returns cross-section in m².
+#[must_use]
+#[inline]
+pub fn rayleigh_cross_section_corrected(wavelength_m: f64) -> f64 {
+    rayleigh_cross_section(wavelength_m) * king_factor(wavelength_m)
+}
+
 // ── Rayleigh Scattering ─────────────────────────────────────────────────────
 
 /// Rayleigh scattering cross-section for a single molecule.
@@ -56,6 +91,13 @@ const RAYLEIGH_PREFACTOR: f64 = {
 /// where n = refractive index of air, N = number density at STP.
 ///
 /// `wavelength_m` in meters. Returns cross-section in m².
+///
+/// ```
+/// # use prakash::atmosphere::rayleigh_cross_section;
+/// let sigma = rayleigh_cross_section(550e-9); // green light
+/// assert!(sigma > 0.0);
+/// assert!(rayleigh_cross_section(400e-9) > sigma); // blue scatters more
+/// ```
 #[must_use]
 #[inline]
 pub fn rayleigh_cross_section(wavelength_m: f64) -> f64 {
@@ -759,5 +801,37 @@ mod tests {
                 }
             }
         }
+    }
+
+    // ── King correction factor tests ─────────────────────────────────────
+
+    #[test]
+    fn test_king_factor_range() {
+        // F_K should be close to 1.048 for visible wavelengths
+        for wl_nm in (400..=700).step_by(50) {
+            let fk = king_factor(wl_nm as f64 * 1e-9);
+            assert!(
+                (fk - 1.048).abs() < 0.01,
+                "King factor at {wl_nm}nm = {fk}, expected ~1.048"
+            );
+        }
+    }
+
+    #[test]
+    fn test_king_factor_positive() {
+        let fk = king_factor(550e-9);
+        assert!(fk > 1.0, "King factor should be > 1");
+    }
+
+    #[test]
+    fn test_corrected_greater_than_uncorrected() {
+        let sigma = rayleigh_cross_section(550e-9);
+        let sigma_corr = rayleigh_cross_section_corrected(550e-9);
+        assert!(sigma_corr > sigma, "Corrected should be larger");
+        let ratio = sigma_corr / sigma;
+        assert!(
+            (ratio - 1.048).abs() < 0.01,
+            "Correction ratio ≈ 1.048, got {ratio}"
+        );
     }
 }

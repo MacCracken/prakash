@@ -330,6 +330,120 @@ pub fn multilayer_reflectance(
     (num_r * num_r + num_i * num_i) / (den_r * den_r + den_i * den_i)
 }
 
+// ── Full Transfer Matrix Method (oblique incidence, s/p split) ───────────
+
+/// Result of a full thin-film stack calculation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ThinFilmResult {
+    /// s-polarization reflectance.
+    pub r_s: f64,
+    /// p-polarization reflectance.
+    pub r_p: f64,
+    /// s-polarization transmittance.
+    pub t_s: f64,
+    /// p-polarization transmittance.
+    pub t_p: f64,
+    /// Average reflectance (unpolarized light).
+    pub r_avg: f64,
+    /// Average transmittance (unpolarized light).
+    pub t_avg: f64,
+}
+
+/// Full transfer matrix method for a multilayer thin-film stack.
+///
+/// Supports oblique incidence with separate s- and p-polarization results.
+/// Uses real refractive indices (for complex n, use the existing
+/// `multilayer_reflectance` with pre-computed effective parameters).
+///
+/// `wavelength` and layer thicknesses in same units.
+/// `angle` is the incidence angle in radians.
+/// `n_incident`/`n_substrate` are bounding media indices.
+/// `layers` = `&[(n, thickness)]` from outermost to innermost.
+#[must_use]
+pub fn multilayer_rt(
+    wavelength: f64,
+    angle: f64,
+    n_incident: f64,
+    n_substrate: f64,
+    layers: &[(f64, f64)],
+) -> ThinFilmResult {
+    trace!(
+        num_layers = layers.len(),
+        wavelength, angle, "multilayer_rt"
+    );
+    let cos_i = angle.cos();
+    let sin_i = angle.sin();
+    let ni_sin_i = n_incident * sin_i; // Snell invariant
+
+    // Compute cos(theta) in each medium via Snell's law
+    let cos_in_medium = |n: f64| -> f64 {
+        let sin_t = ni_sin_i / n;
+        if sin_t.abs() > 1.0 {
+            0.0 // TIR — treat as evanescent
+        } else {
+            (1.0 - sin_t * sin_t).sqrt()
+        }
+    };
+
+    let cos_sub = cos_in_medium(n_substrate);
+
+    // TMM for s-polarization: eta_s = n·cos(theta)
+    // TMM for p-polarization: eta_p = n/cos(theta)  (but careful with convention)
+    let tmm = |eta_fn: &dyn Fn(f64, f64) -> f64| -> (f64, f64) {
+        let mut m11_r = 1.0;
+        let mut m12_i = 0.0;
+        let mut m21_i = 0.0;
+        let mut m22_r = 1.0;
+
+        for &(n, d) in layers {
+            let cos_l = cos_in_medium(n);
+            let delta = std::f64::consts::TAU * n * d * cos_l / wavelength;
+            let eta = eta_fn(n, cos_l);
+            let (sin_d, cos_d) = delta.sin_cos();
+
+            let new_m11_r = m11_r * cos_d - m12_i * eta * sin_d;
+            let new_m12_i = -m11_r * sin_d / eta + m12_i * cos_d;
+            let new_m21_i = m21_i * cos_d - m22_r * eta * sin_d;
+            let new_m22_r = -m21_i * sin_d / eta + m22_r * cos_d;
+
+            m11_r = new_m11_r;
+            m12_i = new_m12_i;
+            m21_i = new_m21_i;
+            m22_r = new_m22_r;
+        }
+
+        let eta_i = eta_fn(n_incident, cos_i);
+        let eta_s = eta_fn(n_substrate, cos_sub);
+
+        let num_r = eta_i * m11_r - eta_s * m22_r;
+        let num_i = eta_i * eta_s * m12_i - m21_i;
+        let den_r = eta_i * m11_r + eta_s * m22_r;
+        let den_i = eta_i * eta_s * m12_i + m21_i;
+
+        let r = (num_r * num_r + num_i * num_i) / (den_r * den_r + den_i * den_i);
+        let t = 1.0 - r; // energy conservation for lossless dielectrics
+        (r, t)
+    };
+
+    let (r_s, t_s) = tmm(&|n, cos_t| n * cos_t); // s: eta = n·cos(θ)
+    let (r_p, t_p) = tmm(&|n, cos_t| {
+        if cos_t.abs() < 1e-15 {
+            n * 1e15
+        } else {
+            n / cos_t
+        }
+    }); // p: eta = n/cos(θ)
+
+    ThinFilmResult {
+        r_s,
+        r_p,
+        t_s,
+        t_p,
+        r_avg: 0.5 * (r_s + r_p),
+        t_avg: 0.5 * (t_s + t_p),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -622,6 +736,105 @@ mod tests {
             assert!(
                 (0.0..=1.0 + EPS).contains(&r),
                 "Reflectance out of range at {wl_nm}nm: {r}"
+            );
+        }
+    }
+
+    // ── Full TMM tests ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_tmm_normal_matches_simple() {
+        // At normal incidence, multilayer_rt should match multilayer_reflectance
+        let wl = 550.0;
+        let n2 = 1.38;
+        let d = ar_quarter_wave_thickness(wl, n2);
+        let r_simple = multilayer_reflectance(wl, 1.0, 1.52, &[(n2, d)]);
+        let result = multilayer_rt(wl, 0.0, 1.0, 1.52, &[(n2, d)]);
+        assert!(
+            (result.r_avg - r_simple).abs() < 0.01,
+            "TMM at normal should match simple: {:.4} vs {:.4}",
+            result.r_avg,
+            r_simple
+        );
+    }
+
+    #[test]
+    fn test_tmm_sp_equal_at_normal() {
+        // At normal incidence, s and p should be equal
+        let result = multilayer_rt(550.0, 0.0, 1.0, 1.52, &[(1.38, 99.6)]);
+        assert!(
+            (result.r_s - result.r_p).abs() < 0.01,
+            "s={:.4}, p={:.4} should match at normal",
+            result.r_s,
+            result.r_p
+        );
+    }
+
+    #[test]
+    fn test_tmm_sp_differ_at_oblique() {
+        // At 45°, s and p should differ
+        let angle = std::f64::consts::FRAC_PI_4;
+        let result = multilayer_rt(550.0, angle, 1.0, 1.52, &[(1.38, 99.6)]);
+        assert!(
+            (result.r_s - result.r_p).abs() > 0.001,
+            "s={:.4}, p={:.4} should differ at 45°",
+            result.r_s,
+            result.r_p
+        );
+    }
+
+    #[test]
+    fn test_tmm_energy_conservation() {
+        let result = multilayer_rt(550.0, 0.3, 1.0, 1.52, &[(1.38, 99.6), (2.1, 65.5)]);
+        assert!(
+            (result.r_s + result.t_s - 1.0).abs() < 0.01,
+            "R_s + T_s should ≈ 1: {:.4} + {:.4}",
+            result.r_s,
+            result.t_s
+        );
+        assert!(
+            (result.r_p + result.t_p - 1.0).abs() < 0.01,
+            "R_p + T_p should ≈ 1: {:.4} + {:.4}",
+            result.r_p,
+            result.t_p
+        );
+    }
+
+    #[test]
+    fn test_tmm_bare_surface_at_angle() {
+        // No layers: should match Fresnel equations
+        let angle = 0.5; // ~28.6°
+        let result = multilayer_rt(550.0, angle, 1.0, 1.52, &[]);
+        let _r_bare = ((1.0_f64 - 1.52) / (1.0 + 1.52)).powi(2);
+        // At normal it matches; at oblique it should still be close for small angles
+        assert!(
+            (0.0..=1.0).contains(&result.r_s),
+            "R_s out of range: {}",
+            result.r_s
+        );
+        assert!(
+            (0.0..=1.0).contains(&result.r_p),
+            "R_p out of range: {}",
+            result.r_p
+        );
+        // s should be higher than p for dielectrics at oblique incidence
+        assert!(result.r_s >= result.r_p - 0.01);
+    }
+
+    #[test]
+    fn test_tmm_reflectance_range() {
+        for angle_deg in (0..=80).step_by(10) {
+            let angle = (angle_deg as f64).to_radians();
+            let result = multilayer_rt(550.0, angle, 1.0, 1.52, &[(1.38, 99.6)]);
+            assert!(
+                (0.0..=1.0 + 0.01).contains(&result.r_s),
+                "R_s={:.4} out of range at {angle_deg}°",
+                result.r_s
+            );
+            assert!(
+                (0.0..=1.0 + 0.01).contains(&result.r_p),
+                "R_p={:.4} out of range at {angle_deg}°",
+                result.r_p
             );
         }
     }

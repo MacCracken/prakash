@@ -108,6 +108,13 @@ impl Medium {
 /// if the angle exceeds the critical angle.
 ///
 /// Delegates to [`bijli::wave::snell_refraction_angle`] when the `bijli-backend` feature is enabled.
+///
+/// ```
+/// # use prakash::ray::snell;
+/// // Air to glass at 30°
+/// let angle_t = snell(1.0, 1.52, 0.5236).unwrap();
+/// assert!(angle_t < 0.5236); // bends toward normal
+/// ```
 #[must_use = "returns the refracted angle"]
 #[inline]
 pub fn snell(n1: f64, n2: f64, incident_angle: f64) -> Result<f64> {
@@ -326,6 +333,8 @@ pub fn rad_to_deg(rad: f64) -> f64 {
 }
 
 mod dispersion;
+/// Fiber optics — numerical aperture, modes, mode field diameter, coupling.
+pub mod fiber;
 mod simulate;
 mod system;
 mod trace;

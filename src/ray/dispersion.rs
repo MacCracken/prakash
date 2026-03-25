@@ -242,6 +242,171 @@ pub fn prism_angular_spread(
     Ok((dev_short, dev_long, (dev_short - dev_long).abs()))
 }
 
+// ── Additional Dispersion Models ─────────────────────────────────────────────
+
+/// Herzberger dispersion coefficients (5-term).
+///
+/// n(λ) = A + B·L + C·L² + D·λ² + E·λ⁴
+///
+/// where L = 1/(λ² − 0.028) and λ is in micrometers.
+/// Preferred for IR materials and wide spectral ranges.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct HerzbergerCoefficients {
+    /// Constant term.
+    pub a: f64,
+    /// First L coefficient.
+    pub b: f64,
+    /// Second L coefficient.
+    pub c: f64,
+    /// λ² coefficient.
+    pub d: f64,
+    /// λ⁴ coefficient.
+    pub e: f64,
+}
+
+impl HerzbergerCoefficients {
+    /// Refractive index at a given wavelength (micrometers).
+    #[must_use]
+    #[inline]
+    pub fn n_at(&self, wavelength_um: f64) -> f64 {
+        let l2 = wavelength_um * wavelength_um;
+        let l = 1.0 / (l2 - 0.028);
+        self.a + self.b * l + self.c * l * l + self.d * l2 + self.e * l2 * l2
+    }
+}
+
+/// Schott dispersion coefficients (6-term, legacy).
+///
+/// n²(λ) = a₀ + a₁·λ² + a₂·λ⁻² + a₃·λ⁻⁴ + a₄·λ⁻⁶ + a₅·λ⁻⁸
+///
+/// λ in micrometers. Used by legacy Schott glass catalogs (pre-1992).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SchottCoefficients {
+    /// Constant term a₀.
+    pub a0: f64,
+    /// λ² coefficient a₁.
+    pub a1: f64,
+    /// λ⁻² coefficient a₂.
+    pub a2: f64,
+    /// λ⁻⁴ coefficient a₃.
+    pub a3: f64,
+    /// λ⁻⁶ coefficient a₄.
+    pub a4: f64,
+    /// λ⁻⁸ coefficient a₅.
+    pub a5: f64,
+}
+
+impl SchottCoefficients {
+    /// Refractive index at a given wavelength (micrometers).
+    #[must_use]
+    #[inline]
+    pub fn n_at(&self, wavelength_um: f64) -> f64 {
+        let l2 = wavelength_um * wavelength_um;
+        let l2_inv = 1.0 / l2;
+        let n2 = self.a0
+            + self.a1 * l2
+            + self.a2 * l2_inv
+            + self.a3 * l2_inv * l2_inv
+            + self.a4 * l2_inv * l2_inv * l2_inv
+            + self.a5 * l2_inv * l2_inv * l2_inv * l2_inv;
+        if n2 > 0.0 { n2.sqrt() } else { 1.0 }
+    }
+
+    /// N-BK7 in Schott format (legacy).
+    pub const BK7: Self = Self {
+        a0: 2.2718929,
+        a1: -0.010108077,
+        a2: 0.010592509,
+        a3: 0.000200816,
+        a4: -7.6472538e-6,
+        a5: 4.9240991e-7,
+    };
+}
+
+/// Conrady dispersion coefficients (3-term).
+///
+/// n(λ) = n₀ + A/λ + B/λ^3.5
+///
+/// λ in micrometers. Quick fit for visible-range glass data.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ConradyCoefficients {
+    /// Constant (reference index).
+    pub n0: f64,
+    /// A coefficient (1/λ term).
+    pub a: f64,
+    /// B coefficient (1/λ^3.5 term).
+    pub b: f64,
+}
+
+impl ConradyCoefficients {
+    /// Refractive index at a given wavelength (micrometers).
+    #[must_use]
+    #[inline]
+    pub fn n_at(&self, wavelength_um: f64) -> f64 {
+        self.n0 + self.a / wavelength_um + self.b / wavelength_um.powf(3.5)
+    }
+}
+
+// ── Partial Dispersion & Chromatic Aberration ────────────────────────────────
+
+/// Partial dispersion ratio P_g,F.
+///
+/// P = (n_g − n_F) / (n_F − n_C)
+///
+/// Used for secondary spectrum analysis. For a doublet to be achromatic,
+/// both elements must have equal P values. Normal glasses have P ≈ 0.53.
+#[must_use]
+#[inline]
+pub fn partial_dispersion(sellmeier: &SellmeierCoefficients) -> f64 {
+    let n_g = sellmeier.n_at(0.435_84); // Fraunhofer g-line
+    let n_f = sellmeier.n_at(FRAUNHOFER_F);
+    let n_c = sellmeier.n_at(FRAUNHOFER_C);
+    let dn_fc = n_f - n_c;
+    if dn_fc.abs() < 1e-15 {
+        return 0.0;
+    }
+    (n_g - n_f) / dn_fc
+}
+
+/// Longitudinal chromatic aberration (axial color).
+///
+/// δf = f / V
+///
+/// where f is the focal length and V is the Abbe number.
+/// Returns the axial focus shift between F and C Fraunhofer lines.
+#[must_use]
+#[inline]
+pub fn longitudinal_chromatic_aberration(focal_length: f64, abbe_num: f64) -> f64 {
+    focal_length / abbe_num
+}
+
+/// Lateral (transverse) chromatic aberration.
+///
+/// TCA = h · δf / f = h / V
+///
+/// where h is the image height. Returns the difference in image height
+/// between F and C lines.
+#[must_use]
+#[inline]
+pub fn lateral_chromatic_aberration(image_height: f64, abbe_num: f64) -> f64 {
+    image_height / abbe_num
+}
+
+/// Secondary spectrum — residual chromatic aberration after achromatic correction.
+///
+/// δf_secondary = f · ΔP / V
+///
+/// where ΔP = P₁ - P₂ is the partial dispersion difference between the
+/// two glass types of the doublet.
+///
+/// For an achromat (V₁ ≠ V₂ but same P), the secondary spectrum is zero.
+/// For normal glasses, secondary spectrum ≈ f/2000.
+#[must_use]
+#[inline]
+pub fn secondary_spectrum(focal_length: f64, delta_p: f64, abbe_num: f64) -> f64 {
+    focal_length * delta_p / abbe_num
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -573,6 +738,95 @@ mod tests {
         assert!(
             spread_flint > spread_crown,
             "Flint glass should have more dispersion than crown"
+        );
+    }
+
+    // ── Additional dispersion model tests ────────────────────────────────
+
+    #[test]
+    fn test_schott_bk7_matches_sellmeier() {
+        let n_schott = SchottCoefficients::BK7.n_at(FRAUNHOFER_D);
+        let n_sellmeier = SellmeierCoefficients::BK7.n_at(FRAUNHOFER_D);
+        assert!(
+            (n_schott - n_sellmeier).abs() < 0.002,
+            "Schott BK7 n_d={n_schott} vs Sellmeier n_d={n_sellmeier}"
+        );
+    }
+
+    #[test]
+    fn test_schott_reasonable_range() {
+        for wl in [0.4, 0.5, 0.6, 0.7] {
+            let n = SchottCoefficients::BK7.n_at(wl);
+            assert!(n > 1.4 && n < 1.6, "Schott BK7 n={n} at {wl}μm");
+        }
+    }
+
+    #[test]
+    fn test_conrady_reasonable() {
+        let c = ConradyCoefficients {
+            n0: 1.51,
+            a: 0.005,
+            b: 0.0001,
+        };
+        let n = c.n_at(0.5876);
+        assert!(n > 1.5 && n < 1.55, "Conrady n={n} at d-line");
+    }
+
+    #[test]
+    fn test_herzberger_reasonable() {
+        let h = HerzbergerCoefficients {
+            a: 1.51,
+            b: 0.001,
+            c: 0.0,
+            d: -0.001,
+            e: 0.0,
+        };
+        let n = h.n_at(0.5876);
+        assert!(n > 1.4 && n < 1.6, "Herzberger n={n}");
+    }
+
+    // ── Chromatic aberration tests ───────────────────────────────────────
+
+    #[test]
+    fn test_partial_dispersion_bk7() {
+        let p = partial_dispersion(&SellmeierCoefficients::BK7);
+        // BK7 partial dispersion P_gF ≈ 0.53
+        assert!(
+            (p - 0.53).abs() < 0.05,
+            "BK7 partial dispersion ≈ 0.53, got {p}"
+        );
+    }
+
+    #[test]
+    fn test_longitudinal_ca() {
+        let v = abbe_number(&SellmeierCoefficients::BK7);
+        let lca = longitudinal_chromatic_aberration(100.0, v);
+        // BK7 V ≈ 64, so LCA ≈ 100/64 ≈ 1.56mm
+        assert!(lca > 1.0 && lca < 2.0, "LCA ≈ 1.5mm, got {lca}");
+    }
+
+    #[test]
+    fn test_lateral_ca() {
+        let v = abbe_number(&SellmeierCoefficients::BK7);
+        let tca = lateral_chromatic_aberration(10.0, v);
+        assert!(tca > 0.0 && tca < 1.0);
+    }
+
+    #[test]
+    fn test_secondary_spectrum_zero_for_matched_p() {
+        let ss = secondary_spectrum(100.0, 0.0, 64.0);
+        assert!(
+            ss.abs() < 1e-15,
+            "Zero ΔP should give zero secondary spectrum"
+        );
+    }
+
+    #[test]
+    fn test_secondary_spectrum_positive() {
+        let ss = secondary_spectrum(100.0, 0.01, 64.0);
+        assert!(
+            ss > 0.0,
+            "Positive ΔP should give positive secondary spectrum"
         );
     }
 }

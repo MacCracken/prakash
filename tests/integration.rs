@@ -324,3 +324,85 @@ mod bijli_integration {
         assert!((Medium::GLASS.permittivity() - 2.3104).abs() < 0.01); // 1.52² = 2.3104
     }
 }
+
+// ── Property-based tests ────────────────────────────────────────────────────
+
+mod property_tests {
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn snell_reversible(angle_deg in 1.0f64..40.0) {
+            use prakash::ray::snell;
+            let angle = angle_deg.to_radians();
+            let angle_t = snell(1.0, 1.52, angle).unwrap();
+            let angle_back = snell(1.52, 1.0, angle_t).unwrap();
+            prop_assert!((angle_back - angle).abs() < 1e-10,
+                "Snell should be reversible: {angle} → {angle_t} → {angle_back}");
+        }
+
+        #[test]
+        fn fresnel_normal_symmetric(n1 in 1.0f64..3.0, n2 in 1.0f64..3.0) {
+            use prakash::ray::fresnel_normal;
+            let r1 = fresnel_normal(n1, n2);
+            let r2 = fresnel_normal(n2, n1);
+            prop_assert!((r1 - r2).abs() < 1e-10,
+                "Fresnel normal should be symmetric: R({n1},{n2})={r1} vs R({n2},{n1})={r2}");
+        }
+
+        #[test]
+        fn fresnel_normal_range(n1 in 1.0f64..4.0, n2 in 1.0f64..4.0) {
+            use prakash::ray::fresnel_normal;
+            let r = fresnel_normal(n1, n2);
+            prop_assert!((0.0..=1.0).contains(&r), "Fresnel in [0,1]: R={r}");
+        }
+
+        #[test]
+        fn wavelength_frequency_roundtrip(nm in 380.0f64..780.0) {
+            use prakash::spectral::{wavelength_to_frequency, frequency_to_wavelength};
+            let freq = wavelength_to_frequency(nm);
+            let back = frequency_to_wavelength(freq);
+            prop_assert!((back - nm).abs() < 1e-6,
+                "Roundtrip failed: {nm} → {freq} → {back}");
+        }
+
+        #[test]
+        fn planck_always_positive(wl_nm in 200.0f64..2000.0, temp in 100.0f64..50000.0) {
+            use prakash::spectral::planck_radiance;
+            let r = planck_radiance(wl_nm * 1e-9, temp);
+            prop_assert!(r >= 0.0 && r.is_finite(),
+                "Planck should be non-negative and finite: {r} at {wl_nm}nm, {temp}K");
+        }
+
+        #[test]
+        fn beer_lambert_monotonic_decay(alpha in 0.01f64..10.0, d in 0.0f64..100.0) {
+            use prakash::ray::beer_lambert;
+            let i = beer_lambert(1.0, alpha, d);
+            prop_assert!((0.0..=1.0).contains(&i),
+                "Beer-Lambert in [0,1]: I={i} for α={alpha}, d={d}");
+        }
+
+        #[test]
+        fn zernike_outside_pupil_is_zero(rho in 1.01f64..5.0, theta in 0.0f64..std::f64::consts::TAU) {
+            use prakash::wave::zernike::zernike;
+            let z = zernike(2, 0, rho, theta);
+            prop_assert!(z.abs() < 1e-10,
+                "Zernike outside pupil should be 0: Z={z} at ρ={rho}");
+        }
+
+        #[test]
+        fn complex_fresnel_dielectric_matches_real(
+            n in 1.0f64..3.0,
+            angle_deg in 0.0f64..85.0
+        ) {
+            use prakash::ray::{ComplexMedium, fresnel_unpolarized, fresnel_unpolarized_complex};
+            let m = ComplexMedium::dielectric(n, "test");
+            let angle = angle_deg.to_radians();
+            let r_complex = fresnel_unpolarized_complex(1.0, &m, angle);
+            if let Ok(r_real) = fresnel_unpolarized(1.0, n, angle) {
+                prop_assert!((r_complex - r_real).abs() < 0.01,
+                    "Complex should match real for dielectric: {r_complex} vs {r_real}");
+            }
+        }
+    }
+}

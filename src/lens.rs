@@ -9,6 +9,13 @@ use crate::error::{PrakashError, Result};
 ///
 /// Given focal length and object distance, returns image distance.
 /// Positive di = real image (opposite side), negative = virtual image (same side).
+///
+/// ```
+/// # use prakash::lens::thin_lens_image_distance;
+/// let di = thin_lens_image_distance(50.0, 200.0).unwrap();
+/// assert!(di > 0.0); // real image
+/// assert!((di - 66.67).abs() < 0.1);
+/// ```
 #[must_use = "returns the computed image distance"]
 #[inline]
 pub fn thin_lens_image_distance(focal_length: f64, object_distance: f64) -> Result<f64> {
@@ -315,6 +322,82 @@ pub fn mtf_diffraction_limited(spatial_freq: f64, cutoff_freq: f64) -> f64 {
     }
     const TWO_OVER_PI: f64 = 2.0 / std::f64::consts::PI;
     TWO_OVER_PI * (v.acos() - v * (1.0 - v * v).sqrt())
+}
+
+/// Polychromatic MTF — weighted average of monochromatic MTFs at multiple wavelengths.
+///
+/// MTF_poly(ν) = Σ wᵢ · MTF(ν, λᵢ) / Σ wᵢ
+///
+/// `wavelengths` and `weights` are parallel slices of wavelength values and their
+/// spectral weights (e.g., from V(λ) or detector response).
+/// `f_num` is the f-number, `spatial_freq` is the query frequency.
+/// All wavelengths in the same units.
+///
+/// Returns 0.0 if no wavelengths are provided.
+#[must_use]
+#[inline]
+pub fn mtf_polychromatic(
+    wavelengths: &[f64],
+    weights: &[f64],
+    f_num: f64,
+    spatial_freq: f64,
+) -> f64 {
+    let mut sum_w = 0.0;
+    let mut sum_mtf = 0.0;
+    for (i, &wl) in wavelengths.iter().enumerate() {
+        let w = weights.get(i).copied().unwrap_or(1.0);
+        let cutoff = mtf_cutoff_frequency(wl, f_num);
+        sum_mtf += w * mtf_diffraction_limited(spatial_freq, cutoff);
+        sum_w += w;
+    }
+    if sum_w < 1e-15 {
+        return 0.0;
+    }
+    sum_mtf / sum_w
+}
+
+/// Through-focus MTF — modulation as a function of defocus.
+///
+/// Computes the diffraction-limited MTF at a fixed spatial frequency for a
+/// range of defocus values. Returns a vector of (defocus, MTF) pairs.
+///
+/// The defocused MTF is approximated by scaling the effective cutoff frequency:
+///
+///   MTF_defocus(ν) ≈ MTF(ν / (1 + W₂₀ · ν / ν_c))
+///
+/// where W₂₀ is the defocus wavefront error in waves.
+///
+/// `wavelength` and `f_num` define the system. `spatial_freq` is the query frequency.
+/// `defocus_range` are the defocus values (in same units as wavelength).
+#[must_use]
+pub fn mtf_through_focus(
+    wavelength: f64,
+    f_num: f64,
+    spatial_freq: f64,
+    defocus_range: &[f64],
+) -> Vec<(f64, f64)> {
+    let cutoff = mtf_cutoff_frequency(wavelength, f_num);
+    let v = spatial_freq / cutoff;
+    defocus_range
+        .iter()
+        .map(|&defocus| {
+            // Defocus wavefront error: W20 = defocus / (8 * f_num^2 * wavelength)
+            let w20 = defocus / (8.0 * f_num * f_num * wavelength);
+            // Strehl-like attenuation for defocus
+            let attenuation = if w20.abs() < 1e-15 {
+                1.0
+            } else {
+                let phi = std::f64::consts::PI * w20 * v;
+                if phi.abs() < 1e-15 {
+                    1.0
+                } else {
+                    (phi.sin() / phi).abs()
+                }
+            };
+            let mtf = mtf_diffraction_limited(spatial_freq, cutoff) * attenuation;
+            (defocus, mtf)
+        })
+        .collect()
 }
 
 // ── Seidel Aberrations ────────────────────────────────────────────────────

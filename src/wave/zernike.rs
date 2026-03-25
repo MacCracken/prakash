@@ -85,6 +85,16 @@ fn factorial(n: usize) -> u64 {
 
 /// Evaluate a single Zernike polynomial Z_n^m(ρ, θ) at a point on the unit disk.
 ///
+/// ```
+/// # use prakash::wave::zernike::zernike;
+/// // Piston (n=0, m=0) is constant = 1.0
+/// assert!((zernike(0, 0, 0.5, 0.0) - 1.0).abs() < 1e-6);
+/// // Defocus (n=2, m=0) varies with ρ
+/// let edge = zernike(2, 0, 1.0, 0.0);
+/// let center = zernike(2, 0, 0.0, 0.0);
+/// assert!(edge > center);
+/// ```
+///
 /// The normalization follows the convention where:
 /// - m > 0: Z = N · R_n^m(ρ) · cos(mθ)
 /// - m < 0: Z = N · R_n^{|m|}(ρ) · sin(|m|θ)

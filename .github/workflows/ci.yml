@@ -77,6 +77,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo install cargo-llvm-cov
       - run: cargo llvm-cov --all-features --lcov --output-path lcov.info
+      - name: Check coverage threshold (85%)
+        run: |
+          TOTAL=$(cargo llvm-cov --all-features --json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'{d[\"data\"][0][\"totals\"][\"lines\"][\"percent\"]:.1f}')" 2>/dev/null || echo "0")
+          echo "Coverage: ${TOTAL}%"
+          if [ "$(echo "$TOTAL < 85" | bc -l 2>/dev/null || echo 1)" = "1" ]; then
+            echo "::warning::Coverage ${TOTAL}% is below 85% target"
+          fi
       - uses: codecov/codecov-action@v4
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:

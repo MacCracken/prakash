@@ -9,6 +9,12 @@ use std::f64::consts::PI;
 ///
 /// Given amplitudes A1, A2 and phase difference δ (radians):
 /// I = A1² + A2² + 2·A1·A2·cos(δ)
+///
+/// ```
+/// # use prakash::wave::interference_intensity;
+/// let constructive = interference_intensity(1.0, 1.0, 0.0);
+/// assert!((constructive - 4.0).abs() < 1e-6); // (1+1)² = 4
+/// ```
 #[must_use]
 #[inline]
 pub fn interference_intensity(a1: f64, a2: f64, phase_diff: f64) -> f64 {
