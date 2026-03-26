@@ -31,9 +31,21 @@
 - **Zernike polynomials** (`wave::zernike` module): radial polynomial R_n^m, full Z_n^m evaluation, Noll index ↔ (n,m) conversion, `ZernikeWavefront` (evaluate, to_grid, RMS error, peak-to-valley, Strehl ratio), named constructors (defocus, spherical, coma_x/y, astigmatism_0/45)
 - **Polarization ray tracing**: `trace_sequential_polarized` tracks cumulative s/p Fresnel transmittance per surface, `PolarizedTraceHit` output with R_p/R_s ratio
 
+### Added — Stack Integration
+- **bijli 1.0**: upgraded from path dep to registry `bijli = "1"`, added `maxwell` feature
+- **bijli wave re-exports**: `radiation_pressure_absorbed/reflected`, `poynting_vector`, `momentum_density`, `plane_wave_intensity`
+- **bijli maxwell re-exports**: `wave_speed`, `impedance`, `free_space_impedance`, `refractive_index`
+- **hisab FFT consolidation**: replaced inline Cooley-Tukey FFT in `wave::pattern` with `hisab::num::fft`
+
+### Changed — Refactoring
+- `ray/mod.rs` split: extracted `ray/fresnel.rs` (Fresnel + Brewster + ComplexMedium + Beer-Lambert)
+- `wave/mod.rs` split: extracted `wave/coherence.rs`, `wave/airy.rs`, `wave/fabry_perot.rs`
+- No file over 1,021 lines (down from 1,313 max)
+
 ### Tests
 - 702 unit tests, 34 integration tests, 8 doc tests = 744 total (up from 598 + 10)
-- Bijli equivalence (14), complex Fresnel (12), Zernike (23), polarization trace (4), Planck edge case (4), fiber optics (11), photometry (8), CIE observers (10), dispersion models (8), chromatic aberration (5), property-based (8)
+- Property-based tests (proptest): 8 properties covering Snell reversibility, Fresnel symmetry, Planck positivity, Beer-Lambert bounds, Zernike pupil, wavelength roundtrip, complex Fresnel dielectric equivalence
+- Doc tests: 8 across all modules (ray, wave, spectral, lens, pbr, atmosphere, zernike)
 
 ## [1.0.0] - 2026-03-24
 

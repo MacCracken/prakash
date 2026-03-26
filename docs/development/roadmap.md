@@ -65,6 +65,15 @@ Prakash does NOT own:
 - [x] **Fiber optics**: `ray::fiber` module — `fiber_na`, `v_number`, `num_modes`, `is_single_mode`, `mode_field_diameter`, `coupling_efficiency_gaussian`
 - [x] **Additional dispersion models**: `HerzbergerCoefficients`, `SchottCoefficients` (BK7 preset), `ConradyCoefficients`
 
+### V1.2.0 — Deeper Stack Integration
+
+- [ ] **hisab geometry bridge**: adopt `hisab::geo::Ray`/`Vec3` types in ray tracer (replace `[f64;3]` arrays)
+- [ ] **hisab numerical integration**: use `hisab::calc::integral_gauss_legendre()` for continuous-function integrals (Huygens-Fresnel, custom SPD generation)
+- [ ] **bijli material bridge**: expose `clausius_mossotti()`, `dielectric_energy_density()`, `refractive_index()` from ε_r/μ_r
+- [ ] **bijli rf impedance**: bridge `quarter_wave_transformer()` for optical coating impedance matching
+- [ ] **bijli relativity**: Doppler shift for moving sources via `lorentz_transform_fields()`
+- [ ] **bijli FDTD**: expose 2D/3D field solvers for non-spherical scattering and photonic structure simulation
+
 ### P2 — Research & Future Features
 
 - [ ] Gradient-index (GRIN) optics: curved ray paths through variable-n media

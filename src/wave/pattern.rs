@@ -4,124 +4,28 @@
 //! (via FFT), multi-source interference, spectral color strips, and point spread
 //! functions from wavefront data.
 
+use hisab::num::Complex;
+use hisab::num::fft;
+#[cfg(test)]
+use hisab::num::ifft;
 use tracing::trace;
 
-// ── Complex Arithmetic (minimal, inline) ────────────────────────────────────
-
-/// Minimal complex number for FFT computation.
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct Complex {
-    re: f64,
-    im: f64,
-}
-
-impl Complex {
-    #[inline]
-    const fn new(re: f64, im: f64) -> Self {
-        Self { re, im }
-    }
-
-    #[inline]
-    const fn zero() -> Self {
-        Self { re: 0.0, im: 0.0 }
-    }
-
-    #[inline]
-    fn norm_sq(self) -> f64 {
-        self.re * self.re + self.im * self.im
-    }
-
-    #[inline]
-    fn mul(self, other: Self) -> Self {
-        Self {
-            re: self.re * other.re - self.im * other.im,
-            im: self.re * other.im + self.im * other.re,
-        }
-    }
-
-    #[inline]
-    fn add(self, other: Self) -> Self {
-        Self {
-            re: self.re + other.re,
-            im: self.im + other.im,
-        }
-    }
-
-    #[inline]
-    fn sub(self, other: Self) -> Self {
-        Self {
-            re: self.re - other.re,
-            im: self.im - other.im,
-        }
-    }
-
-    /// e^(iθ)
-    #[inline]
-    fn from_phase(theta: f64) -> Self {
-        let (s, c) = theta.sin_cos();
-        Self { re: c, im: s }
-    }
-}
-
-// ── FFT (Cooley-Tukey radix-2) ──────────────────────────────────────────────
-
-/// In-place radix-2 Cooley-Tukey FFT.
-///
-/// `data` length must be a power of 2. `inverse` = true for IFFT.
-fn fft_radix2(data: &mut [Complex], inverse: bool) {
-    let n = data.len();
-    debug_assert!(n.is_power_of_two(), "FFT length must be power of 2");
-
-    // Bit-reversal permutation
-    let mut j = 0;
-    for i in 1..n {
-        let mut bit = n >> 1;
-        while j & bit != 0 {
-            j ^= bit;
-            bit >>= 1;
-        }
-        j ^= bit;
-        if i < j {
-            data.swap(i, j);
-        }
-    }
-
-    // Butterfly passes
-    let sign = if inverse { 1.0 } else { -1.0 };
-    let mut len = 2;
-    while len <= n {
-        let half = len / 2;
-        let angle = sign * std::f64::consts::TAU / len as f64;
-        let wn = Complex::from_phase(angle);
-
-        let mut start = 0;
-        while start < n {
-            let mut w = Complex::new(1.0, 0.0);
-            for k in 0..half {
-                let u = data[start + k];
-                let v = data[start + k + half].mul(w);
-                data[start + k] = u.add(v);
-                data[start + k + half] = u.sub(v);
-                w = w.mul(wn);
-            }
-            start += len;
-        }
-        len <<= 1;
-    }
-
-    // Normalize for inverse
-    if inverse {
-        let inv_n = 1.0 / n as f64;
-        for c in data.iter_mut() {
-            c.re *= inv_n;
-            c.im *= inv_n;
-        }
-    }
-}
-
-/// Round up to the next power of 2.
+/// |c|² = re² + im² (hisab Complex doesn't expose norm_sq directly).
 #[inline]
-fn next_power_of_2(n: usize) -> usize {
+fn norm_sq(c: &Complex) -> f64 {
+    c.re * c.re + c.im * c.im
+}
+
+/// e^(iθ) = cos(θ) + i·sin(θ).
+#[inline]
+fn from_phase(theta: f64) -> Complex {
+    let (s, c) = theta.sin_cos();
+    Complex::new(c, s)
+}
+
+/// Next power of two.
+#[inline]
+fn npot(n: usize) -> usize {
     n.next_power_of_two()
 }
 
@@ -196,11 +100,11 @@ impl Pattern2D {
 #[must_use]
 pub fn diffraction_pattern_2d(aperture: &[f64], width: usize, height: usize) -> Pattern2D {
     trace!(width, height, "diffraction_pattern_2d");
-    let nw = next_power_of_2(width);
-    let nh = next_power_of_2(height);
+    let nw = npot(width);
+    let nh = npot(height);
 
     // Create zero-padded complex array
-    let mut grid = vec![Complex::zero(); nw * nh];
+    let mut grid = vec![Complex::new(0.0, 0.0); nw * nh];
     for row in 0..height {
         for col in 0..width {
             grid[row * nw + col] = Complex::new(aperture[row * width + col], 0.0);
@@ -211,15 +115,15 @@ pub fn diffraction_pattern_2d(aperture: &[f64], width: usize, height: usize) -> 
     // Row FFTs
     for row in 0..nh {
         let start = row * nw;
-        fft_radix2(&mut grid[start..start + nw], false);
+        let _ = fft(&mut grid[start..start + nw]);
     }
     // Column FFTs
-    let mut col_buf = vec![Complex::zero(); nh];
+    let mut col_buf = vec![Complex::new(0.0, 0.0); nh];
     for col in 0..nw {
         for row in 0..nh {
             col_buf[row] = grid[row * nw + col];
         }
-        fft_radix2(&mut col_buf, false);
+        let _ = fft(&mut col_buf);
         for row in 0..nh {
             grid[row * nw + col] = col_buf[row];
         }
@@ -232,7 +136,7 @@ pub fn diffraction_pattern_2d(aperture: &[f64], width: usize, height: usize) -> 
             // fftshift: swap quadrants
             let sr = (row + nh / 2) % nh;
             let sc = (col + nw / 2) % nw;
-            pattern.set(col, row, grid[sr * nw + sc].norm_sq());
+            pattern.set(col, row, norm_sq(&grid[sr * nw + sc]));
         }
     }
     pattern
@@ -248,7 +152,7 @@ pub fn diffraction_pattern_2d(aperture: &[f64], width: usize, height: usize) -> 
 #[must_use]
 pub fn diffraction_pattern_circular(grid_size: usize, radius: f64) -> Pattern2D {
     trace!(grid_size, radius, "diffraction_pattern_circular");
-    let n = next_power_of_2(grid_size);
+    let n = npot(grid_size);
     let cx = n as f64 / 2.0;
     let cy = n as f64 / 2.0;
     let r2 = radius * radius;
@@ -460,19 +364,19 @@ pub fn psf_from_wavefront(
     wavelength: f64,
 ) -> Pattern2D {
     trace!(width, height, wavelength, "psf_from_wavefront");
-    let nw = next_power_of_2(width);
-    let nh = next_power_of_2(height);
+    let nw = npot(width);
+    let nh = npot(height);
     let k = std::f64::consts::TAU / wavelength;
 
     // Build complex pupil function: P(x,y) · exp(i·k·W(x,y))
-    let mut grid = vec![Complex::zero(); nw * nh];
+    let mut grid = vec![Complex::new(0.0, 0.0); nw * nh];
     for row in 0..height {
         for col in 0..width {
             let idx = row * width + col;
             let p = pupil[idx];
             if p > 0.0 {
                 let phase = k * wavefront_error[idx];
-                let e = Complex::from_phase(phase);
+                let e = from_phase(phase);
                 grid[row * nw + col] = Complex::new(p * e.re, p * e.im);
             }
         }
@@ -481,14 +385,14 @@ pub fn psf_from_wavefront(
     // 2D FFT
     for row in 0..nh {
         let start = row * nw;
-        fft_radix2(&mut grid[start..start + nw], false);
+        let _ = fft(&mut grid[start..start + nw]);
     }
-    let mut col_buf = vec![Complex::zero(); nh];
+    let mut col_buf = vec![Complex::new(0.0, 0.0); nh];
     for col in 0..nw {
         for row in 0..nh {
             col_buf[row] = grid[row * nw + col];
         }
-        fft_radix2(&mut col_buf, false);
+        let _ = fft(&mut col_buf);
         for row in 0..nh {
             grid[row * nw + col] = col_buf[row];
         }
@@ -500,7 +404,7 @@ pub fn psf_from_wavefront(
         for col in 0..nw {
             let sr = (row + nh / 2) % nh;
             let sc = (col + nw / 2) % nw;
-            pattern.set(col, row, grid[sr * nw + sc].norm_sq());
+            pattern.set(col, row, norm_sq(&grid[sr * nw + sc]));
         }
     }
     pattern
@@ -529,16 +433,16 @@ mod tests {
     #[test]
     fn test_fft_single_element() {
         let mut data = [Complex::new(5.0, 0.0)];
-        fft_radix2(&mut data, false);
+        let _ = fft(&mut data);
         assert!((data[0].re - 5.0).abs() < EPS);
     }
 
     #[test]
     fn test_fft_two_elements() {
         let mut data = [Complex::new(1.0, 0.0), Complex::new(1.0, 0.0)];
-        fft_radix2(&mut data, false);
+        let _ = fft(&mut data);
         assert!((data[0].re - 2.0).abs() < EPS); // DC = sum
-        assert!(data[1].norm_sq() < EPS); // Nyquist = 0 for constant
+        assert!(norm_sq(&data[1]) < EPS); // Nyquist = 0 for constant
     }
 
     #[test]
@@ -550,8 +454,8 @@ mod tests {
             Complex::new(4.0, 0.0),
         ];
         let mut data = original;
-        fft_radix2(&mut data, false);
-        fft_radix2(&mut data, true);
+        let _ = fft(&mut data);
+        let _ = ifft(&mut data);
         for (a, b) in data.iter().zip(original.iter()) {
             assert!(
                 (a.re - b.re).abs() < EPS && (a.im - b.im).abs() < EPS,
@@ -569,9 +473,9 @@ mod tests {
             Complex::new(-1.0, 0.0),
             Complex::new(0.0, -1.0),
         ];
-        let energy_time: f64 = data.iter().map(|c| c.norm_sq()).sum();
-        fft_radix2(&mut data, false);
-        let energy_freq: f64 = data.iter().map(|c| c.norm_sq()).sum();
+        let energy_time: f64 = data.iter().map(norm_sq).sum();
+        let _ = fft(&mut data);
+        let energy_freq: f64 = data.iter().map(norm_sq).sum();
         assert!(
             (energy_time * 4.0 - energy_freq).abs() < EPS,
             "Parseval: {energy_time}*4 ≠ {energy_freq}"

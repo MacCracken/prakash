@@ -270,6 +270,21 @@ pub use bijli::polarization::{Complex, JonesMatrix, JonesVector};
 #[cfg(feature = "bijli-backend")]
 pub use bijli::beam::{AbcdMatrix, GaussianBeam, ResonatorStability, resonator_stability};
 
+/// Radiation pressure and energy flux from bijli.
+///
+/// Available when the `bijli-backend` feature is enabled.
+#[cfg(feature = "bijli-backend")]
+pub use bijli::wave::{
+    momentum_density, plane_wave_intensity, poynting_vector, radiation_pressure_absorbed,
+    radiation_pressure_reflected,
+};
+
+/// Maxwell's equations: wave speed, impedance, refractive index from ε_r/μ_r.
+///
+/// Available when the `bijli-backend` feature is enabled.
+#[cfg(feature = "bijli-backend")]
+pub use bijli::maxwell::{free_space_impedance, impedance, refractive_index, wave_speed};
+
 #[cfg(test)]
 mod tests {
     use super::*;

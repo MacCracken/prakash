@@ -23,9 +23,8 @@ allow = [
 
 [bans]
 multiple-versions = "warn"
-wildcards = "warn"
+wildcards = "deny"
 highlight = "all"
-allow-wildcard-paths = true
 
 [sources]
 unknown-registry = "deny"

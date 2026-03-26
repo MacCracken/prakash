@@ -237,6 +237,36 @@ fn bench_ray(c: &mut Criterion) {
     group.bench_function("find_system_properties", |b| {
         b.iter(|| find_system_properties(black_box(&prescription)))
     });
+    group.bench_function("fresnel_normal_complex_gold", |b| {
+        b.iter(|| fresnel_normal_complex(black_box(1.0), black_box(&ComplexMedium::GOLD_550NM)))
+    });
+    group.bench_function("fresnel_s_complex_gold", |b| {
+        b.iter(|| {
+            fresnel_s_complex(
+                black_box(1.0),
+                black_box(&ComplexMedium::GOLD_550NM),
+                black_box(0.5),
+            )
+        })
+    });
+    group.bench_function("fiber_na", |b| {
+        b.iter(|| fiber::fiber_na(black_box(1.4682), black_box(1.4629)))
+    });
+    group.bench_function("fiber_v_number", |b| {
+        b.iter(|| fiber::v_number(black_box(4.1e-6), black_box(0.12), black_box(1.55e-6)))
+    });
+    group.bench_function("fiber_mfd", |b| {
+        b.iter(|| fiber::mode_field_diameter(black_box(4.1e-6), black_box(2.0)))
+    });
+    group.bench_function("fiber_coupling", |b| {
+        b.iter(|| fiber::coupling_efficiency_gaussian(black_box(5e-6), black_box(5.2e-6)))
+    });
+    group.bench_function("partial_dispersion_bk7", |b| {
+        b.iter(|| partial_dispersion(black_box(&SellmeierCoefficients::BK7)))
+    });
+    group.bench_function("schott_n_at", |b| {
+        b.iter(|| SchottCoefficients::BK7.n_at(black_box(0.5876)))
+    });
 
     group.finish();
 }
@@ -325,6 +355,18 @@ fn bench_spectral(c: &mut Criterion) {
     group.bench_function("cri", |b| {
         let spd = illuminant_d65();
         b.iter(|| color_rendering_index(black_box(&spd)))
+    });
+    group.bench_function("luminous_flux_d65", |b| {
+        let spd = illuminant_d65();
+        b.iter(|| luminous_flux(black_box(&spd)))
+    });
+    group.bench_function("luminous_efficacy_d65", |b| {
+        let spd = illuminant_d65();
+        b.iter(|| luminous_efficacy(black_box(&spd)))
+    });
+    group.bench_function("spd_to_xyz_2015_2deg", |b| {
+        let spd = illuminant_d65();
+        b.iter(|| black_box(&spd).to_xyz_observer(black_box(Observer::Cie2015_2deg)))
     });
 
     group.finish();
@@ -549,6 +591,34 @@ fn bench_wave(c: &mut Criterion) {
     group.bench_function("psf_32", |b| {
         b.iter(|| psf_diffraction_limited(black_box(32), black_box(8.0)))
     });
+    group.bench_function("zernike_eval", |b| {
+        b.iter(|| zernike::zernike(black_box(4), black_box(0), black_box(0.7), black_box(0.5)))
+    });
+    group.bench_function("zernike_wavefront_eval", |b| {
+        let wf = zernike::defocus(0.1);
+        b.iter(|| wf.evaluate(black_box(0.7), black_box(0.5)))
+    });
+    group.bench_function("zernike_rms", |b| {
+        let wf = zernike::ZernikeWavefront::new(vec![
+            0.0, 0.01, 0.02, 0.1, 0.05, 0.03, 0.02, 0.01, 0.005, 0.002, 0.05,
+        ]);
+        b.iter(|| black_box(&wf).rms_error())
+    });
+    group.bench_function("multilayer_rt_oblique", |b| {
+        b.iter(|| {
+            multilayer_rt(
+                black_box(550.0),
+                black_box(0.5),
+                black_box(1.0),
+                black_box(1.52),
+                black_box(&[(1.38, 99.6), (2.1, 65.5)]),
+            )
+        })
+    });
+    group.bench_function("king_factor", |b| {
+        use prakash::atmosphere::king_factor;
+        b.iter(|| king_factor(black_box(550e-9)))
+    });
 
     group.finish();
 }
@@ -668,6 +738,18 @@ fn bench_lens(c: &mut Criterion) {
     });
     group.bench_function("separated_lenses_bfd", |b| {
         b.iter(|| separated_lenses_bfd(black_box(50.0), black_box(-80.0), black_box(30.0)))
+    });
+    group.bench_function("mtf_polychromatic_3wl", |b| {
+        let wls = [486.1e-6, 587.6e-6, 656.3e-6];
+        let wts = [1.0, 2.0, 1.0];
+        b.iter(|| {
+            mtf_polychromatic(
+                black_box(&wls),
+                black_box(&wts),
+                black_box(5.6),
+                black_box(50.0),
+            )
+        })
     });
 
     group.finish();
