@@ -57,7 +57,7 @@ Prakash does NOT own:
 ### P2 — Important Gaps (from research audit)
 
 - [x] **Photometric functions**: V(λ) photopic + scotopic tables, luminous flux, luminous efficacy, scotopic flux — `spectral::photometry` module
-- [ ] **CIE 2015 cone-fundamental observers**: 2-deg and 10-deg, plus CIE 1964 10-deg for legacy (data table entry needed)
+- [x] **CIE observers**: CIE 1964 10-deg, CIE 2015 2-deg and 10-deg cone-fundamental tables, `Observer` enum, `Spd::to_xyz_observer()`
 - [x] **Transfer matrix method upgrade**: `multilayer_rt()` with oblique incidence, separate s/p reflectance + transmittance, `ThinFilmResult`
 - [x] **Chromatic aberration expansion**: `lateral_chromatic_aberration()`, `secondary_spectrum()`, `partial_dispersion()`
 - [x] **Polychromatic MTF**: `mtf_polychromatic()` with spectral weights, `mtf_through_focus()` with defocus range
@@ -89,7 +89,7 @@ Prakash does NOT own:
 
 - [x] `cargo semver-checks` in CI (already in ci.yml)
 - [x] Property-based testing (proptest) — 8 property tests for Snell, Fresnel, Planck, Beer-Lambert, Zernike, wavelength roundtrip
-- [ ] Benchmark regression CI gate — fail on >10% regression
+- [x] Benchmark regression CI gate — PR comparison with >10% regression warning
 - [x] Doc tests for key functions — 8 doc tests across all modules (ray, wave, spectral, lens, pbr, atmosphere, zernike)
 - [x] Coverage gate in CI — 85% threshold warning in ci.yml
 

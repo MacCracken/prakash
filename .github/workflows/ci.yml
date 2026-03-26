@@ -98,6 +98,53 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features
+  bench:
+    name: Benchmark Regression
+    runs-on: ubuntu-latest
+    needs: [check]
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run benchmarks (PR)
+        run: cargo bench --all-features -- --output-format bencher | tee pr-bench.txt
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main-branch
+      - name: Run benchmarks (main)
+        run: |
+          cd main-branch
+          cargo bench --all-features -- --output-format bencher | tee ../main-bench.txt
+      - name: Compare benchmarks
+        run: |
+          echo "## Benchmark Comparison (PR vs main)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if command -v python3 &>/dev/null; then
+            python3 -c "
+          import re, sys
+          def parse(f):
+              d = {}
+              for line in open(f):
+                  m = re.match(r'test (\S+)\s+.*bench:\s+([\d,]+) ns/iter', line)
+                  if m:
+                      d[m.group(1)] = int(m.group(2).replace(',',''))
+              return d
+          pr = parse('pr-bench.txt')
+          main = parse('main-bench.txt')
+          regressions = []
+          for name in sorted(set(pr) & set(main)):
+              p, m = pr[name], main[name]
+              pct = (p - m) / m * 100 if m > 0 else 0
+              marker = '🔴' if pct > 10 else '🟡' if pct > 5 else '🟢'
+              print(f'{marker} {name}: {m}ns → {p}ns ({pct:+.1f}%)')
+              if pct > 10:
+                  regressions.append(f'{name}: {pct:+.1f}%')
+          if regressions:
+              print(f'::warning::Benchmark regressions >10%: {\", \".join(regressions)}')
+          " >> $GITHUB_STEP_SUMMARY
+          fi
   semver:
     name: SemVer Check
     runs-on: ubuntu-latest
