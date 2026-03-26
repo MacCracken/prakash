@@ -32,8 +32,8 @@
 - **Polarization ray tracing**: `trace_sequential_polarized` tracks cumulative s/p Fresnel transmittance per surface, `PolarizedTraceHit` output with R_p/R_s ratio
 
 ### Tests
-- 655 unit tests, 26 integration tests (up from 598 + 10)
-- Bijli equivalence tests (14), complex Fresnel tests (12), Zernike tests (23), polarization trace tests (4), Planck edge case tests (4)
+- 702 unit tests, 34 integration tests, 8 doc tests = 744 total (up from 598 + 10)
+- Bijli equivalence (14), complex Fresnel (12), Zernike (23), polarization trace (4), Planck edge case (4), fiber optics (11), photometry (8), CIE observers (10), dispersion models (8), chromatic aberration (5), property-based (8)
 
 ## [1.0.0] - 2026-03-24
 

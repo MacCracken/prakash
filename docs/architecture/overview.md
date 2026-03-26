@@ -5,16 +5,16 @@
 | Module | Feature | Files | Lines | Key Types | Purpose |
 |--------|---------|-------|-------|-----------|---------|
 | `error` | always | `error.rs` | 174 | `PrakashError`, `Result<T>` | Shared error types with `Cow<'static, str>` messages, bijli error bridge |
-| `ray` | `ray` | `mod.rs`, `dispersion.rs`, `simulate.rs`, `system.rs`, `trace.rs` | 4144 | `Medium`, `ComplexMedium`, `CauchyCoefficients`, `SellmeierCoefficients`, `TraceRay`, `OpticalSurface`, `PolarizedTraceHit`, `ParaxialRay`, `Prescription` | Geometric optics: Snell, Fresnel (real + complex), dispersion, sequential/recursive tracing with polarization, ray fans, spot diagrams, OPD |
-| `wave` | `wave` | `mod.rs`, `diffraction.rs`, `pattern.rs`, `polarization.rs`, `zernike.rs` | 4007 | `Polarization`, `StokesVector`, `MuellerMatrix`, `Pattern2D`, `ZernikeWavefront` | Wave optics: interference, diffraction, Fabry-Perot, AR coatings, Jones/Stokes/Mueller, Zernike polynomials, 2D patterns, PSF |
-| `spectral` | `spectral` | `mod.rs`, `cie.rs` | 1496 | `Rgb`, `Xyz`, `Spd` | Color science: wavelength-to-RGB, Planck (numerically stable), Wien, CIE 1931 XYZ, SPD (Cow storage), illuminants, CRI |
-| `lens` | `lens` | `lens.rs` | 1102 | `LensType`, `CardinalPoints`, `SeidelCoefficients` | Lens/mirror geometry: thin/thick lens, aberrations, MTF, DoF, Petzval, multi-element |
-| `pbr` | `pbr` | `mod.rs`, `advanced.rs` | 1628 | (free functions) | PBR shading: Cook-Torrance, GGX, sheen, clearcoat, SSS, iridescence, volumetric, importance sampling, env maps |
-| `atmosphere` | `atmosphere` | `atmosphere.rs` | 763 | (free functions + constants) | Atmospheric optics: Rayleigh/Mie scattering, sky color, air mass, optical depth, sunset model |
-| `ai` | `ai` | `ai.rs` | 127 | `DaimonClient`, `DaimonConfig` | AI-assisted optics queries via reqwest/tokio |
-| `logging` | `logging` | `logging.rs` | 34 | (init functions) | tracing-subscriber setup |
+| `ray` | `ray` | `mod.rs`, `fresnel.rs`, `dispersion.rs`, `fiber.rs`, `simulate.rs`, `system.rs`, `trace.rs` | 4591 | `Medium`, `ComplexMedium`, `CauchyCoefficients`, `SellmeierCoefficients`, `HerzbergerCoefficients`, `SchottCoefficients`, `ConradyCoefficients`, `TraceRay`, `OpticalSurface`, `PolarizedTraceHit`, `ParaxialRay`, `Prescription` | Geometric optics: Snell, Fresnel (real + complex), dispersion (Sellmeier/Cauchy/Herzberger/Schott/Conrady), chromatic aberration, fiber optics, sequential/recursive tracing with polarization, ray fans, spot diagrams, OPD |
+| `wave` | `wave` | `mod.rs`, `coherence.rs`, `airy.rs`, `fabry_perot.rs`, `diffraction.rs`, `pattern.rs`, `polarization.rs`, `zernike.rs` | 4245 | `Polarization`, `StokesVector`, `MuellerMatrix`, `Pattern2D`, `ZernikeWavefront`, `Observer`, `ThinFilmResult` | Wave optics: interference, coherence, Airy/Bessel, Fabry-Perot, diffraction (Fraunhofer/Fresnel), TMM (oblique s/p), AR coatings, Jones/Stokes/Mueller, Zernike polynomials, 2D patterns, PSF |
+| `spectral` | `spectral` | `mod.rs`, `cie.rs`, `photometry.rs` | 2118 | `Rgb`, `Xyz`, `Spd`, `Observer` | Color science: wavelength-to-RGB, Planck (numerically stable), Wien, CIE 1931/1964/2015 XYZ, SPD (Cow storage), illuminants, CRI, photometry (V(λ), luminous flux/efficacy) |
+| `lens` | `lens` | `lens.rs` | 1185 | `LensType`, `CardinalPoints`, `SeidelCoefficients` | Lens/mirror geometry: thin/thick lens, aberrations, MTF (monochromatic + polychromatic + through-focus), DoF, Petzval, multi-element |
+| `pbr` | `pbr` | `mod.rs`, `advanced.rs` | 1636 | (free functions) | PBR shading: Cook-Torrance, GGX, sheen, clearcoat, SSS, iridescence, volumetric, importance sampling, env maps |
+| `atmosphere` | `atmosphere` | `atmosphere.rs` | 837 | (free functions + constants) | Atmospheric optics: Rayleigh/Mie scattering, King correction factor, sky color, air mass, optical depth, sunset model |
+| `ai` | `ai` | `ai.rs` | 135 | `DaimonClient`, `DaimonConfig` | AI-assisted optics queries via reqwest/tokio |
+| `logging` | `logging` | `logging.rs` | 36 | (init functions) | tracing-subscriber setup |
 
-**Total**: ~13,540 lines across 20 source files.
+**Total**: ~15,000 lines across 26 source files.
 
 ## Design Principles
 

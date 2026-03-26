@@ -302,7 +302,7 @@ pub fn fresnel_unpolarized_complex(n1: f64, medium: &ComplexMedium, incident_ang
 ///
 /// I = I₀ · exp(−α · d)
 ///
-/// Related: [`pbr::volume_transmittance`](crate::pbr::advanced::volume_transmittance) returns
+/// Related: [`pbr::volume_transmittance`](crate::pbr::volume_transmittance) returns
 /// the transmittance factor alone (equivalent to `beer_lambert(1.0, σt, d)`).
 #[must_use]
 #[inline]
