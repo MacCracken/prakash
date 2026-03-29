@@ -222,8 +222,8 @@ impl From<Polarization> for bijli::polarization::JonesVector {
     fn from(p: Polarization) -> Self {
         use bijli::polarization::Complex;
         bijli::polarization::JonesVector::new(
-            Complex::real(p.ex),
-            Complex::from_polar(p.ey, p.phase),
+            Complex::from_real(p.ex),
+            Complex::new(p.ey * p.phase.cos(), p.ey * p.phase.sin()),
         )
     }
 }
