@@ -358,40 +358,6 @@ impl BirefringentMaterial {
     };
 }
 
-// ── Bijli interop ────────────────────────────────────────────────────────
-
-#[cfg(feature = "bijli-backend")]
-impl From<bijli::polarization::StokesVector> for StokesVector {
-    #[inline]
-    fn from(b: bijli::polarization::StokesVector) -> Self {
-        Self::new(b.s[0], b.s[1], b.s[2], b.s[3])
-    }
-}
-
-#[cfg(feature = "bijli-backend")]
-impl From<StokesVector> for bijli::polarization::StokesVector {
-    #[inline]
-    fn from(p: StokesVector) -> Self {
-        bijli::polarization::StokesVector::new(p.s0, p.s1, p.s2, p.s3)
-    }
-}
-
-#[cfg(feature = "bijli-backend")]
-impl From<bijli::polarization::MuellerMatrix> for MuellerMatrix {
-    #[inline]
-    fn from(b: bijli::polarization::MuellerMatrix) -> Self {
-        Self::new(b.m)
-    }
-}
-
-#[cfg(feature = "bijli-backend")]
-impl From<MuellerMatrix> for bijli::polarization::MuellerMatrix {
-    #[inline]
-    fn from(p: MuellerMatrix) -> Self {
-        bijli::polarization::MuellerMatrix::new(p.m)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

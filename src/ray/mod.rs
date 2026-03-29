@@ -107,8 +107,6 @@ impl Medium {
 /// Returns the refracted angle in radians, or `TotalInternalReflection` error
 /// if the angle exceeds the critical angle.
 ///
-/// Delegates to [`bijli::wave::snell_refraction_angle`] when the `bijli-backend` feature is enabled.
-///
 /// ```
 /// # use prakash::ray::snell;
 /// // Air to glass at 30°
@@ -122,24 +120,6 @@ pub fn snell(n1: f64, n2: f64, incident_angle: f64) -> Result<f64> {
     snell_impl(n1, n2, incident_angle)
 }
 
-#[cfg(feature = "bijli-backend")]
-#[inline]
-fn snell_impl(n1: f64, n2: f64, incident_angle: f64) -> Result<f64> {
-    match bijli::wave::snell_refraction_angle(n1, n2, incident_angle)? {
-        Some(angle) => Ok(angle),
-        None => {
-            let ca = critical_angle(n1, n2).unwrap_or(0.0);
-            Err(PrakashError::TotalInternalReflection {
-                angle_deg: incident_angle.to_degrees(),
-                critical_deg: ca.to_degrees(),
-                n1,
-                n2,
-            })
-        }
-    }
-}
-
-#[cfg(not(feature = "bijli-backend"))]
 #[inline]
 fn snell_impl(n1: f64, n2: f64, incident_angle: f64) -> Result<f64> {
     let sin_t = (n1 / n2) * incident_angle.sin();
@@ -159,25 +139,12 @@ fn snell_impl(n1: f64, n2: f64, incident_angle: f64) -> Result<f64> {
 ///
 /// Returns the angle in radians beyond which all light is reflected.
 ///
-/// Delegates to [`bijli::wave::critical_angle`] when the `bijli-backend` feature is enabled.
 #[must_use = "returns the critical angle"]
 #[inline]
 pub fn critical_angle(n1: f64, n2: f64) -> Result<f64> {
     critical_angle_impl(n1, n2)
 }
 
-#[cfg(feature = "bijli-backend")]
-#[inline]
-fn critical_angle_impl(n1: f64, n2: f64) -> Result<f64> {
-    match bijli::wave::critical_angle(n1, n2)? {
-        Some(angle) => Ok(angle),
-        None => Err(PrakashError::InvalidParameter {
-            reason: "critical angle requires n1 > n2".into(),
-        }),
-    }
-}
-
-#[cfg(not(feature = "bijli-backend"))]
 #[inline]
 fn critical_angle_impl(n1: f64, n2: f64) -> Result<f64> {
     if n1 <= n2 {

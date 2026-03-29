@@ -67,23 +67,6 @@ pub enum PrakashError {
 /// Convenience alias for `Result<T, PrakashError>`.
 pub type Result<T> = std::result::Result<T, PrakashError>;
 
-#[cfg(feature = "bijli-backend")]
-impl From<bijli::BijliError> for PrakashError {
-    fn from(e: bijli::BijliError) -> Self {
-        match e {
-            bijli::BijliError::DivisionByZero { context } => PrakashError::DivisionByZero {
-                context: context.into(),
-            },
-            bijli::BijliError::InvalidParameter { reason } => PrakashError::InvalidParameter {
-                reason: reason.into(),
-            },
-            other => PrakashError::InvalidParameter {
-                reason: other.to_string().into(),
-            },
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

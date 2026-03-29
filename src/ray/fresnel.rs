@@ -37,32 +37,12 @@ pub fn fresnel_p(n1: f64, n2: f64, cos_i: f64, cos_t: f64) -> f64 {
 ///
 /// Returns the fraction of light reflected (0.0 = none, 1.0 = total reflection).
 ///
-/// Delegates to [`bijli::wave::reflectance_unpolarized`] when the `bijli-backend` feature is enabled.
 #[must_use = "returns the Fresnel reflectance"]
 #[inline]
 pub fn fresnel_unpolarized(n1: f64, n2: f64, incident_angle: f64) -> Result<f64> {
     fresnel_unpolarized_impl(n1, n2, incident_angle)
 }
 
-#[cfg(feature = "bijli-backend")]
-#[inline]
-fn fresnel_unpolarized_impl(n1: f64, n2: f64, incident_angle: f64) -> Result<f64> {
-    // Check for TIR first — bijli returns Ok(1.0) for TIR, but prakash returns an error
-    let sin_t = (n1 / n2) * incident_angle.sin();
-    if sin_t.abs() > 1.0 {
-        let ca = critical_angle(n1, n2).unwrap_or(0.0);
-        return Err(PrakashError::TotalInternalReflection {
-            angle_deg: incident_angle.to_degrees(),
-            critical_deg: ca.to_degrees(),
-            n1,
-            n2,
-        });
-    }
-    let cos_theta_i = incident_angle.cos();
-    Ok(bijli::wave::reflectance_unpolarized(n1, n2, cos_theta_i)?)
-}
-
-#[cfg(not(feature = "bijli-backend"))]
 #[inline]
 fn fresnel_unpolarized_impl(n1: f64, n2: f64, incident_angle: f64) -> Result<f64> {
     let (sin_i, cos_i) = incident_angle.sin_cos();
@@ -84,8 +64,6 @@ fn fresnel_unpolarized_impl(n1: f64, n2: f64, incident_angle: f64) -> Result<f64
 ///
 /// Simplified: R = ((n1 - n2) / (n1 + n2))²
 ///
-/// Delegates to [`bijli::wave::reflectance_normal`] when the `bijli-backend` feature is enabled.
-///
 /// ```
 /// # use prakash::ray::fresnel_normal;
 /// let r = fresnel_normal(1.0, 1.52); // air→glass ≈ 4%
@@ -97,16 +75,6 @@ pub fn fresnel_normal(n1: f64, n2: f64) -> f64 {
     fresnel_normal_impl(n1, n2)
 }
 
-#[cfg(feature = "bijli-backend")]
-#[inline]
-fn fresnel_normal_impl(n1: f64, n2: f64) -> f64 {
-    bijli::wave::reflectance_normal(n1, n2).unwrap_or_else(|_| {
-        let r = (n1 - n2) / (n1 + n2);
-        r * r
-    })
-}
-
-#[cfg(not(feature = "bijli-backend"))]
 #[inline]
 fn fresnel_normal_impl(n1: f64, n2: f64) -> f64 {
     let r = (n1 - n2) / (n1 + n2);
@@ -119,20 +87,12 @@ fn fresnel_normal_impl(n1: f64, n2: f64) -> f64 {
 ///
 /// At this angle, p-polarized reflectance is zero.
 ///
-/// Delegates to [`bijli::wave::brewster_angle`] when the `bijli-backend` feature is enabled.
 #[must_use]
 #[inline]
 pub fn brewster_angle(n1: f64, n2: f64) -> f64 {
     brewster_angle_impl(n1, n2)
 }
 
-#[cfg(feature = "bijli-backend")]
-#[inline]
-fn brewster_angle_impl(n1: f64, n2: f64) -> f64 {
-    bijli::wave::brewster_angle(n1, n2).unwrap_or_else(|_| (n2 / n1).atan())
-}
-
-#[cfg(not(feature = "bijli-backend"))]
 #[inline]
 fn brewster_angle_impl(n1: f64, n2: f64) -> f64 {
     (n2 / n1).atan()

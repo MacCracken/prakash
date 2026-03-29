@@ -102,6 +102,15 @@ Prakash does NOT own:
 - [x] Doc tests for key functions — 8 doc tests across all modules (ray, wave, spectral, lens, pbr, atmosphere, zernike)
 - [x] Coverage gate in CI — 85% threshold warning in ci.yml
 
+## Cross-Crate Bridges
+
+- [ ] `bridge.rs` module — primitive-value conversions for cross-crate optics (no deps on sibling crates)
+- [ ] **bijli bridge**: EM wavelength (nm) → refractive index; Fresnel coefficients from E/B field amplitudes
+- [ ] **tara bridge**: stellar temperature (K) → blackbody RGB color; spectral class → color index
+- [ ] **badal bridge**: atmospheric density profile → Rayleigh scattering coefficients; humidity → Mie scattering
+
+---
+
 ## Consumers
 
 | Consumer | What it uses |

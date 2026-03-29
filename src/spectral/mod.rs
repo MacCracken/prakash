@@ -11,14 +11,6 @@ pub const VISIBLE_MIN_NM: f64 = 380.0;
 pub const VISIBLE_MAX_NM: f64 = 780.0;
 
 /// Speed of light in m/s.
-///
-/// When the `bijli-backend` feature is enabled, this is re-exported from
-/// [`bijli::field::SPEED_OF_LIGHT`] for a single source of truth.
-#[cfg(feature = "bijli-backend")]
-pub use bijli::field::SPEED_OF_LIGHT;
-
-/// Speed of light in m/s.
-#[cfg(not(feature = "bijli-backend"))]
 pub const SPEED_OF_LIGHT: f64 = 299_792_458.0;
 /// Planck's constant in J·s.
 pub const PLANCK_H: f64 = 6.626_070_15e-34;

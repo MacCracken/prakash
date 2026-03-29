@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.2.0]
+
+### Added
+- **bridge** — cross-crate primitive-value bridges for bijli (EM frequency/wavelength conversion, E-field to intensity, Cauchy refractive index), tara (stellar temperature to RGB, B-V color index, spectral class, absolute magnitude to luminosity), badal (density to Rayleigh scale, humidity to Mie scale, cloud cover to diffuse fraction, visibility to extinction)
+
+### Removed
+- **bijli-backend feature** — removed direct bijli dependency and all `#[cfg(feature = "bijli-backend")]` code. Cross-crate coupling now uses primitive-value bridges instead. Removed: bijli type re-exports (JonesVector, GaussianBeam, AbcdMatrix, etc.), From impls between prakash/bijli types, Snell/Fresnel/Brewster delegation to bijli. All optics math is now self-contained in prakash.
+
+### Updated
+- iri-string 0.7.11 -> 0.7.12
+
 ## [1.1.0] - 2026-03-25
 
 ### Changed — P1 Post-V1.0 Audit

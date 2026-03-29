@@ -54,4 +54,6 @@ pub mod logging;
 #[cfg(feature = "ai")]
 pub mod ai;
 
+pub mod bridge;
+
 pub use error::PrakashError;

@@ -7,16 +7,6 @@
 use std::f64::consts::PI;
 use tracing::trace;
 
-// ── Bijli re-exports ────────────────────────────────────────────────────────
-
-/// Full Mie scattering solver from bijli (exact solution for spherical particles).
-///
-/// Available when the `bijli-backend` feature is enabled. Uses complex refractive
-/// index for accurate particle scattering — more general than the Cornette-Shanks
-/// approximation used in this module's atmospheric functions.
-#[cfg(feature = "bijli-backend")]
-pub use bijli::scattering::{MieResult, mie, rayleigh_cross_section as em_rayleigh_cross_section};
-
 // ── Physical Constants ──────────────────────────────────────────────────────
 
 /// Index of refraction of air at sea level (STP, ~550nm).

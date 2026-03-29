@@ -213,21 +213,6 @@ impl From<Polarization> for StokesVector {
     }
 }
 
-#[cfg(feature = "bijli-backend")]
-impl From<Polarization> for bijli::polarization::JonesVector {
-    /// Convert a prakash `Polarization` to a bijli `JonesVector`.
-    ///
-    /// Maps `(ex, ey, phase)` to complex Jones vector `[Ex, Ey·e^(iδ)]`.
-    #[inline]
-    fn from(p: Polarization) -> Self {
-        use bijli::polarization::Complex;
-        bijli::polarization::JonesVector::new(
-            Complex::from_real(p.ex),
-            Complex::new(p.ey * p.phase.cos(), p.ey * p.phase.sin()),
-        )
-    }
-}
-
 /// Malus's law: intensity after a polarizer at angle θ relative to polarization.
 ///
 /// I = I0 · cos²(θ)
@@ -255,35 +240,6 @@ pub mod zernike;
 pub use diffraction::*;
 pub use pattern::*;
 pub use polarization::*;
-
-// ── Bijli re-exports ────────────────────────────────────────────────────────
-
-/// Jones vector, Jones matrix, and complex number types from bijli.
-///
-/// Available when the `bijli-backend` feature is enabled.
-#[cfg(feature = "bijli-backend")]
-pub use bijli::polarization::{Complex, JonesMatrix, JonesVector};
-
-/// Gaussian beam propagation and ABCD ray transfer matrices from bijli.
-///
-/// Available when the `bijli-backend` feature is enabled.
-#[cfg(feature = "bijli-backend")]
-pub use bijli::beam::{AbcdMatrix, GaussianBeam, ResonatorStability, resonator_stability};
-
-/// Radiation pressure and energy flux from bijli.
-///
-/// Available when the `bijli-backend` feature is enabled.
-#[cfg(feature = "bijli-backend")]
-pub use bijli::wave::{
-    momentum_density, plane_wave_intensity, poynting_vector, radiation_pressure_absorbed,
-    radiation_pressure_reflected,
-};
-
-/// Maxwell's equations: wave speed, impedance, refractive index from ε_r/μ_r.
-///
-/// Available when the `bijli-backend` feature is enabled.
-#[cfg(feature = "bijli-backend")]
-pub use bijli::maxwell::{free_space_impedance, impedance, refractive_index, wave_speed};
 
 #[cfg(test)]
 mod tests {
