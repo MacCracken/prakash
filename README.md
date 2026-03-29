@@ -99,4 +99,4 @@ cargo test --all-features
 
 ## License
 
-GPL-3.0 -- see [LICENSE](LICENSE).
+GPL-3.0-only -- see [LICENSE](LICENSE).
