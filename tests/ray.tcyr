@@ -1,0 +1,277 @@
+# ray optics test suite — ported from rust-old/src/ray/mod.rs (#[cfg(test)]).
+# Covers Medium, Snell's law, critical angle, reflection, refract_3d, deg/rad.
+# Fresnel, snell_3d, and serde round-trips are ported with their own bites.
+
+include "src/error.cyr"
+include "src/ray_core.cyr"
+
+# ── float test helpers ────────
+# non-integer literal via ratio; f64_from takes an integer.
+fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
+fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
+# normalize a 3-vector
+fn _n3(x, y, z) {
+    var l = f64_sqrt(f64_add(f64_add(f64_mul(x, x), f64_mul(y, y)), f64_mul(z, z)));
+    return ray_vec3(f64_div(x, l), f64_div(y, l), f64_div(z, l));
+}
+
+var TOL6 = f64_div(F64_ONE, f64_from(1000000));   # 1e-6
+var TOL_HALF = f64_div(F64_ONE, F64_TWO);         # 0.5
+var TOL_01 = f64_div(F64_ONE, f64_from(100));     # 0.01
+var TOL_001 = f64_div(F64_ONE, f64_from(1000));   # 0.001
+
+alloc_init();
+
+# ── Medium ────────
+test_group("medium");
+
+# presets valid: n >= 1.0
+assert(f64_ge(Medium_n(medium_vacuum()), F64_ONE), "vacuum n>=1");
+assert(f64_ge(Medium_n(medium_air()), F64_ONE), "air n>=1");
+assert(f64_ge(Medium_n(medium_water()), F64_ONE), "water n>=1");
+assert(f64_ge(Medium_n(medium_glass()), F64_ONE), "glass n>=1");
+assert(f64_ge(Medium_n(medium_crown_glass()), F64_ONE), "crown n>=1");
+assert(f64_ge(Medium_n(medium_flint_glass()), F64_ONE), "flint n>=1");
+assert(f64_ge(Medium_n(medium_diamond()), F64_ONE), "diamond n>=1");
+assert(f64_ge(Medium_n(medium_ice()), F64_ONE), "ice n>=1");
+assert(f64_ge(Medium_n(medium_quartz()), F64_ONE), "quartz n>=1");
+assert(f64_ge(Medium_n(medium_sapphire()), F64_ONE), "sapphire n>=1");
+assert(f64_ge(Medium_n(medium_acrylic()), F64_ONE), "acrylic n>=1");
+assert(f64_ge(Medium_n(medium_polycarbonate()), F64_ONE), "polycarbonate n>=1");
+
+# custom valid
+var mc_err = 0;
+var mc = medium_custom(_fd(18, 10), "custom", &mc_err);
+assert_eq(mc_err, 0, "custom 1.8 ok code");
+_assert_near(Medium_n(mc), _fd(18, 10), TOL6, "custom n=1.8");
+
+# custom exactly 1.0 ok
+var m1_err = 0;
+var _m1 = medium_custom(F64_ONE, "edge", &m1_err);
+assert_eq(m1_err, 0, "custom 1.0 ok");
+
+# custom invalid
+var mi_err = 0;
+var _mi1 = medium_custom(_fd(5, 10), "invalid", &mi_err);
+assert_eq(mi_err, PRK_ERR_INVALID_INDEX, "custom 0.5 err");
+var _mi2 = medium_custom(_fd(999, 1000), "invalid", &mi_err);
+assert_eq(mi_err, PRK_ERR_INVALID_INDEX, "custom 0.999 err");
+var _mi3 = medium_custom(f64_neg(F64_ONE), "neg", &mi_err);
+assert_eq(mi_err, PRK_ERR_INVALID_INDEX, "custom -1.0 err");
+
+# ordering: vacuum < air < water < glass < diamond
+assert(f64_lt(Medium_n(medium_vacuum()), Medium_n(medium_air())), "vacuum<air");
+assert(f64_lt(Medium_n(medium_air()), Medium_n(medium_water())), "air<water");
+assert(f64_lt(Medium_n(medium_water()), Medium_n(medium_glass())), "water<glass");
+assert(f64_lt(Medium_n(medium_glass()), Medium_n(medium_diamond())), "glass<diamond");
+
+# permittivity = n^2 : glass 1.52^2 = 2.3104
+_assert_near(medium_permittivity(medium_glass()), _fd(23104, 10000), TOL_001, "glass permittivity");
+
+# ── Snell's law ────────
+test_group("snell");
+
+var e = 0;
+var at = ray_snell(Medium_n(medium_air()), Medium_n(medium_glass()), ray_deg_to_rad(f64_from(30)), &e);
+assert_eq(e, 0, "snell air-glass ok");
+_assert_near(ray_rad_to_deg(at), _fd(192, 10), TOL_HALF, "snell air-glass ~19.2deg");
+
+var e2 = 0;
+var at2 = ray_snell(F64_ONE, _fd(15, 10), f64_from(0), &e2);
+assert_eq(e2, 0, "snell normal ok");
+_assert_near(at2, f64_from(0), TOL6, "snell normal incidence = 0");
+
+var e3 = 0;
+var _t3 = ray_snell(Medium_n(medium_glass()), Medium_n(medium_air()), ray_deg_to_rad(f64_from(45)), &e3);
+assert_eq(e3, PRK_ERR_TIR, "snell glass-air 45deg TIR");
+
+# at exactly the critical angle -> refracted goes to 90deg (pi/2)
+var ecx = 0;
+var ca_x = ray_critical_angle(Medium_n(medium_glass()), Medium_n(medium_air()), &ecx);
+var esx = 0;
+var at_x = ray_snell(Medium_n(medium_glass()), Medium_n(medium_air()), ca_x, &esx);
+assert_eq(esx, 0, "snell at critical ok");
+_assert_near(at_x, F64_PI_2, TOL_01, "snell at critical = pi/2");
+
+# symmetry: forward then back recovers the incident angle
+var esa = 0;
+var esb = 0;
+var ai30 = ray_deg_to_rad(f64_from(30));
+var t_fwd = ray_snell(F64_ONE, _fd(15, 10), ai30, &esa);
+var t_back = ray_snell(_fd(15, 10), F64_ONE, t_fwd, &esb);
+_assert_near(t_back, ai30, TOL6, "snell symmetry");
+
+# entering denser -> bends toward normal (angle_t < angle_i)
+for (var deg = 10; deg <= 50; deg = deg + 10) {
+    var eb = 0;
+    var ai = ray_deg_to_rad(f64_from(deg));
+    var atb = ray_snell(F64_ONE, _fd(15, 10), ai, &eb);
+    assert(f64_lt(atb, ai), "bends toward normal entering denser");
+}
+
+# leaving denser -> bends away from normal (angle_t > angle_i)
+for (var degb = 10; degb <= 25; degb = degb + 5) {
+    var ea = 0;
+    var aia = ray_deg_to_rad(f64_from(degb));
+    var ata = ray_snell(_fd(15, 10), F64_ONE, aia, &ea);
+    assert(f64_gt(ata, aia), "bends away leaving denser");
+}
+
+# same medium -> no bending
+var esm = 0;
+var ai45 = ray_deg_to_rad(f64_from(45));
+var atsm = ray_snell(_fd(15, 10), _fd(15, 10), ai45, &esm);
+_assert_near(atsm, ai45, TOL6, "same medium no bending");
+
+# multiple materials succeed
+var emm = 0;
+var _tm1 = ray_snell(Medium_n(medium_air()), Medium_n(medium_water()), ray_deg_to_rad(f64_from(30)), &emm);
+assert_eq(emm, 0, "air-water ok");
+var _tm2 = ray_snell(Medium_n(medium_air()), Medium_n(medium_diamond()), ray_deg_to_rad(f64_from(30)), &emm);
+assert_eq(emm, 0, "air-diamond ok");
+var _tm3 = ray_snell(Medium_n(medium_water()), Medium_n(medium_glass()), ray_deg_to_rad(f64_from(30)), &emm);
+assert_eq(emm, 0, "water-glass ok");
+
+# ── Critical angle ────────
+test_group("critical_angle");
+
+var eca = 0;
+var cag = ray_critical_angle(Medium_n(medium_glass()), Medium_n(medium_air()), &eca);
+assert_eq(eca, 0, "ca glass-air ok");
+_assert_near(ray_rad_to_deg(cag), _fd(411, 10), TOL_HALF, "ca glass-air ~41.1deg");
+
+var ecb = 0;
+var _cb1 = ray_critical_angle(F64_ONE, _fd(15, 10), &ecb);
+assert_eq(ecb, PRK_ERR_INVALID_PARAMETER, "ca n1<n2 err");
+var _cb2 = ray_critical_angle(_fd(15, 10), _fd(15, 10), &ecb);
+assert_eq(ecb, PRK_ERR_INVALID_PARAMETER, "ca n1==n2 err");
+
+var ecd = 0;
+var ecg = 0;
+var cad = ray_critical_angle(Medium_n(medium_diamond()), Medium_n(medium_air()), &ecd);
+var cag2 = ray_critical_angle(Medium_n(medium_glass()), Medium_n(medium_air()), &ecg);
+assert(f64_lt(cad, cag2), "diamond critical angle < glass (more TIR)");
+
+# ── Reflection ────────
+test_group("reflection");
+
+_assert_near(ray_reflect_angle(_fd(5, 10)), _fd(5, 10), TOL6, "reflect_angle 0.5");
+_assert_near(ray_reflect_angle(f64_from(0)), f64_from(0), TOL6, "reflect_angle 0");
+_assert_near(ray_reflect_angle(F64_PI_4), F64_PI_4, TOL6, "reflect_angle pi/4");
+
+# reflect_2d: [0.707,-0.707] about [0,1] -> [0.707, 0.707]
+var r2 = ray_reflect_2d(ray_vec2(_fd(707, 1000), f64_neg(_fd(707, 1000))), ray_vec2(f64_from(0), F64_ONE));
+_assert_near(RayVec2_x(r2), _fd(707, 1000), TOL_01, "reflect2d x");
+_assert_near(RayVec2_y(r2), _fd(707, 1000), TOL_01, "reflect2d y");
+
+# reflect_2d normal incidence: [0,-1] about [0,1] -> [0,1]
+var r2n = ray_reflect_2d(ray_vec2(f64_from(0), f64_neg(F64_ONE)), ray_vec2(f64_from(0), F64_ONE));
+_assert_near(RayVec2_x(r2n), f64_from(0), TOL6, "reflect2d normal x=0");
+_assert_near(RayVec2_y(r2n), F64_ONE, TOL6, "reflect2d normal y=1");
+
+# reflect_3d: [0,-1,0] about [0,1,0] -> [0,1,0]
+var r3 = ray_reflect_3d(
+ray_vec3(f64_from(0), f64_neg(F64_ONE), f64_from(0)),
+ray_vec3(f64_from(0), F64_ONE, f64_from(0)));
+_assert_near(RayVec3_x(r3), f64_from(0), TOL6, "reflect3d x=0");
+_assert_near(RayVec3_y(r3), F64_ONE, TOL6, "reflect3d y=1");
+_assert_near(RayVec3_z(r3), f64_from(0), TOL6, "reflect3d z=0");
+
+# reflect_3d preserves magnitude
+var dm = ray_vec3(_fd(577, 1000), f64_neg(_fd(577, 1000)), _fd(577, 1000));
+var rm = ray_reflect_3d(dm, ray_vec3(f64_from(0), F64_ONE, f64_from(0)));
+var mag_in = f64_sqrt(f64_add(
+f64_add(f64_mul(RayVec3_x(dm), RayVec3_x(dm)), f64_mul(RayVec3_y(dm), RayVec3_y(dm))),
+f64_mul(RayVec3_z(dm), RayVec3_z(dm))));
+var mag_out = f64_sqrt(f64_add(
+f64_add(f64_mul(RayVec3_x(rm), RayVec3_x(rm)), f64_mul(RayVec3_y(rm), RayVec3_y(rm))),
+f64_mul(RayVec3_z(rm), RayVec3_z(rm))));
+_assert_near(mag_in, mag_out, TOL_01, "reflect3d preserves magnitude");
+
+# reflect_3d diagonal: s=1/sqrt2, [s,-s,0] about [0,1,0] -> [s,s,0]
+var s = f64_div(F64_ONE, f64_sqrt(F64_TWO));
+var rd = ray_reflect_3d(ray_vec3(s, f64_neg(s), f64_from(0)), ray_vec3(f64_from(0), F64_ONE, f64_from(0)));
+_assert_near(RayVec3_x(rd), s, TOL6, "reflect3d diag x");
+_assert_near(RayVec3_y(rd), s, TOL6, "reflect3d diag y");
+_assert_near(RayVec3_z(rd), f64_from(0), TOL6, "reflect3d diag z");
+
+# ── 3D refraction ────────
+test_group("refract_3d");
+
+# normal incidence: straight down, no bending, still -z, unit length
+var e_r = 0;
+var rn = ray_refract_3d(
+ray_vec3(f64_from(0), f64_from(0), f64_neg(F64_ONE)),
+ray_vec3(f64_from(0), f64_from(0), F64_ONE), F64_ONE, _fd(15, 10), &e_r);
+assert_eq(e_r, 0, "refract normal ok");
+_assert_near(RayVec3_x(rn), f64_from(0), TOL6, "refract normal x=0");
+_assert_near(RayVec3_y(rn), f64_from(0), TOL6, "refract normal y=0");
+assert(f64_lt(RayVec3_z(rn), f64_from(0)), "refract normal still -z");
+
+# bends toward normal: 45deg air->glass
+var e_b = 0;
+var sb = f64_div(F64_ONE, f64_sqrt(F64_TWO));
+var rb = ray_refract_3d(
+ray_vec3(sb, f64_from(0), f64_neg(sb)),
+ray_vec3(f64_from(0), f64_from(0), F64_ONE), F64_ONE, _fd(15, 10), &e_b);
+assert_eq(e_b, 0, "refract bend ok");
+var angle_tb = ganita_f64_acos(f64_neg(RayVec3_z(rb)));
+assert(f64_lt(angle_tb, F64_PI_4), "refract bends toward normal (<45deg)");
+
+# TIR: glass->air at steep angle. [0.8,0,-0.6] is already unit length
+var e_t = 0;
+var _rt = ray_refract_3d(
+ray_vec3(_fd(8, 10), f64_from(0), f64_neg(_fd(6, 10))),
+ray_vec3(f64_from(0), f64_from(0), F64_ONE), _fd(15, 10), F64_ONE, &e_t);
+assert_eq(e_t, PRK_ERR_TIR, "refract glass-air TIR");
+
+# Snell's law holds: n1 sin(i) == n2 sin(t)
+var e_sl = 0;
+var dsl = _n3(_fd(5, 10), f64_from(0), f64_neg(_fd(866, 1000)));
+var cos_i_sl = f64_neg(RayVec3_z(dsl));
+var sin_i_sl = f64_sqrt(f64_sub(F64_ONE, f64_mul(cos_i_sl, cos_i_sl)));
+var rsl = ray_refract_3d(dsl, ray_vec3(f64_from(0), f64_from(0), F64_ONE), F64_ONE, _fd(15, 10), &e_sl);
+var cos_t_sl = f64_neg(RayVec3_z(rsl));
+var sin_t_sl = f64_sqrt(f64_sub(F64_ONE, f64_mul(cos_t_sl, cos_t_sl)));
+_assert_near(f64_mul(F64_ONE, sin_i_sl), f64_mul(_fd(15, 10), sin_t_sl), TOL_01, "3d snell law holds");
+
+# reversible: refract, reverse geometry, recover -incident
+var e_rv1 = 0;
+var e_rv2 = 0;
+var drv = _n3(_fd(3, 10), _fd(2, 10), f64_neg(_fd(9, 10)));
+var refr = ray_refract_3d(drv, ray_vec3(f64_from(0), f64_from(0), F64_ONE), F64_ONE, _fd(15, 10), &e_rv1);
+var neg_refr = ray_vec3(f64_neg(RayVec3_x(refr)), f64_neg(RayVec3_y(refr)), f64_neg(RayVec3_z(refr)));
+var back = ray_refract_3d(neg_refr, ray_vec3(f64_from(0), f64_from(0), f64_neg(F64_ONE)), _fd(15, 10), F64_ONE, &e_rv2);
+_assert_near(RayVec3_x(back), f64_neg(RayVec3_x(drv)), TOL_01, "reversible x");
+_assert_near(RayVec3_y(back), f64_neg(RayVec3_y(drv)), TOL_01, "reversible y");
+_assert_near(RayVec3_z(back), f64_neg(RayVec3_z(drv)), TOL_01, "reversible z");
+
+# same medium -> no bending
+var e_sm = 0;
+var dsm = _n3(_fd(5, 10), _fd(3, 10), f64_neg(_fd(8, 10)));
+var rsm = ray_refract_3d(dsm, ray_vec3(f64_from(0), f64_from(0), F64_ONE), _fd(15, 10), _fd(15, 10), &e_sm);
+assert_eq(e_sm, 0, "refract same medium ok");
+_assert_near(RayVec3_x(rsm), RayVec3_x(dsm), TOL_01, "same medium x");
+_assert_near(RayVec3_y(rsm), RayVec3_y(dsm), TOL_01, "same medium y");
+_assert_near(RayVec3_z(rsm), RayVec3_z(dsm), TOL_01, "same medium z");
+
+# stays in plane of incidence (2D cross of tangent components ~ 0)
+var e_tp = 0;
+var dtp = _n3(_fd(4, 10), _fd(3, 10), f64_neg(_fd(8, 10)));
+var rtp = ray_refract_3d(dtp, ray_vec3(f64_from(0), f64_from(0), F64_ONE), F64_ONE, _fd(15, 10), &e_tp);
+var cross2d = f64_sub(f64_mul(RayVec3_x(dtp), RayVec3_y(rtp)), f64_mul(RayVec3_y(dtp), RayVec3_x(rtp)));
+assert(f64_lt(f64_abs(cross2d), TOL_01), "refract stays in plane of incidence");
+
+# ── Degrees / radians ────────
+test_group("deg_rad");
+
+for (var d = 0; d <= 360; d = d + 30) {
+    _assert_near(ray_rad_to_deg(ray_deg_to_rad(f64_from(d))), f64_from(d), TOL6, "deg-rad roundtrip");
+}
+_assert_near(ray_deg_to_rad(f64_from(0)), f64_from(0), TOL6, "deg2rad 0");
+_assert_near(ray_deg_to_rad(f64_from(90)), F64_PI_2, TOL6, "deg2rad 90 = pi/2");
+_assert_near(ray_deg_to_rad(f64_from(180)), F64_PI, TOL6, "deg2rad 180 = pi");
+_assert_near(ray_deg_to_rad(f64_from(360)), F64_TAU, TOL6, "deg2rad 360 = tau");
+
+var r = assert_summary();
