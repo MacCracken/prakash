@@ -6169,3 +6169,244 @@ fn pbr_subsurface_diffuse(n_dot_l, n_dot_v, roughness) {
 fn pbr_sss_transmittance(thickness, extinction) {
     return f64_exp(f64_mul(f64_neg(extinction), thickness));
 }
+
+# ── Iridescence ────────
+
+# Thin-film iridescence Fresnel reflectance at one wavelength (Airy formula).
+#must_use
+fn pbr_iridescence_fresnel(n_outside, n_film, n_base, thickness, wavelength, cos_theta) {
+    var ct = f64_clamp(cos_theta, f64_from(0), F64_ONE);
+    var sin2_theta = f64_sub(F64_ONE, f64_mul(ct, ct));
+    var of = f64_div(n_outside, n_film);
+    var sin2_film = f64_mul(f64_mul(sin2_theta, of), of);
+    if (f64_ge(sin2_film, F64_ONE) == 1) {
+        return F64_ONE;
+    }
+    var cos_film = f64_sqrt(f64_sub(F64_ONE, sin2_film));
+    # r01 = ((n_out*ct - n_film*cos_film) / (sum))^2
+    var a01 = f64_mul(n_outside, ct);
+    var b01 = f64_mul(n_film, cos_film);
+    var q01 = f64_div(f64_sub(a01, b01), f64_add(a01, b01));
+    var r01 = f64_mul(q01, q01);
+    # cos_base via Snell (0 on TIR)
+    var ob = f64_div(n_outside, n_base);
+    var sin2_base = f64_mul(f64_mul(sin2_theta, ob), ob);
+    var cos_base = f64_from(0);
+    if (f64_lt(sin2_base, F64_ONE) == 1) {
+        cos_base = f64_sqrt(f64_sub(F64_ONE, sin2_base));
+    }
+    # r12 = ((n_film*cos_film - n_base*cos_base) / (sum + 1e-15))^2
+    var a12 = f64_mul(n_film, cos_film);
+    var b12 = f64_mul(n_base, cos_base);
+    var q12 = f64_div(f64_sub(a12, b12), f64_add(f64_add(a12, b12), _pbr_eps15()));
+    var r12 = f64_mul(q12, q12);
+    # phase delta = TAU*n_film*thickness*cos_film / wavelength
+    var delta = f64_div(
+    f64_mul(f64_mul(f64_mul(F64_TAU, n_film), thickness), cos_film),
+    wavelength);
+    var cos_d = f64_cos(delta);
+    var sqrt_rr = f64_sqrt(f64_mul(r01, r12));
+    var cos_2d = f64_sub(f64_mul(f64_mul(F64_TWO, cos_d), cos_d), F64_ONE);
+    var mix = f64_mul(f64_mul(F64_TWO, sqrt_rr), cos_2d);
+    var num = f64_add(f64_add(r01, r12), mix);
+    var den = f64_add(f64_add(F64_ONE, f64_mul(r01, r12)), mix);
+    if (f64_lt(den, _pbr_eps15()) == 1) {
+        return f64_from(0);
+    }
+    return f64_clamp(f64_div(num, den), f64_from(0), F64_ONE);
+}
+
+# Iridescence as RGB (R=650nm, G=550nm, B=450nm) into a 3-f64 out buffer.
+fn pbr_iridescence_rgb(n_outside, n_film, n_base, thickness_nm, cos_theta, out) {
+    store64(out,
+    pbr_iridescence_fresnel(n_outside, n_film, n_base, thickness_nm, f64_from(650), cos_theta));
+    store64(out + 8,
+    pbr_iridescence_fresnel(n_outside, n_film, n_base, thickness_nm, f64_from(550), cos_theta));
+    store64(out + 16,
+    pbr_iridescence_fresnel(n_outside, n_film, n_base, thickness_nm, f64_from(450), cos_theta));
+    return 0;
+}
+
+# ── Volumetric Scattering ────────
+
+# Henyey-Greenstein phase: (1 - g^2) / (4*pi * (1 + g^2 - 2*g*cos)^1.5).
+#must_use
+fn pbr_henyey_greenstein(cos_theta, g) {
+    var g2 = f64_mul(g, g);
+    var denom = f64_sub(f64_add(F64_ONE, g2), f64_mul(f64_mul(F64_TWO, g), cos_theta));
+    var denom_full = f64_mul(denom, f64_sqrt(denom));
+    if (f64_lt(denom_full, _pbr_eps15()) == 1) {
+        return f64_from(0);
+    }
+    return f64_div(f64_sub(F64_ONE, g2), f64_mul(f64_mul(f64_from(4), F64_PI), denom_full));
+}
+
+# Isotropic phase: 1/(4*pi).
+#must_use
+fn pbr_phase_isotropic() {
+    return f64_div(F64_ONE, f64_mul(f64_from(4), F64_PI));
+}
+
+# Rayleigh phase: 3*(1 + cos^2) / (16*pi).
+#must_use
+fn pbr_phase_rayleigh(cos_theta) {
+    return f64_div(
+    f64_mul(f64_from(3), f64_add(F64_ONE, f64_mul(cos_theta, cos_theta))),
+    f64_mul(f64_from(16), F64_PI));
+}
+
+# Extinction: sigma_t = absorption + scattering.
+#must_use
+fn pbr_extinction_coefficient(absorption, scattering) {
+    return f64_add(absorption, scattering);
+}
+
+# Beer-Lambert volume transmittance: e^(-sigma_t * distance).
+#must_use
+fn pbr_volume_transmittance(sigma_t, distance) {
+    return f64_exp(f64_mul(f64_neg(sigma_t), distance));
+}
+
+# Single-scattering albedo: scattering / (absorption + scattering).
+#must_use
+fn pbr_single_scatter_albedo(absorption, scattering) {
+    var total = f64_add(absorption, scattering);
+    if (f64_lt(total, _pbr_eps15()) == 1) {
+        return f64_from(0);
+    }
+    return f64_div(scattering, total);
+}
+
+# In-scattering: sigma_s * phase(cos) * T(d) * L.
+#must_use
+fn pbr_single_scatter_inscattering(scattering, cos_theta, g, sigma_t, distance, light_intensity) {
+    var phase = pbr_henyey_greenstein(cos_theta, g);
+    var transmittance = pbr_volume_transmittance(sigma_t, distance);
+    return f64_mul(f64_mul(f64_mul(scattering, phase), transmittance), light_intensity);
+}
+
+# ── Importance Sampling ────────
+
+# GGX importance-sampled half-vector (tangent space) into a 3-f64 out buffer.
+fn pbr_sample_ggx(roughness, xi1, xi2, out) {
+    var a = f64_mul(roughness, roughness);
+    var a2 = f64_mul(a, a);
+    var cos_theta = f64_sqrt(f64_div(
+    f64_sub(F64_ONE, xi1),
+    f64_add(F64_ONE, f64_mul(f64_sub(a2, F64_ONE), xi1))));
+    var sin_theta = f64_max(f64_sqrt(f64_sub(F64_ONE, f64_mul(cos_theta, cos_theta))), f64_from(0));
+    var phi = f64_mul(F64_TAU, xi2);
+    var sin_phi = f64_sin(phi);
+    var cos_phi = f64_cos(phi);
+    store64(out, f64_mul(sin_theta, cos_phi));
+    store64(out + 8, f64_mul(sin_theta, sin_phi));
+    store64(out + 16, cos_theta);
+    return 0;
+}
+
+# PDF of the GGX-sampled half-vector: D(h) * n.h / (4 * h.v).
+#must_use
+fn pbr_sample_ggx_pdf(n_dot_h, h_dot_v, roughness) {
+    var d = pbr_distribution_ggx(n_dot_h, roughness);
+    var ndh = f64_clamp(n_dot_h, f64_from(0), F64_ONE);
+    var hdv = f64_clamp(h_dot_v, _pbr_r(1, 1000), F64_ONE);
+    return f64_div(f64_mul(d, ndh), f64_mul(f64_from(4), hdv));
+}
+
+# Cosine-weighted hemisphere sample (Malley's method) into a 3-f64 out buffer.
+fn pbr_sample_cosine_hemisphere(xi1, xi2, out) {
+    var r = f64_sqrt(xi1);
+    var phi = f64_mul(F64_TAU, xi2);
+    var sin_phi = f64_sin(phi);
+    var cos_phi = f64_cos(phi);
+    store64(out, f64_mul(r, cos_phi));
+    store64(out + 8, f64_mul(r, sin_phi));
+    store64(out + 16, f64_max(f64_sqrt(f64_sub(F64_ONE, xi1)), f64_from(0)));
+    return 0;
+}
+
+# PDF of cosine hemisphere sampling: n.l / pi.
+#must_use
+fn pbr_sample_cosine_pdf(n_dot_l) {
+    return f64_div(f64_clamp(n_dot_l, f64_from(0), F64_ONE), F64_PI);
+}
+
+# ── Split-Sum IBL ────────
+
+# Analytic split-sum (scale, bias) fit (Lazarov 2013) into a 2-f64 out buffer.
+fn pbr_split_sum_scale_bias(n_dot_v, roughness, out) {
+    var ndv = f64_clamp(n_dot_v, f64_from(0), F64_ONE);
+    var rc = f64_min(roughness, F64_ONE);
+    var x = f64_mul(rc, rc);
+    var s1 = f64_add(f64_mul(f64_neg(_pbr_r(24, 1000)), x), _pbr_r(132, 1000));
+    var s2 = f64_add(f64_mul(s1, x), f64_neg(_pbr_r(333, 1000)));
+    var s3 = f64_add(f64_mul(s2, x), _pbr_r(998, 1000));
+    var st1 = f64_add(f64_mul(f64_neg(_pbr_r(1613, 1000)), ndv), _pbr_r(2227, 1000));
+    var scale = f64_mul(s3, f64_min(st1, F64_ONE));
+    var b1 = f64_add(f64_mul(_pbr_r(42, 1000), x), f64_neg(_pbr_r(1, 10)));
+    var b2 = f64_add(f64_mul(b1, x), _pbr_r(3, 100));
+    var b3 = f64_add(f64_mul(b2, x), f64_neg(_pbr_r(2, 1000)));
+    var bt1 = f64_add(f64_mul(_pbr_r(309, 100), ndv), f64_neg(_pbr_r(1929, 1000)));
+    var bias = f64_mul(b3, f64_max(bt1, f64_from(0)));
+    store64(out, f64_clamp(scale, f64_from(0), F64_ONE));
+    store64(out + 8, f64_clamp(bias, f64_from(0), F64_ONE));
+    return 0;
+}
+
+# Environment-map mip level: roughness * max_lod.
+#must_use
+fn pbr_env_map_lod(roughness, max_lod) {
+    return f64_mul(roughness, max_lod);
+}
+
+# u32 bit-reversal (32-bit) for the Hammersley sequence.
+fn _pbr_revbits32(x) {
+    var r = 0;
+    var i = 0;
+    while (i < 32) {
+        r = (r << 1) + (x & 1);
+        x = x >> 1;
+        i = i + 1;
+    }
+    return r;
+}
+
+# Van der Corput radical inverse (base 2): reverse_bits(bits) * 2^-32.
+fn _pbr_radvdc(bits) {
+    return f64_mul(f64_from(_pbr_revbits32(bits)), 0x3DF0000000000000);
+}
+
+# Numerically integrate the split-sum BRDF LUT (scale, bias) into a 2-f64 buffer
+# via importance-sampled GGX + Hammersley points.
+fn pbr_integrate_brdf_lut(n_dot_v, roughness, num_samples, out) {
+    var ndv = f64_clamp(n_dot_v, _pbr_r(1, 1000), F64_ONE);
+    var v = alloc(24);
+    store64(v, f64_sqrt(f64_sub(F64_ONE, f64_mul(ndv, ndv))));
+    store64(v + 8, f64_from(0));
+    store64(v + 16, ndv);
+    var scale = f64_from(0);
+    var bias = f64_from(0);
+    var inv_samples = f64_div(F64_ONE, f64_from(num_samples));
+    var h = alloc(24);
+    for (var i = 0; i < num_samples; i = i + 1) {
+        var xi1 = f64_mul(f64_from(i), inv_samples);
+        pbr_sample_ggx(roughness, xi1, _pbr_radvdc(i), h);
+        var vdh = f64_max(f64_add(
+        f64_add(f64_mul(load64(v), load64(h)), f64_mul(load64(v + 8), load64(h + 8))),
+        f64_mul(load64(v + 16), load64(h + 16))), f64_from(0));
+        var n_dot_l = f64_max(
+        f64_sub(f64_mul(f64_mul(F64_TWO, vdh), load64(h + 16)), load64(v + 16)),
+        f64_from(0));
+        var n_dot_h = f64_max(load64(h + 16), f64_from(0));
+        if (f64_gt(n_dot_l, f64_from(0)) == 1) {
+            var g = pbr_geometry_smith(ndv, n_dot_l, roughness);
+            var g_vis = f64_div(f64_mul(g, vdh), f64_add(f64_mul(n_dot_h, ndv), _pbr_eps15()));
+            var fc = _pbr_pow5(f64_sub(F64_ONE, vdh));
+            scale = f64_add(scale, f64_mul(g_vis, f64_sub(F64_ONE, fc)));
+            bias = f64_add(bias, f64_mul(g_vis, fc));
+        }
+    }
+    store64(out, f64_mul(scale, inv_samples));
+    store64(out + 8, f64_mul(bias, inv_samples));
+    return 0;
+}

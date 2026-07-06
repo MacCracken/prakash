@@ -152,4 +152,154 @@ _assert_near(pbr_sss_transmittance(Z, F64_ONE), F64_ONE, EPS, "transmittance 0 t
 assert(f64_lt(pbr_sss_transmittance(F64_ONE, F64_ONE), F64_ONE), "transmittance < 1");
 assert(f64_gt(pbr_sss_transmittance(F64_ONE, F64_ONE), Z), "transmittance > 0");
 
+var h3 = alloc(24);
+var d3 = alloc(24);
+var rgb3 = alloc(24);
+var sb2 = alloc(16);
+var sb2b = alloc(16);
+var N13 = _fd(13, 10);
+var N15 = _fd(15, 10);
+var THR = _fd(1, 1000);
+
+# ── Iridescence ────────
+test_group("iridescence");
+
+var ir_ct = alloc(5 * 8);
+store64(ir_ct, _fd(1, 10));
+store64(ir_ct + 8, _fd(3, 10));
+store64(ir_ct + 16, F64_HALF);
+store64(ir_ct + 24, _fd(7, 10));
+store64(ir_ct + 32, _fd(9, 10));
+for (var ic = 0; ic < 5; ic = ic + 1) {
+    var rr = pbr_iridescence_fresnel(F64_ONE, N13, N15, f64_from(300), f64_from(550), load64(ir_ct + ic * 8));
+    assert(f64_ge(rr, Z), "iridescence range lo");
+    assert(f64_le(rr, F64_ONE), "iridescence range hi");
+}
+assert(f64_gt(f64_abs(f64_sub(
+pbr_iridescence_fresnel(F64_ONE, N13, N15, f64_from(300), f64_from(650), _fd(8, 10)),
+pbr_iridescence_fresnel(F64_ONE, N13, N15, f64_from(300), f64_from(450), _fd(8, 10)))), THR),
+"iridescence varies with wavelength");
+assert(f64_gt(f64_abs(f64_sub(
+pbr_iridescence_fresnel(F64_ONE, N13, N15, f64_from(200), f64_from(550), _fd(8, 10)),
+pbr_iridescence_fresnel(F64_ONE, N13, N15, f64_from(400), f64_from(550), _fd(8, 10)))), THR),
+"iridescence varies with thickness");
+assert(f64_gt(f64_abs(f64_sub(
+pbr_iridescence_fresnel(F64_ONE, N13, N15, f64_from(300), f64_from(550), F64_ONE),
+pbr_iridescence_fresnel(F64_ONE, N13, N15, f64_from(300), f64_from(550), _fd(2, 10)))), _fd(1, 100)),
+"iridescence varies with angle");
+pbr_iridescence_rgb(F64_ONE, N13, N15, f64_from(300), _fd(8, 10), rgb3);
+assert(f64_ge(load64(rgb3), Z), "irid rgb R >= 0");
+assert(f64_ge(load64(rgb3 + 8), Z), "irid rgb G >= 0");
+assert(f64_ge(load64(rgb3 + 16), Z), "irid rgb B >= 0");
+var col_any = 0;
+if (f64_gt(f64_abs(f64_sub(load64(rgb3), load64(rgb3 + 8))), THR) == 1) {
+    col_any = 1;
+}
+if (f64_gt(f64_abs(f64_sub(load64(rgb3 + 8), load64(rgb3 + 16))), THR) == 1) {
+    col_any = 1;
+}
+assert_eq(col_any, 1, "iridescence produces color variation");
+
+# ── Volumetric ────────
+test_group("volumetric");
+
+_assert_near(pbr_henyey_greenstein(F64_HALF, Z), pbr_phase_isotropic(), THR, "HG(g=0) = isotropic");
+assert(f64_gt(pbr_henyey_greenstein(F64_ONE, _fd(8, 10)),
+pbr_henyey_greenstein(f64_neg(F64_ONE), _fd(8, 10))), "HG forward > backward");
+assert(f64_gt(pbr_henyey_greenstein(f64_neg(F64_ONE), f64_neg(F64_HALF)),
+pbr_henyey_greenstein(F64_ONE, f64_neg(F64_HALF))), "HG backward > forward");
+var g_vals = alloc(5 * 8);
+store64(g_vals, f64_neg(_fd(9, 10)));
+store64(g_vals + 8, f64_neg(F64_HALF));
+store64(g_vals + 16, Z);
+store64(g_vals + 24, F64_HALF);
+store64(g_vals + 32, _fd(9, 10));
+var ct_vals = alloc(5 * 8);
+store64(ct_vals, f64_neg(F64_ONE));
+store64(ct_vals + 8, f64_neg(F64_HALF));
+store64(ct_vals + 16, Z);
+store64(ct_vals + 24, F64_HALF);
+store64(ct_vals + 32, F64_ONE);
+for (var hi = 0; hi < 5; hi = hi + 1) {
+    for (var hj = 0; hj < 5; hj = hj + 1) {
+        assert(f64_ge(pbr_henyey_greenstein(load64(ct_vals + hj * 8), load64(g_vals + hi * 8)), Z),
+        "HG non-negative");
+    }
+}
+_assert_near(pbr_phase_rayleigh(F64_ONE), pbr_phase_rayleigh(f64_neg(F64_ONE)), EPS, "rayleigh symmetric");
+assert(f64_gt(pbr_phase_rayleigh(F64_ONE), pbr_phase_rayleigh(Z)), "rayleigh min at 90");
+_assert_near(pbr_extinction_coefficient(F64_HALF, _fd(3, 10)), _fd(8, 10), EPS, "extinction = 0.8");
+_assert_near(pbr_volume_transmittance(Z, f64_from(10)), F64_ONE, EPS, "vol_t 0 = 1");
+assert(f64_lt(pbr_volume_transmittance(F64_ONE, F64_ONE), F64_ONE), "vol_t < 1");
+assert(f64_gt(pbr_volume_transmittance(F64_ONE, F64_ONE), Z), "vol_t > 0");
+assert(f64_lt(pbr_volume_transmittance(F64_HALF, f64_from(3)), pbr_volume_transmittance(F64_HALF, F64_ONE)),
+"thicker less transmittance");
+_assert_near(pbr_single_scatter_albedo(Z, F64_ONE), F64_ONE, EPS, "ssa(0,1) = 1");
+assert(f64_lt(f64_abs(pbr_single_scatter_albedo(F64_ONE, Z)), EPS), "ssa(1,0) = 0");
+_assert_near(pbr_single_scatter_albedo(F64_HALF, F64_HALF), F64_HALF, EPS, "ssa(0.5,0.5) = 0.5");
+assert(f64_lt(f64_abs(pbr_single_scatter_albedo(Z, Z)), EPS), "ssa(0,0) = 0");
+assert(f64_gt(pbr_single_scatter_inscattering(F64_HALF, _fd(8, 10), F64_HALF, F64_ONE, F64_HALF, F64_ONE), Z),
+"inscattering positive");
+assert(f64_lt(f64_abs(
+pbr_single_scatter_inscattering(Z, _fd(8, 10), F64_HALF, F64_ONE, F64_HALF, F64_ONE)), EPS),
+"zero scattering = zero inscattering");
+
+# ── Importance sampling ────────
+test_group("importance_sampling");
+
+pbr_sample_ggx(_fd(3, 10), F64_HALF, F64_HALF, h3);
+var glen = f64_sqrt(f64_add(f64_add(f64_mul(load64(h3), load64(h3)),
+f64_mul(load64(h3 + 8), load64(h3 + 8))), f64_mul(load64(h3 + 16), load64(h3 + 16))));
+_assert_near(glen, F64_ONE, _fd(1, 100), "sample_ggx unit length");
+for (var gh = 0; gh < 20; gh = gh + 1) {
+    pbr_sample_ggx(F64_HALF, _fd(gh, 20), _fd(3, 10), h3);
+    assert(f64_ge(load64(h3 + 16), Z), "sample_ggx upper hemisphere");
+}
+pbr_sample_ggx(_fd(1, 100), F64_HALF, Z, h3);
+assert(f64_gt(load64(h3 + 16), _fd(9, 10)), "smooth concentrates near normal");
+pbr_sample_ggx(_fd(9, 10), F64_HALF, Z, h3);
+assert(f64_lt(load64(h3 + 16), _fd(9, 10)), "rough spreads");
+assert(f64_gt(pbr_sample_ggx_pdf(_fd(9, 10), _fd(8, 10), _fd(3, 10)), Z), "ggx pdf positive");
+assert(f64_gt(pbr_sample_ggx_pdf(F64_ONE, F64_ONE, _fd(1, 100)),
+pbr_sample_ggx_pdf(F64_ONE, F64_ONE, _fd(9, 10))), "smooth higher peak pdf");
+pbr_sample_cosine_hemisphere(F64_HALF, F64_HALF, d3);
+var dlen = f64_sqrt(f64_add(f64_add(f64_mul(load64(d3), load64(d3)),
+f64_mul(load64(d3 + 8), load64(d3 + 8))), f64_mul(load64(d3 + 16), load64(d3 + 16))));
+_assert_near(dlen, F64_ONE, _fd(1, 100), "cosine sample unit length");
+for (var ch = 0; ch < 20; ch = ch + 1) {
+    pbr_sample_cosine_hemisphere(_fd(ch, 20), _fd(3, 10), d3);
+    assert(f64_ge(load64(d3 + 16), Z), "cosine sample upper hemisphere");
+}
+_assert_near(pbr_sample_cosine_pdf(F64_ONE), f64_div(F64_ONE, F64_PI), EPS, "cosine pdf at normal");
+assert(f64_lt(f64_abs(pbr_sample_cosine_pdf(Z)), EPS), "cosine pdf at grazing = 0");
+
+# ── Split-sum IBL ────────
+test_group("split_sum");
+
+for (var nv = 1; nv <= 10; nv = nv + 1) {
+    for (var rg = 0; rg <= 10; rg = rg + 1) {
+        pbr_split_sum_scale_bias(_fd(nv, 10), _fd(rg, 10), sb2);
+        assert(f64_ge(load64(sb2), Z), "scale >= 0");
+        assert(f64_le(load64(sb2), F64_ONE), "scale <= 1");
+        assert(f64_ge(load64(sb2 + 8), Z), "bias >= 0");
+        assert(f64_le(load64(sb2 + 8), F64_ONE), "bias <= 1");
+    }
+}
+pbr_split_sum_scale_bias(F64_ONE, Z, sb2);
+assert(f64_gt(load64(sb2), F64_HALF), "smooth normal high scale");
+_assert_near(pbr_env_map_lod(Z, f64_from(8)), Z, EPS, "env_lod 0 = 0");
+_assert_near(pbr_env_map_lod(F64_ONE, f64_from(8)), f64_from(8), EPS, "env_lod 1 = 8");
+_assert_near(pbr_env_map_lod(F64_HALF, f64_from(8)), f64_from(4), EPS, "env_lod 0.5 = 4");
+pbr_integrate_brdf_lut(F64_HALF, _fd(3, 10), 64, sb2);
+assert(f64_ge(load64(sb2), Z), "lut scale >= 0");
+assert(f64_ge(load64(sb2 + 8), Z), "lut bias >= 0");
+assert(f64_le(f64_add(load64(sb2), load64(sb2 + 8)), F64_TWO), "lut scale+bias <= 2");
+pbr_integrate_brdf_lut(_fd(8, 10), _fd(1, 10), 64, sb2);
+pbr_integrate_brdf_lut(_fd(8, 10), _fd(9, 10), 64, sb2b);
+assert(f64_gt(load64(sb2), load64(sb2b)), "lut smooth higher scale");
+pbr_integrate_brdf_lut(F64_HALF, _fd(3, 10), 64, sb2);
+pbr_integrate_brdf_lut(F64_HALF, _fd(3, 10), 64, sb2b);
+assert(f64_lt(f64_abs(f64_sub(load64(sb2), load64(sb2b))), EPS), "lut deterministic scale");
+assert(f64_lt(f64_abs(f64_sub(load64(sb2 + 8), load64(sb2b + 8))), EPS), "lut deterministic bias");
+
 var r = assert_summary();
