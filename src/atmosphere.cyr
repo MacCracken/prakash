@@ -1,0 +1,216 @@
+# atmosphere.cyr -- atmospheric optics (Rayleigh/Mie scattering, sky color,
+# air mass, optical depth)
+# Usage: include "lib/atmosphere.cyr"  (requires ganita for pow/acos)
+#
+# Ported from the Rust `atmosphere.rs`. Physical constants: N_AIR=1.000293
+# (exact ratio), N_S=2.504e25 and RAYLEIGH_PREFACTOR=(8pi^3/3)(N_AIR^2-1)^2/N_S^2
+# are exact IEEE-754 hex (extreme magnitude / precomputed const). RGB channels
+# use wavelengths R=650nm, G=550nm, B=450nm; [f64;3] returns -> 3-f64 out buffers.
+
+fn _atm_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _atm_eps15() { return f64_div(F64_ONE, f64_from(1000000000000000)); }
+
+# Physical constants.
+fn _atm_n_air() { return _atm_r(1000293, 1000000); }        # 1.000293
+fn _atm_n_s() { return 0x4534B66D1EB52A20; }                # 2.504e25 molecules/m^3
+fn _atm_beta_m() { return _atm_r(21, 1000000); }            # 21e-6 1/m (Mie sea level)
+fn _atm_scale_h_rayleigh() { return f64_from(8500); }       # meters
+fn _atm_scale_h_mie() { return f64_from(1200); }            # meters
+fn _atm_mie_g() { return _atm_r(76, 100); }                 # 0.76
+# (8*pi^3/3)*(N_AIR^2-1)^2/N_S^2 -- compile-time const, exact hex.
+fn _atm_prefactor() { return 0x3471C55EE39309A4; }
+# 180/pi for to_degrees (matches Rust's precomputed const).
+fn _atm_to_degrees(x) { return f64_mul(x, f64_div(f64_from(180), F64_PI)); }
+
+# i-th RGB wavelength in meters: 650/550/450 nm.
+fn _atm_rgb_wl(i) {
+    if (i == 0) {
+        return _atm_r(65, 100000000);
+    }
+    if (i == 1) {
+        return _atm_r(55, 100000000);
+    }
+    return _atm_r(45, 100000000);
+}
+
+# ── King correction factor ────────
+
+# King factor F_K = (6 + 3*rho_n) / (6 - 7*rho_n),
+# rho_n = 0.0279 + 0.000174/lambda_um^2 (Bates 1984).
+#must_use
+fn atm_king_factor(wavelength_m) {
+    var lambda_um = f64_mul(wavelength_m, f64_from(1000000));
+    var rho_n = f64_add(_atm_r(279, 10000),
+    f64_div(_atm_r(174, 1000000), f64_mul(lambda_um, lambda_um)));
+    return f64_div(
+    f64_add(f64_from(6), f64_mul(f64_from(3), rho_n)),
+    f64_sub(f64_from(6), f64_mul(f64_from(7), rho_n)));
+}
+
+# ── Rayleigh scattering ────────
+
+# Rayleigh cross-section: sigma(lambda) = PREFACTOR / lambda^4.
+#must_use
+fn atm_rayleigh_cross_section(wavelength_m) {
+    var lambda4 = f64_mul(
+    f64_mul(f64_mul(wavelength_m, wavelength_m), wavelength_m), wavelength_m);
+    return f64_div(_atm_prefactor(), lambda4);
+}
+
+# Rayleigh cross-section with King correction.
+#must_use
+fn atm_rayleigh_cross_section_corrected(wavelength_m) {
+    return f64_mul(atm_rayleigh_cross_section(wavelength_m), atm_king_factor(wavelength_m));
+}
+
+# Rayleigh scattering coefficient at sea level: beta = N_S * sigma.
+#must_use
+fn atm_rayleigh_scattering_coefficient(wavelength_m) {
+    return f64_mul(_atm_n_s(), atm_rayleigh_cross_section(wavelength_m));
+}
+
+# Rayleigh coefficient at altitude: beta0 * exp(-h/H_R).
+#must_use
+fn atm_rayleigh_scattering_at_altitude(wavelength_m, altitude_m) {
+    return f64_mul(atm_rayleigh_scattering_coefficient(wavelength_m),
+    f64_exp(f64_div(f64_neg(altitude_m), _atm_scale_h_rayleigh())));
+}
+
+# Rayleigh phase function: 3*(1 + cos^2) / (16*pi).
+#must_use
+fn atm_phase_rayleigh(cos_theta) {
+    return f64_div(
+    f64_mul(f64_from(3), f64_add(F64_ONE, f64_mul(cos_theta, cos_theta))),
+    f64_mul(f64_from(16), F64_PI));
+}
+
+# ── Mie scattering ────────
+
+# Mie scattering coefficient at sea level (wavelength-independent, alpha=0).
+#must_use
+fn atm_mie_scattering_coefficient(wavelength_m) {
+    return _atm_beta_m();
+}
+
+# Mie coefficient at altitude: beta0 * exp(-h/H_M).
+#must_use
+fn atm_mie_scattering_at_altitude(wavelength_m, altitude_m) {
+    return f64_mul(atm_mie_scattering_coefficient(wavelength_m),
+    f64_exp(f64_div(f64_neg(altitude_m), _atm_scale_h_mie())));
+}
+
+# Cornette-Shanks Mie phase:
+# (3/8pi)*(1-g^2)(1+cos^2) / ((2+g^2)(1+g^2-2g*cos)^1.5).
+#must_use
+fn atm_mie_phase_cornette_shanks(cos_theta, g) {
+    var g2 = f64_mul(g, g);
+    var denom_base = f64_sub(f64_add(F64_ONE, g2), f64_mul(f64_mul(F64_TWO, g), cos_theta));
+    var denom = f64_mul(f64_mul(f64_add(F64_TWO, g2), denom_base), f64_sqrt(denom_base));
+    if (f64_lt(denom, _atm_eps15()) == 1) {
+        return f64_from(0);
+    }
+    return f64_div(
+    f64_mul(
+    f64_mul(f64_div(f64_from(3), f64_mul(f64_from(8), F64_PI)), f64_sub(F64_ONE, g2)),
+    f64_add(F64_ONE, f64_mul(cos_theta, cos_theta))),
+    denom);
+}
+
+# ── Air mass & optical depth ────────
+
+# Relative air mass (Kasten & Young 1989):
+# 1 / (cos(z) + 0.50572*(96.07995 - z_deg)^-1.6364), z_deg = to_degrees(z).min(90).
+#must_use
+fn atm_air_mass(zenith_angle) {
+    var zenith_deg = f64_min(_atm_to_degrees(zenith_angle), f64_from(90));
+    var cos_z = f64_cos(zenith_angle);
+    var correction = f64_mul(_atm_r(50572, 100000),
+    ganita_f64_pow(f64_sub(_atm_r(9607995, 100000), zenith_deg), f64_neg(_atm_r(16364, 10000))));
+    return f64_div(F64_ONE, f64_add(cos_z, correction));
+}
+
+# Rayleigh optical depth (zenith): tau_R = beta_R * H_R.
+#must_use
+fn atm_optical_depth_rayleigh(wavelength_m) {
+    return f64_mul(atm_rayleigh_scattering_coefficient(wavelength_m), _atm_scale_h_rayleigh());
+}
+
+# Mie optical depth: tau_M = beta_M * H_M.
+#must_use
+fn atm_optical_depth_mie() {
+    return f64_mul(_atm_beta_m(), _atm_scale_h_mie());
+}
+
+# Atmospheric transmittance: exp(-(tau_R + tau_M) * air_mass(z)).
+#must_use
+fn atm_atmospheric_transmittance(wavelength_m, zenith_angle) {
+    var m = atm_air_mass(zenith_angle);
+    var tau_r = atm_optical_depth_rayleigh(wavelength_m);
+    var tau_m = atm_optical_depth_mie();
+    return f64_exp(f64_mul(f64_neg(f64_add(tau_r, tau_m)), m));
+}
+
+# ── Sky color ────────
+
+# Single-scatter sky radiance (relative) at one wavelength.
+#must_use
+fn atm_sky_radiance_single_scatter(wavelength_m, sun_zenith, scattering_angle) {
+    var cos_scatter = f64_cos(scattering_angle);
+    var beta_r = atm_rayleigh_scattering_coefficient(wavelength_m);
+    var beta_m = atm_mie_scattering_coefficient(wavelength_m);
+    var radiance_r = f64_mul(beta_r, atm_phase_rayleigh(cos_scatter));
+    var radiance_m = f64_mul(beta_m, atm_mie_phase_cornette_shanks(cos_scatter, _atm_mie_g()));
+    var sun_transmittance = atm_atmospheric_transmittance(wavelength_m, sun_zenith);
+    return f64_mul(f64_add(radiance_r, radiance_m), sun_transmittance);
+}
+
+# Sky color RGB (single-scatter, R/G/B wavelengths) into a 3-f64 out buffer.
+fn atm_sky_color_rgb(sun_zenith, scattering_angle, out) {
+    for (var i = 0; i < 3; i = i + 1) {
+        store64(out + i * 8,
+        atm_sky_radiance_single_scatter(_atm_rgb_wl(i), sun_zenith, scattering_angle));
+    }
+    return 0;
+}
+
+# ── Sunset / sunrise ────────
+
+# Direct-sunlight color (transmittance) after the atmospheric path, into 3-f64.
+fn atm_sunlight_color(sun_zenith, out) {
+    for (var i = 0; i < 3; i = i + 1) {
+        store64(out + i * 8, atm_atmospheric_transmittance(_atm_rgb_wl(i), sun_zenith));
+    }
+    return 0;
+}
+
+# Sunset/sunrise sky gradient RGB into a 3-f64 out buffer.
+fn atm_sunset_gradient(sun_zenith, view_elevation, angular_distance_to_sun, out) {
+    var view_zenith = f64_clamp(f64_sub(F64_PI_2, view_elevation), f64_from(0), F64_PI_2);
+    var cos_scatter = f64_cos(angular_distance_to_sun);
+    var phase_r = atm_phase_rayleigh(cos_scatter);
+    var phase_m = atm_mie_phase_cornette_shanks(cos_scatter, _atm_mie_g());
+    var sun_air_mass = atm_air_mass(sun_zenith);
+    var view_air_mass = atm_air_mass(view_zenith);
+    var tau_m = atm_optical_depth_mie();
+    for (var i = 0; i < 3; i = i + 1) {
+        var beta_r = atm_rayleigh_scattering_coefficient(_atm_rgb_wl(i));
+        var total_tau = f64_add(f64_mul(beta_r, _atm_scale_h_rayleigh()), tau_m);
+        var sun_transmittance = f64_exp(f64_mul(f64_neg(total_tau), sun_air_mass));
+        var view_transmittance = f64_exp(f64_mul(f64_neg(total_tau), view_air_mass));
+        var scatter = f64_mul(
+        f64_add(f64_mul(beta_r, phase_r), f64_mul(_atm_beta_m(), phase_m)),
+        sun_transmittance);
+        store64(out + i * 8, f64_mul(scatter, view_transmittance));
+    }
+    return 0;
+}
+
+# Scattering angle between sun and view directions (zenith + azimuth):
+# acos(clamp(cos_s*cos_v + sin_s*sin_v*cos(azimuth_diff), -1, 1)).
+#must_use
+fn atm_scattering_angle(sun_zenith, view_zenith, azimuth_diff) {
+    var cos_gamma = f64_add(
+    f64_mul(f64_cos(sun_zenith), f64_cos(view_zenith)),
+    f64_mul(f64_mul(f64_sin(sun_zenith), f64_sin(view_zenith)), f64_cos(azimuth_diff)));
+    return ganita_f64_acos(f64_clamp(cos_gamma, f64_neg(F64_ONE), F64_ONE));
+}

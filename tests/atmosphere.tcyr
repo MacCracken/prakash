@@ -1,0 +1,251 @@
+# atmosphere test suite — from rust-old/src/atmosphere.rs (inline #[cfg(test)] mod).
+
+include "src/error.cyr"
+include "src/atmosphere.cyr"
+
+fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
+fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
+fn _rad(deg) { return f64_div(f64_mul(f64_from(deg), F64_PI), f64_from(180)); }
+fn _is_finite(x) { return f64_lt(f64_abs(x), 0x7FF0000000000000); }
+
+var EPS = f64_div(F64_ONE, f64_from(1000000));   # 1e-6
+var Z = f64_from(0);
+var WL = _fd(55, 100000000);   # 550e-9
+var BLUE = _fd(44, 100000000); # 440e-9
+var RED = _fd(68, 100000000);  # 680e-9
+var INV_E = f64_exp(f64_neg(F64_ONE));
+
+alloc_init();
+
+var RGB = alloc(24);
+var RGB2 = alloc(24);
+
+# ── Rayleigh scattering ────────
+test_group("rayleigh");
+
+assert(f64_gt(atm_rayleigh_cross_section(WL), Z), "cross-section positive");
+var sig550 = atm_rayleigh_cross_section(WL);
+assert(f64_gt(sig550, 0x3949F623D5A8A733), "cross-section > 1e-32");
+assert(f64_lt(sig550, 0x39E95A5EFEA6B347), "cross-section < 1e-29");
+var b_ratio = f64_div(atm_rayleigh_cross_section(BLUE), atm_rayleigh_cross_section(RED));
+var base = f64_div(f64_from(680), f64_from(440));
+var base2 = f64_mul(base, base);
+var expected4 = f64_mul(base2, base2);
+assert(f64_lt(f64_div(f64_abs(f64_sub(b_ratio, expected4)), expected4), _fd(1, 100)),
+"lambda^-4 dependence");
+var beta550 = atm_rayleigh_scattering_coefficient(WL);
+assert(f64_gt(beta550, Z), "beta positive");
+assert(f64_gt(beta550, _fd(1, 1000000)), "beta > 1e-6");
+assert(f64_lt(beta550, _fd(1, 10000)), "beta < 1e-4");
+assert(f64_gt(atm_rayleigh_scattering_coefficient(BLUE),
+f64_mul(atm_rayleigh_scattering_coefficient(RED), f64_from(4))), "blue scatters more");
+var beta_sea = atm_rayleigh_scattering_at_altitude(WL, Z);
+var beta_high = atm_rayleigh_scattering_at_altitude(WL, f64_from(8500));
+assert(f64_lt(f64_abs(f64_sub(f64_div(beta_high, beta_sea), INV_E)), _fd(1, 100)),
+"at scale height -> 1/e");
+_assert_near(atm_rayleigh_scattering_at_altitude(WL, Z), atm_rayleigh_scattering_coefficient(WL), EPS,
+"altitude 0 = sea level");
+_assert_near(atm_phase_rayleigh(F64_ONE), atm_phase_rayleigh(f64_neg(F64_ONE)), EPS, "phase symmetric");
+assert(f64_gt(atm_phase_rayleigh(F64_ONE), atm_phase_rayleigh(Z)), "phase min at 90");
+var integ_r = Z;
+for (var ri = 0; ri < 1000; ri = ri + 1) {
+    var theta = f64_div(f64_mul(F64_PI, f64_add(f64_from(ri), F64_HALF)), f64_from(1000));
+    integ_r = f64_add(integ_r, f64_mul(f64_mul(f64_mul(atm_phase_rayleigh(f64_cos(theta)),
+    f64_sin(theta)), f64_mul(F64_TWO, F64_PI)), f64_div(F64_PI, f64_from(1000))));
+}
+_assert_near(integ_r, F64_ONE, _fd(1, 100), "rayleigh phase integrates to 1");
+
+# ── Mie scattering ────────
+test_group("mie");
+
+assert(f64_gt(atm_mie_scattering_coefficient(WL), Z), "mie coefficient positive");
+var mie_sea = atm_mie_scattering_at_altitude(WL, Z);
+var mie_high = atm_mie_scattering_at_altitude(WL, f64_from(1200));
+assert(f64_lt(f64_abs(f64_sub(f64_div(mie_high, mie_sea), INV_E)), _fd(1, 100)), "mie scale height 1/e");
+assert(f64_gt(atm_mie_phase_cornette_shanks(F64_ONE, _fd(76, 100)),
+f64_mul(atm_mie_phase_cornette_shanks(f64_neg(F64_ONE), _fd(76, 100)), f64_from(10))),
+"mie forward peak");
+var mg4 = alloc(4 * 8);
+store64(mg4, Z);
+store64(mg4 + 8, F64_HALF);
+store64(mg4 + 16, _fd(76, 100));
+store64(mg4 + 24, _fd(9, 10));
+var ct5 = alloc(5 * 8);
+store64(ct5, f64_neg(F64_ONE));
+store64(ct5 + 8, f64_neg(F64_HALF));
+store64(ct5 + 16, Z);
+store64(ct5 + 24, F64_HALF);
+store64(ct5 + 32, F64_ONE);
+for (var mi = 0; mi < 4; mi = mi + 1) {
+    for (var mj = 0; mj < 5; mj = mj + 1) {
+        assert(f64_ge(atm_mie_phase_cornette_shanks(load64(ct5 + mj * 8), load64(mg4 + mi * 8)), Z),
+        "mie phase non-negative");
+    }
+}
+assert(f64_gt(atm_mie_phase_cornette_shanks(F64_ONE, Z), atm_mie_phase_cornette_shanks(Z, Z)),
+"mie g=0 forward > 90");
+var integ_m = Z;
+for (var mi2 = 0; mi2 < 1000; mi2 = mi2 + 1) {
+    var thm = f64_div(f64_mul(F64_PI, f64_add(f64_from(mi2), F64_HALF)), f64_from(1000));
+    integ_m = f64_add(integ_m, f64_mul(f64_mul(f64_mul(
+    atm_mie_phase_cornette_shanks(f64_cos(thm), _fd(76, 100)),
+    f64_sin(thm)), f64_mul(F64_TWO, F64_PI)), f64_div(F64_PI, f64_from(1000))));
+}
+_assert_near(integ_m, F64_ONE, _fd(2, 100), "mie phase integrates to 1");
+
+# ── Air mass ────────
+test_group("air_mass");
+
+_assert_near(atm_air_mass(Z), F64_ONE, _fd(1, 100), "air mass zenith ~ 1");
+_assert_near(atm_air_mass(_rad(60)), F64_TWO, _fd(5, 100), "air mass 60deg ~ 2");
+var m_horizon = atm_air_mass(F64_PI_2);
+assert_eq(_is_finite(m_horizon), 1, "horizon air mass finite");
+assert(f64_gt(m_horizon, f64_from(30)), "horizon air mass > 30");
+assert(f64_lt(m_horizon, f64_from(45)), "horizon air mass < 45");
+assert(f64_lt(atm_air_mass(_rad(30)), atm_air_mass(_rad(60))), "air mass increases 30<60");
+assert(f64_lt(atm_air_mass(_rad(60)), atm_air_mass(_rad(80))), "air mass increases 60<80");
+
+# ── Optical depth ────────
+test_group("optical_depth");
+
+var tau_r = atm_optical_depth_rayleigh(WL);
+assert(f64_gt(tau_r, Z), "tau_r positive");
+assert(f64_gt(tau_r, _fd(5, 100)), "tau_r > 0.05");
+assert(f64_lt(tau_r, _fd(2, 10)), "tau_r < 0.2");
+assert(f64_gt(atm_optical_depth_rayleigh(BLUE), atm_optical_depth_rayleigh(RED)), "tau blue > red");
+assert(f64_gt(atm_optical_depth_mie(), Z), "tau_m positive");
+
+# ── Transmittance ────────
+test_group("transmittance");
+
+var angs4 = alloc(4 * 8);
+store64(angs4, Z);
+store64(angs4 + 8, _rad(30));
+store64(angs4 + 16, _rad(60));
+store64(angs4 + 24, _rad(80));
+for (var ti = 0; ti < 4; ti = ti + 1) {
+    var tt = atm_atmospheric_transmittance(WL, load64(angs4 + ti * 8));
+    assert(f64_ge(tt, Z), "transmittance range lo");
+    assert(f64_le(tt, F64_ONE), "transmittance range hi");
+}
+assert(f64_gt(atm_atmospheric_transmittance(WL, Z), _fd(8, 10)), "zenith transmittance high");
+assert(f64_gt(atm_atmospheric_transmittance(WL, Z), atm_atmospheric_transmittance(WL, _rad(60))),
+"transmittance decreases 0>60");
+assert(f64_gt(atm_atmospheric_transmittance(WL, _rad(60)), atm_atmospheric_transmittance(WL, _rad(85))),
+"transmittance decreases 60>85");
+assert(f64_gt(atm_atmospheric_transmittance(RED, _rad(80)), atm_atmospheric_transmittance(BLUE, _rad(80))),
+"red transmits better than blue");
+
+# ── Sky color ────────
+test_group("sky_color");
+
+atm_sky_color_rgb(Z, F64_PI_2, RGB);
+assert(f64_gt(load64(RGB + 16), load64(RGB)), "sky at 90deg is blue-dominant");
+var sunz4 = alloc(4 * 8);
+store64(sunz4, Z);
+store64(sunz4 + 8, F64_HALF);
+store64(sunz4 + 16, F64_ONE);
+store64(sunz4 + 24, _fd(13, 10));
+var scat5 = alloc(5 * 8);
+store64(scat5, _fd(1, 10));
+store64(scat5 + 8, F64_HALF);
+store64(scat5 + 16, F64_ONE);
+store64(scat5 + 24, F64_PI_2);
+store64(scat5 + 32, F64_PI);
+for (var si = 0; si < 4; si = si + 1) {
+    for (var sj = 0; sj < 5; sj = sj + 1) {
+        atm_sky_color_rgb(load64(sunz4 + si * 8), load64(scat5 + sj * 8), RGB);
+        assert(f64_ge(load64(RGB), Z), "sky R >= 0");
+        assert(f64_ge(load64(RGB + 8), Z), "sky G >= 0");
+        assert(f64_ge(load64(RGB + 16), Z), "sky B >= 0");
+    }
+}
+assert(f64_gt(atm_sky_radiance_single_scatter(BLUE, _fd(3, 10), F64_PI_2),
+atm_sky_radiance_single_scatter(RED, _fd(3, 10), F64_PI_2)), "blue dominates at 90deg");
+
+# ── Sunlight color ────────
+test_group("sunlight");
+
+atm_sunlight_color(Z, RGB);
+assert(f64_gt(load64(RGB), _fd(8, 10)), "sunlight R > 0.8");
+assert(f64_gt(load64(RGB + 8), _fd(8, 10)), "sunlight G > 0.8");
+assert(f64_gt(load64(RGB + 16), _fd(7, 10)), "sunlight B > 0.7");
+atm_sunlight_color(_rad(85), RGB);
+assert(f64_gt(load64(RGB), load64(RGB + 8)), "sunset R > G");
+assert(f64_gt(load64(RGB + 8), load64(RGB + 16)), "sunset G > B");
+atm_sunlight_color(_rad(89), RGB);
+assert(f64_lt(load64(RGB + 16), _fd(1, 10)), "deep sunset B < 0.1");
+assert(f64_gt(load64(RGB), f64_mul(load64(RGB + 16), f64_from(5))), "deep sunset R dominates");
+var sun6 = alloc(6 * 8);
+store64(sun6, Z);
+store64(sun6 + 8, _rad(30));
+store64(sun6 + 16, _rad(60));
+store64(sun6 + 24, _rad(80));
+store64(sun6 + 32, _rad(85));
+store64(sun6 + 40, _rad(89));
+for (var ui = 0; ui < 6; ui = ui + 1) {
+    atm_sunlight_color(load64(sun6 + ui * 8), RGB);
+    for (var uc = 0; uc < 3; uc = uc + 1) {
+        assert(f64_ge(load64(RGB + uc * 8), Z), "sunlight range lo");
+        assert(f64_le(load64(RGB + uc * 8), F64_ONE), "sunlight range hi");
+    }
+}
+
+# ── Sunset gradient ────────
+test_group("sunset_gradient");
+
+atm_sunset_gradient(_rad(85), _rad(10), _fd(3, 10), RGB);
+assert(f64_ge(load64(RGB), Z), "gradient R >= 0");
+assert(f64_ge(load64(RGB + 8), Z), "gradient G >= 0");
+assert(f64_ge(load64(RGB + 16), Z), "gradient B >= 0");
+atm_sunset_gradient(_rad(85), _rad(5), _fd(1, 10), RGB);
+assert(f64_gt(load64(RGB), load64(RGB + 16)), "near sun warm R > B");
+atm_sunset_gradient(_rad(85), _rad(20), _fd(2, 10), RGB);
+atm_sunset_gradient(_rad(85), _rad(20), F64_PI_2, RGB2);
+var ratio_near = f64_div(load64(RGB + 16), f64_add(load64(RGB), _atm_eps15()));
+var ratio_away = f64_div(load64(RGB2 + 16), f64_add(load64(RGB2), _atm_eps15()));
+assert(f64_gt(ratio_away, ratio_near), "away from sun bluer");
+
+# ── Scattering angle ────────
+test_group("scattering_angle");
+
+assert(f64_lt(f64_abs(atm_scattering_angle(F64_HALF, F64_HALF, Z)), EPS), "same direction 0");
+_assert_near(atm_scattering_angle(Z, F64_PI, Z), F64_PI, _fd(1, 100), "opposite -> pi");
+_assert_near(atm_scattering_angle(Z, F64_PI_2, Z), F64_PI_2, _fd(1, 100), "perpendicular -> pi/2");
+var zang4 = alloc(4 * 8);
+store64(zang4, Z);
+store64(zang4 + 8, F64_HALF);
+store64(zang4 + 16, F64_ONE);
+store64(zang4 + 24, F64_PI_2);
+var az4 = alloc(4 * 8);
+store64(az4, Z);
+store64(az4 + 8, F64_PI_4);
+store64(az4 + 16, F64_PI_2);
+store64(az4 + 24, F64_PI);
+var pi_eps = f64_add(F64_PI, EPS);
+for (var ai = 0; ai < 4; ai = ai + 1) {
+    for (var aj = 0; aj < 4; aj = aj + 1) {
+        for (var ak = 0; ak < 4; ak = ak + 1) {
+            var gamma = atm_scattering_angle(load64(zang4 + ai * 8), load64(zang4 + aj * 8),
+            load64(az4 + ak * 8));
+            assert(f64_ge(gamma, Z), "scatter angle >= 0");
+            assert(f64_le(gamma, pi_eps), "scatter angle <= pi");
+        }
+    }
+}
+
+# ── King factor ────────
+test_group("king_factor");
+
+for (var wl = 400; wl <= 700; wl = wl + 50) {
+    var fk = atm_king_factor(f64_mul(f64_from(wl), _fd(1, 1000000000)));
+    assert(f64_lt(f64_abs(f64_sub(fk, _fd(1048, 1000))), _fd(1, 100)), "king factor ~ 1.048");
+}
+assert(f64_gt(atm_king_factor(WL), F64_ONE), "king factor > 1");
+var sig_u = atm_rayleigh_cross_section(WL);
+var sig_c = atm_rayleigh_cross_section_corrected(WL);
+assert(f64_gt(sig_c, sig_u), "corrected > uncorrected");
+_assert_near(f64_div(sig_c, sig_u), _fd(1048, 1000), _fd(1, 100), "correction ratio ~ 1.048");
+
+var r = assert_summary();
