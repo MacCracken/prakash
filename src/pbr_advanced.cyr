@@ -385,6 +385,7 @@ fn _pbr_radvdc(bits) {
 # Numerically integrate the split-sum BRDF LUT (scale, bias) into a 2-f64 buffer
 # via importance-sampled GGX + Hammersley points.
 fn pbr_integrate_brdf_lut(n_dot_v, roughness, num_samples, out) {
+    _prk_trace("integrate_brdf_lut");
     var ndv = f64_clamp(n_dot_v, _pbr_r(1, 1000), F64_ONE);
     var v = alloc(24);
     store64(v, f64_sqrt(f64_sub(F64_ONE, f64_mul(ndv, ndv))));

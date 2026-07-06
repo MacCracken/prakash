@@ -81,6 +81,7 @@ fn rgb_luminance(c) {
 # outside 380-780 nm (NaN also fails the range test).
 #must_use
 fn wavelength_to_rgb(wavelength_nm, err_out) {
+    _prk_trace("wavelength_to_rgb");
     store64(err_out, PK_ERR_NONE);
     var in_range = 0;
     if (f64_ge(wavelength_nm, spec_visible_min_nm()) == 1) {
@@ -160,6 +161,7 @@ fn wien_peak(temperature_k) {
 # Color temperature (Kelvin) -> RGB via Tanner Helland's algorithm.
 #must_use
 fn color_temperature_to_rgb(kelvin) {
+    _prk_trace("color_temperature_to_rgb");
     var temp = f64_clamp(f64_div(kelvin, f64_from(100)), f64_from(10), f64_from(400));
 
     var r = F64_ONE;

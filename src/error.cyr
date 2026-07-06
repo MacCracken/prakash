@@ -37,3 +37,21 @@ fn prakash_is_ok(code) {
     if (code == 0) { return 1; }
     return 0;
 }
+
+# ── Logging (sakshi) ────────
+# Ports the Rust `tracing::trace!` diagnostics. Consumers set the level with
+# prakash_set_log_level(SK_TRACE) to see operation-entry traces; the default
+# (SK_INFO) leaves them off. `_prk_trace` is a thin wrapper the optics modules
+# call at operation entry — sakshi_trace is compile-elidable (#if SAKSHI_LEVEL)
+# and runtime-guarded, so it is near-free when trace is disabled.
+
+# Set the global log level (SK_OFF/ERROR/WARN/INFO/DEBUG/TRACE from sakshi).
+fn prakash_set_log_level(level) {
+    return sakshi_set_level(level);
+}
+
+# Emit a TRACE-level operation marker (the Rust trace!("op") equivalent).
+fn _prk_trace(name) {
+    sakshi_trace(name, strlen(name));
+    return 0;
+}

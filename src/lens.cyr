@@ -135,6 +135,7 @@ struct CardinalPoints { focal_length; ffd; bfd; front_principal; back_principal;
 # Cardinal points of a thick lens (returns struct ptr; 0 on error).
 #must_use
 fn lens_cardinal_points(n, r1, r2, thickness, err_out) {
+    _prk_trace("cardinal_points");
     var f = lens_thick_focal_length(n, r1, r2, thickness, err_out);
     if (prakash_is_err(load64(err_out)) == 1) {
         return 0;
@@ -303,6 +304,7 @@ struct SeidelCoefficients { spherical; coma; astigmatism; field_curvature; disto
 # Third-order Seidel aberration coefficients for a thin lens in air.
 #must_use
 fn lens_seidel_coefficients(n, focal_length, q, p) {
+    _prk_trace("seidel_coefficients");
     var phi = f64_div(F64_ONE, focal_length);
     var nm1 = f64_sub(n, F64_ONE);
     var term2 = f64_div(n, f64_mul(f64_from(4), _lens_pow2(nm1)));

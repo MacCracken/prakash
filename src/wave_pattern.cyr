@@ -131,6 +131,7 @@ fn _pat_fftshift_to_pattern(grid, nw, nh) {
 # 0=opaque..1=clear). Dimensions padded to the next power of 2. Returns |E|^2.
 #must_use
 fn diffraction_pattern_2d(aperture, width, height) {
+    _prk_trace("diffraction_pattern_2d");
     var nw = _pat_npot(width);
     var nh = _pat_npot(height);
     var grid = alloc(nw * nh * 16);
@@ -152,6 +153,7 @@ fn diffraction_pattern_2d(aperture, width, height) {
 # 2D diffraction pattern of a circular aperture (radius in grid pixels) -> Airy.
 #must_use
 fn diffraction_pattern_circular(grid_size, radius) {
+    _prk_trace("diffraction_pattern_circular");
     var n = _pat_npot(grid_size);
     var cx = f64_div(f64_from(n), F64_TWO);
     var cy = f64_div(f64_from(n), F64_TWO);
@@ -191,6 +193,7 @@ fn point_source_new(x, y, amplitude, phase) {
 # PointSource array (element i at sources + i*sizeof(PointSource)).
 #must_use
 fn interference_pattern(sources, num_sources, wavelength, distance, gx0, gx1, gy0, gy1, nx, ny) {
+    _prk_trace("interference_pattern");
     var k = f64_div(F64_TAU, wavelength);
     var dx = f64_from(0);
     if (nx > 1) {
@@ -283,6 +286,7 @@ fn _pat_wl_to_rgb(nm, out) {
 # Visible-spectrum strip (380-780 nm) as num_samples StripColors (contiguous).
 #must_use
 fn spectrum_strip(num_samples) {
+    _prk_trace("spectrum_strip");
     var colors = alloc(num_samples * sizeof(StripColor));
     var rgb = alloc(24);
     for (var i = 0; i < num_samples; i = i + 1) {
@@ -303,6 +307,7 @@ fn spectrum_strip(num_samples) {
 # Spectrum strip for a custom [start_nm, end_nm] range.
 #must_use
 fn spectrum_strip_range(start_nm, end_nm, num_samples) {
+    _prk_trace("spectrum_strip_range");
     var colors = alloc(num_samples * sizeof(StripColor));
     var rgb = alloc(24);
     for (var i = 0; i < num_samples; i = i + 1) {
@@ -326,6 +331,7 @@ fn spectrum_strip_range(start_nm, end_nm, num_samples) {
 # pupil/wavefront_error are row-major f64 grids (width x height); k = TAU/wl.
 #must_use
 fn psf_from_wavefront(pupil, wavefront_error, width, height, wavelength) {
+    _prk_trace("psf_from_wavefront");
     var nw = _pat_npot(width);
     var nh = _pat_npot(height);
     var k = f64_div(F64_TAU, wavelength);
@@ -353,5 +359,6 @@ fn psf_from_wavefront(pupil, wavefront_error, width, height, wavelength) {
 # Diffraction-limited PSF (perfect wavefront) = circular-aperture Airy pattern.
 #must_use
 fn psf_diffraction_limited(grid_size, radius) {
+    _prk_trace("psf_diffraction_limited");
     return diffraction_pattern_circular(grid_size, radius);
 }

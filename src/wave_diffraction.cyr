@@ -260,6 +260,7 @@ fn vcoat_reflectance(n1, n2, n3) {
 # M12/M21 purely imaginary (tracked as *_i), M11/M22 purely real (*_r).
 #must_use
 fn multilayer_reflectance(wavelength, n_incident, n_substrate, layers, num_layers) {
+    _prk_trace("multilayer_reflectance");
     var m11_r = F64_ONE;
     var m12_i = f64_from(0);
     var m21_i = f64_from(0);
@@ -359,6 +360,7 @@ fn _diff_tmm_stack(wavelength, ni, ns, layers, num_layers, cos_i, cos_sub, ni_si
 # s/p reflectances/transmittances and their unpolarized averages.
 #must_use
 fn multilayer_rt(wavelength, angle, n_incident, n_substrate, layers, num_layers) {
+    _prk_trace("multilayer_rt");
     var cos_i = f64_cos(angle);
     var sin_i = f64_sin(angle);
     var ni_sin_i = f64_mul(n_incident, sin_i);

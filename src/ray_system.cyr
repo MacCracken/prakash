@@ -75,6 +75,7 @@ fn paraxsurf_new(power, reduced_t) {
 # state after each surface (including the input state). Last thickness ignored.
 #must_use
 fn paraxial_trace(ray, surfaces) {
+    _prk_trace("paraxial_trace");
     var states = vec_new();
     var current = ray;
     vec_push(states, current);
@@ -203,6 +204,7 @@ struct SystemProperties { focal_length; bfd; ffd; power; entrance_pupil; exit_pu
 # system is empty or afocal (zero power).
 #must_use
 fn find_system_properties(prescription, err_out) {
+    _prk_trace("find_system_properties");
     store64(err_out, PK_ERR_NONE);
     if (prescription_is_empty(prescription) == 1) {
         store64(err_out, PK_ERR_INVALID_PARAMETER);

@@ -71,6 +71,7 @@ struct TraceTree { segments; interactions; }
 # Trace a ray recursively, following refracted + reflected paths at each surface.
 #must_use
 fn trace_recursive(ray, surfaces, config) {
+    _prk_trace("trace_recursive");
     var segments = vec_new();
     var interactions = 0;
     _trace_recursive_inner(ray, surfaces, config, F64_ONE, 0, segments, &interactions);
@@ -172,6 +173,7 @@ fn _fan_t(i, num_rays) {
 # Meridional ray fan (rays spread across y in the y-z plane).
 #must_use
 fn ray_fan_meridional(aperture_radius, num_rays, field_angle, start_z) {
+    _prk_trace("ray_fan_meridional");
     var rays = vec_new();
     var sin_f = f64_sin(field_angle);
     var cos_f = f64_cos(field_angle);
@@ -189,6 +191,7 @@ fn ray_fan_meridional(aperture_radius, num_rays, field_angle, start_z) {
 # Sagittal ray fan (rays spread across x in the x-z plane).
 #must_use
 fn ray_fan_sagittal(aperture_radius, num_rays, field_angle, start_z) {
+    _prk_trace("ray_fan_sagittal");
     var rays = vec_new();
     var sin_f = f64_sin(field_angle);
     var cos_f = f64_cos(field_angle);
@@ -206,6 +209,7 @@ fn ray_fan_sagittal(aperture_radius, num_rays, field_angle, start_z) {
 # Radial ray bundle: a chief ray plus num_rings concentric rings of num_arms rays.
 #must_use
 fn ray_bundle(aperture_radius, num_rings, num_arms, field_angle, start_z) {
+    _prk_trace("ray_bundle");
     var rays = vec_new();
     var sin_f = f64_sin(field_angle);
     var cos_f = f64_cos(field_angle);
@@ -243,6 +247,7 @@ struct SpotPoint { x; y; optical_path; aperture_height; }
 # Vignetted / parallel / behind rays are silently skipped.
 #must_use
 fn spot_diagram(surfaces, aperture_radius, num_rings, num_arms, field_angle, start_z, image_z) {
+    _prk_trace("spot_diagram");
     var bundle = ray_bundle(aperture_radius, num_rings, num_arms, field_angle, start_z);
     var spots = vec_new();
     var count = vec_len(bundle);
@@ -394,6 +399,7 @@ struct OpdPoint { height; opd; }
 # Returns a `vec` of OpdPoint; vignetted rays are excluded, empty on failure.
 #must_use
 fn opd_fan(fan, surfaces, image_z) {
+    _prk_trace("opd_fan");
     var result = vec_new();
     var count = vec_len(fan);
     if (count == 0) {

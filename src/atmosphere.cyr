@@ -166,6 +166,7 @@ fn atm_sky_radiance_single_scatter(wavelength_m, sun_zenith, scattering_angle) {
 
 # Sky color RGB (single-scatter, R/G/B wavelengths) into a 3-f64 out buffer.
 fn atm_sky_color_rgb(sun_zenith, scattering_angle, out) {
+    _prk_trace("sky_color_rgb");
     for (var i = 0; i < 3; i = i + 1) {
         store64(out + i * 8,
         atm_sky_radiance_single_scatter(_atm_rgb_wl(i), sun_zenith, scattering_angle));
@@ -177,6 +178,7 @@ fn atm_sky_color_rgb(sun_zenith, scattering_angle, out) {
 
 # Direct-sunlight color (transmittance) after the atmospheric path, into 3-f64.
 fn atm_sunlight_color(sun_zenith, out) {
+    _prk_trace("sunlight_color");
     for (var i = 0; i < 3; i = i + 1) {
         store64(out + i * 8, atm_atmospheric_transmittance(_atm_rgb_wl(i), sun_zenith));
     }
@@ -185,6 +187,7 @@ fn atm_sunlight_color(sun_zenith, out) {
 
 # Sunset/sunrise sky gradient RGB into a 3-f64 out buffer.
 fn atm_sunset_gradient(sun_zenith, view_elevation, angular_distance_to_sun, out) {
+    _prk_trace("sunset_gradient");
     var view_zenith = f64_clamp(f64_sub(F64_PI_2, view_elevation), f64_from(0), F64_PI_2);
     var cos_scatter = f64_cos(angular_distance_to_sun);
     var phase_r = atm_phase_rayleigh(cos_scatter);

@@ -64,6 +64,7 @@ struct TraceHit { hit_point; normal; ray_after; reflectance; }
 # axis; a spherical surface's center of curvature is at z_position + radius.
 #must_use
 fn trace_surface(ray, surface, err_out) {
+    _prk_trace("trace_surface");
     store64(err_out, PK_ERR_NONE);
     var pos = TraceRay_pos(ray);
     var dir = TraceRay_dir(ray);
@@ -182,6 +183,7 @@ fn trace_surface(ray, surface, err_out) {
 # Returns a `vec` of TraceHit (0 on error, with err_out set).
 #must_use
 fn trace_sequential(initial_ray, surfaces, err_out) {
+    _prk_trace("trace_sequential");
     store64(err_out, PK_ERR_NONE);
     var hits = vec_new();
     var current = initial_ray;
@@ -213,6 +215,7 @@ struct PolarizedTraceHit { hit; rp_over_rs; transmittance_s; transmittance_p; }
 # (0 on error, err_out set).
 #must_use
 fn trace_sequential_polarized(initial_ray, surfaces, err_out) {
+    _prk_trace("trace_sequential_polarized");
     store64(err_out, PK_ERR_NONE);
     var results = vec_new();
     var current = initial_ray;

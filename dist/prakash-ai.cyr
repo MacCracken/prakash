@@ -46,6 +46,24 @@ fn prakash_is_ok(code) {
     return 0;
 }
 
+# ── Logging (sakshi) ────────
+# Ports the Rust `tracing::trace!` diagnostics. Consumers set the level with
+# prakash_set_log_level(SK_TRACE) to see operation-entry traces; the default
+# (SK_INFO) leaves them off. `_prk_trace` is a thin wrapper the optics modules
+# call at operation entry — sakshi_trace is compile-elidable (#if SAKSHI_LEVEL)
+# and runtime-guarded, so it is near-free when trace is disabled.
+
+# Set the global log level (SK_OFF/ERROR/WARN/INFO/DEBUG/TRACE from sakshi).
+fn prakash_set_log_level(level) {
+    return sakshi_set_level(level);
+}
+
+# Emit a TRACE-level operation marker (the Rust trace!("op") equivalent).
+fn _prk_trace(name) {
+    sakshi_trace(name, strlen(name));
+    return 0;
+}
+
 # --- ray_core.cyr ---
 
 # ray_core.cyr -- geometric (ray) optics core
@@ -156,6 +174,7 @@ fn medium_permittivity(m) {
 # radians, or writes PK_ERR_TIR (and returns 0) on total internal reflection.
 #must_use
 fn ray_snell(n1, n2, incident_angle, err_out) {
+    _prk_trace("snell");
     store64(err_out, PK_ERR_NONE);
     var sin_t = f64_mul(f64_div(n1, n2), f64_sin(incident_angle));
     if (f64_gt(f64_abs(sin_t), F64_ONE) == 1) {
@@ -567,6 +586,7 @@ struct TraceHit { hit_point; normal; ray_after; reflectance; }
 # axis; a spherical surface's center of curvature is at z_position + radius.
 #must_use
 fn trace_surface(ray, surface, err_out) {
+    _prk_trace("trace_surface");
     store64(err_out, PK_ERR_NONE);
     var pos = TraceRay_pos(ray);
     var dir = TraceRay_dir(ray);
@@ -685,6 +705,7 @@ fn trace_surface(ray, surface, err_out) {
 # Returns a `vec` of TraceHit (0 on error, with err_out set).
 #must_use
 fn trace_sequential(initial_ray, surfaces, err_out) {
+    _prk_trace("trace_sequential");
     store64(err_out, PK_ERR_NONE);
     var hits = vec_new();
     var current = initial_ray;
@@ -716,6 +737,7 @@ struct PolarizedTraceHit { hit; rp_over_rs; transmittance_s; transmittance_p; }
 # (0 on error, err_out set).
 #must_use
 fn trace_sequential_polarized(initial_ray, surfaces, err_out) {
+    _prk_trace("trace_sequential_polarized");
     store64(err_out, PK_ERR_NONE);
     var results = vec_new();
     var current = initial_ray;
@@ -839,6 +861,7 @@ struct TraceTree { segments; interactions; }
 # Trace a ray recursively, following refracted + reflected paths at each surface.
 #must_use
 fn trace_recursive(ray, surfaces, config) {
+    _prk_trace("trace_recursive");
     var segments = vec_new();
     var interactions = 0;
     _trace_recursive_inner(ray, surfaces, config, F64_ONE, 0, segments, &interactions);
@@ -940,6 +963,7 @@ fn _fan_t(i, num_rays) {
 # Meridional ray fan (rays spread across y in the y-z plane).
 #must_use
 fn ray_fan_meridional(aperture_radius, num_rays, field_angle, start_z) {
+    _prk_trace("ray_fan_meridional");
     var rays = vec_new();
     var sin_f = f64_sin(field_angle);
     var cos_f = f64_cos(field_angle);
@@ -957,6 +981,7 @@ fn ray_fan_meridional(aperture_radius, num_rays, field_angle, start_z) {
 # Sagittal ray fan (rays spread across x in the x-z plane).
 #must_use
 fn ray_fan_sagittal(aperture_radius, num_rays, field_angle, start_z) {
+    _prk_trace("ray_fan_sagittal");
     var rays = vec_new();
     var sin_f = f64_sin(field_angle);
     var cos_f = f64_cos(field_angle);
@@ -974,6 +999,7 @@ fn ray_fan_sagittal(aperture_radius, num_rays, field_angle, start_z) {
 # Radial ray bundle: a chief ray plus num_rings concentric rings of num_arms rays.
 #must_use
 fn ray_bundle(aperture_radius, num_rings, num_arms, field_angle, start_z) {
+    _prk_trace("ray_bundle");
     var rays = vec_new();
     var sin_f = f64_sin(field_angle);
     var cos_f = f64_cos(field_angle);
@@ -1011,6 +1037,7 @@ struct SpotPoint { x; y; optical_path; aperture_height; }
 # Vignetted / parallel / behind rays are silently skipped.
 #must_use
 fn spot_diagram(surfaces, aperture_radius, num_rings, num_arms, field_angle, start_z, image_z) {
+    _prk_trace("spot_diagram");
     var bundle = ray_bundle(aperture_radius, num_rings, num_arms, field_angle, start_z);
     var spots = vec_new();
     var count = vec_len(bundle);
@@ -1162,6 +1189,7 @@ struct OpdPoint { height; opd; }
 # Returns a `vec` of OpdPoint; vignetted rays are excluded, empty on failure.
 #must_use
 fn opd_fan(fan, surfaces, image_z) {
+    _prk_trace("opd_fan");
     var result = vec_new();
     var count = vec_len(fan);
     if (count == 0) {
@@ -1278,6 +1306,7 @@ fn paraxsurf_new(power, reduced_t) {
 # state after each surface (including the input state). Last thickness ignored.
 #must_use
 fn paraxial_trace(ray, surfaces) {
+    _prk_trace("paraxial_trace");
     var states = vec_new();
     var current = ray;
     vec_push(states, current);
@@ -1406,6 +1435,7 @@ struct SystemProperties { focal_length; bfd; ffd; power; entrance_pupil; exit_pu
 # system is empty or afocal (zero power).
 #must_use
 fn find_system_properties(prescription, err_out) {
+    _prk_trace("find_system_properties");
     store64(err_out, PK_ERR_NONE);
     if (prescription_is_empty(prescription) == 1) {
         store64(err_out, PK_ERR_INVALID_PARAMETER);
@@ -1996,6 +2026,7 @@ fn rgb_luminance(c) {
 # outside 380-780 nm (NaN also fails the range test).
 #must_use
 fn wavelength_to_rgb(wavelength_nm, err_out) {
+    _prk_trace("wavelength_to_rgb");
     store64(err_out, PK_ERR_NONE);
     var in_range = 0;
     if (f64_ge(wavelength_nm, spec_visible_min_nm()) == 1) {
@@ -2075,6 +2106,7 @@ fn wien_peak(temperature_k) {
 # Color temperature (Kelvin) -> RGB via Tanner Helland's algorithm.
 #must_use
 fn color_temperature_to_rgb(kelvin) {
+    _prk_trace("color_temperature_to_rgb");
     var temp = f64_clamp(f64_div(kelvin, f64_from(100)), f64_from(10), f64_from(400));
 
     var r = F64_ONE;
@@ -3789,7 +3821,10 @@ fn _spd_integrate(s, cmf) {
 }
 
 #must_use
-fn spd_to_xyz(s) { return _spd_integrate(s, _cie1931()); }
+fn spd_to_xyz(s) {
+    _prk_trace("spd_to_xyz");
+    return _spd_integrate(s, _cie1931());
+}
 
 #must_use
 fn spd_to_xyz_observer(s, observer) { return _spd_integrate(s, observer_cmf(observer)); }
@@ -3876,6 +3911,7 @@ fn _cri_band_delta(test_spd, ref_spd, test_y_total, ref_y_total, start, end) {
 # Color Rendering Index Ra (0-100), simplified chromaticity-shift method.
 #must_use
 fn color_rendering_index(test_spd) {
+    _prk_trace("color_rendering_index");
     var test_xyz = spd_to_xyz(test_spd);
     var xyy = xyz_to_xyy(test_xyz);
     var test_cct = cct_from_xy(XyY_x(xyy), XyY_y(xyy));
@@ -5062,6 +5098,7 @@ fn vcoat_reflectance(n1, n2, n3) {
 # M12/M21 purely imaginary (tracked as *_i), M11/M22 purely real (*_r).
 #must_use
 fn multilayer_reflectance(wavelength, n_incident, n_substrate, layers, num_layers) {
+    _prk_trace("multilayer_reflectance");
     var m11_r = F64_ONE;
     var m12_i = f64_from(0);
     var m21_i = f64_from(0);
@@ -5161,6 +5198,7 @@ fn _diff_tmm_stack(wavelength, ni, ns, layers, num_layers, cos_i, cos_sub, ni_si
 # s/p reflectances/transmittances and their unpolarized averages.
 #must_use
 fn multilayer_rt(wavelength, angle, n_incident, n_substrate, layers, num_layers) {
+    _prk_trace("multilayer_rt");
     var cos_i = f64_cos(angle);
     var sin_i = f64_sin(angle);
     var ni_sin_i = f64_mul(n_incident, sin_i);
@@ -5648,6 +5686,7 @@ fn _pat_fftshift_to_pattern(grid, nw, nh) {
 # 0=opaque..1=clear). Dimensions padded to the next power of 2. Returns |E|^2.
 #must_use
 fn diffraction_pattern_2d(aperture, width, height) {
+    _prk_trace("diffraction_pattern_2d");
     var nw = _pat_npot(width);
     var nh = _pat_npot(height);
     var grid = alloc(nw * nh * 16);
@@ -5669,6 +5708,7 @@ fn diffraction_pattern_2d(aperture, width, height) {
 # 2D diffraction pattern of a circular aperture (radius in grid pixels) -> Airy.
 #must_use
 fn diffraction_pattern_circular(grid_size, radius) {
+    _prk_trace("diffraction_pattern_circular");
     var n = _pat_npot(grid_size);
     var cx = f64_div(f64_from(n), F64_TWO);
     var cy = f64_div(f64_from(n), F64_TWO);
@@ -5708,6 +5748,7 @@ fn point_source_new(x, y, amplitude, phase) {
 # PointSource array (element i at sources + i*sizeof(PointSource)).
 #must_use
 fn interference_pattern(sources, num_sources, wavelength, distance, gx0, gx1, gy0, gy1, nx, ny) {
+    _prk_trace("interference_pattern");
     var k = f64_div(F64_TAU, wavelength);
     var dx = f64_from(0);
     if (nx > 1) {
@@ -5800,6 +5841,7 @@ fn _pat_wl_to_rgb(nm, out) {
 # Visible-spectrum strip (380-780 nm) as num_samples StripColors (contiguous).
 #must_use
 fn spectrum_strip(num_samples) {
+    _prk_trace("spectrum_strip");
     var colors = alloc(num_samples * sizeof(StripColor));
     var rgb = alloc(24);
     for (var i = 0; i < num_samples; i = i + 1) {
@@ -5820,6 +5862,7 @@ fn spectrum_strip(num_samples) {
 # Spectrum strip for a custom [start_nm, end_nm] range.
 #must_use
 fn spectrum_strip_range(start_nm, end_nm, num_samples) {
+    _prk_trace("spectrum_strip_range");
     var colors = alloc(num_samples * sizeof(StripColor));
     var rgb = alloc(24);
     for (var i = 0; i < num_samples; i = i + 1) {
@@ -5843,6 +5886,7 @@ fn spectrum_strip_range(start_nm, end_nm, num_samples) {
 # pupil/wavefront_error are row-major f64 grids (width x height); k = TAU/wl.
 #must_use
 fn psf_from_wavefront(pupil, wavefront_error, width, height, wavelength) {
+    _prk_trace("psf_from_wavefront");
     var nw = _pat_npot(width);
     var nh = _pat_npot(height);
     var k = f64_div(F64_TAU, wavelength);
@@ -5870,6 +5914,7 @@ fn psf_from_wavefront(pupil, wavefront_error, width, height, wavelength) {
 # Diffraction-limited PSF (perfect wavefront) = circular-aperture Airy pattern.
 #must_use
 fn psf_diffraction_limited(grid_size, radius) {
+    _prk_trace("psf_diffraction_limited");
     return diffraction_pattern_circular(grid_size, radius);
 }
 
@@ -6380,6 +6425,7 @@ fn _pbr_radvdc(bits) {
 # Numerically integrate the split-sum BRDF LUT (scale, bias) into a 2-f64 buffer
 # via importance-sampled GGX + Hammersley points.
 fn pbr_integrate_brdf_lut(n_dot_v, roughness, num_samples, out) {
+    _prk_trace("integrate_brdf_lut");
     var ndv = f64_clamp(n_dot_v, _pbr_r(1, 1000), F64_ONE);
     var v = alloc(24);
     store64(v, f64_sqrt(f64_sub(F64_ONE, f64_mul(ndv, ndv))));
@@ -6551,6 +6597,7 @@ struct CardinalPoints { focal_length; ffd; bfd; front_principal; back_principal;
 # Cardinal points of a thick lens (returns struct ptr; 0 on error).
 #must_use
 fn lens_cardinal_points(n, r1, r2, thickness, err_out) {
+    _prk_trace("cardinal_points");
     var f = lens_thick_focal_length(n, r1, r2, thickness, err_out);
     if (prakash_is_err(load64(err_out)) == 1) {
         return 0;
@@ -6719,6 +6766,7 @@ struct SeidelCoefficients { spherical; coma; astigmatism; field_curvature; disto
 # Third-order Seidel aberration coefficients for a thin lens in air.
 #must_use
 fn lens_seidel_coefficients(n, focal_length, q, p) {
+    _prk_trace("seidel_coefficients");
     var phi = f64_div(F64_ONE, focal_length);
     var nm1 = f64_sub(n, F64_ONE);
     var term2 = f64_div(n, f64_mul(f64_from(4), _lens_pow2(nm1)));
@@ -6991,6 +7039,7 @@ fn atm_sky_radiance_single_scatter(wavelength_m, sun_zenith, scattering_angle) {
 
 # Sky color RGB (single-scatter, R/G/B wavelengths) into a 3-f64 out buffer.
 fn atm_sky_color_rgb(sun_zenith, scattering_angle, out) {
+    _prk_trace("sky_color_rgb");
     for (var i = 0; i < 3; i = i + 1) {
         store64(out + i * 8,
         atm_sky_radiance_single_scatter(_atm_rgb_wl(i), sun_zenith, scattering_angle));
@@ -7002,6 +7051,7 @@ fn atm_sky_color_rgb(sun_zenith, scattering_angle, out) {
 
 # Direct-sunlight color (transmittance) after the atmospheric path, into 3-f64.
 fn atm_sunlight_color(sun_zenith, out) {
+    _prk_trace("sunlight_color");
     for (var i = 0; i < 3; i = i + 1) {
         store64(out + i * 8, atm_atmospheric_transmittance(_atm_rgb_wl(i), sun_zenith));
     }
@@ -7010,6 +7060,7 @@ fn atm_sunlight_color(sun_zenith, out) {
 
 # Sunset/sunrise sky gradient RGB into a 3-f64 out buffer.
 fn atm_sunset_gradient(sun_zenith, view_elevation, angular_distance_to_sun, out) {
+    _prk_trace("sunset_gradient");
     var view_zenith = f64_clamp(f64_sub(F64_PI_2, view_elevation), f64_from(0), F64_PI_2);
     var cos_scatter = f64_cos(angular_distance_to_sun);
     var phase_r = atm_phase_rayleigh(cos_scatter);

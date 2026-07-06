@@ -1645,7 +1645,10 @@ fn _spd_integrate(s, cmf) {
 }
 
 #must_use
-fn spd_to_xyz(s) { return _spd_integrate(s, _cie1931()); }
+fn spd_to_xyz(s) {
+    _prk_trace("spd_to_xyz");
+    return _spd_integrate(s, _cie1931());
+}
 
 #must_use
 fn spd_to_xyz_observer(s, observer) { return _spd_integrate(s, observer_cmf(observer)); }
@@ -1732,6 +1735,7 @@ fn _cri_band_delta(test_spd, ref_spd, test_y_total, ref_y_total, start, end) {
 # Color Rendering Index Ra (0-100), simplified chromaticity-shift method.
 #must_use
 fn color_rendering_index(test_spd) {
+    _prk_trace("color_rendering_index");
     var test_xyz = spd_to_xyz(test_spd);
     var xyy = xyz_to_xyy(test_xyz);
     var test_cct = cct_from_xy(XyY_x(xyy), XyY_y(xyy));

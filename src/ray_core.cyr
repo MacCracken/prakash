@@ -106,6 +106,7 @@ fn medium_permittivity(m) {
 # radians, or writes PK_ERR_TIR (and returns 0) on total internal reflection.
 #must_use
 fn ray_snell(n1, n2, incident_angle, err_out) {
+    _prk_trace("snell");
     store64(err_out, PK_ERR_NONE);
     var sin_t = f64_mul(f64_div(n1, n2), f64_sin(incident_angle));
     if (f64_gt(f64_abs(sin_t), F64_ONE) == 1) {
