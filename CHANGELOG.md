@@ -1,5 +1,69 @@
 # Changelog
 
+## [2.0.0] - 2026-07-06 — Full port to the Cyrius systems language
+
+prakash is rewritten from Rust to **Cyrius**, the AGNOS systems language. Every
+optics module — ray, spectral, wave, lens, PBR, atmosphere, bridge, AI, plus
+error/logging — was translated line-by-line from the archived Rust source (now
+in pre-2.0 git tags) into hand-verified Cyrius. **25 science modules, 5251 test
+assertions across 26 suites, and 27 benchmarks are green.** The math is
+bit-faithful to the Rust original: f64 constants are encoded as exact ratios or
+IEEE-754 hex bit patterns, `powi` replicates the compiler's square-and-multiply,
+and left-associative fold order is preserved so results match to the ULP. Every
+module was checked by an adversarial multi-agent verification pass.
+
+This is a hard break: consumers no longer link a Rust crate — they include a
+self-contained Cyrius bundle. soorat, kiran, and ranga remain Rust for now; the
+`dist/prakash*.cyr` bundle is the interop surface until they port.
+
+### Breaking
+- **Language & ABI** — the entire library is reimplemented in Cyrius. There is no
+  Rust crate, no `Cargo.toml`, no crates.io publish. The Rust API (methods,
+  generics, traits, `Result<T>`, `Option<T>`, `Cow`, `Vec`) is replaced by flat
+  Cyrius **free functions**. Migration: link a bundle and call the `*_` functions.
+  - `Result<f64>` → an `err_out` pointer parameter (`store64(err_out, PK_ERR_*)`,
+    returns 0 on error); `Option<T>` → returns `1`/`0` plus an out-pointer.
+  - Tuples / `[f64; N]` returns → caller-supplied out-pointer buffers.
+  - `f64` values are IEEE-754 bit patterns in `i64`; all arithmetic goes through
+    `f64_add`/`f64_mul`/`f64_sqrt`/… (comparisons return `1`/`0`).
+  - Structs are heap-allocated (`alloc(sizeof(T))` + `#derive(accessors)`); enums
+    become tag constants.
+- **error constants** — namespaced `PK_ERR_*` (`PK_ERR_NONE`, `PK_ERR_TIR`,
+  `PK_ERR_DIVISION_BY_ZERO`, …) so they never collide with a dependency's globals
+  under Cyrius's last-one-wins global rule. `PK_ERR_NONE` is 0.
+
+### Added
+- **Two distlib bundles** — `cyrius distlib` emits `dist/prakash.cyr` (math-only,
+  no TLS) and `cyrius distlib ai` emits `dist/prakash-ai.cyr` (same core **plus**
+  the daimon/hoosh AI client, which pulls the sandhi HTTP/TLS stack). Consumers
+  pick one — mirroring the old optional `ai` cargo feature.
+- **logging** — the Rust `tracing::trace!` diagnostics are ported onto **sakshi**:
+  `prakash_set_log_level(level)` (SK_ERROR=1 … SK_TRACE=5, default SK_INFO leaves
+  traces off) and 31 operation-entry `_prk_trace` markers. sakshi_trace is
+  compile-elidable and runtime-guarded — zero measured overhead when disabled.
+- **serialization** — `src/serialize.cyr` reimplements serde_json roundtrips on
+  **bayan** (`*_to_json` / `*_from_json`) for the seven tested types (rgb, medium,
+  sellmeier, lens_type, polarization, prescription, spd). Float rendering is
+  6-decimal (roundtrips checked to ~1e-5).
+- **benchmarking** — `tests/prakash.bcyr` (27 benches across every module) plus
+  `scripts/bench-history.sh`, which records a CSV history and a 3-point trend
+  `benchmarks.md`.
+
+### Changed
+- **Dependency stack** — first-party **hisab** (git dep, tag 2.6.8) supplies
+  Complex + FFT (`num_fft`/`num_ifft`) for `wave/pattern`; **ganita** (stdlib)
+  supplies transcendentals and linear algebra; **bayan** replaces serde_json;
+  **sandhi** replaces reqwest/tokio for the AI client's blocking HTTP POST;
+  **sakshi** replaces `tracing`. No external Rust crates remain.
+- **toolchain** — Cyrius `6.4.10`; `VERSION` is the single source of truth
+  (`cyrius.cyml` pulls it via `${file:VERSION}`).
+
+### Removed
+- **Rust build system** — `Cargo.toml`, `criterion` benches, `cargo`-based CI, and
+  the crates.io publish flow. The Rust source is preserved in pre-2.0 git tags.
+- **bijli-backend feature** — already dropped in 1.2.0; the port keeps optics math
+  self-contained (the `bridge` module exposes primitive-value cross-crate hooks).
+
 ## [1.2.0]
 
 ### Added
