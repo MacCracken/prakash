@@ -48,6 +48,7 @@ modules = [
     "src/lens.cyr",
     "src/atmosphere.cyr",
     "src/bridge.cyr",
+    "src/serialize.cyr",
 ]
 
 # `[lib.ai]` — the opt-in profile that ADDS the daimon/hoosh AI client
@@ -80,6 +81,7 @@ modules = [
     "src/lens.cyr",
     "src/atmosphere.cyr",
     "src/bridge.cyr",
+    "src/serialize.cyr",
     "src/ai.cyr",
 ]
 

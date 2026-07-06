@@ -7246,3 +7246,200 @@ fn br_visibility_to_extinction(visibility_km) {
     }
     return f64_div(_br_r(3912, 1000), v_m);
 }
+
+# --- serialize.cyr ---
+
+# serialize.cyr -- JSON (de)serialization for the types that had serde derives
+# Usage: include "lib/serialize.cyr"  (requires the type modules + bayan)
+#
+# Ported from the Rust `#[derive(Serialize, Deserialize)]` types that had serde
+# roundtrip tests: Rgb, Medium, SellmeierCoefficients, LensType, Polarization,
+# Prescription, Spd. Uses the bayan recipe — build with str_from() keys/values +
+# v_float_new(bits), parse with parse_str(data,len); *_from_json takes (data ptr,
+# byte len) since bayan's build output Str is not NUL-terminated. Floats
+# round-trip through bayan's 6-decimal render (within the tests' tolerances).
+
+# ── Rgb (spectral) ────────
+
+# Rgb -> JSON Str: {"r":..,"g":..,"b":..}.
+#must_use
+fn rgb_to_json(c) {
+    var o = bayan_json_v_obj_new();
+    bayan_json_v_obj_set(o, str_from("r"), bayan_json_v_float_new(Rgb_r(c)));
+    bayan_json_v_obj_set(o, str_from("g"), bayan_json_v_float_new(Rgb_g(c)));
+    bayan_json_v_obj_set(o, str_from("b"), bayan_json_v_float_new(Rgb_b(c)));
+    return bayan_json_v_build(o);
+}
+
+#must_use
+fn rgb_from_json(json, len) {
+    var v = bayan_json_v_parse_str(json, len);
+    return rgb_new(
+    bayan_json_v_float(bayan_json_v_obj_get(v, "r")),
+    bayan_json_v_float(bayan_json_v_obj_get(v, "g")),
+    bayan_json_v_float(bayan_json_v_obj_get(v, "b")));
+}
+
+# ── Medium (ray) ────────
+
+# Medium -> JSON Str: {"n":..,"name":".."}.
+#must_use
+fn medium_to_json(m) {
+    var o = bayan_json_v_obj_new();
+    bayan_json_v_obj_set(o, str_from("n"), bayan_json_v_float_new(Medium_n(m)));
+    bayan_json_v_obj_set(o, str_from("name"), bayan_json_v_str_new(str_from(Medium_name(m))));
+    return bayan_json_v_build(o);
+}
+
+#must_use
+fn medium_from_json(json, len) {
+    var v = bayan_json_v_parse_str(json, len);
+    return _medium_mk(
+    bayan_json_v_float(bayan_json_v_obj_get(v, "n")),
+    str_data(bayan_json_v_str(bayan_json_v_obj_get(v, "name"))));
+}
+
+# ── SellmeierCoefficients (ray) ────────
+
+# SellmeierCoefficients -> JSON Str: {"b1":..,"c1":..,"b2":..,"c2":..,"b3":..,"c3":..}.
+#must_use
+fn sellmeier_to_json(s) {
+    var o = bayan_json_v_obj_new();
+    bayan_json_v_obj_set(o, str_from("b1"), bayan_json_v_float_new(SellmeierCoefficients_b1(s)));
+    bayan_json_v_obj_set(o, str_from("c1"), bayan_json_v_float_new(SellmeierCoefficients_c1(s)));
+    bayan_json_v_obj_set(o, str_from("b2"), bayan_json_v_float_new(SellmeierCoefficients_b2(s)));
+    bayan_json_v_obj_set(o, str_from("c2"), bayan_json_v_float_new(SellmeierCoefficients_c2(s)));
+    bayan_json_v_obj_set(o, str_from("b3"), bayan_json_v_float_new(SellmeierCoefficients_b3(s)));
+    bayan_json_v_obj_set(o, str_from("c3"), bayan_json_v_float_new(SellmeierCoefficients_c3(s)));
+    return bayan_json_v_build(o);
+}
+
+#must_use
+fn sellmeier_from_json(json, len) {
+    var v = bayan_json_v_parse_str(json, len);
+    return _sellmeier_mk(
+    bayan_json_v_float(bayan_json_v_obj_get(v, "b1")),
+    bayan_json_v_float(bayan_json_v_obj_get(v, "c1")),
+    bayan_json_v_float(bayan_json_v_obj_get(v, "b2")),
+    bayan_json_v_float(bayan_json_v_obj_get(v, "c2")),
+    bayan_json_v_float(bayan_json_v_obj_get(v, "b3")),
+    bayan_json_v_float(bayan_json_v_obj_get(v, "c3")));
+}
+
+# ── LensType (lens) ────────
+
+# LensType -> JSON Str: bare "Converging" / "Diverging" (serde unit-variant).
+#must_use
+fn lens_type_to_json(lt) {
+    if (lt == LENS_CONVERGING) {
+        return bayan_json_v_build(bayan_json_v_str_new(str_from("Converging")));
+    }
+    return bayan_json_v_build(bayan_json_v_str_new(str_from("Diverging")));
+}
+
+#must_use
+fn lens_type_from_json(json, len) {
+    var v = bayan_json_v_parse_str(json, len);
+    if (streq(str_data(bayan_json_v_str(v)), "Converging") == 1) {
+        return LENS_CONVERGING;
+    }
+    return LENS_DIVERGING;
+}
+
+# ── Polarization (wave) ────────
+
+# Polarization -> JSON Str: {"ex":..,"ey":..,"phase":..}.
+#must_use
+fn polarization_to_json(p) {
+    var o = bayan_json_v_obj_new();
+    bayan_json_v_obj_set(o, str_from("ex"), bayan_json_v_float_new(Polarization_ex(p)));
+    bayan_json_v_obj_set(o, str_from("ey"), bayan_json_v_float_new(Polarization_ey(p)));
+    bayan_json_v_obj_set(o, str_from("phase"), bayan_json_v_float_new(Polarization_phase(p)));
+    return bayan_json_v_build(o);
+}
+
+#must_use
+fn polarization_from_json(json, len) {
+    var v = bayan_json_v_parse_str(json, len);
+    return polarization_new(
+    bayan_json_v_float(bayan_json_v_obj_get(v, "ex")),
+    bayan_json_v_float(bayan_json_v_obj_get(v, "ey")),
+    bayan_json_v_float(bayan_json_v_obj_get(v, "phase")));
+}
+
+# ── Prescription (ray/system) ────────
+
+# Prescription -> JSON Str: {"name":..,"surfaces":[{radius,thickness,n_after,
+# aperture_radius}...],"n_initial":..}.
+#must_use
+fn prescription_to_json(p) {
+    var o = bayan_json_v_obj_new();
+    bayan_json_v_obj_set(o, str_from("name"), bayan_json_v_str_new(str_from(Prescription_name(p))));
+    var surfaces = bayan_json_v_arr_new();
+    var vec = Prescription_surfaces(p);
+    for (var i = 0; i < vec_len(vec); i = i + 1) {
+        var surf = vec_get(vec, i);
+        var so = bayan_json_v_obj_new();
+        bayan_json_v_obj_set(so, str_from("radius"),
+        bayan_json_v_float_new(PrescriptionSurface_radius(surf)));
+        bayan_json_v_obj_set(so, str_from("thickness"),
+        bayan_json_v_float_new(PrescriptionSurface_thickness(surf)));
+        bayan_json_v_obj_set(so, str_from("n_after"),
+        bayan_json_v_float_new(PrescriptionSurface_n_after(surf)));
+        bayan_json_v_obj_set(so, str_from("aperture_radius"),
+        bayan_json_v_float_new(PrescriptionSurface_aperture_radius(surf)));
+        bayan_json_v_arr_push(surfaces, so);
+    }
+    bayan_json_v_obj_set(o, str_from("surfaces"), surfaces);
+    bayan_json_v_obj_set(o, str_from("n_initial"), bayan_json_v_float_new(Prescription_n_initial(p)));
+    return bayan_json_v_build(o);
+}
+
+#must_use
+fn prescription_from_json(json, len) {
+    var v = bayan_json_v_parse_str(json, len);
+    var p = prescription_new(str_data(bayan_json_v_str(bayan_json_v_obj_get(v, "name"))));
+    Prescription_set_n_initial(p, bayan_json_v_float(bayan_json_v_obj_get(v, "n_initial")));
+    var surfaces_v = bayan_json_v_obj_get(v, "surfaces");
+    for (var i = 0; i < bayan_json_v_arr_len(surfaces_v); i = i + 1) {
+        var so = bayan_json_v_arr_get(surfaces_v, i);
+        var _added = prescription_add_surface(p,
+        bayan_json_v_float(bayan_json_v_obj_get(so, "radius")),
+        bayan_json_v_float(bayan_json_v_obj_get(so, "thickness")),
+        bayan_json_v_float(bayan_json_v_obj_get(so, "n_after")),
+        bayan_json_v_float(bayan_json_v_obj_get(so, "aperture_radius")));
+    }
+    return p;
+}
+
+# ── Spd (spectral/cie) ────────
+
+# Spd -> JSON Str: {"start_nm":..,"step_nm":..,"values":[..]}.
+#must_use
+fn spd_to_json(s) {
+    var o = bayan_json_v_obj_new();
+    bayan_json_v_obj_set(o, str_from("start_nm"), bayan_json_v_float_new(Spd_start_nm(s)));
+    bayan_json_v_obj_set(o, str_from("step_nm"), bayan_json_v_float_new(Spd_step_nm(s)));
+    var vals = bayan_json_v_arr_new();
+    var data = Spd_values(s);
+    for (var i = 0; i < Spd_len(s); i = i + 1) {
+        bayan_json_v_arr_push(vals, bayan_json_v_float_new(load64(data + i * 8)));
+    }
+    bayan_json_v_obj_set(o, str_from("values"), vals);
+    return bayan_json_v_build(o);
+}
+
+#must_use
+fn spd_from_json(json, len) {
+    var v = bayan_json_v_parse_str(json, len);
+    var vals_v = bayan_json_v_obj_get(v, "values");
+    var n = bayan_json_v_arr_len(vals_v);
+    var data = alloc(n * 8);
+    for (var i = 0; i < n; i = i + 1) {
+        store64(data + i * 8, bayan_json_v_float(bayan_json_v_arr_get(vals_v, i)));
+    }
+    return spd_new(
+    bayan_json_v_float(bayan_json_v_obj_get(v, "start_nm")),
+    bayan_json_v_float(bayan_json_v_obj_get(v, "step_nm")),
+    data, n);
+}
