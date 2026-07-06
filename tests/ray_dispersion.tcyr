@@ -1,0 +1,195 @@
+# ray dispersion test suite — ported from rust-old/src/ray/dispersion.rs.
+# Covers Cauchy/Sellmeier/Herzberger/Schott/Conrady, prisms, Abbe, chromatic ab.
+# (serde roundtrip deferred to the bayan bite)
+
+include "src/error.cyr"
+include "src/ray_core.cyr"
+include "src/ray_fresnel.cyr"
+include "src/ray_trace.cyr"
+include "src/ray_dispersion.cyr"
+
+fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
+fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
+fn _between(x, lo, hi) {
+    if (f64_lt(x, lo) == 1) { return 0; }
+    if (f64_gt(x, hi) == 1) { return 0; }
+    return 1;
+}
+fn _is_finite(x) { return f64_lt(f64_abs(x), 0x7FF0000000000000); }
+fn _n3(x, y, z) {
+    var l = f64_sqrt(f64_add(f64_add(f64_mul(x, x), f64_mul(y, y)), f64_mul(z, z)));
+    return ray_vec3(f64_div(x, l), f64_div(y, l), f64_div(z, l));
+}
+
+var TOL6 = f64_div(F64_ONE, f64_from(1000000));    # 1e-6
+var TOL3 = f64_div(F64_ONE, f64_from(1000));       # 0.001
+var TOL_002 = f64_div(F64_ONE, f64_from(500));     # 0.002
+var TOL_005 = f64_div(F64_ONE, f64_from(200));     # 0.005
+var TOL_02 = f64_div(F64_ONE, f64_from(50));       # 0.02
+var TOL_05 = f64_div(F64_ONE, f64_from(20));       # 0.05
+var TOL1 = F64_ONE;                                # 1.0
+var Z = f64_from(0);
+var N15 = f64_div(f64_from(15), f64_from(10));      # 1.5
+
+alloc_init();
+
+# ── Cauchy ────────
+test_group("cauchy");
+
+var cb = cauchy_bk7();
+var cn_blue = cauchy_n_at(cb, _fd(486, 1000));
+var cn_d = cauchy_n_at(cb, _fd(5876, 10000));
+var cn_red = cauchy_n_at(cb, _fd(656, 1000));
+assert(f64_gt(cn_blue, cn_d), "cauchy blue > yellow");
+assert(f64_gt(cn_d, cn_red), "cauchy yellow > red");
+_assert_near(cn_d, _fd(1517, 1000), TOL_02, "cauchy BK7 n_d ~ 1.517");
+
+assert(f64_gt(cauchy_n_at(cb, _fd(4, 10)), cauchy_n_at(cb, _fd(5, 10))), "cauchy dispersion 0.4>0.5");
+assert(f64_gt(cauchy_n_at(cb, _fd(5, 10)), cauchy_n_at(cb, _fd(6, 10))), "cauchy dispersion 0.5>0.6");
+assert(f64_gt(cauchy_n_at(cb, _fd(6, 10)), cauchy_n_at(cb, _fd(7, 10))), "cauchy dispersion 0.6>0.7");
+
+_assert_near(cauchy_n_at(cauchy_fused_silica(), _fd(5876, 10000)), _fd(1458, 1000), TOL_02, "cauchy FS n ~ 1.458");
+
+# ── Sellmeier ────────
+test_group("sellmeier");
+
+_assert_near(sellmeier_n_at(sellmeier_bk7(), fraunhofer_d()), _fd(15168, 10000), TOL3, "BK7 n_d ~ 1.5168");
+var sb = sellmeier_bk7();
+assert(f64_gt(sellmeier_n_at(sb, fraunhofer_f()), sellmeier_n_at(sb, fraunhofer_d())), "BK7 n_F > n_d");
+assert(f64_gt(sellmeier_n_at(sb, fraunhofer_d()), sellmeier_n_at(sb, fraunhofer_c())), "BK7 n_d > n_C");
+_assert_near(sellmeier_n_at(sellmeier_sf11(), fraunhofer_d()), _fd(17847, 10000), TOL3, "SF11 n_d ~ 1.7847");
+_assert_near(sellmeier_n_at(sellmeier_fused_silica(), fraunhofer_d()), _fd(14585, 10000), TOL3, "FS n_d ~ 1.4585");
+_assert_near(sellmeier_n_at(sellmeier_water(), fraunhofer_d()), _fd(1333, 1000), TOL_005, "Water n_d ~ 1.333");
+_assert_near(sellmeier_n_at(sellmeier_diamond(), fraunhofer_d()), _fd(2417, 1000), TOL_02, "Diamond n_d ~ 2.417");
+
+assert(_between(sellmeier_n_at(sellmeier_bk7(), fraunhofer_d()), TOL1, f64_from(3)), "BK7 reasonable");
+assert(_between(sellmeier_n_at(sellmeier_sf11(), fraunhofer_d()), TOL1, f64_from(3)), "SF11 reasonable");
+assert(_between(sellmeier_n_at(sellmeier_fused_silica(), fraunhofer_d()), TOL1, f64_from(3)), "FS reasonable");
+assert(_between(sellmeier_n_at(sellmeier_sapphire(), fraunhofer_d()), TOL1, f64_from(3)), "Sapphire reasonable");
+assert(_between(sellmeier_n_at(sellmeier_water(), fraunhofer_d()), TOL1, f64_from(3)), "Water reasonable");
+assert(_between(sellmeier_n_at(sellmeier_diamond(), fraunhofer_d()), TOL1, f64_from(3)), "Diamond reasonable");
+
+# resonance guard: at l^2 = c1, n stays finite and >= 1
+var res_wl = f64_sqrt(SellmeierCoefficients_c1(sellmeier_bk7()));
+var res_n = sellmeier_n_at(sellmeier_bk7(), res_wl);
+assert_eq(_is_finite(res_n), 1, "resonance n finite");
+assert(f64_ge(res_n, F64_ONE), "resonance n >= 1");
+
+# ── Abbe ────────
+test_group("abbe");
+
+_assert_near(abbe_number(sellmeier_bk7()), _fd(6417, 100), TOL1, "BK7 Abbe ~ 64.17");
+_assert_near(abbe_number(sellmeier_sf11()), _fd(2576, 100), TOL1, "SF11 Abbe ~ 25.76");
+var v_bk7 = abbe_number(sellmeier_bk7());
+var v_sf11 = abbe_number(sellmeier_sf11());
+assert(f64_gt(v_bk7, v_sf11), "crown Abbe > flint");
+assert(f64_gt(v_bk7, f64_from(50)), "crown V > 50");
+assert(f64_lt(v_sf11, f64_from(50)), "flint V < 50");
+
+# ── cross-module refract/snell/trace ────────
+test_group("refract_snell_trace");
+
+var er = 0;
+var refracted = ray_refract_3d(
+_n3(_fd(4, 10), _fd(3, 10), f64_neg(_fd(8, 10))),
+ray_vec3(Z, Z, F64_ONE), F64_ONE, N15, &er);
+var rl = f64_sqrt(f64_add(f64_add(
+f64_mul(RayVec3_x(refracted), RayVec3_x(refracted)),
+f64_mul(RayVec3_y(refracted), RayVec3_y(refracted))),
+f64_mul(RayVec3_z(refracted), RayVec3_z(refracted))));
+_assert_near(rl, F64_ONE, TOL_02, "refracted direction normalized");
+
+var angle_i = ray_deg_to_rad(f64_from(30));
+var es = 0;
+var scalar_t = ray_snell(F64_ONE, N15, angle_i, &es);
+var refl_x = 0;
+var e3d = 0;
+var refr3 = ray_snell_3d(
+ray_vec3(f64_sin(angle_i), Z, f64_neg(f64_cos(angle_i))),
+ray_vec3(Z, Z, F64_ONE), F64_ONE, N15, &refl_x, &e3d);
+var angle_t_3d = ganita_f64_acos(f64_neg(RayVec3_z(refr3)));
+_assert_near(angle_t_3d, scalar_t, TOL3, "snell_3d matches scalar snell");
+
+var surfs = vec_new();
+vec_push(surfs, surface_plane(f64_from(10), N15, f64_from(25)));
+vec_push(surfs, surface_plane(f64_from(15), F64_ONE, f64_from(25)));
+var et = 0;
+var hits = trace_sequential(trace_ray_new(ray_vec3(Z, Z, Z), ray_vec3(Z, Z, F64_ONE), F64_ONE), surfs, &et);
+var ih = 0;
+while (ih < vec_len(hits)) {
+    var refl = TraceHit_reflectance(vec_get(hits, ih));
+    assert(_between(refl, Z, F64_ONE), "surface reflectance in [0,1]");
+    ih = ih + 1;
+}
+
+# ── Prism ────────
+test_group("prism");
+
+var e_zero = 0;
+var dev_zero = prism_deviation(Z, N15, &e_zero);
+assert_eq(e_zero, 0, "zero apex ok");
+_assert_near(dev_zero, Z, TOL6, "zero apex zero deviation");
+
+var apex60 = ray_deg_to_rad(f64_from(60));
+var e60 = 0;
+var dev60 = prism_deviation(apex60, sellmeier_n_at(sellmeier_bk7(), fraunhofer_d()), &e60);
+assert(_between(ray_rad_to_deg(dev60), f64_from(35), f64_from(50)), "60deg BK7 prism dev ~40deg");
+
+var el = 0;
+var eh = 0;
+var dev_low = prism_deviation(apex60, _fd(14, 10), &el);
+var dev_high = prism_deviation(apex60, _fd(17, 10), &eh);
+assert(f64_gt(dev_high, dev_low), "deviation increases with n");
+
+var e_tir = 0;
+var _dtir = prism_deviation(ray_deg_to_rad(f64_from(120)), F64_TWO, &e_tir);
+assert(prakash_is_err(e_tir), "prism TIR errors");
+
+var edb = 0;
+var edr = 0;
+var dev_blue = prism_dispersion(apex60, sellmeier_bk7(), fraunhofer_f(), &edb);
+var dev_red = prism_dispersion(apex60, sellmeier_bk7(), fraunhofer_c(), &edr);
+assert(f64_gt(dev_blue, dev_red), "blue deviated more than red");
+
+var esp = 0;
+var spread = prism_angular_spread(apex60, sellmeier_bk7(), fraunhofer_f(), fraunhofer_c(), &esp);
+assert_eq(esp, 0, "angular spread ok");
+assert(f64_gt(PrismSpread_dev_short(spread), PrismSpread_dev_long(spread)), "dev_short > dev_long");
+assert(f64_gt(PrismSpread_spread(spread), Z), "spread positive");
+assert(f64_lt(ray_rad_to_deg(PrismSpread_spread(spread)), f64_from(5)), "BK7 spread modest");
+
+var esc = 0;
+var esf = 0;
+var spread_crown = prism_angular_spread(apex60, sellmeier_bk7(), fraunhofer_f(), fraunhofer_c(), &esc);
+var spread_flint = prism_angular_spread(apex60, sellmeier_sf11(), fraunhofer_f(), fraunhofer_c(), &esf);
+assert(f64_gt(PrismSpread_spread(spread_flint), PrismSpread_spread(spread_crown)), "flint disperses more than crown");
+
+# ── additional models ────────
+test_group("additional_models");
+
+_assert_near(
+schott_n_at(schott_bk7(), fraunhofer_d()),
+sellmeier_n_at(sellmeier_bk7(), fraunhofer_d()), TOL_002, "Schott BK7 ~ Sellmeier BK7");
+assert(_between(schott_n_at(schott_bk7(), _fd(4, 10)), _fd(14, 10), _fd(16, 10)), "Schott BK7 range 0.4");
+assert(_between(schott_n_at(schott_bk7(), _fd(5, 10)), _fd(14, 10), _fd(16, 10)), "Schott BK7 range 0.5");
+assert(_between(schott_n_at(schott_bk7(), _fd(6, 10)), _fd(14, 10), _fd(16, 10)), "Schott BK7 range 0.6");
+assert(_between(schott_n_at(schott_bk7(), _fd(7, 10)), _fd(14, 10), _fd(16, 10)), "Schott BK7 range 0.7");
+
+var conrady = _conrady_mk(_fd(151, 100), _fd(5, 1000), _fd(1, 10000));
+assert(_between(conrady_n_at(conrady, _fd(5876, 10000)), N15, _fd(155, 100)), "Conrady n in (1.5,1.55)");
+
+var herz = _herzberger_mk(_fd(151, 100), _fd(1, 1000), Z, f64_neg(_fd(1, 1000)), Z);
+assert(_between(herzberger_n_at(herz, _fd(5876, 10000)), _fd(14, 10), _fd(16, 10)), "Herzberger n in (1.4,1.6)");
+
+# ── chromatic aberration ────────
+test_group("chromatic_aberration");
+
+_assert_near(partial_dispersion(sellmeier_bk7()), _fd(53, 100), TOL_05, "BK7 partial dispersion ~ 0.53");
+var v = abbe_number(sellmeier_bk7());
+assert(_between(longitudinal_chromatic_aberration(f64_from(100), v), TOL1, F64_TWO), "LCA ~ 1.5mm");
+assert(_between(lateral_chromatic_aberration(f64_from(10), v), Z, F64_ONE), "TCA in (0,1)");
+_assert_near(secondary_spectrum(f64_from(100), Z, f64_from(64)), Z, TOL6, "zero dP -> zero secondary spectrum");
+assert(f64_gt(secondary_spectrum(f64_from(100), _fd(1, 100), f64_from(64)), Z), "positive dP -> positive secondary");
+
+var r = assert_summary();

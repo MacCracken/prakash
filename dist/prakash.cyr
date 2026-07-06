@@ -1525,3 +1525,310 @@ fn prescription_doublet(focal_length, n1, v1, n2, v2, aperture, t1, t2) {
     var _p3 = prescription_add_surface(p, r4, f64_from(0), F64_ONE, aperture);
     return p;
 }
+
+# --- ray_dispersion.cyr ---
+
+# ray_dispersion.cyr -- dispersion models (Cauchy/Sellmeier/Herzberger/Schott/
+# Conrady), prisms, Abbe number, chromatic aberration.
+# Usage: include "lib/ray_dispersion.cyr"  (requires error.cyr)
+#
+# Ported from the Rust `ray/dispersion.rs`. Glass coefficients are encoded as
+# exact ratios (num/den, both < 2^53) which reproduce Rust's decimal literals
+# bit-for-bit. Wavelengths are in micrometers.
+
+fn _disp_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _disp_eps15() { return f64_div(F64_ONE, f64_from(1000000000000000)); }
+
+# Fraunhofer reference wavelengths (micrometers).
+fn fraunhofer_d() { return _disp_r(58756, 100000); }   # 0.58756 (He yellow)
+fn fraunhofer_f() { return _disp_r(48613, 100000); }   # 0.48613 (H blue)
+fn fraunhofer_c() { return _disp_r(65627, 100000); }   # 0.65627 (H red)
+
+# ── Cauchy dispersion: n(l) = b + c/l^2 ────────
+
+#derive(accessors)
+struct CauchyCoefficients { b; c; }
+
+fn _cauchy_mk(b, c) {
+    var x = alloc(sizeof(CauchyCoefficients));
+    CauchyCoefficients_set_b(x, b);
+    CauchyCoefficients_set_c(x, c);
+    return x;
+}
+
+#must_use
+fn cauchy_bk7() { return _cauchy_mk(_disp_r(15046, 10000), _disp_r(420, 100000)); }
+#must_use
+fn cauchy_fused_silica() { return _cauchy_mk(_disp_r(14580, 10000), _disp_r(354, 100000)); }
+
+# Refractive index at wavelength_um: b + c/l^2.
+#must_use
+fn cauchy_n_at(coef, wavelength_um) {
+    var l2 = f64_mul(wavelength_um, wavelength_um);
+    return f64_add(CauchyCoefficients_b(coef), f64_div(CauchyCoefficients_c(coef), l2));
+}
+
+# ── Sellmeier dispersion (3-term) ────────
+
+#derive(accessors)
+struct SellmeierCoefficients { b1; c1; b2; c2; b3; c3; }
+
+fn _sellmeier_mk(b1, c1, b2, c2, b3, c3) {
+    var s = alloc(sizeof(SellmeierCoefficients));
+    SellmeierCoefficients_set_b1(s, b1);
+    SellmeierCoefficients_set_c1(s, c1);
+    SellmeierCoefficients_set_b2(s, b2);
+    SellmeierCoefficients_set_c2(s, c2);
+    SellmeierCoefficients_set_b3(s, b3);
+    SellmeierCoefficients_set_c3(s, c3);
+    return s;
+}
+
+#must_use
+fn sellmeier_bk7() {
+    return _sellmeier_mk(
+    _disp_r(103961212, 100000000), _disp_r(600069867, 100000000000),
+    _disp_r(231792344, 1000000000), _disp_r(200179144, 10000000000),
+    _disp_r(101046945, 100000000), _disp_r(103560653, 1000000));
+}
+#must_use
+fn sellmeier_sf11() {
+    return _sellmeier_mk(
+    _disp_r(173759626, 100000000), _disp_r(131887070, 10000000000),
+    _disp_r(313747346, 1000000000), _disp_r(623068142, 10000000000),
+    _disp_r(189878101, 100000000), _disp_r(15523629, 100000));
+}
+#must_use
+fn sellmeier_fused_silica() {
+    return _sellmeier_mk(
+    _disp_r(6961663, 10000000), _disp_r(46791482, 10000000000),
+    _disp_r(4079426, 10000000), _disp_r(13512063, 1000000000),
+    _disp_r(8974794, 10000000), _disp_r(979340025, 10000000));
+}
+#must_use
+fn sellmeier_sapphire() {
+    return _sellmeier_mk(
+    _disp_r(14313493, 10000000), _disp_r(527925, 100000000),
+    _disp_r(65054713, 100000000), _disp_r(1421826, 100000000),
+    _disp_r(53414822, 10000000), _disp_r(32501783, 100000));
+}
+#must_use
+fn sellmeier_water() {
+    return _sellmeier_mk(
+    _disp_r(56701972, 100000000), _disp_r(508550, 100000000),
+    _disp_r(17262926, 100000000), _disp_r(1818000, 100000000),
+    _disp_r(2062460, 100000000), _disp_r(2625000, 100000000));
+}
+#must_use
+fn sellmeier_diamond() {
+    # two-term fit: b3 = 0, c3 = 1.0
+    return _sellmeier_mk(
+    _disp_r(43358, 10000), _disp_r(106, 10000),
+    _disp_r(3060, 10000), _disp_r(175, 10000),
+    f64_from(0), F64_ONE);
+}
+
+# One Sellmeier term with a resonance-pole guard: b*l2/(l2-c), or 0 near the pole.
+fn _sellmeier_term(b, l2, c) {
+    var d = f64_sub(l2, c);
+    if (f64_gt(f64_abs(d), _disp_eps15()) == 1) {
+        return f64_div(f64_mul(b, l2), d);
+    }
+    return f64_from(0);
+}
+
+# Refractive index at wavelength_um. Clamps to 1.0 in the unphysical n^2 < 1 region.
+#must_use
+fn sellmeier_n_at(coef, wavelength_um) {
+    var l2 = f64_mul(wavelength_um, wavelength_um);
+    var t1 = _sellmeier_term(SellmeierCoefficients_b1(coef), l2, SellmeierCoefficients_c1(coef));
+    var t2 = _sellmeier_term(SellmeierCoefficients_b2(coef), l2, SellmeierCoefficients_c2(coef));
+    var t3 = _sellmeier_term(SellmeierCoefficients_b3(coef), l2, SellmeierCoefficients_c3(coef));
+    var n2 = f64_add(f64_add(f64_add(F64_ONE, t1), t2), t3);
+    if (f64_lt(n2, F64_ONE) == 1) {
+        return F64_ONE;
+    }
+    return f64_sqrt(n2);
+}
+
+# Abbe number V = (n_d - 1) / (n_F - n_C).
+#must_use
+fn abbe_number(sellmeier) {
+    var n_d = sellmeier_n_at(sellmeier, fraunhofer_d());
+    var n_f = sellmeier_n_at(sellmeier, fraunhofer_f());
+    var n_c = sellmeier_n_at(sellmeier, fraunhofer_c());
+    return f64_div(f64_sub(n_d, F64_ONE), f64_sub(n_f, n_c));
+}
+
+# ── Prism ────────
+
+# Minimum deviation angle: d_min = 2*asin(n*sin(A/2)) - A. Writes PRK_ERR_TIR
+# (returns 0) if n*sin(A/2) exceeds 1.
+#must_use
+fn prism_deviation(apex_angle, n, err_out) {
+    store64(err_out, ERR_NONE);
+    var sin_half_a = f64_sin(f64_div(apex_angle, F64_TWO));
+    var arg = f64_mul(n, sin_half_a);
+    if (f64_gt(f64_abs(arg), F64_ONE) == 1) {
+        store64(err_out, PRK_ERR_TIR);
+        return 0;
+    }
+    return f64_sub(f64_mul(F64_TWO, ganita_f64_asin(arg)), apex_angle);
+}
+
+# Prism deviation using the Sellmeier index at wavelength_um.
+#must_use
+fn prism_dispersion(apex_angle, sellmeier, wavelength_um, err_out) {
+    var n = sellmeier_n_at(sellmeier, wavelength_um);
+    return prism_deviation(apex_angle, n, err_out);
+}
+
+# (dev_short, dev_long, angular_spread) for prism_angular_spread.
+#derive(accessors)
+struct PrismSpread { dev_short; dev_long; spread; }
+
+# Angular spread across a wavelength range. Returns a PrismSpread (0 on error).
+#must_use
+fn prism_angular_spread(apex_angle, sellmeier, wavelength_short_um, wavelength_long_um, err_out) {
+    store64(err_out, ERR_NONE);
+    var e1 = 0;
+    var dev_short = prism_dispersion(apex_angle, sellmeier, wavelength_short_um, &e1);
+    if (prakash_is_err(e1) == 1) {
+        store64(err_out, e1);
+        return 0;
+    }
+    var e2 = 0;
+    var dev_long = prism_dispersion(apex_angle, sellmeier, wavelength_long_um, &e2);
+    if (prakash_is_err(e2) == 1) {
+        store64(err_out, e2);
+        return 0;
+    }
+    var ps = alloc(sizeof(PrismSpread));
+    PrismSpread_set_dev_short(ps, dev_short);
+    PrismSpread_set_dev_long(ps, dev_long);
+    PrismSpread_set_spread(ps, f64_abs(f64_sub(dev_short, dev_long)));
+    return ps;
+}
+
+# ── Additional dispersion models ────────
+
+# Herzberger (5-term): n = a + b*L + c*L^2 + d*l2 + e*l2^2, L = 1/(l2 - 0.028).
+#derive(accessors)
+struct HerzbergerCoefficients { a; b; c; d; e; }
+
+fn _herzberger_mk(a, b, c, d, e) {
+    var h = alloc(sizeof(HerzbergerCoefficients));
+    HerzbergerCoefficients_set_a(h, a);
+    HerzbergerCoefficients_set_b(h, b);
+    HerzbergerCoefficients_set_c(h, c);
+    HerzbergerCoefficients_set_d(h, d);
+    HerzbergerCoefficients_set_e(h, e);
+    return h;
+}
+
+#must_use
+fn herzberger_n_at(coef, wavelength_um) {
+    var l2 = f64_mul(wavelength_um, wavelength_um);
+    var l = f64_div(F64_ONE, f64_sub(l2, _disp_r(28, 1000)));   # 0.028
+    # Match Rust's left-associative coefficient-first order: c*l*l = (c*l)*l.
+    var term_a = HerzbergerCoefficients_a(coef);
+    var term_b = f64_mul(HerzbergerCoefficients_b(coef), l);
+    var term_c = f64_mul(f64_mul(HerzbergerCoefficients_c(coef), l), l);
+    var term_d = f64_mul(HerzbergerCoefficients_d(coef), l2);
+    var term_e = f64_mul(f64_mul(HerzbergerCoefficients_e(coef), l2), l2);
+    return f64_add(f64_add(f64_add(f64_add(term_a, term_b), term_c), term_d), term_e);
+}
+
+# Schott (6-term legacy): n^2 = a0 + a1*l2 + a2/l2 + a3/l2^2 + a4/l2^3 + a5/l2^4.
+#derive(accessors)
+struct SchottCoefficients { a0; a1; a2; a3; a4; a5; }
+
+fn _schott_mk(a0, a1, a2, a3, a4, a5) {
+    var s = alloc(sizeof(SchottCoefficients));
+    SchottCoefficients_set_a0(s, a0);
+    SchottCoefficients_set_a1(s, a1);
+    SchottCoefficients_set_a2(s, a2);
+    SchottCoefficients_set_a3(s, a3);
+    SchottCoefficients_set_a4(s, a4);
+    SchottCoefficients_set_a5(s, a5);
+    return s;
+}
+
+#must_use
+fn schott_bk7() {
+    return _schott_mk(
+    _disp_r(22718929, 10000000), f64_neg(_disp_r(10108077, 1000000000)),
+    _disp_r(10592509, 1000000000), _disp_r(200816, 1000000000),
+    f64_neg(_disp_r(76472538, 10000000000000)), _disp_r(49240991, 100000000000000));
+}
+
+#must_use
+fn schott_n_at(coef, wavelength_um) {
+    var l2 = f64_mul(wavelength_um, wavelength_um);
+    var li = f64_div(F64_ONE, l2);
+    # Match Rust's left-associative coefficient-first folds: a3*x*x = (a3*x)*x.
+    var t3 = f64_mul(f64_mul(SchottCoefficients_a3(coef), li), li);
+    var t4 = f64_mul(f64_mul(f64_mul(SchottCoefficients_a4(coef), li), li), li);
+    var t5 = f64_mul(f64_mul(f64_mul(f64_mul(SchottCoefficients_a5(coef), li), li), li), li);
+    var n2 = f64_add(f64_add(f64_add(f64_add(f64_add(
+    SchottCoefficients_a0(coef),
+    f64_mul(SchottCoefficients_a1(coef), l2)),
+    f64_mul(SchottCoefficients_a2(coef), li)),
+    t3), t4), t5);
+    if (f64_gt(n2, f64_from(0)) == 1) {
+        return f64_sqrt(n2);
+    }
+    return F64_ONE;
+}
+
+# Conrady (3-term): n = n0 + a/l + b/l^3.5.
+#derive(accessors)
+struct ConradyCoefficients { n0; a; b; }
+
+fn _conrady_mk(n0, a, b) {
+    var c = alloc(sizeof(ConradyCoefficients));
+    ConradyCoefficients_set_n0(c, n0);
+    ConradyCoefficients_set_a(c, a);
+    ConradyCoefficients_set_b(c, b);
+    return c;
+}
+
+#must_use
+fn conrady_n_at(coef, wavelength_um) {
+    var term_a = f64_div(ConradyCoefficients_a(coef), wavelength_um);
+    var term_b = f64_div(ConradyCoefficients_b(coef), ganita_f64_pow(wavelength_um, _disp_r(7, 2)));
+    return f64_add(f64_add(ConradyCoefficients_n0(coef), term_a), term_b);
+}
+
+# ── Partial dispersion & chromatic aberration ────────
+
+# Partial dispersion P_g,F = (n_g - n_F) / (n_F - n_C). 0 if n_F ~ n_C.
+#must_use
+fn partial_dispersion(sellmeier) {
+    var n_g = sellmeier_n_at(sellmeier, _disp_r(43584, 100000));   # g-line 0.43584
+    var n_f = sellmeier_n_at(sellmeier, fraunhofer_f());
+    var n_c = sellmeier_n_at(sellmeier, fraunhofer_c());
+    var dn_fc = f64_sub(n_f, n_c);
+    if (f64_lt(f64_abs(dn_fc), _disp_eps15()) == 1) {
+        return f64_from(0);
+    }
+    return f64_div(f64_sub(n_g, n_f), dn_fc);
+}
+
+# Longitudinal chromatic aberration (axial color): df = f / V.
+#must_use
+fn longitudinal_chromatic_aberration(focal_length, abbe_num) {
+    return f64_div(focal_length, abbe_num);
+}
+
+# Lateral (transverse) chromatic aberration: TCA = h / V.
+#must_use
+fn lateral_chromatic_aberration(image_height, abbe_num) {
+    return f64_div(image_height, abbe_num);
+}
+
+# Secondary spectrum (residual after achromatic correction): f * dP / V.
+#must_use
+fn secondary_spectrum(focal_length, delta_p, abbe_num) {
+    return f64_div(f64_mul(focal_length, delta_p), abbe_num);
+}
