@@ -1,0 +1,177 @@
+# pbr_advanced.cyr -- advanced PBR (anisotropy, sheen, clearcoat, SSS,
+# iridescence, volumetric, importance sampling, split-sum IBL)
+# Usage: include "lib/pbr_advanced.cyr"  (requires pbr_core.cyr; ganita for pow)
+#
+# Ported from the Rust `pbr/advanced.rs`. Reuses pbr_core helpers (_pbr_r,
+# _pbr_pow5, _pbr_eps15, pbr_distribution_ggx, pbr_fresnel_schlick). This file
+# is built in two sections: (1) anisotropy/sheen/clearcoat/SSS; (2) iridescence,
+# volumetric scattering, importance sampling, and the split-sum IBL helpers.
+
+# ── Anisotropic GGX ────────
+
+# Anisotropic GGX NDF: 1 / (pi*ax*ay*term^2 + 1e-15),
+# term = (hx/ax)^2 + (hy/ay)^2 + ndh^2.
+#must_use
+fn pbr_distribution_ggx_aniso(n_dot_h, h_dot_x, h_dot_y, roughness_x, roughness_y) {
+    var ax = f64_mul(roughness_x, roughness_x);
+    var ay = f64_mul(roughness_y, roughness_y);
+    var ndh = f64_clamp(n_dot_h, f64_from(0), F64_ONE);
+    var hx_ax = f64_div(h_dot_x, ax);
+    var hy_ay = f64_div(h_dot_y, ay);
+    var term = f64_add(
+    f64_add(f64_mul(hx_ax, hx_ax), f64_mul(hy_ay, hy_ay)),
+    f64_mul(ndh, ndh));
+    var denom = f64_add(
+    f64_mul(f64_mul(f64_mul(f64_mul(F64_PI, ax), ay), term), term),
+    _pbr_eps15());
+    return f64_div(F64_ONE, denom);
+}
+
+# Anisotropic Smith geometry (single direction, Heitz): 2*ndv/denom,
+# denom = ndv + sqrt(ndv^2 + (vx*ax)^2 + (vy*ay)^2).
+#must_use
+fn pbr_geometry_ggx_aniso(n_dot_v, v_dot_x, v_dot_y, roughness_x, roughness_y) {
+    var ax = f64_mul(roughness_x, roughness_x);
+    var ay = f64_mul(roughness_y, roughness_y);
+    var ndv = f64_clamp(n_dot_v, f64_from(0), F64_ONE);
+    var vx_ax = f64_mul(v_dot_x, ax);
+    var vy_ay = f64_mul(v_dot_y, ay);
+    var lambda_sq = f64_add(f64_mul(vx_ax, vx_ax), f64_mul(vy_ay, vy_ay));
+    var denom = f64_add(ndv, f64_sqrt(f64_add(f64_mul(ndv, ndv), lambda_sq)));
+    if (f64_lt(denom, _pbr_eps15()) == 1) {
+        return f64_from(0);
+    }
+    return f64_div(f64_mul(F64_TWO, ndv), denom);
+}
+
+# Anisotropic Smith geometry (both directions).
+#must_use
+fn pbr_geometry_smith_aniso(n_dot_v, n_dot_l, v_dot_x, v_dot_y, l_dot_x, l_dot_y,
+roughness_x, roughness_y) {
+    return f64_mul(
+    pbr_geometry_ggx_aniso(n_dot_v, v_dot_x, v_dot_y, roughness_x, roughness_y),
+    pbr_geometry_ggx_aniso(n_dot_l, l_dot_x, l_dot_y, roughness_x, roughness_y));
+}
+
+# ── Sheen ────────
+
+# Charlie sheen distribution (Estevez & Kulla 2017):
+# (2 + 1/a) * sin(theta)^(1/a) / (2*pi), a = clamp(roughness, 0.001, 1).
+#must_use
+fn pbr_distribution_charlie(n_dot_h, roughness) {
+    var alpha = f64_clamp(roughness, _pbr_r(1, 1000), F64_ONE);
+    var inv_alpha = f64_div(F64_ONE, alpha);
+    var ndh = f64_clamp(n_dot_h, f64_from(0), F64_ONE);
+    var sin_theta = f64_sqrt(f64_sub(F64_ONE, f64_mul(ndh, ndh)));
+    return f64_div(
+    f64_mul(f64_add(F64_TWO, inv_alpha), ganita_f64_pow(sin_theta, inv_alpha)),
+    f64_mul(F64_TWO, F64_PI));
+}
+
+# Sheen BRDF (Charlie): D / (4*(ndl + ndv - ndl*ndv)).
+#must_use
+fn pbr_sheen_charlie(n_dot_h, n_dot_l, n_dot_v, roughness) {
+    var d = pbr_distribution_charlie(n_dot_h, roughness);
+    var ndl = f64_clamp(n_dot_l, _pbr_r(1, 1000), F64_ONE);
+    var ndv = f64_clamp(n_dot_v, _pbr_r(1, 1000), F64_ONE);
+    return f64_div(d,
+    f64_mul(f64_from(4), f64_sub(f64_add(ndl, ndv), f64_mul(ndl, ndv))));
+}
+
+# Ashikhmin sheen: intensity * (1 - ct)^5.
+#must_use
+fn pbr_sheen_ashikhmin(cos_theta, sheen_intensity) {
+    var ct = f64_clamp(cos_theta, f64_from(0), F64_ONE);
+    return f64_mul(sheen_intensity, _pbr_pow5(f64_sub(F64_ONE, ct)));
+}
+
+# ── Clearcoat ────────
+
+# Clearcoat GGX distribution (separate low roughness).
+#must_use
+fn pbr_clearcoat_distribution(n_dot_h, clearcoat_roughness) {
+    return pbr_distribution_ggx(n_dot_h, clearcoat_roughness);
+}
+
+# Clearcoat Fresnel (fixed IOR 1.5, F0 = 0.04).
+#must_use
+fn pbr_clearcoat_fresnel(cos_theta) {
+    return pbr_fresnel_schlick(_pbr_r(4, 100), cos_theta);
+}
+
+# Clearcoat geometry (Kelemen, simplified): 0.25 / (ndv*ndl).
+#must_use
+fn pbr_clearcoat_geometry(n_dot_v, n_dot_l) {
+    var ndv = f64_clamp(n_dot_v, _pbr_r(1, 1000), F64_ONE);
+    var ndl = f64_clamp(n_dot_l, _pbr_r(1, 1000), F64_ONE);
+    return f64_div(_pbr_r(1, 4), f64_mul(ndv, ndl));
+}
+
+# Full clearcoat BRDF: D * F * G.
+#must_use
+fn pbr_clearcoat_brdf(n_dot_h, n_dot_v, n_dot_l, h_dot_v, clearcoat_roughness) {
+    var d = pbr_clearcoat_distribution(n_dot_h, clearcoat_roughness);
+    var f = pbr_clearcoat_fresnel(h_dot_v);
+    var g = pbr_clearcoat_geometry(n_dot_v, n_dot_l);
+    return f64_mul(f64_mul(d, f), g);
+}
+
+# Energy-conserving clearcoat blend:
+# (1 - Fc*clearcoat)*base + clearcoat*coat.
+#must_use
+fn pbr_clearcoat_blend(base_brdf, coat_brdf, clearcoat, h_dot_v) {
+    var fc = pbr_clearcoat_fresnel(h_dot_v);
+    return f64_add(
+    f64_mul(f64_sub(F64_ONE, f64_mul(fc, clearcoat)), base_brdf),
+    f64_mul(clearcoat, coat_brdf));
+}
+
+# ── Subsurface Scattering ────────
+
+# Burley normalized diffusion: A*[e^(-r/d) + e^(-r/3d)] / (8*pi*d*r);
+# at r=0 returns the limit 1/(2*pi*d^2).
+#must_use
+fn pbr_sss_profile_burley(r, d) {
+    if (f64_lt(r, _pbr_eps15()) == 1) {
+        return f64_div(F64_ONE, f64_mul(f64_mul(f64_mul(F64_TWO, F64_PI), d), d));
+    }
+    var inv_8pd = f64_div(F64_ONE, f64_mul(f64_mul(f64_from(8), F64_PI), d));
+    var terms = f64_add(
+    f64_exp(f64_div(f64_neg(r), d)),
+    f64_exp(f64_div(f64_neg(r), f64_mul(f64_from(3), d))));
+    return f64_div(f64_mul(inv_8pd, terms), r);
+}
+
+# Gaussian SSS profile: e^(-r^2/(2*sigma^2)) / (2*pi*sigma^2).
+#must_use
+fn pbr_sss_profile_gaussian(r, sigma) {
+    var s2 = f64_mul(sigma, sigma);
+    var num = f64_exp(f64_div(f64_mul(f64_neg(r), r), f64_mul(F64_TWO, s2)));
+    return f64_div(num, f64_mul(f64_mul(F64_TWO, F64_PI), s2));
+}
+
+# Subsurface diffuse term (Burley approximation).
+#must_use
+fn pbr_subsurface_diffuse(n_dot_l, n_dot_v, roughness) {
+    var ndl = f64_clamp(n_dot_l, f64_from(0), F64_ONE);
+    var ndv = f64_clamp(n_dot_v, f64_from(0), F64_ONE);
+    var fl = _pbr_pow5(f64_sub(F64_ONE, ndl));
+    var fv = _pbr_pow5(f64_sub(F64_ONE, ndv));
+    var f_ss90 = f64_mul(roughness, roughness);
+    var f_ss = f64_mul(
+    f64_add(F64_ONE, f64_mul(f64_sub(f_ss90, F64_ONE), fl)),
+    f64_add(F64_ONE, f64_mul(f64_sub(f_ss90, F64_ONE), fv)));
+    var inner = f64_add(
+    f64_mul(f_ss, f64_sub(
+    f64_div(F64_ONE, f64_add(f64_add(ndl, ndv), _pbr_eps15())),
+    F64_HALF)),
+    F64_HALF);
+    var fss = f64_mul(_pbr_r(125, 100), inner);
+    return f64_div(fss, F64_PI);
+}
+
+# Thin-slab diffuse transmittance (Borshukov): e^(-extinction*thickness).
+#must_use
+fn pbr_sss_transmittance(thickness, extinction) {
+    return f64_exp(f64_mul(f64_neg(extinction), thickness));
+}

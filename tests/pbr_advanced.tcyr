@@ -1,0 +1,155 @@
+# pbr_advanced test suite (part 1) — aniso / sheen / clearcoat / SSS tests
+# from rust-old/src/pbr/advanced.rs (inline #[cfg(test)] mod).
+
+include "src/error.cyr"
+include "src/pbr_core.cyr"
+include "src/pbr_advanced.cyr"
+
+fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
+fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
+
+var EPS = f64_div(F64_ONE, f64_from(1000000));   # 1e-6
+var Z = f64_from(0);
+
+alloc_init();
+
+# ── Anisotropic GGX ────────
+test_group("ggx_aniso");
+
+var sinT = f64_sqrt(f64_sub(F64_ONE, f64_mul(_fd(9, 10), _fd(9, 10))));
+assert(f64_gt(pbr_distribution_ggx_aniso(_fd(9, 10), sinT, Z, _fd(3, 10), _fd(3, 10)), Z),
+"aniso positive");
+assert(f64_gt(pbr_distribution_ggx(_fd(9, 10), _fd(3, 10)), Z), "iso positive");
+
+# always positive over grid
+var ndh4 = alloc(4 * 8);
+store64(ndh4, _fd(1, 10));
+store64(ndh4 + 8, F64_HALF);
+store64(ndh4 + 16, _fd(9, 10));
+store64(ndh4 + 24, F64_ONE);
+var rxy3 = alloc(3 * 8);
+store64(rxy3, _fd(1, 10));
+store64(rxy3 + 8, _fd(3, 10));
+store64(rxy3 + 16, _fd(7, 10));
+for (var i = 0; i < 4; i = i + 1) {
+    for (var jx = 0; jx < 3; jx = jx + 1) {
+        for (var jy = 0; jy < 3; jy = jy + 1) {
+            assert(f64_ge(pbr_distribution_ggx_aniso(load64(ndh4 + i * 8), _fd(3, 10), _fd(2, 10),
+            load64(rxy3 + jx * 8), load64(rxy3 + jy * 8)), Z), "aniso non-negative");
+        }
+    }
+}
+
+assert(f64_gt(pbr_distribution_ggx_aniso(F64_ONE, Z, Z, _fd(3, 10), F64_HALF),
+pbr_distribution_ggx_aniso(F64_HALF, F64_HALF, F64_HALF, _fd(3, 10), F64_HALF)),
+"aniso peaks at normal");
+
+var dx_off = pbr_distribution_ggx_aniso(_fd(9, 10), _fd(4, 10), Z, _fd(8, 10), _fd(1, 10));
+var dy_off = pbr_distribution_ggx_aniso(_fd(9, 10), Z, _fd(4, 10), _fd(8, 10), _fd(1, 10));
+assert(f64_gt(f64_abs(f64_sub(dx_off, dy_off)), EPS), "aniso directional");
+
+var ndv3 = alloc(3 * 8);
+store64(ndv3, _fd(1, 10));
+store64(ndv3 + 8, F64_HALF);
+store64(ndv3 + 16, _fd(9, 10));
+for (var gi = 0; gi < 3; gi = gi + 1) {
+    var g = pbr_geometry_ggx_aniso(load64(ndv3 + gi * 8), _fd(3, 10), _fd(2, 10), _fd(3, 10), F64_HALF);
+    assert(f64_ge(g, Z), "aniso G lo");
+    assert(f64_le(g, f64_add(F64_ONE, EPS)), "aniso G hi");
+}
+
+_assert_near(
+pbr_geometry_smith_aniso(_fd(8, 10), _fd(6, 10), _fd(3, 10), _fd(2, 10), _fd(3, 10), _fd(2, 10),
+_fd(3, 10), F64_HALF),
+pbr_geometry_smith_aniso(_fd(6, 10), _fd(8, 10), _fd(3, 10), _fd(2, 10), _fd(3, 10), _fd(2, 10),
+_fd(3, 10), F64_HALF),
+EPS, "aniso smith symmetric");
+
+# ── Sheen ────────
+test_group("sheen");
+
+var rough5 = alloc(5 * 8);
+store64(rough5, _fd(1, 10));
+store64(rough5 + 8, _fd(3, 10));
+store64(rough5 + 16, F64_HALF);
+store64(rough5 + 24, _fd(7, 10));
+store64(rough5 + 32, _fd(9, 10));
+for (var ci = 0; ci < 5; ci = ci + 1) {
+    assert(f64_ge(pbr_distribution_charlie(_fd(8, 10), load64(rough5 + ci * 8)), Z), "charlie positive");
+}
+assert(f64_gt(f64_abs(f64_sub(pbr_distribution_charlie(F64_HALF, _fd(1, 10)),
+pbr_distribution_charlie(F64_HALF, _fd(9, 10)))), _fd(1, 1000)), "charlie varies with roughness");
+assert(f64_ge(pbr_sheen_charlie(_fd(9, 10), _fd(8, 10), _fd(7, 10), F64_HALF), Z), "sheen charlie positive");
+_assert_near(pbr_sheen_ashikhmin(F64_ONE, F64_ONE), Z, EPS, "ashikhmin normal = 0");
+_assert_near(pbr_sheen_ashikhmin(Z, _fd(8, 10)), _fd(8, 10), EPS, "ashikhmin grazing = intensity");
+var as1 = pbr_sheen_ashikhmin(F64_HALF, F64_HALF);
+var as2 = pbr_sheen_ashikhmin(F64_HALF, F64_ONE);
+_assert_near(f64_div(as2, as1), F64_TWO, EPS, "ashikhmin scales linearly");
+
+# ── Clearcoat ────────
+test_group("clearcoat");
+
+_assert_near(pbr_clearcoat_fresnel(F64_ONE), _fd(4, 100), EPS, "clearcoat fresnel normal = 0.04");
+_assert_near(pbr_clearcoat_fresnel(Z), F64_ONE, EPS, "clearcoat fresnel grazing = 1");
+assert(f64_gt(pbr_clearcoat_brdf(_fd(9, 10), _fd(8, 10), _fd(7, 10), _fd(85, 100), _fd(5, 100)), Z),
+"clearcoat brdf positive");
+assert(f64_gt(pbr_clearcoat_brdf(F64_ONE, _fd(8, 10), _fd(7, 10), _fd(9, 10), _fd(1, 100)),
+pbr_clearcoat_brdf(F64_ONE, _fd(8, 10), _fd(7, 10), _fd(9, 10), _fd(1, 10))), "smoother sharper peak");
+_assert_near(pbr_clearcoat_blend(F64_HALF, _fd(3, 10), Z, _fd(8, 10)), F64_HALF, EPS, "zero clearcoat = base");
+var blend_ec = pbr_clearcoat_blend(F64_ONE, F64_ONE, F64_ONE, _fd(8, 10));
+assert(f64_ge(blend_ec, Z), "blend >= 0");
+assert(f64_le(blend_ec, F64_TWO), "blend <= 2");
+assert(f64_gt(f64_abs(f64_sub(
+pbr_clearcoat_blend(F64_ONE, F64_HALF, F64_HALF, _fd(8, 10)),
+pbr_clearcoat_blend(F64_ONE, F64_HALF, F64_ONE, _fd(8, 10)))), EPS), "clearcoat levels differ");
+var ccg5 = alloc(5 * 8);
+store64(ccg5, _fd(1, 10));
+store64(ccg5 + 8, _fd(3, 10));
+store64(ccg5 + 16, F64_HALF);
+store64(ccg5 + 24, _fd(7, 10));
+store64(ccg5 + 32, _fd(9, 10));
+for (var vi = 0; vi < 5; vi = vi + 1) {
+    for (var li = 0; li < 5; li = li + 1) {
+        assert(f64_gt(pbr_clearcoat_geometry(load64(ccg5 + vi * 8), load64(ccg5 + li * 8)), Z),
+        "clearcoat G positive");
+    }
+}
+
+# ── Subsurface scattering ────────
+test_group("sss");
+
+var br5 = alloc(5 * 8);
+store64(br5, Z);
+store64(br5 + 8, _fd(1, 10));
+store64(br5 + 16, F64_HALF);
+store64(br5 + 24, F64_ONE);
+store64(br5 + 32, f64_from(5));
+for (var ri = 0; ri < 5; ri = ri + 1) {
+    assert(f64_ge(pbr_sss_profile_burley(load64(br5 + ri * 8), F64_ONE), Z), "burley non-negative");
+}
+assert(f64_gt(pbr_sss_profile_burley(_fd(1, 10), F64_ONE), pbr_sss_profile_burley(F64_TWO, F64_ONE)),
+"burley decreases with distance");
+assert(f64_gt(f64_abs(f64_sub(pbr_sss_profile_burley(F64_ONE, F64_HALF),
+pbr_sss_profile_burley(F64_ONE, F64_TWO))), EPS), "burley wider d differs");
+assert(f64_gt(pbr_sss_profile_gaussian(F64_HALF, F64_ONE), Z), "gaussian positive");
+assert(f64_gt(pbr_sss_profile_gaussian(Z, F64_ONE), pbr_sss_profile_gaussian(F64_ONE, F64_ONE)),
+"gaussian peak at zero");
+assert(f64_gt(pbr_sss_profile_gaussian(Z, F64_HALF), pbr_sss_profile_gaussian(Z, F64_TWO)),
+"narrower sigma taller");
+var sndlv = alloc(3 * 8);
+store64(sndlv, _fd(1, 10));
+store64(sndlv + 8, F64_HALF);
+store64(sndlv + 16, _fd(9, 10));
+for (var di = 0; di < 3; di = di + 1) {
+    for (var dj = 0; dj < 3; dj = dj + 1) {
+        var sv = pbr_subsurface_diffuse(load64(sndlv + di * 8), load64(sndlv + dj * 8), F64_HALF);
+        assert(f64_gt(sv, Z), "sss diffuse positive");
+        assert(f64_lt(sv, F64_TWO), "sss diffuse bounded");
+    }
+}
+_assert_near(pbr_sss_transmittance(Z, F64_ONE), F64_ONE, EPS, "transmittance 0 thick = 1");
+assert(f64_lt(pbr_sss_transmittance(F64_ONE, F64_ONE), F64_ONE), "transmittance < 1");
+assert(f64_gt(pbr_sss_transmittance(F64_ONE, F64_ONE), Z), "transmittance > 0");
+
+var r = assert_summary();
