@@ -11,6 +11,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # prakash vendors the full stdlib snapshot under lib/ for hermetic, reproducible
+  # builds (it shadows the toolchain's version-matched lib/ — intentional).
+  CYRIUS_NO_WARN_SHADOW_LIB: "1"
+
 jobs:
   build:
     name: Build & Test

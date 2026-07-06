@@ -11,6 +11,11 @@ on:
 permissions:
   contents: write
 
+env:
+  # prakash vendors the full stdlib snapshot under lib/ for hermetic, reproducible
+  # builds (it shadows the toolchain's version-matched lib/ — intentional).
+  CYRIUS_NO_WARN_SHADOW_LIB: "1"
+
 jobs:
   ci:
     name: CI Gate
