@@ -45,6 +45,7 @@ modules = [
     "src/wave_pattern.cyr",
     "src/pbr_core.cyr",
     "src/pbr_advanced.cyr",
+    "src/lens.cyr",
 ]
 
 [deps]

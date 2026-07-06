@@ -1,0 +1,170 @@
+# lens test suite (part 1) — thin/thick lens, f-number/NA, FOV
+# from rust-old/src/lens.rs (inline #[cfg(test)] mod).
+
+include "src/error.cyr"
+include "src/lens.cyr"
+
+fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
+fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
+
+var EPS = f64_div(F64_ONE, f64_from(1000000));   # 1e-6
+var Z = f64_from(0);
+var INF = 0x7FF0000000000000;
+var N15 = _fd(15, 10);
+
+alloc_init();
+
+var ER = alloc(8);
+var DOF = alloc(16);
+
+# ── Thin lens ────────
+test_group("thin_lens");
+
+_assert_near(lens_thin_image_distance(f64_from(50), f64_from(100), ER), f64_from(100), EPS, "real image di=100");
+assert_eq(load64(ER), PK_ERR_NONE, "real image ok");
+assert(f64_lt(lens_thin_image_distance(f64_from(50), f64_from(30), ER), Z), "virtual image di<0");
+var _e0 = lens_thin_image_distance(f64_from(50), f64_from(50), ER);
+assert_eq(prakash_is_err(load64(ER)), 1, "object at focus is err");
+_assert_near(lens_thin_image_distance(f64_from(50), f64_from(1000000), ER), f64_from(50), _fd(1, 100),
+"far object di~f");
+assert(f64_lt(lens_thin_image_distance(f64_neg(f64_from(50)), f64_from(100), ER), Z), "diverging virtual");
+var di_eq = lens_thin_image_distance(f64_from(75), f64_from(200), ER);
+_assert_near(f64_div(F64_ONE, f64_from(75)),
+f64_add(f64_div(F64_ONE, f64_from(200)), f64_div(F64_ONE, di_eq)), EPS, "satisfies 1/f=1/do+1/di");
+
+# ── Magnification ────────
+test_group("magnification");
+
+_assert_near(lens_magnification(f64_from(100), f64_from(100)), f64_neg(F64_ONE), EPS, "M at 2f = -1");
+var m_mag = lens_magnification(f64_from(60), f64_from(120));
+assert(f64_gt(f64_abs(m_mag), F64_ONE), "magnified |M|>1");
+assert(f64_lt(m_mag, Z), "magnified inverted");
+assert(f64_lt(f64_abs(lens_magnification(f64_from(200), f64_from(50))), F64_ONE), "diminished |M|<1");
+assert(f64_gt(lens_magnification(f64_from(30), f64_neg(f64_from(60))), Z), "virtual upright M>0");
+
+# ── Lensmaker ────────
+test_group("lensmaker");
+
+_assert_near(lens_lensmaker_focal_length(N15, f64_from(100), f64_neg(f64_from(100)), ER), f64_from(100),
+EPS, "lensmaker f=100");
+_assert_near(lens_lensmaker_focal_length(N15, f64_from(100), INF, ER), f64_from(200), EPS,
+"planoconvex f=200");
+var _e1 = lens_lensmaker_focal_length(N15, INF, INF, ER);
+assert_eq(prakash_is_err(load64(ER)), 1, "flat surfaces err");
+assert(f64_lt(lens_lensmaker_focal_length(N15, f64_neg(f64_from(100)), f64_from(100), ER), Z),
+"biconcave f<0");
+
+# ── Optical power ────────
+test_group("optical_power");
+
+_assert_near(lens_optical_power(F64_HALF, ER), F64_TWO, EPS, "power(0.5)=2");
+_assert_near(lens_optical_power(f64_neg(F64_HALF), ER), f64_neg(F64_TWO), EPS, "power(-0.5)=-2");
+var _e2 = lens_optical_power(Z, ER);
+assert_eq(prakash_is_err(load64(ER)), 1, "power(0) err");
+var pw = lens_optical_power(_fd(1, 4), ER);
+_assert_near(f64_div(F64_ONE, pw), _fd(1, 4), EPS, "power roundtrip");
+
+# ── Mirror ────────
+test_group("mirror");
+
+_assert_near(lens_mirror_focal_length(f64_from(200)), f64_from(100), EPS, "mirror focal 100");
+assert(f64_gt(lens_mirror_focal_length(f64_from(100)), Z), "concave f>0");
+assert(f64_lt(lens_mirror_focal_length(f64_neg(f64_from(100))), Z), "convex f<0");
+_assert_near(lens_mirror_image_distance(f64_from(100), f64_from(200), ER), f64_from(200), EPS,
+"mirror image real 200");
+var _e3 = lens_mirror_image_distance(f64_from(100), f64_from(100), ER);
+assert_eq(prakash_is_err(load64(ER)), 1, "mirror at focus err");
+
+# ── Classify ────────
+test_group("classify");
+
+assert_eq(lens_classify(f64_from(50)), LENS_CONVERGING, "positive converging");
+assert_eq(lens_classify(f64_neg(f64_from(50))), LENS_DIVERGING, "negative diverging");
+assert_eq(lens_classify(Z), LENS_DIVERGING, "zero diverging");
+
+# ── Combined ────────
+test_group("combined");
+
+_assert_near(lens_combined_focal_length(f64_from(100), f64_from(100), ER), f64_from(50), EPS,
+"combined 100+100 = 50");
+_assert_near(lens_combined_focal_length(f64_from(50), f64_neg(f64_from(100)), ER), f64_from(100), EPS,
+"combined 50-100 = 100");
+var _e4 = lens_combined_focal_length(f64_from(100), f64_neg(f64_from(100)), ER);
+assert_eq(prakash_is_err(load64(ER)), 1, "equal opposite err");
+
+# ── Depth of field ────────
+test_group("depth_of_field");
+
+lens_depth_of_field(f64_from(50), _fd(28, 10), _fd(3, 100), f64_from(2000), DOF);
+assert(f64_lt(load64(DOF), f64_from(2000)), "dof near < subject");
+assert(f64_gt(load64(DOF + 8), f64_from(2000)), "dof far > subject");
+assert(f64_gt(load64(DOF), Z), "dof near > 0");
+
+lens_depth_of_field(f64_from(50), _fd(14, 10), _fd(3, 100), f64_from(2000), DOF);
+var dof1 = f64_sub(load64(DOF + 8), load64(DOF));
+lens_depth_of_field(f64_from(50), f64_from(8), _fd(3, 100), f64_from(2000), DOF);
+var dof2 = f64_sub(load64(DOF + 8), load64(DOF));
+assert(f64_lt(dof1, dof2), "wider aperture shallower DoF");
+
+lens_depth_of_field(f64_from(85), _fd(28, 10), _fd(3, 100), f64_from(2000), DOF);
+var dofl1 = f64_sub(load64(DOF + 8), load64(DOF));
+lens_depth_of_field(f64_from(35), _fd(28, 10), _fd(3, 100), f64_from(2000), DOF);
+var dofl2 = f64_sub(load64(DOF + 8), load64(DOF));
+assert(f64_lt(dofl1, dofl2), "longer lens shallower DoF");
+
+lens_depth_of_field(f64_from(50), _fd(56, 10), _fd(3, 100), f64_from(5000), DOF);
+assert(f64_lt(load64(DOF), f64_from(5000)), "dof near < 5000");
+assert(f64_gt(load64(DOF + 8), f64_from(5000)), "dof far > 5000");
+
+# ── Thick lens ────────
+test_group("thick_lens");
+
+var f_thin0 = lens_lensmaker_focal_length(N15, f64_from(100), f64_neg(f64_from(100)), ER);
+var f_thick0 = lens_thick_focal_length(N15, f64_from(100), f64_neg(f64_from(100)), Z, ER);
+_assert_near(f_thin0, f_thick0, EPS, "thick@0 = thin");
+var f_thick = lens_thick_focal_length(N15, f64_from(100), f64_neg(f64_from(100)), f64_from(10), ER);
+assert(f64_gt(f_thick, Z), "biconvex thick converging");
+assert(f64_gt(f64_abs(f64_sub(f_thick, f_thin0)), _fd(1, 100)), "thick differs from thin");
+var _e5 = lens_thick_focal_length(N15, INF, INF, f64_from(10), ER);
+assert_eq(prakash_is_err(load64(ER)), 1, "thick zero power err");
+
+var cp = lens_cardinal_points(N15, f64_from(100), f64_neg(f64_from(100)), f64_from(10), ER);
+assert(f64_gt(CardinalPoints_focal_length(cp), Z), "cardinal f>0");
+assert(f64_gt(CardinalPoints_bfd(cp), Z), "cardinal bfd>0");
+assert(f64_lt(CardinalPoints_ffd(cp), Z), "cardinal ffd<0");
+assert(f64_lt(f64_abs(f64_sub(f64_abs(CardinalPoints_front_principal(cp)),
+f64_abs(CardinalPoints_back_principal(cp)))), _fd(1, 10)), "symmetric principal planes");
+
+# ── F-number / NA ────────
+test_group("f_number_na");
+
+_assert_near(lens_f_number(f64_from(50), f64_from(25)), F64_TWO, EPS, "f_number 50/25 = 2");
+_assert_near(lens_f_number(f64_from(100), f64_from(50)), F64_TWO, EPS, "f_number 100/50 = 2");
+_assert_near(lens_aperture_from_f_number(f64_from(50), F64_TWO), f64_from(25), EPS, "aperture 50/2 = 25");
+var d357 = _fd(30357, 1000);
+var nfr = lens_f_number(f64_from(85), d357);
+_assert_near(lens_aperture_from_f_number(f64_from(85), nfr), d357, EPS, "f/aperture roundtrip");
+_assert_near(lens_numerical_aperture(F64_ONE, f64_div(F64_PI, f64_from(6))), F64_HALF, EPS, "NA sin30 = 0.5");
+_assert_near(lens_na_from_f_number(F64_TWO), _fd(1, 4), EPS, "NA from f/2 = 0.25");
+assert(f64_gt(lens_numerical_aperture(_fd(1515, 1000), f64_div(F64_PI, f64_from(3))), F64_ONE),
+"oil immersion NA > 1");
+var theta_s = lens_diffraction_limit(_fd(55, 100000), f64_from(10));
+assert(f64_gt(theta_s, Z), "diffraction limit > 0");
+assert(f64_lt(theta_s, _fd(1, 1000)), "diffraction limit small");
+assert(f64_lt(lens_diffraction_limit(_fd(55, 100000), f64_from(50)), theta_s), "larger aperture better");
+var airy = lens_airy_disk_radius(_fd(55, 100000), _fd(28, 10));
+assert(f64_gt(airy, Z), "airy radius > 0");
+_assert_near(airy, _fd(188, 100000), _fd(1, 1000), "airy ~ 0.00188mm");
+
+# ── Field of view ────────
+test_group("field_of_view");
+
+var fov50 = lens_field_of_view(f64_from(36), f64_from(50));
+var fov_deg = f64_div(f64_mul(fov50, f64_from(180)), F64_PI);
+_assert_near(fov_deg, _fd(396, 10), F64_ONE, "50mm FF ~ 39.6 deg");
+assert(f64_lt(lens_field_of_view(f64_from(36), f64_from(200)), fov50), "longer lens narrower");
+assert(f64_gt(lens_field_of_view_diagonal(f64_from(36), f64_from(24), f64_from(50)), fov50),
+"diagonal > horizontal");
+
+var r = assert_summary();

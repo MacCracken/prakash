@@ -6410,3 +6410,213 @@ fn pbr_integrate_brdf_lut(n_dot_v, roughness, num_samples, out) {
     store64(out + 8, f64_mul(bias, inv_samples));
     return 0;
 }
+
+# --- lens.cyr ---
+
+# lens.cyr -- lens & mirror geometry, aberrations, MTF, depth of field
+# Usage: include "lib/lens.cyr"  (requires error.cyr; ganita for atan2/acos/hypot)
+#
+# Ported from the Rust `lens.rs`. Two sections: (1) thin/thick lens equations,
+# f-number/NA, field of view; (2) MTF, Seidel aberrations, Petzval, multi-element
+# systems. Rust `Result<f64>` -> err_out pointer (PK_ERR_NONE / PK_ERR_*, 0 on
+# error). `f64::INFINITY` = 0x7FF0000000000000; 1/inf = 0 via IEEE division.
+
+fn _lens_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _lens_eps15() { return f64_div(F64_ONE, f64_from(1000000000000000)); }
+fn _lens_inf() { return 0x7FF0000000000000; }
+
+# x^2 and x^3 matching Rust powi (square-and-multiply).
+fn _lens_pow2(x) { return f64_mul(x, x); }
+fn _lens_pow3(x) { return f64_mul(x, f64_mul(x, x)); }
+
+# ── Thin lens ────────
+
+# Thin lens equation 1/f = 1/do + 1/di -> image distance; err if object at focus.
+#must_use
+fn lens_thin_image_distance(focal_length, object_distance, err_out) {
+    store64(err_out, PK_ERR_NONE);
+    var denom = f64_sub(object_distance, focal_length);
+    if (f64_lt(f64_abs(denom), _lens_eps15()) == 1) {
+        store64(err_out, PK_ERR_DIVISION_BY_ZERO);
+        return f64_from(0);
+    }
+    return f64_div(f64_mul(focal_length, object_distance), denom);
+}
+
+# Magnification M = -di/do.
+#must_use
+fn lens_magnification(object_distance, image_distance) {
+    return f64_div(f64_neg(image_distance), object_distance);
+}
+
+# Lensmaker's equation: 1/f = (n-1)*(1/R1 - 1/R2).
+#must_use
+fn lens_lensmaker_focal_length(n, r1, r2, err_out) {
+    store64(err_out, PK_ERR_NONE);
+    var power = f64_mul(f64_sub(n, F64_ONE),
+    f64_sub(f64_div(F64_ONE, r1), f64_div(F64_ONE, r2)));
+    if (f64_lt(f64_abs(power), _lens_eps15()) == 1) {
+        store64(err_out, PK_ERR_DIVISION_BY_ZERO);
+        return f64_from(0);
+    }
+    return f64_div(F64_ONE, power);
+}
+
+# Optical power in diopters: 1/f.
+#must_use
+fn lens_optical_power(focal_length_m, err_out) {
+    store64(err_out, PK_ERR_NONE);
+    if (f64_lt(f64_abs(focal_length_m), _lens_eps15()) == 1) {
+        store64(err_out, PK_ERR_DIVISION_BY_ZERO);
+        return f64_from(0);
+    }
+    return f64_div(F64_ONE, focal_length_m);
+}
+
+# Mirror focal length: f = R/2.
+#must_use
+fn lens_mirror_focal_length(radius) {
+    return f64_div(radius, F64_TWO);
+}
+
+# Mirror image distance (same form as thin lens).
+#must_use
+fn lens_mirror_image_distance(focal_length, object_distance, err_out) {
+    return lens_thin_image_distance(focal_length, object_distance, err_out);
+}
+
+# ── Lens classification ────────
+
+var LENS_CONVERGING = 0;
+var LENS_DIVERGING = 1;
+
+# Classify a lens by focal length (>0 converging, else diverging).
+#must_use
+fn lens_classify(focal_length) {
+    if (f64_gt(focal_length, f64_from(0)) == 1) {
+        return LENS_CONVERGING;
+    }
+    return LENS_DIVERGING;
+}
+
+# Two thin lenses in contact: 1/f = 1/f1 + 1/f2.
+#must_use
+fn lens_combined_focal_length(f1, f2, err_out) {
+    store64(err_out, PK_ERR_NONE);
+    var sum = f64_add(f1, f2);
+    if (f64_lt(f64_abs(sum), _lens_eps15()) == 1) {
+        store64(err_out, PK_ERR_DIVISION_BY_ZERO);
+        return f64_from(0);
+    }
+    return f64_div(f64_mul(f1, f2), sum);
+}
+
+# Depth of field: writes (near, far) to out+0/+8; far = INFINITY beyond hyperfocal.
+fn lens_depth_of_field(focal_length, f_number, coc, subject_dist, out) {
+    var h = f64_div(f64_mul(focal_length, focal_length), f64_mul(f_number, coc));
+    var sd_minus_f = f64_sub(subject_dist, focal_length);
+    var near = f64_div(f64_mul(h, subject_dist), f64_add(h, sd_minus_f));
+    var far_denom = f64_sub(h, sd_minus_f);
+    var far = _lens_inf();
+    if (f64_le(far_denom, f64_from(0)) == 0) {
+        far = f64_div(f64_mul(h, subject_dist), far_denom);
+    }
+    store64(out, near);
+    store64(out + 8, far);
+    return 0;
+}
+
+# ── Thick lens ────────
+
+# Thick lens focal length: 1/f = (n-1)*[1/R1 - 1/R2 + (n-1)*d/(n*R1*R2)].
+#must_use
+fn lens_thick_focal_length(n, r1, r2, thickness, err_out) {
+    store64(err_out, PK_ERR_NONE);
+    var nm1 = f64_sub(n, F64_ONE);
+    var inner = f64_add(
+    f64_sub(f64_div(F64_ONE, r1), f64_div(F64_ONE, r2)),
+    f64_div(f64_mul(nm1, thickness), f64_mul(f64_mul(n, r1), r2)));
+    var power = f64_mul(nm1, inner);
+    if (f64_lt(f64_abs(power), _lens_eps15()) == 1) {
+        store64(err_out, PK_ERR_DIVISION_BY_ZERO);
+        return f64_from(0);
+    }
+    return f64_div(F64_ONE, power);
+}
+
+#derive(accessors)
+struct CardinalPoints { focal_length; ffd; bfd; front_principal; back_principal; }
+
+# Cardinal points of a thick lens (returns struct ptr; 0 on error).
+#must_use
+fn lens_cardinal_points(n, r1, r2, thickness, err_out) {
+    var f = lens_thick_focal_length(n, r1, r2, thickness, err_out);
+    if (prakash_is_err(load64(err_out)) == 1) {
+        return 0;
+    }
+    var nm1 = f64_sub(n, F64_ONE);
+    var phi1 = f64_div(nm1, r1);
+    var phi2 = f64_div(f64_neg(nm1), r2);
+    var bfd = f64_mul(f, f64_sub(F64_ONE, f64_div(f64_mul(phi1, thickness), n)));
+    var ffd = f64_mul(f64_neg(f), f64_sub(F64_ONE, f64_div(f64_mul(phi2, thickness), n)));
+    var cp = alloc(sizeof(CardinalPoints));
+    CardinalPoints_set_focal_length(cp, f);
+    CardinalPoints_set_ffd(cp, ffd);
+    CardinalPoints_set_bfd(cp, bfd);
+    CardinalPoints_set_front_principal(cp, f64_sub(f64_neg(f), ffd));
+    CardinalPoints_set_back_principal(cp, f64_sub(f, bfd));
+    return cp;
+}
+
+# ── Aperture / F-number / NA ────────
+
+# F-number: N = f / D.
+#must_use
+fn lens_f_number(focal_length, aperture_diameter) {
+    return f64_div(focal_length, aperture_diameter);
+}
+
+# Aperture diameter from f-number: D = f / N.
+#must_use
+fn lens_aperture_from_f_number(focal_length, f_num) {
+    return f64_div(focal_length, f_num);
+}
+
+# Numerical aperture: NA = n * sin(half_angle).
+#must_use
+fn lens_numerical_aperture(n, half_angle) {
+    return f64_mul(n, f64_sin(half_angle));
+}
+
+# Paraxial NA from f-number: NA = 1 / (2*N).
+#must_use
+fn lens_na_from_f_number(f_num) {
+    return f64_div(F64_ONE, f64_mul(F64_TWO, f_num));
+}
+
+# Rayleigh diffraction limit: theta = 1.22*lambda / D.
+#must_use
+fn lens_diffraction_limit(wavelength, aperture_diameter) {
+    return f64_div(f64_mul(_lens_r(122, 100), wavelength), aperture_diameter);
+}
+
+# Airy disk radius: r = 1.22*lambda*N.
+#must_use
+fn lens_airy_disk_radius(wavelength, f_num) {
+    return f64_mul(f64_mul(_lens_r(122, 100), wavelength), f_num);
+}
+
+# ── Field of View ────────
+
+# Full-angle field of view: FOV = 2*atan(sensor / (2*f)).
+#must_use
+fn lens_field_of_view(sensor_size, focal_length) {
+    return f64_mul(F64_TWO,
+    ganita_f64_atan2(f64_div(sensor_size, f64_mul(F64_TWO, focal_length)), F64_ONE));
+}
+
+# Diagonal field of view from sensor width/height.
+#must_use
+fn lens_field_of_view_diagonal(width, height, focal_length) {
+    return lens_field_of_view(ganita_f64_hypot(width, height), focal_length);
+}
