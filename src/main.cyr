@@ -1,0 +1,19 @@
+# prakash — optics and light simulation (CLI entry)
+# प्रकाश (Sanskrit: light, illumination, to make visible)
+#
+# This is the package CLI smoke entry — it only proves the toolchain can build
+# prakash and exits. The optics modules live in src/ (the library source) and
+# ship as the dist/prakash.cyr bundle; library coverage lives in tests/*.tcyr,
+# each suite including the src/ modules it exercises directly. The CLI stays
+# minimal on purpose — it does not include the library.
+
+include "lib/syscalls.cyr"
+include "lib/io.cyr"
+
+fn main() {
+    println("prakash (cyrius port)");
+    return 0;
+}
+
+var r = main();
+syscall(SYS_EXIT, r);

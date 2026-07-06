@@ -1,0 +1,39 @@
+# error.cyr -- prakash error codes
+# Usage: include "lib/error.cyr"
+#
+# Replaces Rust's PrakashError enum with integer error codes. Functions return
+# ERR_NONE (0) on success or a negative PRK_ERR_* code on failure. Where a
+# function also returns an f64 result, it takes an `err_out` pointer and writes
+# the code there. Detailed failure context (angles, indices) is logged via
+# sakshi at the failure site rather than carried in the return value.
+#
+# Pairs with tagged.cyr for Result-like patterns when an Option is needed.
+
+var ERR_NONE                  = 0;
+
+# Total internal reflection — incident angle exceeds the critical angle.
+var PRK_ERR_TIR               = (0 - 1);
+# Refractive index is below the physical minimum of 1.0.
+var PRK_ERR_INVALID_INDEX     = (0 - 2);
+# Wavelength is outside the visible range (380-780 nm).
+var PRK_ERR_WAVELENGTH_RANGE  = (0 - 3);
+# Angle is outside the valid range (0-90 deg) for a surface interaction.
+var PRK_ERR_INVALID_ANGLE     = (0 - 4);
+# Negative focal length where a positive one is required.
+var PRK_ERR_INVALID_FOCAL     = (0 - 5);
+# Division by zero in an optical calculation.
+var PRK_ERR_DIVISION_BY_ZERO  = (0 - 6);
+# A parameter is outside the valid range for the operation.
+var PRK_ERR_INVALID_PARAMETER = (0 - 7);
+
+# 1 if `code` is an error (negative), else 0.
+fn prakash_is_err(code) {
+    if (code < 0) { return 1; }
+    return 0;
+}
+
+# 1 if `code` is success (ERR_NONE), else 0.
+fn prakash_is_ok(code) {
+    if (code == 0) { return 1; }
+    return 0;
+}

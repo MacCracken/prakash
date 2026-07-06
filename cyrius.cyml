@@ -1,0 +1,47 @@
+[package]
+name = "prakash"
+version = "${file:VERSION}"
+description = "prakash — optics and light simulation (ray optics, wave optics, spectral math, lens geometry, PBR, atmospheric scattering)"
+license = "GPL-3.0-only"
+repository = "https://github.com/MacCracken/prakash"
+language = "cyrius"
+cyrius = "6.4.8"
+
+[build]
+src = "src/main.cyr"
+output = "build/prakash"
+
+# `[lib]` declares the bundle layout that `cyrius distlib` writes into
+# `dist/prakash.cyr`. Optics modules live in `src/`; `lib/` holds only vendored
+# stdlib + first-party deps managed by `cyrius deps`. Order = dependency order:
+# error/constants → ray → spectral → wave → lens/pbr/atmosphere → bridge.
+# The bundler strips `include` lines; every module here is self-contained and
+# resolves stdlib from the consumer's `[deps] stdlib` list. `ai.cyr` is
+# deliberately NOT bundled here (it pulls sandhi/TLS) — it ships as an opt-in
+# module, mirroring the old `ai` cargo feature.
+#
+# Modules are appended as the Rust→Cyrius port lands them (see
+# docs/development/cyrius-port-plan.md). Only ported modules are listed.
+[lib]
+modules = [
+    "src/error.cyr",
+]
+
+[deps]
+stdlib = [
+    "syscalls",
+    "string",
+    "alloc",
+    "str",
+    "fmt",
+    "vec",
+    "io",
+    "args",
+    "assert",
+    "math",
+    "ganita",
+    "tagged",
+    "fnptr",
+    "bench",
+    "callback",
+]

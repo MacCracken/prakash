@@ -1,0 +1,28 @@
+# prakash smoke test suite
+# Proves the scaffold builds and the error module resolves. Grows into the full
+# optics coverage as modules are ported (see docs/development/cyrius-port-plan.md).
+
+include "src/error.cyr"
+
+alloc_init();
+
+# ================================================================
+# error codes
+# ================================================================
+test_group("error");
+
+assert_eq(ERR_NONE, 0, "ERR_NONE is 0");
+assert_eq(PRK_ERR_TIR, (0 - 1), "TIR code");
+assert_eq(PRK_ERR_INVALID_INDEX, (0 - 2), "invalid index code");
+assert_eq(PRK_ERR_WAVELENGTH_RANGE, (0 - 3), "wavelength range code");
+assert_eq(PRK_ERR_INVALID_ANGLE, (0 - 4), "invalid angle code");
+assert_eq(PRK_ERR_INVALID_FOCAL, (0 - 5), "invalid focal code");
+assert_eq(PRK_ERR_DIVISION_BY_ZERO, (0 - 6), "div-by-zero code");
+assert_eq(PRK_ERR_INVALID_PARAMETER, (0 - 7), "invalid parameter code");
+
+assert_eq(prakash_is_err(ERR_NONE), 0, "ERR_NONE is not an error");
+assert_eq(prakash_is_err(PRK_ERR_TIR), 1, "TIR is an error");
+assert_eq(prakash_is_ok(ERR_NONE), 1, "ERR_NONE is ok");
+assert_eq(prakash_is_ok(PRK_ERR_INVALID_INDEX), 0, "error is not ok");
+
+var r = assert_summary();
