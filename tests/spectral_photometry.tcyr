@@ -1,0 +1,75 @@
+# spectral photometry test suite — ported from rust-old/src/spectral/photometry.rs.
+# Covers V(lambda) tables and luminous flux/efficacy (photopic + scotopic).
+
+include "src/error.cyr"
+include "src/spectral_core.cyr"
+include "src/spectral_cie.cyr"
+include "src/spectral_photometry.cyr"
+
+fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
+fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
+fn _in_range(x, lo, hi) {
+    if (f64_lt(x, lo) == 1) { return 0; }
+    if (f64_gt(x, hi) == 1) { return 0; }
+    return 1;
+}
+
+var TOL6 = f64_div(F64_ONE, f64_from(1000000));   # 1e-6
+var Z = f64_from(0);
+
+alloc_init();
+
+# ── V(lambda) tables ────────
+test_group("v_lambda");
+
+var vp = _vlambda_photopic();
+_assert_near(_vl(vp, 35), F64_ONE, TOL6, "photopic V peaks 1.0 at 555nm");
+var pi = 0;
+while (pi < 81) {
+    assert(_in_range(_vl(vp, pi), Z, F64_ONE), "photopic V in [0,1]");
+    pi = pi + 1;
+}
+
+# scotopic peak near 507nm (index ~25)
+var vs = _vlambda_scotopic();
+var best_i = 0;
+var best_v = _vl(vs, 0);
+var si = 1;
+while (si < 81) {
+    if (f64_gt(_vl(vs, si), best_v) == 1) {
+        best_v = _vl(vs, si);
+        best_i = si;
+    }
+    si = si + 1;
+}
+_assert_near(f64_from(380 + best_i * 5), f64_from(505), f64_from(10), "scotopic peak near 507nm");
+
+# ── luminous flux & efficacy ────────
+test_group("luminous");
+
+assert(f64_gt(luminous_flux(illuminant_d65()), Z), "D65 luminous flux positive");
+assert(_in_range(luminous_efficacy(illuminant_d65()), f64_from(100), f64_from(400)), "D65 efficacy 100-400 lm/W");
+
+# monochromatic 555nm source -> max efficacy 683 lm/W
+var mono_vals = alloc(8);
+store64(mono_vals, F64_ONE);
+var mono = spd_new(f64_from(555), f64_from(5), mono_vals, 1);
+_assert_near(luminous_efficacy(mono), f64_from(683), f64_from(10), "555nm efficacy ~683 lm/W");
+
+assert(f64_gt(luminous_flux_scotopic(illuminant_d65()), Z), "D65 scotopic flux positive");
+
+# scotopic weights blue (430nm) more than photopic
+var blue_vals = alloc(648);
+var bz = 0;
+while (bz < 81) {
+    store64(blue_vals + bz * 8, Z);
+    bz = bz + 1;
+}
+store64(blue_vals + 10 * 8, F64_ONE);   # 430nm
+var blue = spd_new(f64_from(380), f64_from(5), blue_vals, 81);
+assert(
+f64_gt(luminous_flux_scotopic(blue), luminous_flux(blue)),
+"scotopic more sensitive to blue than photopic");
+
+var r = assert_summary();

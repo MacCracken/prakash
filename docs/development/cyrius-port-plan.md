@@ -280,7 +280,10 @@ Config round-trip tests port to bayan (§8). Kept out of the core distlib bundle
       ray_trace (28), ray_simulate (180), ray_system (46), ray_dispersion (54),
       ray_fiber (14) = **593 test assertions**, all lint/fmt clean, each with a
       passing adversarial-verify workflow. (benches deferred to a later pass.)
-- [ ] **M2 Spectral** — 3 modules (incl. CIE tables) + tests.
+- [x] **M2 Spectral** — 3 modules DONE & verified: spectral_core (435),
+      spectral_cie (1168, incl. 4 CMF + 4 illuminant hex-generated tables),
+      spectral_photometry (88) = **1691 assertions**, all lint/fmt clean, each
+      with a passing adversarial-verify workflow.
 - [ ] **M3 Wave** — 8 modules (pattern last, on hisab FFT) + tests.
 - [ ] **M4 Lens / PBR / Atmosphere** — + tests.
 - [ ] **M5 Bridge** — + tests.

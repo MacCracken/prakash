@@ -3898,3 +3898,245 @@ fn color_rendering_index(test_spd) {
     f64_sub(f64_from(100), f64_mul(f64_mul(_cie_r(46, 10), delta_e_avg), f64_from(100))),
     f64_from(0), f64_from(100));
 }
+
+# --- spectral_photometry.cyr ---
+
+# spectral_photometry.cyr -- radiometric-to-photometric conversion via V(lambda)
+# Usage: include "lib/spectral_photometry.cyr"
+#   (requires error.cyr, spectral_core.cyr, spectral_cie.cyr for Spd + spd_at)
+#
+# Ported from the Rust `spectral/photometry.rs`. The two 81-value luminous-
+# efficiency tables (photopic V and scotopic V') are lazily-initialized flat f64
+# buffers of exact IEEE-754 hex bit patterns generated from the Rust source.
+
+fn _vl(t, i) { return load64(t + i * 8); }
+fn _phot_eps15() { return f64_div(F64_ONE, f64_from(1000000000000000)); }
+
+# ── V(lambda) tables (generated: exact IEEE-754 hex from spectral/photometry.rs) ──
+
+var _vlambda_photopic_p = 0;
+fn _vlambda_photopic() {
+    if (_vlambda_photopic_p != 0) { return _vlambda_photopic_p; }
+    var t = alloc(648);
+    store64(t + 0, 0x3F04727DCBDDB984);
+    store64(t + 8, 0x3F10C6F7A0B5ED8D);
+    store64(t + 16, 0x3F1F75104D551D69);
+    store64(t + 24, 0x3F2C714FCE746CB9);
+    store64(t + 32, 0x3F39F3C70C996B76);
+    store64(t + 40, 0x3F44F8B588E368F1);
+    store64(t + 48, 0x3F53D31B9B66F933);
+    store64(t + 56, 0x3F61DBCA9691A75D);
+    store64(t + 64, 0x3F70624DD2F1A9FC);
+    store64(t + 72, 0x3F7DE69AD42C3C9F);
+    store64(t + 80, 0x3F87C1BDA5119CE0);
+    store64(t + 88, 0x3F913E81450EFDCA);
+    store64(t + 96, 0x3F978D4FDF3B645A);
+    store64(t + 104, 0x3F9E83E425AEE632);
+    store64(t + 112, 0x3FA374BC6A7EF9DB);
+    store64(t + 120, 0x3FA89374BC6A7EFA);
+    store64(t + 128, 0x3FAEB851EB851EB8);
+    store64(t + 136, 0x3FB2EB1C432CA57A);
+    store64(t + 144, 0x3FB74A771C970F7C);
+    store64(t + 152, 0x3FBCD35A858793DE);
+    store64(t + 160, 0x3FC1CB6848BEB5B3);
+    store64(t + 168, 0x3FC5AB9F559B3D08);
+    store64(t + 176, 0x3FCAA0663C74FB55);
+    store64(t + 184, 0x3FD08CE703AFB7E9);
+    store64(t + 192, 0x3FD4AC083126E979);
+    store64(t + 200, 0x3FDA113404EA4A8C);
+    store64(t + 208, 0x3FE0189374BC6A7F);
+    store64(t + 216, 0x3FE3765FD8ADAB9F);
+    store64(t + 224, 0x3FE6B851EB851EB8);
+    store64(t + 232, 0x3FE961E4F765FD8B);
+    store64(t + 240, 0x3FEB95810624DD2F);
+    store64(t + 248, 0x3FED467381D7DBF5);
+    store64(t + 256, 0x3FEE872B020C49BA);
+    store64(t + 264, 0x3FEF5E9E1B089A02);
+    store64(t + 272, 0x3FEFD6A161E4F766);
+    store64(t + 280, 0x3FF0000000000000);
+    store64(t + 288, 0x3FEFD70A3D70A3D7);
+    store64(t + 296, 0x3FEF50B0F27BB2FF);
+    store64(t + 304, 0x3FEE76C8B4395810);
+    store64(t + 312, 0x3FED4AF4F0D844D0);
+    store64(t + 320, 0x3FEBD70A3D70A3D7);
+    store64(t + 328, 0x3FEA1F212D773190);
+    store64(t + 336, 0x3FE8395810624DD3);
+    store64(t + 344, 0x3FE63C9EECBFB15B);
+    store64(t + 352, 0x3FE43126E978D4FE);
+    store64(t + 360, 0x3FE22339C0EBEDFA);
+    store64(t + 368, 0x3FE0189374BC6A7F);
+    store64(t + 376, 0x3FDC3C9EECBFB15B);
+    store64(t + 384, 0x3FD8624DD2F1A9FC);
+    store64(t + 392, 0x3FD48B4395810625);
+    store64(t + 400, 0x3FD0F5C28F5C28F6);
+    store64(t + 408, 0x3FCBC6A7EF9DB22D);
+    store64(t + 416, 0x3FC6666666666666);
+    store64(t + 424, 0x3FC1B089A0275254);
+    store64(t + 432, 0x3FBB645A1CAC0831);
+    store64(t + 440, 0x3FB4E3BCD35A8588);
+    store64(t + 448, 0x3FAF3B645A1CAC08);
+    store64(t + 456, 0x3FA6D330941C8217);
+    store64(t + 464, 0x3FA0624DD2F1A9FC);
+    store64(t + 472, 0x3F97C1BDA5119CE0);
+    store64(t + 480, 0x3F916872B020C49C);
+    store64(t + 488, 0x3F8869835158B828);
+    store64(t + 496, 0x3F80D0678C0053E3);
+    store64(t + 504, 0x3F7771001D5C3159);
+    store64(t + 512, 0x3F70CD423D9231C6);
+    store64(t + 520, 0x3F67FE8EE6B8305E);
+    store64(t + 528, 0x3F61212513B5BF6A);
+    store64(t + 536, 0x3F585058DDE7A744);
+    store64(t + 544, 0x3F51276FB09203A3);
+    store64(t + 552, 0x3F483F91E646F156);
+    store64(t + 560, 0x3F410A137F38C543);
+    store64(t + 568, 0x3F37A89331A08BFC);
+    store64(t + 576, 0x3F305186DB50F40E);
+    store64(t + 584, 0x3F268B5CBFF47736);
+    store64(t + 592, 0x3F1F75104D551D69);
+    store64(t + 600, 0x3F164840E1719F80);
+    store64(t + 608, 0x3F0F75104D551D69);
+    store64(t + 616, 0x3F06052502EEC7C9);
+    store64(t + 624, 0x3EFF75104D551D69);
+    store64(t + 632, 0x3EF6052502EEC7C9);
+    store64(t + 640, 0x3EEF75104D551D69);
+    _vlambda_photopic_p = t;
+    return t;
+}
+
+var _vlambda_scotopic_p = 0;
+fn _vlambda_scotopic() {
+    if (_vlambda_scotopic_p != 0) { return _vlambda_scotopic_p; }
+    var t = alloc(648);
+    store64(t + 0, 0x3F434CE3DE6149C7);
+    store64(t + 8, 0x3F522749F0E4DA0A);
+    store64(t + 16, 0x3F62189BD8383ADA);
+    store64(t + 24, 0x3F728E0C9D9D3459);
+    store64(t + 32, 0x3F8306A2B1704FF4);
+    store64(t + 40, 0x3F92EC6BCE8533B1);
+    store64(t + 48, 0x3FA1D68C692F6E83);
+    store64(t + 56, 0x3FAEECBFB15B573F);
+    store64(t + 64, 0x3FB8BAC710CB295F);
+    store64(t + 72, 0x3FC26B50B0F27BB3);
+    store64(t + 80, 0x3FC9930BE0DED289);
+    store64(t + 88, 0x3FD0CCCCCCCCCCCD);
+    store64(t + 96, 0x3FD4FF972474538F);
+    store64(t + 104, 0x3FD9F06F69446738);
+    store64(t + 112, 0x3FDF089A02752546);
+    store64(t + 120, 0x3FE229C779A6B50B);
+    store64(t + 128, 0x3FE4C7E28240B780);
+    store64(t + 136, 0x3FE73B645A1CAC08);
+    store64(t + 144, 0x3FE961E4F765FD8B);
+    store64(t + 152, 0x3FEB3EAB367A0F91);
+    store64(t + 160, 0x3FECC63F141205BC);
+    store64(t + 168, 0x3FEE00D1B71758E2);
+    store64(t + 176, 0x3FEED1B71758E219);
+    store64(t + 184, 0x3FEF4E3BCD35A858);
+    store64(t + 192, 0x3FEF6C8B43958106);
+    store64(t + 200, 0x3FEF6113404EA4A9);
+    store64(t + 208, 0x3FEF0F27BB2FEC57);
+    store64(t + 216, 0x3FEE5AEE631F8A09);
+    store64(t + 224, 0x3FED3C36113404EA);
+    store64(t + 232, 0x3FEBD2F1A9FBE76D);
+    store64(t + 240, 0x3FE9F3B645A1CAC1);
+    store64(t + 248, 0x3FE774BC6A7EF9DB);
+    store64(t + 256, 0x3FE4CCCCCCCCCCCD);
+    store64(t + 264, 0x3FE20C49BA5E353F);
+    store64(t + 272, 0x3FDEC8B439581062);
+    store64(t + 280, 0x3FD9BA5E353F7CEE);
+    store64(t + 288, 0x3FD50B0F27BB2FEC);
+    store64(t + 296, 0x3FD0ED916872B021);
+    store64(t + 304, 0x3FCA92A305532618);
+    store64(t + 312, 0x3FC4816F0068DB8C);
+    store64(t + 320, 0x3FBF06F694467382);
+    store64(t + 328, 0x3FB703AFB7E90FF9);
+    store64(t + 336, 0x3FB0C49BA5E353F8);
+    store64(t + 344, 0x3FA80346DC5D6388);
+    store64(t + 352, 0x3FA0F27BB2FEC56D);
+    store64(t + 360, 0x3F973EAB367A0F91);
+    store64(t + 368, 0x3F9013A92A305532);
+    store64(t + 376, 0x3F854C985F06F694);
+    store64(t + 384, 0x3F7C432CA57A786C);
+    store64(t + 392, 0x3F728E0C9D9D3459);
+    store64(t + 400, 0x3F67C1BDA5119CE0);
+    store64(t + 408, 0x3F5E2584F4C6E6DA);
+    store64(t + 416, 0x3F52AD81ADEA8976);
+    store64(t + 424, 0x3F469C23B7952D23);
+    store64(t + 432, 0x3F3B866E43AA79BC);
+    store64(t + 440, 0x3F30624DD2F1A9FC);
+    store64(t + 448, 0x3F23879C4113C686);
+    store64(t + 456, 0x3F1711947CFA26A2);
+    store64(t + 464, 0x3F0B43526527A205);
+    store64(t + 472, 0x3EFF75104D551D69);
+    store64(t + 480, 0x3EF2DFD694CCAB3F);
+    store64(t + 488, 0x3EE4F8B588E368F1);
+    store64(t + 496, 0x3ED92A737110E454);
+    store64(t + 504, 0x3EC92A737110E454);
+    store64(t + 512, 0x3EC0C6F7A0B5ED8D);
+    store64(t + 520, 0x3EB0C6F7A0B5ED8D);
+    store64(t + 528, 0x3EB0C6F7A0B5ED8D);
+    store64(t + 536, 0x0000000000000000);
+    store64(t + 544, 0x0000000000000000);
+    store64(t + 552, 0x0000000000000000);
+    store64(t + 560, 0x0000000000000000);
+    store64(t + 568, 0x0000000000000000);
+    store64(t + 576, 0x0000000000000000);
+    store64(t + 584, 0x0000000000000000);
+    store64(t + 592, 0x0000000000000000);
+    store64(t + 600, 0x0000000000000000);
+    store64(t + 608, 0x0000000000000000);
+    store64(t + 616, 0x0000000000000000);
+    store64(t + 624, 0x0000000000000000);
+    store64(t + 632, 0x0000000000000000);
+    store64(t + 640, 0x0000000000000000);
+    _vlambda_scotopic_p = t;
+    return t;
+}
+
+# Maximum luminous efficacy at 555nm (683 lm/W).
+#must_use
+fn photometry_k_m() { return f64_from(683); }
+
+# Photopic luminous flux: K_m * sum(spd.at(wl) * V(wl)) * 5nm step.
+#must_use
+fn luminous_flux(spd) {
+    var t = _vlambda_photopic();
+    var sum = f64_from(0);
+    var i = 0;
+    while (i < 81) {
+        sum = f64_add(sum, f64_mul(spd_at(spd, f64_from(380 + i * 5)), _vl(t, i)));
+        i = i + 1;
+    }
+    return f64_mul(f64_mul(f64_from(683), sum), f64_from(5));
+}
+
+# Luminous efficacy (lm/W): K_m * luminous_sum / radiant_sum (0 if no radiant power).
+#must_use
+fn luminous_efficacy(spd) {
+    var t = _vlambda_photopic();
+    var radiant_sum = f64_from(0);
+    var luminous_sum = f64_from(0);
+    var i = 0;
+    while (i < 81) {
+        var power = spd_at(spd, f64_from(380 + i * 5));
+        radiant_sum = f64_add(radiant_sum, power);
+        luminous_sum = f64_add(luminous_sum, f64_mul(power, _vl(t, i)));
+        i = i + 1;
+    }
+    if (f64_lt(radiant_sum, _phot_eps15()) == 1) {
+        return f64_from(0);
+    }
+    return f64_div(f64_mul(f64_from(683), luminous_sum), radiant_sum);
+}
+
+# Scotopic (night-vision) luminous flux: K'_m (1700 lm/W) * sum(spd.at * V') * 5nm.
+#must_use
+fn luminous_flux_scotopic(spd) {
+    var t = _vlambda_scotopic();
+    var sum = f64_from(0);
+    var i = 0;
+    while (i < 81) {
+        sum = f64_add(sum, f64_mul(spd_at(spd, f64_from(380 + i * 5)), _vl(t, i)));
+        i = i + 1;
+    }
+    return f64_mul(f64_mul(f64_from(1700), sum), f64_from(5));
+}

@@ -34,6 +34,7 @@ modules = [
     "src/ray_fiber.cyr",
     "src/spectral_core.cyr",
     "src/spectral_cie.cyr",
+    "src/spectral_photometry.cyr",
 ]
 
 [deps]
