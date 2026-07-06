@@ -33,6 +33,7 @@ modules = [
     "src/ray_dispersion.cyr",
     "src/ray_fiber.cyr",
     "src/spectral_core.cyr",
+    "src/spectral_cie.cyr",
 ]
 
 [deps]

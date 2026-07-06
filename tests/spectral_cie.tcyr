@@ -1,0 +1,264 @@
+# spectral CIE test suite — ported from rust-old/src/spectral/cie.rs.
+# Covers CMF tables/observers, XYZ, sRGB gamma, CCT, SPD, illuminants, CRI.
+# (Cow borrowed/owned storage tests and serde roundtrip are Rust-specific and
+# do not apply in Cyrius, so they are omitted.)
+
+include "src/error.cyr"
+include "src/spectral_core.cyr"
+include "src/spectral_cie.cyr"
+
+fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
+fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
+fn _in_range(x, lo, hi) {
+    if (f64_lt(x, lo) == 1) { return 0; }
+    if (f64_gt(x, hi) == 1) { return 0; }
+    return 1;
+}
+
+var TOL6 = f64_div(F64_ONE, f64_from(1000000));   # 1e-6
+var TOL3 = f64_div(F64_ONE, f64_from(1000));      # 0.001
+var TOL_01 = f64_div(F64_ONE, f64_from(100));     # 0.01
+var TOL_05 = f64_div(F64_ONE, f64_from(20));      # 0.05
+var Z = f64_from(0);
+
+alloc_init();
+
+# ── CMF tables ────────
+test_group("cmf_tables");
+
+assert_eq(cie_cmf_len(), 81, "CMF table length 81");
+var t31 = cie_1931_table();
+_assert_near(_cmf_y(t31, 35), F64_ONE, TOL_01, "y-bar peaks ~1.0 at 555nm");
+
+var ci = 0;
+while (ci < 81) {
+    assert(f64_ge(_cmf_x(t31, ci), Z), "1931 x-bar non-negative");
+    assert(f64_ge(_cmf_y(t31, ci), Z), "1931 y-bar non-negative");
+    assert(f64_ge(_cmf_z(t31, ci), Z), "1931 z-bar non-negative");
+    ci = ci + 1;
+}
+
+# interpolation at a table point
+var cmf555 = cie_cmf_at(f64_from(555));
+_assert_near(Xyz_x(cmf555), _cmf_x(t31, 35), TOL6, "cmf_at 555 x matches table");
+_assert_near(Xyz_y(cmf555), _cmf_y(t31, 35), TOL6, "cmf_at 555 y matches table");
+_assert_near(Xyz_z(cmf555), _cmf_z(t31, 35), TOL6, "cmf_at 555 z matches table");
+
+# interpolation midpoint 557.5 = mean of 555 and 560
+var cmf5575 = cie_cmf_at(_fd(5575, 10));
+var mid_x = f64_div(f64_add(_cmf_x(t31, 35), _cmf_x(t31, 36)), F64_TWO);
+_assert_near(Xyz_x(cmf5575), mid_x, TOL3, "cmf_at 557.5 interpolates");
+
+# out of range -> zero
+var oor_lo = cie_cmf_at(f64_from(300));
+assert_eq(f64_to(Xyz_x(oor_lo)), 0, "cmf_at 300 x=0");
+assert_eq(f64_to(Xyz_y(oor_lo)), 0, "cmf_at 300 y=0");
+var oor_hi = cie_cmf_at(f64_from(800));
+assert_eq(f64_to(Xyz_z(oor_hi)), 0, "cmf_at 800 z=0");
+
+# ── XYZ conversions ────────
+test_group("xyz");
+
+var xyz1 = xyz_new(_fd(5, 10), _fd(4, 10), _fd(3, 10));
+var xyy1 = xyz_to_xyy(xyz1);
+var back1 = xyz_from_xyy(XyY_x(xyy1), XyY_y(xyy1), XyY_big_y(xyy1));
+_assert_near(Xyz_x(back1), Xyz_x(xyz1), TOL3, "xyY roundtrip x");
+_assert_near(Xyz_y(back1), Xyz_y(xyz1), TOL3, "xyY roundtrip y");
+_assert_near(Xyz_z(back1), Xyz_z(xyz1), TOL3, "xyY roundtrip z");
+
+var xyy_w = xyz_to_xyy(xyz_d65_white());
+_assert_near(XyY_x(xyy_w), _fd(3127, 10000), TOL3, "D65 chromaticity x ~ 0.3127");
+_assert_near(XyY_y(xyy_w), _fd(3290, 10000), TOL3, "D65 chromaticity y ~ 0.3290");
+
+var xyy_blk = xyz_to_xyy(xyz_new(Z, Z, Z));
+assert_eq(f64_to(XyY_x(xyy_blk)), 0, "black xyY x=0");
+assert_eq(f64_to(XyY_big_y(xyy_blk)), 0, "black xyY Y=0");
+
+var srgb_w = xyz_to_srgb(xyz_d65_white());
+_assert_near(Rgb_r(srgb_w), F64_ONE, TOL_05, "D65 sRGB r ~ 1");
+_assert_near(Rgb_g(srgb_w), F64_ONE, TOL_05, "D65 sRGB g ~ 1");
+_assert_near(Rgb_b(srgb_w), F64_ONE, TOL_05, "D65 sRGB b ~ 1");
+
+var srgb_blk = xyz_to_srgb(xyz_new(Z, Z, Z));
+_assert_near(Rgb_r(srgb_blk), Z, TOL6, "black sRGB r ~ 0");
+_assert_near(Rgb_g(srgb_blk), Z, TOL6, "black sRGB g ~ 0");
+_assert_near(Rgb_b(srgb_blk), Z, TOL6, "black sRGB b ~ 0");
+
+var rgb_l = rgb_new(_fd(5, 10), _fd(3, 10), _fd(8, 10));
+var back_l = xyz_to_linear_srgb(linear_srgb_to_xyz(rgb_l));
+_assert_near(Rgb_r(back_l), Rgb_r(rgb_l), TOL3, "linear sRGB roundtrip r");
+_assert_near(Rgb_g(back_l), Rgb_g(rgb_l), TOL3, "linear sRGB roundtrip g");
+_assert_near(Rgb_b(back_l), Rgb_b(rgb_l), TOL3, "linear sRGB roundtrip b");
+
+# ── sRGB gamma ────────
+test_group("gamma");
+
+_assert_near(srgb_gamma_to_linear(linear_to_srgb_gamma(Z)), Z, TOL3, "gamma roundtrip 0");
+_assert_near(srgb_gamma_to_linear(linear_to_srgb_gamma(_fd(1, 100))), _fd(1, 100), TOL3, "gamma roundtrip 0.01");
+_assert_near(srgb_gamma_to_linear(linear_to_srgb_gamma(_fd(1, 10))), _fd(1, 10), TOL3, "gamma roundtrip 0.1");
+_assert_near(srgb_gamma_to_linear(linear_to_srgb_gamma(_fd(5, 10))), _fd(5, 10), TOL3, "gamma roundtrip 0.5");
+_assert_near(srgb_gamma_to_linear(linear_to_srgb_gamma(_fd(9, 10))), _fd(9, 10), TOL3, "gamma roundtrip 0.9");
+_assert_near(srgb_gamma_to_linear(linear_to_srgb_gamma(F64_ONE)), F64_ONE, TOL3, "gamma roundtrip 1.0");
+
+var gprev = Z;
+for (var gi = 0; gi <= 100; gi = gi + 1) {
+    var gv = f64_div(f64_from(gi), f64_from(100));
+    var gg = linear_to_srgb_gamma(gv);
+    assert(f64_ge(gg, f64_sub(gprev, TOL6)), "gamma monotonic");
+    gprev = gg;
+}
+
+# ── CCT ────────
+test_group("cct");
+
+var xyy_d65 = xyz_to_xyy(xyz_d65_white());
+_assert_near(cct_from_xy(XyY_x(xyy_d65), XyY_y(xyy_d65)), f64_from(6504), f64_from(100), "D65 CCT ~ 6504K");
+assert(_in_range(cct_from_xy(_fd(45, 100), _fd(41, 100)), f64_from(2000), f64_from(4000)), "warm CCT in (2000,4000)");
+
+# ── SPD ────────
+test_group("spd");
+
+var bb = spd_blackbody(f64_from(5778));
+assert_eq(Spd_len(bb), 81, "blackbody 81 samples");
+_assert_near(Spd_start_nm(bb), f64_from(380), TOL6, "blackbody start 380");
+_assert_near(Spd_step_nm(bb), f64_from(5), TOL6, "blackbody step 5");
+var bi = 0;
+while (bi < 81) {
+    assert(f64_gt(_spd_val(Spd_values(bb), bi), Z), "blackbody power positive");
+    bi = bi + 1;
+}
+
+var svals = alloc(24);
+store64(svals + 0, F64_ONE);
+store64(svals + 8, F64_TWO);
+store64(svals + 16, f64_from(3));
+var spd3 = spd_new(f64_from(380), f64_from(5), svals, 3);
+_assert_near(spd_at(spd3, f64_from(380)), F64_ONE, TOL6, "spd at 380 = 1");
+_assert_near(spd_at(spd3, _fd(3825, 10)), _fd(15, 10), TOL6, "spd at 382.5 = 1.5");
+_assert_near(spd_at(spd3, f64_from(385)), F64_TWO, TOL6, "spd at 385 = 2");
+_assert_near(spd_at(spd3, f64_from(390)), f64_from(3), TOL6, "spd at 390 = 3");
+_assert_near(spd_at(spd3, f64_from(370)), Z, TOL6, "spd at 370 = 0 (below)");
+_assert_near(spd_at(spd3, f64_from(400)), Z, TOL6, "spd at 400 = 0 (above)");
+
+var bb_xyz = spd_to_xyz(spd_blackbody(f64_from(5778)));
+assert(f64_gt(Xyz_x(bb_xyz), Z), "blackbody XYZ x > 0");
+assert(f64_gt(Xyz_y(bb_xyz), Z), "blackbody XYZ y > 0");
+assert(f64_gt(Xyz_z(bb_xyz), Z), "blackbody XYZ z > 0");
+
+var bb_srgb = spd_to_srgb(spd_blackbody(f64_from(5778)));
+assert(_in_range(Rgb_r(bb_srgb), Z, F64_ONE), "blackbody sRGB r in [0,1]");
+assert(_in_range(Rgb_g(bb_srgb), Z, F64_ONE), "blackbody sRGB g in [0,1]");
+assert(_in_range(Rgb_b(bb_srgb), Z, F64_ONE), "blackbody sRGB b in [0,1]");
+
+# ── illuminants ────────
+test_group("illuminants");
+
+assert_eq(Spd_len(illuminant_d65()), 81, "D65 length 81");
+_assert_near(spd_at(illuminant_d65(), f64_from(560)), f64_from(100), F64_TWO, "D65 ~100 at 560nm");
+assert_eq(Spd_len(illuminant_d50()), 81, "D50 length 81");
+assert(f64_gt(spd_at(illuminant_a(), f64_from(650)), spd_at(illuminant_a(), f64_from(450))), "illuminant A red > blue");
+assert_eq(Spd_len(illuminant_f2()), 81, "F2 length 81");
+assert_eq(Spd_len(illuminant_f11()), 81, "F11 length 81");
+
+# every illuminant: all raw values non-negative and XYZ all positive
+var illums = vec_new();
+vec_push(illums, illuminant_d65());
+vec_push(illums, illuminant_d50());
+vec_push(illums, illuminant_a());
+vec_push(illums, illuminant_f2());
+vec_push(illums, illuminant_f11());
+var iu = 0;
+while (iu < 5) {
+    var sp = vec_get(illums, iu);
+    var vj = 0;
+    while (vj < Spd_len(sp)) {
+        assert(f64_ge(_spd_val(Spd_values(sp), vj), Z), "illuminant value non-negative");
+        vj = vj + 1;
+    }
+    var ixz = spd_to_xyz(sp);
+    assert(f64_gt(Xyz_x(ixz), Z), "illuminant XYZ x > 0");
+    assert(f64_gt(Xyz_y(ixz), Z), "illuminant XYZ y > 0");
+    assert(f64_gt(Xyz_z(ixz), Z), "illuminant XYZ z > 0");
+    iu = iu + 1;
+}
+
+# borrowed vs owned produce identical XYZ (Cyrius: same representation)
+var owned_vals = alloc(648);
+var oi = 0;
+while (oi < 81) {
+    store64(owned_vals + oi * 8, _spd_val(_illum_d65_data(), oi));
+    oi = oi + 1;
+}
+var owned_d65 = spd_new(f64_from(380), f64_from(5), owned_vals, 81);
+var xyz_b = spd_to_xyz(illuminant_d65());
+var xyz_o = spd_to_xyz(owned_d65);
+_assert_near(Xyz_x(xyz_b), Xyz_x(xyz_o), TOL6, "borrowed vs owned XYZ identical");
+
+# ── CRI ────────
+test_group("cri");
+
+assert(f64_gt(color_rendering_index(illuminant_d65()), f64_from(90)), "D65 CRI > 90");
+assert(f64_gt(color_rendering_index(spd_blackbody(f64_from(3000))), f64_from(85)), "blackbody CRI > 85");
+assert(_in_range(color_rendering_index(illuminant_d50()), Z, f64_from(100)), "D50 CRI in [0,100]");
+assert(_in_range(color_rendering_index(illuminant_a()), Z, f64_from(100)), "A CRI in [0,100]");
+assert(_in_range(color_rendering_index(illuminant_f2()), Z, f64_from(100)), "F2 CRI in [0,100]");
+assert(_in_range(color_rendering_index(illuminant_f11()), Z, f64_from(100)), "F11 CRI in [0,100]");
+assert(
+f64_gt(color_rendering_index(illuminant_d65()), color_rendering_index(illuminant_f11())),
+"daylight CRI > fluorescent CRI");
+
+# ── observers ────────
+test_group("observers");
+
+var t64 = cie_1964_table();
+var ci64 = 0;
+while (ci64 < 81) {
+    assert(f64_ge(_cmf_x(t64, ci64), Z), "1964 x-bar non-negative");
+    assert(f64_ge(_cmf_y(t64, ci64), Z), "1964 y-bar non-negative");
+    assert(f64_ge(_cmf_z(t64, ci64), Z), "1964 z-bar non-negative");
+    ci64 = ci64 + 1;
+}
+var best_i = 0;
+var best_y = _cmf_y(t64, 0);
+var pi = 1;
+while (pi < 81) {
+    if (f64_gt(_cmf_y(t64, pi), best_y) == 1) {
+        best_y = _cmf_y(t64, pi);
+        best_i = pi;
+    }
+    pi = pi + 1;
+}
+_assert_near(f64_from(380 + best_i * 5), f64_from(555), f64_from(10), "1964 y peak near 555nm");
+
+var t2015 = cie_2015_2deg_table();
+assert_eq(f64_to(_cmf_x(t2015, 0)), 0, "2015 2deg starts x=0");
+assert_eq(f64_to(_cmf_y(t2015, 0)), 0, "2015 2deg starts y=0");
+assert_eq(f64_to(_cmf_z(t2015, 0)), 0, "2015 2deg starts z=0");
+
+# observer default matches to_xyz
+var xyz_def = spd_to_xyz(illuminant_d65());
+var xyz_obs = spd_to_xyz_observer(illuminant_d65(), OBS_CIE1931);
+_assert_near(Xyz_x(xyz_def), Xyz_x(xyz_obs), TOL6, "observer 1931 matches default");
+
+# 1964 differs from 1931
+var xyz_1931 = spd_to_xyz_observer(illuminant_d65(), OBS_CIE1931);
+var xyz_1964 = spd_to_xyz_observer(illuminant_d65(), OBS_CIE1964);
+assert(f64_gt(f64_abs(f64_sub(Xyz_x(xyz_1931), Xyz_x(xyz_1964))), _fd(1, 10)), "1931 and 1964 differ");
+
+# all four observers produce positive XYZ for D65
+var obss = vec_new();
+vec_push(obss, OBS_CIE1931);
+vec_push(obss, OBS_CIE1964);
+vec_push(obss, OBS_CIE2015_2DEG);
+vec_push(obss, OBS_CIE2015_10DEG);
+var oj = 0;
+while (oj < 4) {
+    var oxz = spd_to_xyz_observer(illuminant_d65(), vec_get(obss, oj));
+    assert(f64_gt(Xyz_x(oxz), Z), "observer XYZ x > 0");
+    assert(f64_gt(Xyz_y(oxz), Z), "observer XYZ y > 0");
+    assert(f64_gt(Xyz_z(oxz), Z), "observer XYZ z > 0");
+    oj = oj + 1;
+}
+
+var r = assert_summary();

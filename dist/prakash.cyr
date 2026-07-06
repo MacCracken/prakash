@@ -2138,3 +2138,1763 @@ fn photon_energy(wavelength_nm) {
 fn photon_energy_ev(wavelength_nm) {
     return f64_div(photon_energy(wavelength_nm), 0x3C07A4DA290C1653);   # / 1.602176634e-19
 }
+
+# --- spectral_cie.cyr ---
+
+# spectral_cie.cyr -- CIE color science: CMF tables, XYZ, SPD, illuminants, CRI
+# Usage: include "lib/spectral_cie.cyr"  (requires error.cyr, spectral_core.cyr)
+#
+# Ported from the Rust `spectral/cie.rs`. The four 81x3 color-matching-function
+# tables and four 81-value illuminant SPDs are lazily-initialized flat f64
+# buffers filled with exact IEEE-754 hex bit patterns (generated from the Rust
+# source). Rust's Cow<[f64]> borrowed/owned storage has no Cyrius analogue, so an
+# Spd just holds a values pointer + length (from_static and new are equivalent).
+
+fn _cie_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _cie_eps15() { return f64_div(F64_ONE, f64_from(1000000000000000)); }
+fn _cie_eps10() { return f64_div(F64_ONE, f64_from(10000000000)); }
+
+# CMF table row accessors (row i, 24 bytes: x@0, y@8, z@16).
+fn _cmf_x(t, i) { return load64(t + i * 24); }
+fn _cmf_y(t, i) { return load64(t + i * 24 + 8); }
+fn _cmf_z(t, i) { return load64(t + i * 24 + 16); }
+# SPD/illuminant value accessor (i-th f64).
+fn _spd_val(t, i) { return load64(t + i * 8); }
+
+# ── CIE tables (generated: exact IEEE-754 hex from rust-old/src/spectral/cie.rs) ──
+# CMF tables: 81 rows x 3 (x,y,z) = 1944 bytes. Illuminants: 81 f64 = 648 bytes.
+
+var _cie1931_p = 0;
+fn _cie1931() {
+    if (_cie1931_p != 0) { return _cie1931_p; }
+    var t = alloc(1944);
+    store64(t + 0, 0x3F5669CED0B30B5B);
+    store64(t + 8, 0x3F04727DCBDDB984);
+    store64(t + 16, 0x3F7A6B50B0F27BB3);
+    store64(t + 24, 0x3F62513B5BF6A0DC);
+    store64(t + 32, 0x3F10C6F7A0B5ED8D);
+    store64(t + 40, 0x3F859B3D07C84B5E);
+    store64(t + 48, 0x3F71611BA3CA7504);
+    store64(t + 56, 0x3F1F75104D551D69);
+    store64(t + 64, 0x3F9487FCB923A29C);
+    store64(t + 72, 0x3F7F559B3D07C84B);
+    store64(t + 80, 0x3F2C714FCE746CB9);
+    store64(t + 88, 0x3FA28A1DFB9389B5);
+    store64(t + 96, 0x3F8D4E8FB00BCBE6);
+    store64(t + 104, 0x3F39F3C70C996B76);
+    store64(t + 112, 0x3FB15E9E1B089A02);
+    store64(t + 120, 0x3F97BF1E8E608073);
+    store64(t + 128, 0x3F44F8B588E368F1);
+    store64(t + 136, 0x3FBC36113404EA4B);
+    store64(t + 144, 0x3FA646F156191149);
+    store64(t + 152, 0x3F53D31B9B66F933);
+    store64(t + 160, 0x3FCA8C154C985F07);
+    store64(t + 168, 0x3FB3DF8F4730403A);
+    store64(t + 176, 0x3F61DBCA9691A75D);
+    store64(t + 184, 0x3FD7C36113404EA5);
+    store64(t + 192, 0x3FC1335D249E44FA);
+    store64(t + 200, 0x3F70624DD2F1A9FC);
+    store64(t + 208, 0x3FE4A8C154C985F0);
+    store64(t + 216, 0x3FCB7D955714B9CB);
+    store64(t + 224, 0x3F7DE69AD42C3C9F);
+    store64(t + 232, 0x3FF09FF2E48E8A72);
+    store64(t + 240, 0x3FD22B6AE7D566CF);
+    store64(t + 248, 0x3F87C1BDA5119CE0);
+    store64(t + 256, 0x3FF62B6AE7D566CF);
+    store64(t + 264, 0x3FD50624DD2F1AA0);
+    store64(t + 272, 0x3F913E81450EFDCA);
+    store64(t + 280, 0x3FF9F7A4E7AB7564);
+    store64(t + 288, 0x3FD64A38327674D1);
+    store64(t + 296, 0x3F978D4FDF3B645A);
+    store64(t + 304, 0x3FFBF3F52FC2656B);
+    store64(t + 312, 0x3FD6469D7342EDBB);
+    store64(t + 320, 0x3F9E83E425AEE632);
+    store64(t + 328, 0x3FFC858793DD97F6);
+    store64(t + 336, 0x3FD5844D013A92A3);
+    store64(t + 344, 0x3FA374BC6A7EF9DB);
+    store64(t + 352, 0x3FFC5A9003EEA20A);
+    store64(t + 360, 0x3FD46594AF4F0D84);
+    store64(t + 368, 0x3FA89374BC6A7EFA);
+    store64(t + 376, 0x3FFBE7D566CF41F2);
+    store64(t + 384, 0x3FD29C779A6B50B1);
+    store64(t + 392, 0x3FAEB851EB851EB8);
+    store64(t + 400, 0x3FFAB50B0F27BB30);
+    store64(t + 408, 0x3FD01205BC01A36E);
+    store64(t + 416, 0x3FB2EB1C432CA57A);
+    store64(t + 424, 0x3FF87318FC504817);
+    store64(t + 432, 0x3FC9018E757928E1);
+    store64(t + 440, 0x3FB74A771C970F7C);
+    store64(t + 448, 0x3FF49A2C669057D1);
+    store64(t + 456, 0x3FC2305532617C1C);
+    store64(t + 464, 0x3FBCD35A858793DE);
+    store64(t + 472, 0x3FF0AB9F559B3D08);
+    store64(t + 480, 0x3FB87BDCF0307F24);
+    store64(t + 488, 0x3FC1CB6848BEB5B3);
+    store64(t + 496, 0x3FEA03AFB7E90FF9);
+    store64(t + 504, 0x3FADB37C99AE924F);
+    store64(t + 512, 0x3FC5AB9F559B3D08);
+    store64(t + 520, 0x3FE3B7E90FF97247);
+    store64(t + 528, 0x3FA0639D5E4A3832);
+    store64(t + 536, 0x3FCAA0663C74FB55);
+    store64(t + 544, 0x3FDDC58255B035BD);
+    store64(t + 552, 0x3F8E1B089A027525);
+    store64(t + 560, 0x3FD08CE703AFB7E9);
+    store64(t + 568, 0x3FD69C779A6B50B1);
+    store64(t + 576, 0x3F741205BC01A36E);
+    store64(t + 584, 0x3FD4AC083126E979);
+    store64(t + 592, 0x3FD16872B020C49C);
+    store64(t + 600, 0x3F63A92A30553261);
+    store64(t + 608, 0x3FDA113404EA4A8C);
+    store64(t + 616, 0x3FCB2CA57A786C22);
+    store64(t + 624, 0x3F830BE0DED288CE);
+    store64(t + 632, 0x3FE0189374BC6A7F);
+    store64(t + 640, 0x3FC43FE5C91D14E4);
+    store64(t + 648, 0x3F9DCC63F141205C);
+    store64(t + 656, 0x3FE3765FD8ADAB9F);
+    store64(t + 664, 0x3FBC985F06F69446);
+    store64(t + 672, 0x3FB0327674D16335);
+    store64(t + 680, 0x3FE6B851EB851EB8);
+    store64(t + 688, 0x3FB4083126E978D5);
+    store64(t + 696, 0x3FBC0EBEDFA43FE6);
+    store64(t + 704, 0x3FE961E4F765FD8B);
+    store64(t + 712, 0x3FAD4FDF3B645A1D);
+    store64(t + 720, 0x3FC52F1A9FBE76C9);
+    store64(t + 728, 0x3FEB95810624DD2F);
+    store64(t + 736, 0x3FA595FEDA661284);
+    store64(t + 744, 0x3FCCE5604189374C);
+    store64(t + 752, 0x3FED467381D7DBF5);
+    store64(t + 760, 0x3F9E8E60807357E6);
+    store64(t + 768, 0x3FD295E9E1B089A0);
+    store64(t + 776, 0x3FEE872B020C49BA);
+    store64(t + 784, 0x3F94C985F06F6944);
+    store64(t + 792, 0x3FD705532617C1BE);
+    store64(t + 800, 0x3FEF5E9E1B089A02);
+    store64(t + 808, 0x3F8B71758E219653);
+    store64(t + 816, 0x3FDBBDA5119CE076);
+    store64(t + 824, 0x3FEFD6A161E4F766);
+    store64(t + 832, 0x3F81EB851EB851EC);
+    store64(t + 840, 0x3FE062B6AE7D566D);
+    store64(t + 848, 0x3FF0000000000000);
+    store64(t + 856, 0x3F778D4FDF3B645A);
+    store64(t + 864, 0x3FE30624DD2F1AA0);
+    store64(t + 872, 0x3FEFD70A3D70A3D7);
+    store64(t + 880, 0x3F6FF2E48E8A71DE);
+    store64(t + 888, 0x3FE5B573EAB367A1);
+    store64(t + 896, 0x3FEF50B0F27BB2FF);
+    store64(t + 904, 0x3F66872B020C49BA);
+    store64(t + 912, 0x3FE8631F8A0902DE);
+    store64(t + 920, 0x3FEE76C8B4395810);
+    store64(t + 928, 0x3F613404EA4A8C15);
+    store64(t + 936, 0x3FEAF5C28F5C28F6);
+    store64(t + 944, 0x3FED4AF4F0D844D0);
+    store64(t + 952, 0x3F5D7DBF487FCB92);
+    store64(t + 960, 0x3FED525460AA64C3);
+    store64(t + 968, 0x3FEBD70A3D70A3D7);
+    store64(t + 976, 0x3F5B089A02752546);
+    store64(t + 984, 0x3FEF50B0F27BB2FF);
+    store64(t + 992, 0x3FEA1F212D773190);
+    store64(t + 1000, 0x3F56F0068DB8BAC7);
+    store64(t + 1008, 0x3FF06BB98C7E2824);
+    store64(t + 1016, 0x3FE8395810624DD3);
+    store64(t + 1024, 0x3F5205BC01A36E2F);
+    store64(t + 1032, 0x3FF0E83E425AEE63);
+    store64(t + 1040, 0x3FE63C9EECBFB15B);
+    store64(t + 1048, 0x3F50624DD2F1A9FC);
+    store64(t + 1056, 0x3FF0FEC56D5CFAAD);
+    store64(t + 1064, 0x3FE43126E978D4FE);
+    store64(t + 1072, 0x3F4A36E2EB1C432D);
+    store64(t + 1080, 0x3FF0BAC710CB295F);
+    store64(t + 1088, 0x3FE22339C0EBEDFA);
+    store64(t + 1096, 0x3F43A92A30553261);
+    store64(t + 1104, 0x3FF00AA64C2F837B);
+    store64(t + 1112, 0x3FE0189374BC6A7F);
+    store64(t + 1120, 0x3F364840E1719F80);
+    store64(t + 1128, 0x3FEE075F6FD21FF3);
+    store64(t + 1136, 0x3FDC3C9EECBFB15B);
+    store64(t + 1144, 0x3F2F75104D551D69);
+    store64(t + 1152, 0x3FEB57A786C22681);
+    store64(t + 1160, 0x3FD8624DD2F1A9FC);
+    store64(t + 1168, 0x3F28E757928E0C9E);
+    store64(t + 1176, 0x3FE80B780346DC5D);
+    store64(t + 1184, 0x3FD48B4395810625);
+    store64(t + 1192, 0x3F1A36E2EB1C432D);
+    store64(t + 1200, 0x3FE48E8A71DE69AD);
+    store64(t + 1208, 0x3FD0F5C28F5C28F6);
+    store64(t + 1216, 0x3F0A36E2EB1C432D);
+    store64(t + 1224, 0x3FE1573EAB367A10);
+    store64(t + 1232, 0x3FCBC6A7EF9DB22D);
+    store64(t + 1240, 0x3EFF75104D551D69);
+    store64(t + 1248, 0x3FDCAA64C2F837B5);
+    store64(t + 1256, 0x3FC6666666666666);
+    store64(t + 1264, 0x3EF4F8B588E368F1);
+    store64(t + 1272, 0x3FD71758E219652C);
+    store64(t + 1280, 0x3FC1B089A0275254);
+    store64(t + 1288, 0x3EE4F8B588E368F1);
+    store64(t + 1296, 0x3FD224DD2F1A9FBE);
+    store64(t + 1304, 0x3FBB645A1CAC0831);
+    store64(t + 1312, 0x0000000000000000);
+    store64(t + 1320, 0x3FCBFE5C91D14E3C);
+    store64(t + 1328, 0x3FB4E3BCD35A8588);
+    store64(t + 1336, 0x0000000000000000);
+    store64(t + 1344, 0x3FC51B71758E2196);
+    store64(t + 1352, 0x3FAF3B645A1CAC08);
+    store64(t + 1360, 0x0000000000000000);
+    store64(t + 1368, 0x3FBF06F694467382);
+    store64(t + 1376, 0x3FA6D330941C8217);
+    store64(t + 1384, 0x0000000000000000);
+    store64(t + 1392, 0x3FB65FD8ADAB9F56);
+    store64(t + 1400, 0x3FA0624DD2F1A9FC);
+    store64(t + 1408, 0x0000000000000000);
+    store64(t + 1416, 0x3FB04816F0068DB9);
+    store64(t + 1424, 0x3F97C1BDA5119CE0);
+    store64(t + 1432, 0x0000000000000000);
+    store64(t + 1440, 0x3FA7F23CC8DE2AC3);
+    store64(t + 1448, 0x3F916872B020C49C);
+    store64(t + 1456, 0x0000000000000000);
+    store64(t + 1464, 0x3FA0D844D013A92A);
+    store64(t + 1472, 0x3F8869835158B828);
+    store64(t + 1480, 0x0000000000000000);
+    store64(t + 1488, 0x3F973EAB367A0F91);
+    store64(t + 1496, 0x3F80D0678C0053E3);
+    store64(t + 1504, 0x0000000000000000);
+    store64(t + 1512, 0x3F90385C67DFE32A);
+    store64(t + 1520, 0x3F7771001D5C3159);
+    store64(t + 1528, 0x0000000000000000);
+    store64(t + 1536, 0x3F8743632C1F42BB);
+    store64(t + 1544, 0x3F70CD423D9231C6);
+    store64(t + 1552, 0x0000000000000000);
+    store64(t + 1560, 0x3F809C7FFDE7210C);
+    store64(t + 1568, 0x3F67FE8EE6B8305E);
+    store64(t + 1576, 0x0000000000000000);
+    store64(t + 1584, 0x3F77B7414A4D2B2C);
+    store64(t + 1592, 0x3F61212513B5BF6A);
+    store64(t + 1600, 0x0000000000000000);
+    store64(t + 1608, 0x3F70D49949E8815E);
+    store64(t + 1616, 0x3F585058DDE7A744);
+    store64(t + 1624, 0x0000000000000000);
+    store64(t + 1632, 0x3F67BFA4C61D8623);
+    store64(t + 1640, 0x3F51276FB09203A3);
+    store64(t + 1648, 0x0000000000000000);
+    store64(t + 1656, 0x3F60C9107FAA044B);
+    store64(t + 1664, 0x3F483F91E646F156);
+    store64(t + 1672, 0x0000000000000000);
+    store64(t + 1680, 0x3F5797CC39FFD60F);
+    store64(t + 1688, 0x3F410A137F38C543);
+    store64(t + 1696, 0x0000000000000000);
+    store64(t + 1704, 0x3F50624DD2F1A9FC);
+    store64(t + 1712, 0x3F37A89331A08BFC);
+    store64(t + 1720, 0x0000000000000000);
+    store64(t + 1728, 0x3F469C23B7952D23);
+    store64(t + 1736, 0x3F305186DB50F40E);
+    store64(t + 1744, 0x0000000000000000);
+    store64(t + 1752, 0x3F3F31F46ED245B3);
+    store64(t + 1760, 0x3F268B5CBFF47736);
+    store64(t + 1768, 0x0000000000000000);
+    store64(t + 1776, 0x3F35C209246BF013);
+    store64(t + 1784, 0x3F1F75104D551D69);
+    store64(t + 1792, 0x0000000000000000);
+    store64(t + 1800, 0x3F2ECD4AA10E0221);
+    store64(t + 1808, 0x3F164840E1719F80);
+    store64(t + 1816, 0x0000000000000000);
+    store64(t + 1824, 0x3F25C209246BF013);
+    store64(t + 1832, 0x3F0F75104D551D69);
+    store64(t + 1840, 0x0000000000000000);
+    store64(t + 1848, 0x3F1EABBCB1CC9646);
+    store64(t + 1856, 0x3F06052502EEC7C9);
+    store64(t + 1864, 0x0000000000000000);
+    store64(t + 1872, 0x3F15C209246BF013);
+    store64(t + 1880, 0x3EFF75104D551D69);
+    store64(t + 1888, 0x0000000000000000);
+    store64(t + 1896, 0x3F0EEED8904F6DFC);
+    store64(t + 1904, 0x3EF6052502EEC7C9);
+    store64(t + 1912, 0x0000000000000000);
+    store64(t + 1920, 0x3F06052502EEC7C9);
+    store64(t + 1928, 0x3EEF75104D551D69);
+    store64(t + 1936, 0x0000000000000000);
+    _cie1931_p = t;
+    return t;
+}
+
+var _cie1964_p = 0;
+fn _cie1964() {
+    if (_cie1964_p != 0) { return _cie1964_p; }
+    var t = alloc(1944);
+    store64(t + 0, 0x3F24F8B588E368F1);
+    store64(t + 8, 0x3EF1D3671AC14C66);
+    store64(t + 16, 0x3F4719F7F8CA8199);
+    store64(t + 24, 0x3F45B1422CCB3A26);
+    store64(t + 32, 0x3F12DFD694CCAB3F);
+    store64(t + 40, 0x3F67FC7607C419A0);
+    store64(t + 48, 0x3F6359791819D239);
+    store64(t + 56, 0x3F3094A2B9D3CBC5);
+    store64(t + 64, 0x3F8577963992C8C5);
+    store64(t + 72, 0x3F7DA9C99285A922);
+    store64(t + 80, 0x3F4932D6ECE13F4B);
+    store64(t + 88, 0x3FA08F648C7192EA);
+    store64(t + 96, 0x3F939192641B328B);
+    store64(t + 104, 0x3F606AB14EC204F3);
+    store64(t + 112, 0x3FB604D12018A43C);
+    store64(t + 120, 0x3FA63886594AF4F1);
+    store64(t + 128, 0x3F727807789A4591);
+    store64(t + 136, 0x3FC93B3A68B19A41);
+    store64(t + 144, 0x3FB5B1422CCB3A26);
+    store64(t + 152, 0x3F81EEAA6D267408);
+    store64(t + 160, 0x3FD8EB5F5F0B2852);
+    store64(t + 168, 0x3FC2006D0D49949F);
+    store64(t + 176, 0x3F8D9B1B79D909F2);
+    store64(t + 184, 0x3FE5042D8C2A454E);
+    store64(t + 192, 0x3FCA2CCB3A2595BC);
+    store64(t + 200, 0x3F95E785B5B70692);
+    store64(t + 208, 0x3FEF1F10667F90DA);
+    store64(t + 216, 0x3FD0F1737542A23C);
+    store64(t + 224, 0x3F9E3476295208E1);
+    store64(t + 232, 0x3FF4851EB851EB85);
+    store64(t + 240, 0x3FD423B3636F3B21);
+    store64(t + 248, 0x3FA3CD573647BAAA);
+    store64(t + 256, 0x3FF8DB0DD82FD75E);
+    store64(t + 264, 0x3FD6E4DE3B8A19CA);
+    store64(t + 272, 0x3FA9656EEFA1E3EB);
+    store64(t + 280, 0x3FFCC6A7EF9DB22D);
+    store64(t + 288, 0x3FD88F190D173FB8);
+    store64(t + 296, 0x3FAFC88E79AAE6C9);
+    store64(t + 304, 0x3FFF79FA97E132B5);
+    store64(t + 312, 0x3FD8C01E68A0D34A);
+    store64(t + 320, 0x3FB31FCD24E160D9);
+    store64(t + 328, 0x400037E90FF97247);
+    store64(t + 336, 0x3FD7B994E1A3F466);
+    store64(t + 344, 0x3FB6E696A26E5471);
+    store64(t + 352, 0x3FFFEAB367A0F909);
+    store64(t + 360, 0x3FD5F301EABBCB1D);
+    store64(t + 368, 0x3FBB3397DD00F777);
+    store64(t + 376, 0x3FFE694467381D7E);
+    store64(t + 384, 0x3FD35870DA5DAF08);
+    store64(t + 392, 0x3FC068E3EF284168);
+    store64(t + 400, 0x3FFBED0917D6B65B);
+    store64(t + 408, 0x3FD042EDBB59DDC2);
+    store64(t + 416, 0x3FC38DAC258D5843);
+    store64(t + 424, 0x3FF8E0DED288CE70);
+    store64(t + 432, 0x3FC90A02B841248D);
+    store64(t + 440, 0x3FC7B44E50C5EB31);
+    store64(t + 448, 0x3FF514B9CB6848BF);
+    store64(t + 456, 0x3FC0F0CFE154434E);
+    store64(t + 464, 0x3FCC26FE718A86D7);
+    store64(t + 472, 0x3FF07BB2FEC56D5D);
+    store64(t + 480, 0x3FB49C1B54195CC8);
+    store64(t + 488, 0x3FD03ACD5B6805A3);
+    store64(t + 496, 0x3FE8B53F7CED9168);
+    store64(t + 504, 0x3FA50763A1900820);
+    store64(t + 512, 0x3FD30CF1800A7C5B);
+    store64(t + 520, 0x3FE23DEE78183F92);
+    store64(t + 528, 0x3F908F648C7192EA);
+    store64(t + 536, 0x3FD5B45AE5FFA3BA);
+    store64(t + 544, 0x3FDA938583621FB0);
+    store64(t + 552, 0x3F75054AC29BF163);
+    store64(t + 560, 0x3FD94DE3B8A19C9D);
+    store64(t + 568, 0x3FD359CCFAEFF5C7);
+    store64(t + 576, 0x3F6F42BB6672FBA0);
+    store64(t + 584, 0x3FDD7D5ED06FEF7C);
+    store64(t + 592, 0x3FCBF7DFA00E27E1);
+    store64(t + 600, 0x3F8FA11A975AFAF8);
+    store64(t + 608, 0x3FE100E6AFCCE1C6);
+    store64(t + 616, 0x3FC462456F75D9A1);
+    store64(t + 624, 0x3FA32E9CCB7D4174);
+    store64(t + 632, 0x3FE36A6C1A048E04);
+    store64(t + 640, 0x3FBCAEEA63B688BE);
+    store64(t + 648, 0x3FB24484944ED6FE);
+    store64(t + 656, 0x3FE5F0ED3D859C8D);
+    store64(t + 664, 0x3FB50E3476295209);
+    store64(t + 672, 0x3FBE24CC6822FF09);
+    store64(t + 680, 0x3FE86050374FF866);
+    store64(t + 688, 0x3FAF154003254E6E);
+    store64(t + 696, 0x3FC62352EB5F5F0B);
+    store64(t + 704, 0x3FEA58B827FA1A0D);
+    store64(t + 712, 0x3FA60AA64C2F837B);
+    store64(t + 720, 0x3FCE45564B662FE0);
+    store64(t + 728, 0x3FEC01BA7FC32EBE);
+    store64(t + 736, 0x3F9F2E8C0485A0BE);
+    store64(t + 744, 0x3FD37839CD8127B3);
+    store64(t + 752, 0x3FED8FD9FD36F7E4);
+    store64(t + 760, 0x3F9513F8DB489093);
+    store64(t + 768, 0x3FD81D084E831AD2);
+    store64(t + 776, 0x3FEEC89B0EE49F51);
+    store64(t + 784, 0x3F8C0229A5EBB774);
+    store64(t + 792, 0x3FDCE6C093D96638);
+    store64(t + 800, 0x3FEF6E2EB1C432CA);
+    store64(t + 808, 0x3F80374FF865D7CB);
+    store64(t + 816, 0x3FE0F455A7D24181);
+    store64(t + 824, 0x3FEFBC81908E581D);
+    store64(t + 832, 0x3F7055B89939218A);
+    store64(t + 840, 0x3FE3B6B4C7F34938);
+    store64(t + 848, 0x3FEFF8B588E368F1);
+    store64(t + 856, 0x3F51DFFC5479D4D8);
+    store64(t + 864, 0x3FE69131EC0B5675);
+    store64(t + 872, 0x3FEFEA35935FC3B5);
+    store64(t + 880, 0x0000000000000000);
+    store64(t + 888, 0x3FE967125DD095AF);
+    store64(t + 896, 0x3FEF6FA82E87D2C8);
+    store64(t + 904, 0x0000000000000000);
+    store64(t + 912, 0x3FEC1DF1172EF0AE);
+    store64(t + 920, 0x3FEE93E1C9B41398);
+    store64(t + 928, 0x0000000000000000);
+    store64(t + 936, 0x3FEE6FEB4A66559F);
+    store64(t + 944, 0x3FED491D14E3BCD3);
+    store64(t + 952, 0x0000000000000000);
+    store64(t + 960, 0x3FF039FFD60E94EE);
+    store64(t + 968, 0x3FEBCE4EAD0C3D25);
+    store64(t + 976, 0x0000000000000000);
+    store64(t + 984, 0x3FF1305532617C1C);
+    store64(t + 992, 0x3FEA6B80ECFA69BE);
+    store64(t + 1000, 0x0000000000000000);
+    store64(t + 1008, 0x3FF1E5753A3EC02F);
+    store64(t + 1016, 0x3FE8E0807357E671);
+    store64(t + 1024, 0x0000000000000000);
+    store64(t + 1032, 0x3FF22617C1BDA512);
+    store64(t + 1040, 0x3FE70D21BC126A66);
+    store64(t + 1048, 0x0000000000000000);
+    store64(t + 1056, 0x3FF1FBDCF0307F24);
+    store64(t + 1064, 0x3FE511212513B5BF);
+    store64(t + 1072, 0x0000000000000000);
+    store64(t + 1080, 0x3FF16CF41F212D77);
+    store64(t + 1088, 0x3FE3010C6F7A0B5F);
+    store64(t + 1096, 0x0000000000000000);
+    store64(t + 1104, 0x3FF07CD898B2E9CD);
+    store64(t + 1112, 0x3FE0E512A94FF002);
+    store64(t + 1120, 0x0000000000000000);
+    store64(t + 1128, 0x3FEE6C764ADFF823);
+    store64(t + 1136, 0x3FDD8EB0318B9347);
+    store64(t + 1144, 0x0000000000000000);
+    store64(t + 1152, 0x3FEB66C8F7553693);
+    store64(t + 1160, 0x3FD979C4113C6866);
+    store64(t + 1168, 0x0000000000000000);
+    store64(t + 1176, 0x3FE82862F5989DF1);
+    store64(t + 1184, 0x3FD5BB40B34E7686);
+    store64(t + 1192, 0x0000000000000000);
+    store64(t + 1200, 0x3FE4B80CB6C7A7CA);
+    store64(t + 1208, 0x3FD224BFD2E94680);
+    store64(t + 1216, 0x0000000000000000);
+    store64(t + 1224, 0x3FE11F9F01B866E4);
+    store64(t + 1232, 0x3FCD376D5497310A);
+    store64(t + 1240, 0x0000000000000000);
+    store64(t + 1248, 0x3FDB9ECB31C219EB);
+    store64(t + 1256, 0x3FC7049A9973D9EC);
+    store64(t + 1264, 0x0000000000000000);
+    store64(t + 1272, 0x3FD5FF04577D9557);
+    store64(t + 1280, 0x3FC1F26F1DC50CE5);
+    store64(t + 1288, 0x0000000000000000);
+    store64(t + 1296, 0x3FD12C4D65E46067);
+    store64(t + 1304, 0x3FBB8DD616F86A0A);
+    store64(t + 1312, 0x0000000000000000);
+    store64(t + 1320, 0x3FCA26809D495183);
+    store64(t + 1328, 0x3FB4C8ABD5DC4007);
+    store64(t + 1336, 0x0000000000000000);
+    store64(t + 1344, 0x3FC38759253543AF);
+    store64(t + 1352, 0x3FAEDD26B723EE1C);
+    store64(t + 1360, 0x0000000000000000);
+    store64(t + 1368, 0x3FBCB9CB6848BEB6);
+    store64(t + 1376, 0x3FA693C03BC4D22D);
+    store64(t + 1384, 0x0000000000000000);
+    store64(t + 1392, 0x3FB4CD855970B49E);
+    store64(t + 1400, 0x3FA04816F0068DB9);
+    store64(t + 1408, 0x0000000000000000);
+    store64(t + 1416, 0x3FADA9003EEA209B);
+    store64(t + 1424, 0x3F9724FA8B4BF8FD);
+    store64(t + 1432, 0x0000000000000000);
+    store64(t + 1440, 0x3FA4EA6C1A048E04);
+    store64(t + 1448, 0x3F9049667B5F1BEF);
+    store64(t + 1456, 0x0000000000000000);
+    store64(t + 1464, 0x3F9D4F5903A7546D);
+    store64(t + 1472, 0x3F86CB5350092CCF);
+    store64(t + 1480, 0x0000000000000000);
+    store64(t + 1488, 0x3F946B69DB65ECC4);
+    store64(t + 1496, 0x3F7FBD6A593A2DF9);
+    store64(t + 1504, 0x0000000000000000);
+    store64(t + 1512, 0x3F8C5931CA7D6734);
+    store64(t + 1520, 0x3F7604189374BC6A);
+    store64(t + 1528, 0x0000000000000000);
+    store64(t + 1536, 0x3F839D1B2E59AF9F);
+    store64(t + 1544, 0x3F6E75360D024702);
+    store64(t + 1552, 0x0000000000000000);
+    store64(t + 1560, 0x3F7B0DD82FD75E20);
+    store64(t + 1568, 0x3F650331E3A7DAA5);
+    store64(t + 1576, 0x0000000000000000);
+    store64(t + 1584, 0x3F72A62AA19439DE);
+    store64(t + 1592, 0x3F5CF7878B7A1C26);
+    store64(t + 1600, 0x0000000000000000);
+    store64(t + 1608, 0x3F69C38B04AB606B);
+    store64(t + 1616, 0x3F54057082491AFC);
+    store64(t + 1624, 0x0000000000000000);
+    store64(t + 1632, 0x3F61D14E3BCD35A8);
+    store64(t + 1640, 0x3F4BB8C32A8C9B84);
+    store64(t + 1648, 0x0000000000000000);
+    store64(t + 1656, 0x3F58AC9F2FDB8FDE);
+    store64(t + 1664, 0x3F4333B96AF038E3);
+    store64(t + 1672, 0x0000000000000000);
+    store64(t + 1680, 0x3F511F0C34C1A8AC);
+    store64(t + 1688, 0x3F3AAC53B0813CAC);
+    store64(t + 1696, 0x0000000000000000);
+    store64(t + 1704, 0x3F47D2849CB252CE);
+    store64(t + 1712, 0x3F329CBAB649D389);
+    store64(t + 1720, 0x0000000000000000);
+    store64(t + 1728, 0x3F40A569B17481B2);
+    store64(t + 1736, 0x3F2A1554FBDAD752);
+    store64(t + 1744, 0x0000000000000000);
+    store64(t + 1752, 0x3F3754B05B7CFE58);
+    store64(t + 1760, 0x3F22599ED7C6FBD2);
+    store64(t + 1768, 0x0000000000000000);
+    store64(t + 1776, 0x3F307314CA925FE9);
+    store64(t + 1784, 0x3F19B0AB2E1693C0);
+    store64(t + 1792, 0x0000000000000000);
+    store64(t + 1800, 0x3F2754B05B7CFE58);
+    store64(t + 1808, 0x3F12599ED7C6FBD2);
+    store64(t + 1816, 0x0000000000000000);
+    store64(t + 1824, 0x3F2083DBC23315D7);
+    store64(t + 1832, 0x3F0A36E2EB1C432D);
+    store64(t + 1840, 0x0000000000000000);
+    store64(t + 1848, 0x3F1797CC39FFD60F);
+    store64(t + 1856, 0x3F02DFD694CCAB3F);
+    store64(t + 1864, 0x0000000000000000);
+    store64(t + 1872, 0x3F110A137F38C543);
+    store64(t + 1880, 0x3EFA36E2EB1C432D);
+    store64(t + 1888, 0x0000000000000000);
+    store64(t + 1896, 0x3F081E03F705857B);
+    store64(t + 1904, 0x3EF2DFD694CCAB3F);
+    store64(t + 1912, 0x0000000000000000);
+    store64(t + 1920, 0x3F014D2F5DBB9CFA);
+    store64(t + 1928, 0x3EEB43526527A205);
+    store64(t + 1936, 0x0000000000000000);
+    _cie1964_p = t;
+    return t;
+}
+
+var _cie2015_2_p = 0;
+fn _cie2015_2() {
+    if (_cie2015_2_p != 0) { return _cie2015_2_p; }
+    var t = alloc(1944);
+    store64(t + 0, 0x0000000000000000);
+    store64(t + 8, 0x0000000000000000);
+    store64(t + 16, 0x0000000000000000);
+    store64(t + 24, 0x0000000000000000);
+    store64(t + 32, 0x0000000000000000);
+    store64(t + 40, 0x0000000000000000);
+    store64(t + 48, 0x3F6EE2435696E58A);
+    store64(t + 56, 0x3F3B328B6D86EC18);
+    store64(t + 64, 0x3F92EA960B6F9FCB);
+    store64(t + 72, 0x3F833764F11B60AF);
+    store64(t + 80, 0x3F515DF6555C52E7);
+    store64(t + 88, 0x3FA79A2834D26FA4);
+    store64(t + 96, 0x3F96ACA793576039);
+    store64(t + 104, 0x3F64163779E9D0EA);
+    store64(t + 112, 0x3FBC0F55DE58E64B);
+    store64(t + 120, 0x3FA848BEB5B2D4D4);
+    store64(t + 128, 0x3F745D851654D61B);
+    store64(t + 136, 0x3FCE538EF34D6A16);
+    store64(t + 144, 0x3FB6EBF65DBFCEB8);
+    store64(t + 152, 0x3F829888F861A60D);
+    store64(t + 160, 0x3FDCDA836EB4E981);
+    store64(t + 168, 0x3FC282F0E0A84BE4);
+    store64(t + 176, 0x3F8D462C343B70EF);
+    store64(t + 184, 0x3FE79CBAB649D389);
+    store64(t + 192, 0x3FCA0EAE18AC9F30);
+    store64(t + 200, 0x3F94C2B51BD61F5C);
+    store64(t + 208, 0x3FF0D44241C3EFAE);
+    store64(t + 216, 0x3FCFDA61E0C5A815);
+    store64(t + 224, 0x3F9ABF76A2F48C2E);
+    store64(t + 232, 0x3FF4E15011904B3C);
+    store64(t + 240, 0x3FD2AD42C3C9EECC);
+    store64(t + 248, 0x3FA0FE47991BC558);
+    store64(t + 256, 0x3FF8D86013660E52);
+    store64(t + 264, 0x3FD4A743A647FDC6);
+    store64(t + 272, 0x3FA549D7BA6698BB);
+    store64(t + 280, 0x3FFBF8F47304039B);
+    store64(t + 288, 0x3FD649CF56EAC860);
+    store64(t + 296, 0x3FA9C5C5718EB895);
+    store64(t + 304, 0x3FFEADFE75BC44BF);
+    store64(t + 312, 0x3FD5E0D66F0CFE15);
+    store64(t + 320, 0x3FAD67FD3F5B5FA2);
+    store64(t + 328, 0x3FFEB1EAFEE6FB4C);
+    store64(t + 336, 0x3FD4A3400B88CA3E);
+    store64(t + 344, 0x3FB091C087442C80);
+    store64(t + 352, 0x3FFD93A3EC02F2FA);
+    store64(t + 360, 0x3FD2172EF0AE5365);
+    store64(t + 368, 0x3FB287B139C94F6A);
+    store64(t + 376, 0x3FFAA18AC9F2FDB9);
+    store64(t + 384, 0x3FCFCFAACD9E83E4);
+    store64(t + 392, 0x3FB5CC426351DEF0);
+    store64(t + 400, 0x3FF85AC14C660A20);
+    store64(t + 408, 0x3FCC69C66D373B00);
+    store64(t + 416, 0x3FBB23CC8DE2AC32);
+    store64(t + 424, 0x3FF6DAE3E6C4C597);
+    store64(t + 432, 0x3FC720E1F7D73C92);
+    store64(t + 440, 0x3FC0A06E9FF0CBB0);
+    store64(t + 448, 0x3FF4027FA1A0CF18);
+    store64(t + 456, 0x3FC0895D0B73D189);
+    store64(t + 464, 0x3FC3A61E0C5A8156);
+    store64(t + 472, 0x3FEFF9463CFB3312);
+    store64(t + 480, 0x3FB4F2BECEDD4845);
+    store64(t + 488, 0x3FC6E3150DAE3E6C);
+    store64(t + 496, 0x3FE82AE8E1D6494D);
+    store64(t + 504, 0x3FA78E7DDCA4B125);
+    store64(t + 512, 0x3FCA6E08F2170931);
+    store64(t + 520, 0x3FE1F9B34A44C7B0);
+    store64(t + 528, 0x3F955714B9CB6849);
+    store64(t + 536, 0x3FCE74080F98FA37);
+    store64(t + 544, 0x3FDA3C4F3BA775FB);
+    store64(t + 552, 0x3F7D12CADDDF43C8);
+    store64(t + 560, 0x3FD23E8DDA48B652);
+    store64(t + 568, 0x3FD3E0C5A8155D5F);
+    store64(t + 576, 0x3F642B302F72B453);
+    store64(t + 584, 0x3FD64B6E935B91F7);
+    store64(t + 592, 0x3FCE6C226809D495);
+    store64(t + 600, 0x3F6DE481F53825E1);
+    store64(t + 608, 0x3FDB606B7AA25D8D);
+    store64(t + 616, 0x3FC604295A6C5D20);
+    store64(t + 624, 0x3F8FE32A0663C750);
+    store64(t + 632, 0x3FE0A7E9531550CA);
+    store64(t + 640, 0x3FBE2046C764AE00);
+    store64(t + 648, 0x3FA61804D9839475);
+    store64(t + 656, 0x3FE3DC2B0EA18373);
+    store64(t + 664, 0x3FB534ACAFF6D331);
+    store64(t + 672, 0x3FB46290EED02CD4);
+    store64(t + 680, 0x3FE6FA95C853C148);
+    store64(t + 688, 0x3FACEE17A02FB5D0);
+    store64(t + 696, 0x3FC03C85C24C404A);
+    store64(t + 704, 0x3FE96DBB59DDC1E8);
+    store64(t + 712, 0x3FA335B0BBF50E34);
+    store64(t + 720, 0x3FC7455219A847B2);
+    store64(t + 728, 0x3FEB714B9CB6848C);
+    store64(t + 736, 0x3F98F7985271BCDC);
+    store64(t + 744, 0x3FCEC8C5004FB118);
+    store64(t + 752, 0x3FED073FFAC1D29E);
+    store64(t + 760, 0x3F9009B30728E92D);
+    store64(t + 768, 0x3FD3D3F5B5FA2270);
+    store64(t + 776, 0x3FEE8B0079A2834D);
+    store64(t + 784, 0x3F842A23BFF8A8F4);
+    store64(t + 792, 0x3FD858DDE7A743A6);
+    store64(t + 800, 0x3FEF67B80A9DE8B4);
+    store64(t + 808, 0x3F791CD1C7DE5083);
+    store64(t + 816, 0x3FDCC3504C48ADEF);
+    store64(t + 824, 0x3FEFA6138FFFBCE4);
+    store64(t + 832, 0x3F6F0C34C1A8AC5C);
+    store64(t + 840, 0x3FE0E5907D912557);
+    store64(t + 848, 0x3FEFFB95A294141F);
+    store64(t + 856, 0x3F6310129CBAB64A);
+    store64(t + 864, 0x3FE3A0CAE642BF98);
+    store64(t + 872, 0x3FEFE5929670196E);
+    store64(t + 880, 0x3F57763E4ABE6A33);
+    store64(t + 888, 0x3FE6742352EB5F5F);
+    store64(t + 896, 0x3FEFB02B40F66A55);
+    store64(t + 904, 0x3F4CE6C093D96638);
+    store64(t + 912, 0x3FE97F2E48E8A71E);
+    store64(t + 920, 0x3FEF24F440AF1CB9);
+    store64(t + 928, 0x3F41DBCA9691A75D);
+    store64(t + 936, 0x3FEC54B05B7CFE58);
+    store64(t + 944, 0x3FEE289B951C5C57);
+    store64(t + 952, 0x3F363779E9D0E992);
+    store64(t + 960, 0x3FEED7C4E2F37FBF);
+    store64(t + 968, 0x3FECAEFD438D1D8A);
+    store64(t + 976, 0x3F2BC98A222D5172);
+    store64(t + 984, 0x3FF0D0F0E90BC7B4);
+    store64(t + 992, 0x3FEB7AA25D8D79D1);
+    store64(t + 1000, 0x3F21904B3C3E74B0);
+    store64(t + 1008, 0x3FF1C19B0AB2E169);
+    store64(t + 1016, 0x3FE9F8854CDB7AE5);
+    store64(t + 1024, 0x3F164840E1719F80);
+    store64(t + 1032, 0x3FF24C447C30D307);
+    store64(t + 1040, 0x3FE824B124D099E1);
+    store64(t + 1048, 0x3F0CD5F99C38B04B);
+    store64(t + 1056, 0x3FF26AA19439DE48);
+    store64(t + 1064, 0x3FE623AD18D25EDD);
+    store64(t + 1072, 0x3F02599ED7C6FBD2);
+    store64(t + 1080, 0x3FF227F6F4BE835E);
+    store64(t + 1088, 0x3FE41070FBEB9E49);
+    store64(t + 1096, 0x3EF81E03F705857B);
+    store64(t + 1104, 0x3FF157C4E2F37FBF);
+    store64(t + 1112, 0x3FE1DE353F7CED91);
+    store64(t + 1120, 0x3EF0C6F7A0B5ED8D);
+    store64(t + 1128, 0x3FF01E14BDFD2631);
+    store64(t + 1136, 0x3FDF558644523F68);
+    store64(t + 1144, 0x3EE4F8B588E368F1);
+    store64(t + 1152, 0x3FED41D8E8640208);
+    store64(t + 1160, 0x3FDB1244A6223E18);
+    store64(t + 1168, 0x0000000000000000);
+    store64(t + 1176, 0x3FEA08A8B08DD1E5);
+    store64(t + 1184, 0x3FD719652BD3C361);
+    store64(t + 1192, 0x0000000000000000);
+    store64(t + 1200, 0x3FE628BB0A2CA9AC);
+    store64(t + 1208, 0x3FD313DB7F173754);
+    store64(t + 1216, 0x0000000000000000);
+    store64(t + 1224, 0x3FE26AD4F5903A75);
+    store64(t + 1232, 0x3FCEEFB2AAE29739);
+    store64(t + 1240, 0x0000000000000000);
+    store64(t + 1248, 0x3FDE47A17F4128BF);
+    store64(t + 1256, 0x3FC8DF37329C347F);
+    store64(t + 1264, 0x0000000000000000);
+    store64(t + 1272, 0x3FD89BA1B1960FA1);
+    store64(t + 1280, 0x3FC3CE8533B10774);
+    store64(t + 1288, 0x0000000000000000);
+    store64(t + 1296, 0x3FD32EE41919AC79);
+    store64(t + 1304, 0x3FBE8B3B320535CA);
+    store64(t + 1312, 0x0000000000000000);
+    store64(t + 1320, 0x3FCD27DCBDDB9842);
+    store64(t + 1328, 0x3FB6FCDEE34FC611);
+    store64(t + 1336, 0x0000000000000000);
+    store64(t + 1344, 0x3FC5DC7ABFB9BED3);
+    store64(t + 1352, 0x3FB113E81450EFDD);
+    store64(t + 1360, 0x0000000000000000);
+    store64(t + 1368, 0x3FC02D40AAEAFAB5);
+    store64(t + 1376, 0x3FA9162281344806);
+    store64(t + 1384, 0x0000000000000000);
+    store64(t + 1392, 0x3FB79D6F112FD32C);
+    store64(t + 1400, 0x3FA23A29C779A6B5);
+    store64(t + 1408, 0x0000000000000000);
+    store64(t + 1416, 0x3FB0FF972474538F);
+    store64(t + 1424, 0x3F9A27AE9AB29E4D);
+    store64(t + 1432, 0x0000000000000000);
+    store64(t + 1440, 0x3FA81E4712E40853);
+    store64(t + 1448, 0x3F92834D26FA3FCD);
+    store64(t + 1456, 0x0000000000000000);
+    store64(t + 1464, 0x3FA0DB0574B40703);
+    store64(t + 1472, 0x3F89D66ADB402D17);
+    store64(t + 1480, 0x0000000000000000);
+    store64(t + 1488, 0x3F972A7BD48CB4AF);
+    store64(t + 1496, 0x3F81BCDBBE0157EF);
+    store64(t + 1504, 0x0000000000000000);
+    store64(t + 1512, 0x3F9021D10B1FEEB3);
+    store64(t + 1520, 0x3F78B0D0EDC3BD5A);
+    store64(t + 1528, 0x0000000000000000);
+    store64(t + 1536, 0x3F8676640A6B93CD);
+    store64(t + 1544, 0x3F712FD32C625E9A);
+    store64(t + 1552, 0x0000000000000000);
+    store64(t + 1560, 0x3F7F2A9D627BF61B);
+    store64(t + 1568, 0x3F67D8CF398E9707);
+    store64(t + 1576, 0x0000000000000000);
+    store64(t + 1584, 0x3F755C52E72DA123);
+    store64(t + 1592, 0x3F6059EA57214F05);
+    store64(t + 1600, 0x0000000000000000);
+    store64(t + 1608, 0x3F6D3CBC48F10A9A);
+    store64(t + 1616, 0x3F56659D12CADDDF);
+    store64(t + 1624, 0x0000000000000000);
+    store64(t + 1632, 0x3F64317ACC4EF88C);
+    store64(t + 1640, 0x3F4EF73C0C1FC8F3);
+    store64(t + 1648, 0x0000000000000000);
+    store64(t + 1656, 0x3F5BEB18116EBD4D);
+    store64(t + 1664, 0x3F456E264E48626F);
+    store64(t + 1672, 0x0000000000000000);
+    store64(t + 1680, 0x3F536E71CDA2B5A2);
+    store64(t + 1688, 0x3F3DE26916440F24);
+    store64(t + 1696, 0x0000000000000000);
+    store64(t + 1704, 0x3F4B1960FA15DB34);
+    store64(t + 1712, 0x3F34D72799A1FD15);
+    store64(t + 1720, 0x0000000000000000);
+    store64(t + 1728, 0x3F42DFD694CCAB3F);
+    store64(t + 1736, 0x3F2D19157ABB8801);
+    store64(t + 1744, 0x0000000000000000);
+    store64(t + 1752, 0x3F3A9B8CB8E086BE);
+    store64(t + 1760, 0x3F24940BBB1F255F);
+    store64(t + 1768, 0x0000000000000000);
+    store64(t + 1776, 0x3F32BE48A58B3F64);
+    store64(t + 1784, 0x3F1CD5F99C38B04B);
+    store64(t + 1792, 0x0000000000000000);
+    store64(t + 1800, 0x3F2A79FEC99F1AE3);
+    store64(t + 1808, 0x3F14727DCBDDB984);
+    store64(t + 1816, 0x0000000000000000);
+    store64(t + 1824, 0x3F22DFD694CCAB3F);
+    store64(t + 1832, 0x3F0D5C31593E5FB7);
+    store64(t + 1840, 0x0000000000000000);
+    store64(t + 1848, 0x3F1ABD1AA821F299);
+    store64(t + 1856, 0x3F04F8B588E368F1);
+    store64(t + 1864, 0x0000000000000000);
+    store64(t + 1872, 0x3F1322F2734F82F5);
+    store64(t + 1880, 0x3EFE68A0D349BE90);
+    store64(t + 1888, 0x0000000000000000);
+    store64(t + 1896, 0x3F0BC98A222D5172);
+    store64(t + 1904, 0x3EF6052502EEC7C9);
+    store64(t + 1912, 0x0000000000000000);
+    store64(t + 1920, 0x3F03EC460ED80A18);
+    store64(t + 1928, 0x3EEF75104D551D69);
+    store64(t + 1936, 0x0000000000000000);
+    _cie2015_2_p = t;
+    return t;
+}
+
+var _cie2015_10_p = 0;
+fn _cie2015_10() {
+    if (_cie2015_10_p != 0) { return _cie2015_10_p; }
+    var t = alloc(1944);
+    store64(t + 0, 0x0000000000000000);
+    store64(t + 8, 0x0000000000000000);
+    store64(t + 16, 0x0000000000000000);
+    store64(t + 24, 0x0000000000000000);
+    store64(t + 32, 0x0000000000000000);
+    store64(t + 40, 0x0000000000000000);
+    store64(t + 48, 0x3F682ECAEEA63B69);
+    store64(t + 56, 0x3F3ABD1AA821F299);
+    store64(t + 64, 0x3F8B024F6598E10D);
+    store64(t + 72, 0x3F7F4C2B51BD61F6);
+    store64(t + 80, 0x3F51A975AFAF8594);
+    store64(t + 88, 0x3FA188B11409A240);
+    store64(t + 96, 0x3F933E78E1932D6F);
+    store64(t + 104, 0x3F65379FA97E132B);
+    store64(t + 112, 0x3FB5C7FFDE7210BF);
+    store64(t + 120, 0x3FA58793DD97F62B);
+    store64(t + 128, 0x3F766BE7AFA72218);
+    store64(t + 136, 0x3FC8AA9F7B5AEA31);
+    store64(t + 144, 0x3FB5309C7FFDE721);
+    store64(t + 152, 0x3F85536933A0407D);
+    store64(t + 160, 0x3FD887B139C94F6A);
+    store64(t + 168, 0x3FC1DB8FDE2EF4E0);
+    store64(t + 176, 0x3F918A86D71F3626);
+    store64(t + 184, 0x3FE504A9478C868C);
+    store64(t + 192, 0x3FCA980B242070B9);
+    store64(t + 200, 0x3F9A6117720C8CD6);
+    store64(t + 208, 0x3FEFC9795B35B0BC);
+    store64(t + 216, 0x3FD135A426BB55AC);
+    store64(t + 224, 0x3FA212513B5BF6A1);
+    store64(t + 232, 0x3FF4F05425F20210);
+    store64(t + 240, 0x3FD500E6AFCCE1C6);
+    store64(t + 248, 0x3FA80E0653005815);
+    store64(t + 256, 0x3FF9FFC115DF6556);
+    store64(t + 264, 0x3FD7A2BE0589ACBD);
+    store64(t + 272, 0x3FAEF672B884406C);
+    store64(t + 280, 0x3FFDE24EDF612407);
+    store64(t + 288, 0x3FD9C4827B6FE2E7);
+    store64(t + 296, 0x3FB31E6CD29131EC);
+    store64(t + 304, 0x40009B899392189C);
+    store64(t + 312, 0x3FD9DF47F993D534);
+    store64(t + 320, 0x3FB6949A5657FB6A);
+    store64(t + 328, 0x40010F82F5126634);
+    store64(t + 336, 0x3FD92A6B0D9513F9);
+    store64(t + 344, 0x3FBA996312F4CF4A);
+    store64(t + 352, 0x400106AF46AA087D);
+    store64(t + 360, 0x3FD64940BBB1F256);
+    store64(t + 368, 0x3FBE9A1B9F98B71C);
+    store64(t + 376, 0x3FFF257B84DB9C73);
+    store64(t + 384, 0x3FD348ADEEBB341E);
+    store64(t + 392, 0x3FC21B54195CC858);
+    store64(t + 400, 0x3FFC4B87BDCF0308);
+    store64(t + 408, 0x3FD03810E8858FF7);
+    store64(t + 416, 0x3FC5C70C996B7671);
+    store64(t + 424, 0x3FF95145D851654D);
+    store64(t + 432, 0x3FC8806290EED02D);
+    store64(t + 440, 0x3FC9992428D434A0);
+    store64(t + 448, 0x3FF4F81E8A2EC28B);
+    store64(t + 456, 0x3FC06CB10342AA9F);
+    store64(t + 464, 0x3FCD995EE136E71D);
+    store64(t + 472, 0x3FF02CDC011D3672);
+    store64(t + 480, 0x3FB37036C9C0A8D2);
+    store64(t + 488, 0x3FD12AA19439DE48);
+    store64(t + 496, 0x3FE80D6D3B6CBD98);
+    store64(t + 504, 0x3FA3A4F8726D04E6);
+    store64(t + 512, 0x3FD3E681A9B8CB8E);
+    store64(t + 520, 0x3FE1C23FAB10BA62);
+    store64(t + 528, 0x3F8CAFB3B7521145);
+    store64(t + 536, 0x3FD6BEE807BBB624);
+    store64(t + 544, 0x3FD975BC44BF4CB2);
+    store64(t + 552, 0x3F6C3CE2089E3433);
+    store64(t + 560, 0x3FDA8C75C4A83B1D);
+    store64(t + 568, 0x3FD298E53EB399F6);
+    store64(t + 576, 0x3F77268D32830A0B);
+    store64(t + 584, 0x3FDE9856A37AC3EB);
+    store64(t + 592, 0x3FCA99B6F5CAF2D8);
+    store64(t + 600, 0x3F8FFD60E94EE393);
+    store64(t + 608, 0x3FE192817763E4AC);
+    store64(t + 616, 0x3FC1D9F4D37C1377);
+    store64(t + 624, 0x3FA358298CC14403);
+    store64(t + 632, 0x3FE3FE9B7BF1E8E6);
+    store64(t + 640, 0x3FB6A98244E93E1D);
+    store64(t + 648, 0x3FB34CB1897A67A5);
+    store64(t + 656, 0x3FE67077CCC03793);
+    store64(t + 664, 0x3FADD249E44FA051);
+    store64(t + 672, 0x3FBEC2374794EA07);
+    store64(t + 680, 0x3FE8EC17EBAF1023);
+    store64(t + 688, 0x3FA360F1B25F633D);
+    store64(t + 696, 0x3FC67CC7D1BB4917);
+    store64(t + 704, 0x3FEACDEA033E78E2);
+    store64(t + 712, 0x3F98E5C4EB56FB8F);
+    store64(t + 720, 0x3FCE779A6B50B0F2);
+    store64(t + 728, 0x3FEC412AD81ADEA9);
+    store64(t + 736, 0x3F8F8769EC2CE465);
+    store64(t + 744, 0x3FD380303C07EE0B);
+    store64(t + 752, 0x3FED8C60CBF2B23A);
+    store64(t + 760, 0x3F83F961804D9839);
+    store64(t + 768, 0x3FD89680E0653006);
+    store64(t + 776, 0x3FEEEDD69D30270F);
+    store64(t + 784, 0x3F78EA7CE0FC2EBA);
+    store64(t + 792, 0x3FDDA6E32E3821AF);
+    store64(t + 800, 0x3FEFA3571D1D4739);
+    store64(t + 808, 0x3F6EE02A77A2CECD);
+    store64(t + 816, 0x3FE1328522EA0FD4);
+    store64(t + 824, 0x3FEFB4395810624E);
+    store64(t + 832, 0x3F6309C7FFDE7211);
+    store64(t + 840, 0x3FE3F05857AFEA3E);
+    store64(t + 848, 0x3FEFFE2E6EA85447);
+    store64(t + 856, 0x3F576145953586CB);
+    store64(t + 864, 0x3FE6CBDBA0A52696);
+    store64(t + 872, 0x3FEFD25EDD052935);
+    store64(t + 880, 0x3F4CC532A497FA5D);
+    store64(t + 888, 0x3FE9A6EFC371DA38);
+    store64(t + 896, 0x3FEF83968D759EE9);
+    store64(t + 904, 0x3F41BA3CA7503B82);
+    store64(t + 912, 0x3FEC963FDD65A145);
+    store64(t + 920, 0x3FEED989DF1172EF);
+    store64(t + 928, 0x3F35E39713AD5BEE);
+    store64(t + 936, 0x3FEF1BB05FAEBC41);
+    store64(t + 944, 0x3FEDB780346DC5D6);
+    store64(t + 952, 0x3F2B43526527A205);
+    store64(t + 960, 0x3FF08C9A77E5EAAB);
+    store64(t + 968, 0x3FEC14C660A20147);
+    store64(t + 976, 0x3F210A137F38C543);
+    store64(t + 984, 0x3FF1B5CE18266773);
+    store64(t + 992, 0x3FEAC964628027D9);
+    store64(t + 1000, 0x3F157EED45E9185D);
+    store64(t + 1008, 0x3FF25B5B70691EA8);
+    store64(t + 1016, 0x3FE92F102363B257);
+    store64(t + 1024, 0x3F0B43526527A205);
+    store64(t + 1032, 0x3FF2915054AC29BF);
+    store64(t + 1040, 0x3FE74579F2346562);
+    store64(t + 1048, 0x3F014D2F5DBB9CFA);
+    store64(t + 1056, 0x3FF25EE02A77A2CF);
+    store64(t + 1064, 0x3FE53682730C6717);
+    store64(t + 1072, 0x3EF711947CFA26A2);
+    store64(t + 1080, 0x3FF1D2502EEC7C95);
+    store64(t + 1088, 0x3FE31AEF6F8F0414);
+    store64(t + 1096, 0x3EED5C31593E5FB7);
+    store64(t + 1104, 0x3FF0C69835158B82);
+    store64(t + 1112, 0x3FE0E74299D883BA);
+    store64(t + 1120, 0x3EE4F8B588E368F1);
+    store64(t + 1128, 0x3FEEC65625A682B6);
+    store64(t + 1136, 0x3FDD72C94B380CB7);
+    store64(t + 1144, 0x3ED92A737110E454);
+    store64(t + 1152, 0x3FEB9D5A187A4A49);
+    store64(t + 1160, 0x3FD948ECD8DBCEC8);
+    store64(t + 1168, 0x0000000000000000);
+    store64(t + 1176, 0x3FE854C985F06F69);
+    store64(t + 1184, 0x3FD573929ED3953E);
+    store64(t + 1192, 0x0000000000000000);
+    store64(t + 1200, 0x3FE48655193708AB);
+    store64(t + 1208, 0x3FD19C90C4DEC1C2);
+    store64(t + 1216, 0x0000000000000000);
+    store64(t + 1224, 0x3FE0EE5EEDCC20D5);
+    store64(t + 1232, 0x3FCC690DE093532E);
+    store64(t + 1240, 0x0000000000000000);
+    store64(t + 1248, 0x3FDBAB042528AE75);
+    store64(t + 1256, 0x3FC6BE7AFA722186);
+    store64(t + 1264, 0x0000000000000000);
+    store64(t + 1272, 0x3FD6606FAC6045BB);
+    store64(t + 1280, 0x3FC20CF1800A7C5B);
+    store64(t + 1288, 0x0000000000000000);
+    store64(t + 1296, 0x3FD1601797CC3A00);
+    store64(t + 1304, 0x3FBBC01A36E2EB1C);
+    store64(t + 1312, 0x0000000000000000);
+    store64(t + 1320, 0x3FCA52C59FB1E18F);
+    store64(t + 1328, 0x3FB4D51F81A5870E);
+    store64(t + 1336, 0x0000000000000000);
+    store64(t + 1344, 0x3FC3B03E20CCFF22);
+    store64(t + 1352, 0x3FAEE4E26D4801F7);
+    store64(t + 1360, 0x0000000000000000);
+    store64(t + 1368, 0x3FBD15592D98BF7F);
+    store64(t + 1376, 0x3FA6A875D56F32BE);
+    store64(t + 1384, 0x0000000000000000);
+    store64(t + 1392, 0x3FB5330941C8216C);
+    store64(t + 1400, 0x3FA071E6CD29131F);
+    store64(t + 1408, 0x0000000000000000);
+    store64(t + 1416, 0x3FAE7D1351159C49);
+    store64(t + 1424, 0x3F979420B3D4AE43);
+    store64(t + 1432, 0x0000000000000000);
+    store64(t + 1440, 0x3FA59D3458CD20B0);
+    store64(t + 1448, 0x3F90ADCD2D44DCA9);
+    store64(t + 1456, 0x0000000000000000);
+    store64(t + 1464, 0x3F9E321A2E7F6F4C);
+    store64(t + 1472, 0x3F87446F9B994E1A);
+    store64(t + 1480, 0x0000000000000000);
+    store64(t + 1488, 0x3F94BDFD2630EC31);
+    store64(t + 1496, 0x3F7FEFBF401C4FC2);
+    store64(t + 1504, 0x0000000000000000);
+    store64(t + 1512, 0x3F8CE18266772D5E);
+    store64(t + 1520, 0x3F763886594AF4F1);
+    store64(t + 1528, 0x0000000000000000);
+    store64(t + 1536, 0x3F841A6937D1FE65);
+    store64(t + 1544, 0x3F6EEED8904F6DFC);
+    store64(t + 1552, 0x0000000000000000);
+    store64(t + 1560, 0x3F7BE3C105186DB5);
+    store64(t + 1568, 0x3F657470EB24A6A8);
+    store64(t + 1576, 0x0000000000000000);
+    store64(t + 1584, 0x3F731CA7D6733EBC);
+    store64(t + 1592, 0x3F5D6CF850DF15A5);
+    store64(t + 1600, 0x0000000000000000);
+    store64(t + 1608, 0x3F6A2A4DB163BABA);
+    store64(t + 1616, 0x3F5426FE718A86D7);
+    store64(t + 1624, 0x0000000000000000);
+    store64(t + 1632, 0x3F6212513B5BF6A1);
+    store64(t + 1640, 0x3F4BDA5119CE075F);
+    store64(t + 1648, 0x0000000000000000);
+    store64(t + 1656, 0x3F58FC504816F007);
+    store64(t + 1664, 0x3F4344806290EED0);
+    store64(t + 1672, 0x0000000000000000);
+    store64(t + 1680, 0x3F51622813448063);
+    store64(t + 1688, 0x3F3ADEA897635E74);
+    store64(t + 1696, 0x0000000000000000);
+    store64(t + 1704, 0x3F483F91E646F156);
+    store64(t + 1712, 0x3F32BE48A58B3F64);
+    store64(t + 1720, 0x0000000000000000);
+    store64(t + 1728, 0x3F40E0221426FE72);
+    store64(t + 1736, 0x3F2A1554FBDAD752);
+    store64(t + 1744, 0x0000000000000000);
+    store64(t + 1752, 0x3F37CA2120E1F7D7);
+    store64(t + 1760, 0x3F227B2CC70867AE);
+    store64(t + 1768, 0x0000000000000000);
+    store64(t + 1776, 0x3F30C6F7A0B5ED8D);
+    store64(t + 1784, 0x3F19F3C70C996B76);
+    store64(t + 1792, 0x0000000000000000);
+    store64(t + 1800, 0x3F27B95A294141EA);
+    store64(t + 1808, 0x3F12599ED7C6FBD2);
+    store64(t + 1816, 0x0000000000000000);
+    store64(t + 1824, 0x3F20E8858FF75968);
+    store64(t + 1832, 0x3F0A36E2EB1C432D);
+    store64(t + 1840, 0x0000000000000000);
+    store64(t + 1848, 0x3F181E03F705857B);
+    store64(t + 1856, 0x3F02DFD694CCAB3F);
+    store64(t + 1864, 0x0000000000000000);
+    store64(t + 1872, 0x3F114D2F5DBB9CFA);
+    store64(t + 1880, 0x3EFB43526527A205);
+    store64(t + 1888, 0x0000000000000000);
+    store64(t + 1896, 0x3F08A43BB40B34E7);
+    store64(t + 1904, 0x3EF2DFD694CCAB3F);
+    store64(t + 1912, 0x0000000000000000);
+    store64(t + 1920, 0x3F01D3671AC14C66);
+    store64(t + 1928, 0x3EEB43526527A205);
+    store64(t + 1936, 0x0000000000000000);
+    _cie2015_10_p = t;
+    return t;
+}
+
+var _illum_d65_p = 0;
+fn _illum_d65_data() {
+    if (_illum_d65_p != 0) { return _illum_d65_p; }
+    var t = alloc(648);
+    store64(t + 0, 0x4048FD70A3D70A3D);
+    store64(t + 8, 0x404A27AE147AE148);
+    store64(t + 16, 0x404B533333333333);
+    store64(t + 24, 0x40512CCCCCCCCCCD);
+    store64(t + 32, 0x4054B00000000000);
+    store64(t + 40, 0x4055C7AE147AE148);
+    store64(t + 48, 0x4056DF5C28F5C28F);
+    store64(t + 56, 0x40571D70A3D70A3D);
+    store64(t + 64, 0x40575B851EB851EC);
+    store64(t + 72, 0x405683D70A3D70A4);
+    store64(t + 80, 0x4055AB851EB851EC);
+    store64(t + 88, 0x4057F147AE147AE1);
+    store64(t + 96, 0x405A370A3D70A3D7);
+    store64(t + 104, 0x405BBC28F5C28F5C);
+    store64(t + 112, 0x405D40A3D70A3D71);
+    store64(t + 120, 0x405D5A3D70A3D70A);
+    store64(t + 128, 0x405D73D70A3D70A4);
+    store64(t + 136, 0x405D15C28F5C28F6);
+    store64(t + 144, 0x405CB70A3D70A3D7);
+    store64(t + 152, 0x405CD8F5C28F5C29);
+    store64(t + 160, 0x405CFAE147AE147B);
+    store64(t + 168, 0x405C17AE147AE148);
+    store64(t + 176, 0x405B33D70A3D70A4);
+    store64(t + 184, 0x405B451EB851EB85);
+    store64(t + 192, 0x405B566666666666);
+    store64(t + 200, 0x405B251EB851EB85);
+    store64(t + 208, 0x405AF33333333333);
+    store64(t + 216, 0x405A933333333333);
+    store64(t + 224, 0x405A328F5C28F5C3);
+    store64(t + 232, 0x405A8F5C28F5C28F);
+    store64(t + 240, 0x405AEC28F5C28F5C);
+    store64(t + 248, 0x405A833333333333);
+    store64(t + 256, 0x405A1A3D70A3D70A);
+    store64(t + 264, 0x405A0EB851EB851F);
+    store64(t + 272, 0x405A033333333333);
+    store64(t + 280, 0x40598147AE147AE1);
+    store64(t + 288, 0x4059000000000000);
+    store64(t + 296, 0x40588AE147AE147B);
+    store64(t + 304, 0x4058151EB851EB85);
+    store64(t + 312, 0x405803D70A3D70A4);
+    store64(t + 320, 0x4057F28F5C28F5C3);
+    store64(t + 328, 0x40570F5C28F5C28F);
+    store64(t + 336, 0x40562C28F5C28F5C);
+    store64(t + 344, 0x4056566666666666);
+    store64(t + 352, 0x405680A3D70A3D71);
+    store64(t + 360, 0x4056733333333333);
+    store64(t + 368, 0x4056666666666666);
+    store64(t + 376, 0x405629999999999A);
+    store64(t + 384, 0x4055ECCCCCCCCCCD);
+    store64(t + 392, 0x40555F5C28F5C28F);
+    store64(t + 400, 0x4054D28F5C28F5C3);
+    store64(t + 408, 0x4054DF5C28F5C28F);
+    store64(t + 416, 0x4054EC28F5C28F5C);
+    store64(t + 424, 0x4054770A3D70A3D7);
+    store64(t + 432, 0x405401EB851EB852);
+    store64(t + 440, 0x405407AE147AE148);
+    store64(t + 448, 0x40540D70A3D70A3D);
+    store64(t + 456, 0x4054500000000000);
+    store64(t + 464, 0x405491EB851EB852);
+    store64(t + 472, 0x405411EB851EB852);
+    store64(t + 480, 0x405391EB851EB852);
+    store64(t + 488, 0x4052800000000000);
+    store64(t + 496, 0x40516E147AE147AE);
+    store64(t + 504, 0x4051AAE147AE147B);
+    store64(t + 512, 0x4051E70A3D70A3D7);
+    store64(t + 520, 0x40523EB851EB851F);
+    store64(t + 528, 0x4052966666666666);
+    store64(t + 536, 0x4050FEB851EB851F);
+    store64(t + 544, 0x404ECCCCCCCCCCCD);
+    store64(t + 552, 0x40506F5C28F5C28F);
+    store64(t + 560, 0x405178F5C28F5C29);
+    store64(t + 568, 0x40521F5C28F5C28F);
+    store64(t + 576, 0x4052C5C28F5C28F6);
+    store64(t + 584, 0x405155C28F5C28F6);
+    store64(t + 592, 0x404FCB851EB851EC);
+    store64(t + 600, 0x404B8147AE147AE1);
+    store64(t + 608, 0x404735C28F5C28F6);
+    store64(t + 616, 0x404C4E147AE147AE);
+    store64(t + 624, 0x4050B3D70A3D70A4);
+    store64(t + 632, 0x405045C28F5C28F6);
+    store64(t + 640, 0x404FB0A3D70A3D71);
+    _illum_d65_p = t;
+    return t;
+}
+
+var _illum_d50_p = 0;
+fn _illum_d50_data() {
+    if (_illum_d50_p != 0) { return _illum_d50_p; }
+    var t = alloc(648);
+    store64(t + 0, 0x40387D70A3D70A3D);
+    store64(t + 8, 0x403B2E147AE147AE);
+    store64(t + 16, 0x403DDEB851EB851F);
+    store64(t + 24, 0x4043CB851EB851EC);
+    store64(t + 32, 0x4048A7AE147AE148);
+    store64(t + 40, 0x404A747AE147AE14);
+    store64(t + 48, 0x404C4147AE147AE1);
+    store64(t + 56, 0x404D228F5C28F5C3);
+    store64(t + 64, 0x404E03D70A3D70A4);
+    store64(t + 72, 0x404D770A3D70A3D7);
+    store64(t + 80, 0x404CE8F5C28F5C29);
+    store64(t + 88, 0x4050947AE147AE14);
+    store64(t + 96, 0x4052B47AE147AE14);
+    store64(t + 104, 0x4054428F5C28F5C3);
+    store64(t + 112, 0x4055D00000000000);
+    store64(t + 120, 0x40563B851EB851EC);
+    store64(t + 128, 0x4056A70A3D70A3D7);
+    store64(t + 136, 0x4056BF5C28F5C28F);
+    store64(t + 144, 0x4056D7AE147AE148);
+    store64(t + 152, 0x40574F5C28F5C28F);
+    store64(t + 160, 0x4057C70A3D70A3D7);
+    store64(t + 168, 0x4057628F5C28F5C3);
+    store64(t + 176, 0x4056FD70A3D70A3D);
+    store64(t + 184, 0x405775C28F5C28F6);
+    store64(t + 192, 0x4057EE147AE147AE);
+    store64(t + 200, 0x40580AE147AE147B);
+    store64(t + 208, 0x4058270A3D70A3D7);
+    store64(t + 216, 0x405837AE147AE148);
+    store64(t + 224, 0x40584851EB851EB8);
+    store64(t + 232, 0x4058E70A3D70A3D7);
+    store64(t + 240, 0x4059866666666666);
+    store64(t + 248, 0x40595B851EB851EC);
+    store64(t + 256, 0x4059300000000000);
+    store64(t + 264, 0x4059628F5C28F5C3);
+    store64(t + 272, 0x4059947AE147AE14);
+    store64(t + 280, 0x40594A3D70A3D70A);
+    store64(t + 288, 0x4059000000000000);
+    store64(t + 296, 0x4058B7AE147AE148);
+    store64(t + 304, 0x40586F5C28F5C28F);
+    store64(t + 312, 0x4058951EB851EB85);
+    store64(t + 320, 0x4058BAE147AE147B);
+    store64(t + 328, 0x40580D70A3D70A3D);
+    store64(t + 336, 0x4057600000000000);
+    store64(t + 344, 0x4057E5C28F5C28F6);
+    store64(t + 352, 0x40586C28F5C28F5C);
+    store64(t + 360, 0x40589EB851EB851F);
+    store64(t + 368, 0x4058D147AE147AE1);
+    store64(t + 376, 0x4058CA3D70A3D70A);
+    store64(t + 384, 0x4058C28F5C28F5C3);
+    store64(t + 392, 0x40585851EB851EB8);
+    store64(t + 400, 0x4057EE147AE147AE);
+    store64(t + 408, 0x4058528F5C28F5C3);
+    store64(t + 416, 0x4058B70A3D70A3D7);
+    store64(t + 424, 0x405850A3D70A3D71);
+    store64(t + 432, 0x4057EAE147AE147B);
+    store64(t + 440, 0x40583B851EB851EC);
+    store64(t + 448, 0x40588C28F5C28F5C);
+    store64(t + 456, 0x4059266666666666);
+    store64(t + 464, 0x4059C00000000000);
+    store64(t + 472, 0x4059447AE147AE14);
+    store64(t + 480, 0x4058C851EB851EB8);
+    store64(t + 488, 0x405750A3D70A3D71);
+    store64(t + 496, 0x4055D851EB851EB8);
+    store64(t + 504, 0x40565F5C28F5C28F);
+    store64(t + 512, 0x4056E66666666666);
+    store64(t + 520, 0x4057100000000000);
+    store64(t + 528, 0x405738F5C28F5C29);
+    store64(t + 536, 0x405537AE147AE148);
+    store64(t + 544, 0x4053366666666666);
+    store64(t + 552, 0x40546B851EB851EC);
+    store64(t + 560, 0x4055A0A3D70A3D71);
+    store64(t + 568, 0x4056633333333333);
+    store64(t + 576, 0x4057251EB851EB85);
+    store64(t + 584, 0x405559999999999A);
+    store64(t + 592, 0x40538EB851EB851F);
+    store64(t + 600, 0x4050FD70A3D70A3D);
+    store64(t + 608, 0x404CD851EB851EB8);
+    store64(t + 616, 0x405193D70A3D70A4);
+    store64(t + 624, 0x4054BAE147AE147B);
+    store64(t + 632, 0x4054266666666666);
+    store64(t + 640, 0x40539147AE147AE1);
+    _illum_d50_p = t;
+    return t;
+}
+
+var _illum_f2_p = 0;
+fn _illum_f2_data() {
+    if (_illum_f2_p != 0) { return _illum_f2_p; }
+    var t = alloc(648);
+    store64(t + 0, 0x3FF2E147AE147AE1);
+    store64(t + 8, 0x3FF7AE147AE147AE);
+    store64(t + 16, 0x3FFD70A3D70A3D71);
+    store64(t + 24, 0x4001333333333333);
+    store64(t + 32, 0x400B851EB851EB85);
+    store64(t + 40, 0x402F6147AE147AE1);
+    store64(t + 48, 0x400ECCCCCCCCCCCD);
+    store64(t + 56, 0x400DEB851EB851EC);
+    store64(t + 64, 0x4010C28F5C28F5C3);
+    store64(t + 72, 0x40127AE147AE147B);
+    store64(t + 80, 0x40143D70A3D70A3D);
+    store64(t + 88, 0x40417D70A3D70A3D);
+    store64(t + 96, 0x40279EB851EB851F);
+    store64(t + 104, 0x4019147AE147AE14);
+    store64(t + 112, 0x401A851EB851EB85);
+    store64(t + 120, 0x401BB851EB851EB8);
+    store64(t + 128, 0x401CC28F5C28F5C3);
+    store64(t + 136, 0x401D99999999999A);
+    store64(t + 144, 0x401E28F5C28F5C29);
+    store64(t + 152, 0x401E7AE147AE147B);
+    store64(t + 160, 0x401E99999999999A);
+    store64(t + 168, 0x401E7AE147AE147B);
+    store64(t + 176, 0x401E7AE147AE147B);
+    store64(t + 184, 0x401DCCCCCCCCCCCD);
+    store64(t + 192, 0x401D1EB851EB851F);
+    store64(t + 200, 0x401C99999999999A);
+    store64(t + 208, 0x401C333333333333);
+    store64(t + 216, 0x401C28F5C28F5C29);
+    store64(t + 224, 0x401CA3D70A3D70A4);
+    store64(t + 232, 0x401DE147AE147AE1);
+    store64(t + 240, 0x4020147AE147AE14);
+    store64(t + 248, 0x4021C28F5C28F5C3);
+    store64(t + 256, 0x4024051EB851EB85);
+    store64(t + 264, 0x40383D70A3D70A3D);
+    store64(t + 272, 0x40308CCCCCCCCCCD);
+    store64(t + 280, 0x402D6B851EB851EC);
+    store64(t + 288, 0x4030BAE147AE147B);
+    store64(t + 296, 0x4033E147AE147AE1);
+    store64(t + 304, 0x403CC00000000000);
+    store64(t + 312, 0x4030851EB851EB85);
+    store64(t + 320, 0x402CB851EB851EB8);
+    store64(t + 328, 0x402AE66666666666);
+    store64(t + 336, 0x402970A3D70A3D71);
+    store64(t + 344, 0x40288A3D70A3D70A);
+    store64(t + 352, 0x4028851EB851EB85);
+    store64(t + 360, 0x403FD9999999999A);
+    store64(t + 368, 0x4029800000000000);
+    store64(t + 376, 0x40295C28F5C28F5C);
+    store64(t + 384, 0x4028000000000000);
+    store64(t + 392, 0x4026570A3D70A3D7);
+    store64(t + 400, 0x4024D1EB851EB852);
+    store64(t + 408, 0x4023BD70A3D70A3D);
+    store64(t + 416, 0x4022851EB851EB85);
+    store64(t + 424, 0x40212E147AE147AE);
+    store64(t + 432, 0x401FD70A3D70A3D7);
+    store64(t + 440, 0x401DA3D70A3D70A4);
+    store64(t + 448, 0x401B7AE147AE147B);
+    store64(t + 456, 0x4019333333333333);
+    store64(t + 464, 0x401747AE147AE148);
+    store64(t + 472, 0x4015147AE147AE14);
+    store64(t + 480, 0x40133D70A3D70A3D);
+    store64(t + 488, 0x4011B851EB851EB8);
+    store64(t + 496, 0x401047AE147AE148);
+    store64(t + 504, 0x400DAE147AE147AE);
+    store64(t + 512, 0x400B0A3D70A3D70A);
+    store64(t + 520, 0x4008B851EB851EB8);
+    store64(t + 528, 0x4006B851EB851EB8);
+    store64(t + 536, 0x40051EB851EB851F);
+    store64(t + 544, 0x400370A3D70A3D71);
+    store64(t + 552, 0x40023D70A3D70A3D);
+    store64(t + 560, 0x4000A3D70A3D70A4);
+    store64(t + 568, 0x3FFE8F5C28F5C28F);
+    store64(t + 576, 0x3FFC51EB851EB852);
+    store64(t + 584, 0x3FFA147AE147AE14);
+    store64(t + 592, 0x3FF87AE147AE147B);
+    store64(t + 600, 0x3FF6B851EB851EB8);
+    store64(t + 608, 0x3FF51EB851EB851F);
+    store64(t + 616, 0x3FF3D70A3D70A3D7);
+    store64(t + 624, 0x3FF2666666666666);
+    store64(t + 632, 0x3FF147AE147AE148);
+    store64(t + 640, 0x3FF028F5C28F5C29);
+    _illum_f2_p = t;
+    return t;
+}
+
+var _illum_f11_p = 0;
+fn _illum_f11_data() {
+    if (_illum_f11_p != 0) { return _illum_f11_p; }
+    var t = alloc(648);
+    store64(t + 0, 0x3FED1EB851EB851F);
+    store64(t + 8, 0x3FE428F5C28F5C29);
+    store64(t + 16, 0x3FDD70A3D70A3D71);
+    store64(t + 24, 0x3FD7AE147AE147AE);
+    store64(t + 32, 0x3FF4A3D70A3D70A4);
+    store64(t + 40, 0x40295C28F5C28F5C);
+    store64(t + 48, 0x3FEEB851EB851EB8);
+    store64(t + 56, 0x3FE47AE147AE147B);
+    store64(t + 64, 0x3FDCCCCCCCCCCCCD);
+    store64(t + 72, 0x3FD7AE147AE147AE);
+    store64(t + 80, 0x3FF0000000000000);
+    store64(t + 88, 0x401F147AE147AE14);
+    store64(t + 96, 0x403075C28F5C28F6);
+    store64(t + 104, 0x3FFDC28F5C28F5C3);
+    store64(t + 112, 0x3FE851EB851EB852);
+    store64(t + 120, 0x3FDF5C28F5C28F5C);
+    store64(t + 128, 0x3FD851EB851EB852);
+    store64(t + 136, 0x3FD70A3D70A3D70A);
+    store64(t + 144, 0x3FD8F5C28F5C28F6);
+    store64(t + 152, 0x3FDCCCCCCCCCCCCD);
+    store64(t + 160, 0x3FE199999999999A);
+    store64(t + 168, 0x3FE51EB851EB851F);
+    store64(t + 176, 0x3FE8A3D70A3D70A4);
+    store64(t + 184, 0x3FECCCCCCCCCCCCD);
+    store64(t + 192, 0x3FF0CCCCCCCCCCCD);
+    store64(t + 200, 0x3FF2E147AE147AE1);
+    store64(t + 208, 0x3FF51EB851EB851F);
+    store64(t + 216, 0x3FF7851EB851EB85);
+    store64(t + 224, 0x3FFA3D70A3D70A3D);
+    store64(t + 232, 0x3FFDC28F5C28F5C3);
+    store64(t + 240, 0x40011EB851EB851F);
+    store64(t + 248, 0x400428F5C28F5C29);
+    store64(t + 256, 0x400828F5C28F5C29);
+    store64(t + 264, 0x400E28F5C28F5C29);
+    store64(t + 272, 0x401428F5C28F5C29);
+    store64(t + 280, 0x402EC7AE147AE148);
+    store64(t + 288, 0x40447D70A3D70A3D);
+    store64(t + 296, 0x405235C28F5C28F6);
+    store64(t + 304, 0x405400A3D70A3D71);
+    store64(t + 312, 0x4046ACCCCCCCCCCD);
+    store64(t + 320, 0x403370A3D70A3D71);
+    store64(t + 328, 0x4021FAE147AE147B);
+    store64(t + 336, 0x4012CCCCCCCCCCCD);
+    store64(t + 344, 0x4009C28F5C28F5C3);
+    store64(t + 352, 0x40068F5C28F5C28F);
+    store64(t + 360, 0x400DD70A3D70A3D7);
+    store64(t + 368, 0x401D8F5C28F5C28F);
+    store64(t + 376, 0x4052B8F5C28F5C29);
+    store64(t + 384, 0x403570A3D70A3D71);
+    store64(t + 392, 0x40276147AE147AE1);
+    store64(t + 400, 0x4012E147AE147AE1);
+    store64(t + 408, 0x40068F5C28F5C28F);
+    store64(t + 416, 0x4000000000000000);
+    store64(t + 424, 0x3FF851EB851EB852);
+    store64(t + 432, 0x3FF3851EB851EB85);
+    store64(t + 440, 0x3FF199999999999A);
+    store64(t + 448, 0x3FF170A3D70A3D71);
+    store64(t + 456, 0x3FF11EB851EB851F);
+    store64(t + 464, 0x3FEFAE147AE147AE);
+    store64(t + 472, 0x3FEC28F5C28F5C29);
+    store64(t + 480, 0x3FE851EB851EB852);
+    store64(t + 488, 0x3FE5C28F5C28F5C3);
+    store64(t + 496, 0x3FE428F5C28F5C29);
+    store64(t + 504, 0x3FE2E147AE147AE1);
+    store64(t + 512, 0x3FE199999999999A);
+    store64(t + 520, 0x3FE0A3D70A3D70A4);
+    store64(t + 528, 0x3FDF5C28F5C28F5C);
+    store64(t + 536, 0x3FDD70A3D70A3D71);
+    store64(t + 544, 0x3FDC28F5C28F5C29);
+    store64(t + 552, 0x3FDAE147AE147AE1);
+    store64(t + 560, 0x3FD8F5C28F5C28F6);
+    store64(t + 568, 0x3FD7AE147AE147AE);
+    store64(t + 576, 0x3FD6666666666666);
+    store64(t + 584, 0x3FD51EB851EB851F);
+    store64(t + 592, 0x3FD3D70A3D70A3D7);
+    store64(t + 600, 0x3FD3333333333333);
+    store64(t + 608, 0x3FD28F5C28F5C28F);
+    store64(t + 616, 0x3FD1EB851EB851EC);
+    store64(t + 624, 0x3FD147AE147AE148);
+    store64(t + 632, 0x3FD0A3D70A3D70A4);
+    store64(t + 640, 0x3FD0000000000000);
+    _illum_f11_p = t;
+    return t;
+}
+
+# ── Observer ────────
+var OBS_CIE1931 = 0;
+var OBS_CIE1964 = 1;
+var OBS_CIE2015_2DEG = 2;
+var OBS_CIE2015_10DEG = 3;
+
+# Color-matching-function table pointer for an observer.
+#must_use
+fn observer_cmf(obs) {
+    if (obs == OBS_CIE1964) { return _cie1964(); }
+    if (obs == OBS_CIE2015_2DEG) { return _cie2015_2(); }
+    if (obs == OBS_CIE2015_10DEG) { return _cie2015_10(); }
+    return _cie1931();
+}
+
+# Public CIE 1931 table pointer + fixed length (81 entries, 380-780nm @ 5nm).
+#must_use
+fn cie_1931_table() { return _cie1931(); }
+#must_use
+fn cie_1964_table() { return _cie1964(); }
+#must_use
+fn cie_2015_2deg_table() { return _cie2015_2(); }
+#must_use
+fn cie_2015_10deg_table() { return _cie2015_10(); }
+#must_use
+fn cie_cmf_len() { return 81; }
+
+# ── XYZ tristimulus ────────
+
+#derive(accessors)
+struct Xyz { x; y; z; }
+
+#must_use
+fn xyz_new(x, y, z) {
+    var v = alloc(sizeof(Xyz));
+    Xyz_set_x(v, x);
+    Xyz_set_y(v, y);
+    Xyz_set_z(v, z);
+    return v;
+}
+
+#must_use
+fn xyz_d65_white() { return xyz_new(_cie_r(95047, 100000), F64_ONE, _cie_r(108883, 100000)); }
+#must_use
+fn xyz_d50_white() { return xyz_new(_cie_r(96422, 100000), F64_ONE, _cie_r(82521, 100000)); }
+
+# CIE xyY chromaticity (x, y, Y).
+#derive(accessors)
+struct XyY { x; y; big_y; }
+
+fn _xyy_new(x, y, big_y) {
+    var v = alloc(sizeof(XyY));
+    XyY_set_x(v, x);
+    XyY_set_y(v, y);
+    XyY_set_big_y(v, big_y);
+    return v;
+}
+
+#must_use
+fn xyz_to_xyy(xyz) {
+    var sum = f64_add(f64_add(Xyz_x(xyz), Xyz_y(xyz)), Xyz_z(xyz));
+    if (f64_lt(sum, _cie_eps15()) == 1) {
+        return _xyy_new(f64_from(0), f64_from(0), f64_from(0));
+    }
+    return _xyy_new(f64_div(Xyz_x(xyz), sum), f64_div(Xyz_y(xyz), sum), Xyz_y(xyz));
+}
+
+#must_use
+fn xyz_from_xyy(cx, cy, big_y) {
+    if (f64_lt(cy, _cie_eps15()) == 1) {
+        return xyz_new(f64_from(0), f64_from(0), f64_from(0));
+    }
+    return xyz_new(
+    f64_mul(f64_div(cx, cy), big_y),
+    big_y,
+    f64_mul(f64_div(f64_sub(f64_sub(F64_ONE, cx), cy), cy), big_y));
+}
+
+# Linear sRGB (D65) from XYZ.
+#must_use
+fn xyz_to_linear_srgb(xyz) {
+    var x = Xyz_x(xyz);
+    var y = Xyz_y(xyz);
+    var z = Xyz_z(xyz);
+    var r = f64_sub(f64_sub(
+    f64_mul(_cie_r(32404542, 10000000), x),
+    f64_mul(_cie_r(15371385, 10000000), y)),
+    f64_mul(_cie_r(4985314, 10000000), z));
+    var g = f64_add(f64_add(
+    f64_mul(f64_neg(_cie_r(9692660, 10000000)), x),
+    f64_mul(_cie_r(18760108, 10000000), y)),
+    f64_mul(_cie_r(415560, 10000000), z));
+    var b = f64_add(f64_sub(
+    f64_mul(_cie_r(556434, 10000000), x),
+    f64_mul(_cie_r(2040259, 10000000), y)),
+    f64_mul(_cie_r(10572252, 10000000), z));
+    return rgb_new(r, g, b);
+}
+
+# Gamma-corrected, clamped sRGB from XYZ.
+#must_use
+fn xyz_to_srgb(xyz) {
+    var lin = xyz_to_linear_srgb(xyz);
+    return rgb_clamp(rgb_new(
+    linear_to_srgb_gamma(Rgb_r(lin)),
+    linear_to_srgb_gamma(Rgb_g(lin)),
+    linear_to_srgb_gamma(Rgb_b(lin))));
+}
+
+# XYZ from linear sRGB (inverse matrix).
+#must_use
+fn linear_srgb_to_xyz(rgb) {
+    var r = Rgb_r(rgb);
+    var g = Rgb_g(rgb);
+    var b = Rgb_b(rgb);
+    return xyz_new(
+    f64_add(f64_add(f64_mul(_cie_r(4124564, 10000000), r),
+    f64_mul(_cie_r(3575761, 10000000), g)), f64_mul(_cie_r(1804375, 10000000), b)),
+    f64_add(f64_add(f64_mul(_cie_r(2126729, 10000000), r),
+    f64_mul(_cie_r(7151522, 10000000), g)), f64_mul(_cie_r(721750, 10000000), b)),
+    f64_add(f64_add(f64_mul(_cie_r(193339, 10000000), r),
+    f64_mul(_cie_r(1191920, 10000000), g)), f64_mul(_cie_r(9503041, 10000000), b)));
+}
+
+# ── sRGB gamma ────────
+
+# linear -> sRGB gamma.
+#must_use
+fn linear_to_srgb_gamma(c) {
+    if (f64_le(c, _cie_r(31308, 10000000)) == 1) {
+        return f64_mul(_cie_r(1292, 100), c);
+    }
+    return f64_sub(
+    f64_mul(_cie_r(1055, 1000), ganita_f64_pow(c, f64_div(F64_ONE, _cie_r(24, 10)))),
+    _cie_r(55, 1000));
+}
+
+# sRGB -> linear.
+#must_use
+fn srgb_gamma_to_linear(c) {
+    if (f64_le(c, _cie_r(4045, 100000)) == 1) {
+        return f64_div(c, _cie_r(1292, 100));
+    }
+    return ganita_f64_pow(f64_div(f64_add(c, _cie_r(55, 1000)), _cie_r(1055, 1000)), _cie_r(24, 10));
+}
+
+# ── CCT ────────
+
+# Correlated color temperature (K) from CIE 1931 xy (McCamy's approximation).
+#must_use
+fn cct_from_xy(cx, cy) {
+    var n = f64_div(f64_sub(cx, _cie_r(3320, 10000)), f64_sub(_cie_r(1858, 10000), cy));
+    return f64_add(f64_add(f64_add(
+    f64_mul(f64_mul(f64_mul(f64_from(449), n), n), n),
+    f64_mul(f64_mul(f64_from(3525), n), n)),
+    f64_mul(_cie_r(68233, 10), n)),
+    _cie_r(552033, 100));
+}
+
+# ── CMF interpolation ────────
+
+# CIE 1931 CMF value at an arbitrary wavelength (linear interp; 0 outside range).
+#must_use
+fn cie_cmf_at(wavelength_nm) {
+    var in_range = 0;
+    if (f64_ge(wavelength_nm, f64_from(380)) == 1) {
+        if (f64_le(wavelength_nm, f64_from(780)) == 1) {
+            in_range = 1;
+        }
+    }
+    if (in_range == 0) {
+        return xyz_new(f64_from(0), f64_from(0), f64_from(0));
+    }
+    var t = _cie1931();
+    var idx_f = f64_div(f64_sub(wavelength_nm, f64_from(380)), f64_from(5));
+    var idx = f64_to(idx_f);
+    if (idx >= 80) {
+        return xyz_new(_cmf_x(t, 80), _cmf_y(t, 80), _cmf_z(t, 80));
+    }
+    var frac = f64_sub(idx_f, f64_from(idx));
+    return xyz_new(
+    f64_add(_cmf_x(t, idx), f64_mul(frac, f64_sub(_cmf_x(t, idx + 1), _cmf_x(t, idx)))),
+    f64_add(_cmf_y(t, idx), f64_mul(frac, f64_sub(_cmf_y(t, idx + 1), _cmf_y(t, idx)))),
+    f64_add(_cmf_z(t, idx), f64_mul(frac, f64_sub(_cmf_z(t, idx + 1), _cmf_z(t, idx)))));
+}
+
+# ── Spectral power distribution ────────
+
+# start_nm, step_nm, values (pointer to f64 array), len (count).
+#derive(accessors)
+struct Spd { start_nm; step_nm; values; len; }
+
+#must_use
+fn spd_new(start_nm, step_nm, values, len) {
+    var s = alloc(sizeof(Spd));
+    Spd_set_start_nm(s, start_nm);
+    Spd_set_step_nm(s, step_nm);
+    Spd_set_values(s, values);
+    Spd_set_len(s, len);
+    return s;
+}
+
+# Equivalent to spd_new in Cyrius (no Cow distinction).
+#must_use
+fn spd_from_static(start_nm, step_nm, values, len) {
+    return spd_new(start_nm, step_nm, values, len);
+}
+
+#must_use
+fn spd_end_nm(s) {
+    return f64_add(Spd_start_nm(s), f64_mul(Spd_step_nm(s), f64_from(Spd_len(s) - 1)));
+}
+
+# Interpolate the SPD at a wavelength (0 outside range).
+#must_use
+fn spd_at(s, wavelength_nm) {
+    if (f64_lt(wavelength_nm, Spd_start_nm(s)) == 1) { return f64_from(0); }
+    if (f64_gt(wavelength_nm, spd_end_nm(s)) == 1) { return f64_from(0); }
+    var idx_f = f64_div(f64_sub(wavelength_nm, Spd_start_nm(s)), Spd_step_nm(s));
+    var idx = f64_to(idx_f);
+    var vals = Spd_values(s);
+    var len = Spd_len(s);
+    if (idx >= len - 1) {
+        return _spd_val(vals, len - 1);
+    }
+    var frac = f64_sub(idx_f, f64_from(idx));
+    return f64_add(_spd_val(vals, idx),
+    f64_mul(frac, f64_sub(_spd_val(vals, idx + 1), _spd_val(vals, idx))));
+}
+
+# Integrate an SPD against a CMF table (81 rows, 5nm), scaled by the 5nm step.
+fn _spd_integrate(s, cmf) {
+    var x = f64_from(0);
+    var y = f64_from(0);
+    var z = f64_from(0);
+    var aligned = 0;
+    if (f64_lt(f64_abs(f64_sub(Spd_start_nm(s), f64_from(380))), _cie_eps10()) == 1) {
+        if (f64_lt(f64_abs(f64_sub(Spd_step_nm(s), f64_from(5))), _cie_eps10()) == 1) {
+            aligned = 1;
+        }
+    }
+    var vals = Spd_values(s);
+    var len = Spd_len(s);
+    var i = 0;
+    while (i < 81) {
+        var power = f64_from(0);
+        if (aligned == 1) {
+            if (i < len) {
+                power = _spd_val(vals, i);
+            } else {
+                power = spd_at(s, f64_add(f64_from(380), f64_mul(f64_from(i), f64_from(5))));
+            }
+        } else {
+            power = spd_at(s, f64_add(f64_from(380), f64_mul(f64_from(i), f64_from(5))));
+        }
+        x = f64_add(x, f64_mul(power, _cmf_x(cmf, i)));
+        y = f64_add(y, f64_mul(power, _cmf_y(cmf, i)));
+        z = f64_add(z, f64_mul(power, _cmf_z(cmf, i)));
+        i = i + 1;
+    }
+    return xyz_new(f64_mul(x, f64_from(5)), f64_mul(y, f64_from(5)), f64_mul(z, f64_from(5)));
+}
+
+#must_use
+fn spd_to_xyz(s) { return _spd_integrate(s, _cie1931()); }
+
+#must_use
+fn spd_to_xyz_observer(s, observer) { return _spd_integrate(s, observer_cmf(observer)); }
+
+#must_use
+fn spd_to_srgb(s) {
+    var xyz = spd_to_xyz(s);
+    var norm = F64_ONE;
+    if (f64_gt(Xyz_y(xyz), _cie_eps15()) == 1) {
+        norm = f64_div(F64_ONE, Xyz_y(xyz));
+    }
+    return xyz_to_srgb(xyz_new(
+    f64_mul(Xyz_x(xyz), norm), f64_mul(Xyz_y(xyz), norm), f64_mul(Xyz_z(xyz), norm)));
+}
+
+# Blackbody SPD at temperature_k, 5nm from 380-780nm (81 samples).
+#must_use
+fn spd_blackbody(temperature_k) {
+    var values = alloc(648);
+    var i = 0;
+    while (i < 81) {
+        var wl_m = f64_mul(f64_from(380 + i * 5), _cie_r(1, 1000000000));
+        store64(values + i * 8, planck_radiance(wl_m, temperature_k));
+        i = i + 1;
+    }
+    return spd_new(f64_from(380), f64_from(5), values, 81);
+}
+
+# ── Standard illuminants ────────
+
+#must_use
+fn illuminant_d65() { return spd_from_static(f64_from(380), f64_from(5), _illum_d65_data(), 81); }
+#must_use
+fn illuminant_d50() { return spd_from_static(f64_from(380), f64_from(5), _illum_d50_data(), 81); }
+#must_use
+fn illuminant_f2() { return spd_from_static(f64_from(380), f64_from(5), _illum_f2_data(), 81); }
+#must_use
+fn illuminant_f11() { return spd_from_static(f64_from(380), f64_from(5), _illum_f11_data(), 81); }
+
+# Illuminant A (incandescent ~2856K): Planck normalized to 100 at 560nm.
+#must_use
+fn illuminant_a() {
+    var values = alloc(648);
+    var norm = planck_radiance(_cie_r(56, 100000000), f64_from(2856));
+    var i = 0;
+    while (i < 81) {
+        var wl_m = f64_mul(f64_from(380 + i * 5), _cie_r(1, 1000000000));
+        store64(values + i * 8,
+        f64_div(f64_mul(f64_from(100), planck_radiance(wl_m, f64_from(2856))), norm));
+        i = i + 1;
+    }
+    return spd_new(f64_from(380), f64_from(5), values, 81);
+}
+
+# ── CRI ────────
+
+# |test_norm - ref_norm| for one spectral band (5nm steps, CIE 1931 y weight).
+fn _cri_band_delta(test_spd, ref_spd, test_y_total, ref_y_total, start, end) {
+    var t = _cie1931();
+    var test_y = f64_from(0);
+    var ref_y = f64_from(0);
+    var wl = start;
+    while (f64_le(wl, end) == 1) {
+        var idx = f64_to(f64_div(f64_sub(wl, f64_from(380)), f64_from(5)));
+        var cy = f64_from(0);
+        if (idx < 81) {
+            cy = _cmf_y(t, idx);
+        }
+        test_y = f64_add(test_y, f64_mul(spd_at(test_spd, wl), cy));
+        ref_y = f64_add(ref_y, f64_mul(spd_at(ref_spd, wl), cy));
+        wl = f64_add(wl, f64_from(5));
+    }
+    var test_norm = f64_from(0);
+    if (f64_gt(test_y_total, _cie_eps15()) == 1) {
+        test_norm = f64_div(test_y, test_y_total);
+    }
+    var ref_norm = f64_from(0);
+    if (f64_gt(ref_y_total, _cie_eps15()) == 1) {
+        ref_norm = f64_div(ref_y, ref_y_total);
+    }
+    return f64_abs(f64_sub(test_norm, ref_norm));
+}
+
+# Color Rendering Index Ra (0-100), simplified chromaticity-shift method.
+#must_use
+fn color_rendering_index(test_spd) {
+    var test_xyz = spd_to_xyz(test_spd);
+    var xyy = xyz_to_xyy(test_xyz);
+    var test_cct = cct_from_xy(XyY_x(xyy), XyY_y(xyy));
+    var ref_spd = illuminant_d65();
+    if (f64_lt(test_cct, f64_from(5000)) == 1) {
+        ref_spd = spd_blackbody(test_cct);
+    }
+    var ref_xyz = spd_to_xyz(ref_spd);
+    var ty = Xyz_y(test_xyz);
+    var ry = Xyz_y(ref_xyz);
+    var s = _cri_band_delta(test_spd, ref_spd, ty, ry, f64_from(400), f64_from(450));
+    s = f64_add(s, _cri_band_delta(test_spd, ref_spd, ty, ry, f64_from(450), f64_from(490)));
+    s = f64_add(s, _cri_band_delta(test_spd, ref_spd, ty, ry, f64_from(490), f64_from(520)));
+    s = f64_add(s, _cri_band_delta(test_spd, ref_spd, ty, ry, f64_from(520), f64_from(560)));
+    s = f64_add(s, _cri_band_delta(test_spd, ref_spd, ty, ry, f64_from(560), f64_from(600)));
+    s = f64_add(s, _cri_band_delta(test_spd, ref_spd, ty, ry, f64_from(600), f64_from(640)));
+    s = f64_add(s, _cri_band_delta(test_spd, ref_spd, ty, ry, f64_from(640), f64_from(690)));
+    s = f64_add(s, _cri_band_delta(test_spd, ref_spd, ty, ry, f64_from(690), f64_from(750)));
+    var delta_e_avg = f64_div(s, f64_from(8));
+    return f64_clamp(
+    f64_sub(f64_from(100), f64_mul(f64_mul(_cie_r(46, 10), delta_e_avg), f64_from(100))),
+    f64_from(0), f64_from(100));
+}
