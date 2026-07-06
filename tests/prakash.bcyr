@@ -1,0 +1,200 @@
+# prakash benchmarks — hot-path functions across the ported optics modules.
+# Run: cyrius bench tests/prakash.bcyr  (or ./scripts/bench-history.sh).
+# Mirrors the intent of the Rust criterion benches for the Cyrius port.
+
+include "src/error.cyr"
+include "src/spectral_core.cyr"
+include "src/ray_core.cyr"
+include "src/ray_fresnel.cyr"
+include "src/ray_trace.cyr"
+include "src/ray_dispersion.cyr"
+include "src/ray_fiber.cyr"
+include "src/ray_system.cyr"
+include "src/spectral_cie.cyr"
+include "src/wave_core.cyr"
+include "src/wave_airy.cyr"
+include "src/wave_diffraction.cyr"
+include "src/wave_zernike.cyr"
+include "src/wave_pattern.cyr"
+include "src/pbr_core.cyr"
+include "src/pbr_advanced.cyr"
+include "src/lens.cyr"
+include "src/atmosphere.cyr"
+include "src/bridge.cyr"
+include "src/serialize.cyr"
+
+fn _bf(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+
+fn bench(name, fp, n) {
+    var b = bench_new(name);
+    bench_run(b, fp, n);
+    bench_report(b);
+    return 0;
+}
+
+# ── Pre-allocated args / data (set in main) ────────
+var _err = 0;
+var _out3 = 0;
+var _bk7 = 0;
+var _d65 = 0;
+var _rgb = 0;
+var _aperture = 0;
+var _wl_nm = 0;
+var _wl_m = 0;
+var _diam = 0;
+var _ang = 0;
+var _i0 = 0;
+var _n1 = 0;
+var _n2 = 0;
+var _nc = 0;
+var _ns = 0;
+var _thick = 0;
+var _f0 = 0;
+var _ct = 0;
+var _ndh = 0;
+var _rough = 0;
+var _hdv = 0;
+var _ndv = 0;
+var _ndl = 0;
+var _g = 0;
+var _film_th = 0;
+var _freq = 0;
+var _cutoff = 0;
+var _sn = 0;
+var _sf = 0;
+var _sp = 0;
+var _temp = 0;
+var _sunz = 0;
+var _scat = 0;
+var _rho = 0;
+var _theta = 0;
+var _na = 0;
+var _x = 0;
+var _slit = 0;
+
+# ── Ray ────────
+fn b_fresnel_unpolarized() { var r = fresnel_unpolarized(_n1, _n2, _ang, _err); return 0; }
+fn b_fiber_na() { var r = fiber_na(_n2, _n1, _err); return 0; }
+fn b_v_number() { var r = v_number(_diam, _na, _wl_m); return 0; }
+fn b_sellmeier_n_at() { var r = sellmeier_n_at(_bk7, _rho); return 0; }
+
+# ── Spectral ────────
+fn b_wavelength_to_rgb() { var r = wavelength_to_rgb(_wl_nm, _err); return 0; }
+fn b_planck_radiance() { var r = planck_radiance(_wl_m, _temp); return 0; }
+fn b_spd_at() { var r = spd_at(_d65, _wl_nm); return 0; }
+
+# ── Wave ────────
+fn b_single_slit() { var r = single_slit_intensity(_wl_m, _slit, _ang, _i0); return 0; }
+fn b_malus_law() { var r = malus_law(_i0, _theta); return 0; }
+fn b_bessel_j1() { var r = bessel_j1(_x); return 0; }
+fn b_airy_pattern() { var r = airy_pattern(_wl_m, _diam, _ang, _i0); return 0; }
+fn b_fresnel_integral_c() { var r = fresnel_integral_c(_x); return 0; }
+fn b_coating_reflectance() { var r = coating_reflectance(_wl_nm, _n1, _nc, _ns, _thick); return 0; }
+fn b_zernike_poly() { var r = zernike_poly(4, 0, _rho, _theta); return 0; }
+fn b_diffraction_2d() { var r = diffraction_pattern_2d(_aperture, 8, 8); return 0; }
+
+# ── PBR ────────
+fn b_fresnel_schlick() { var r = pbr_fresnel_schlick(_f0, _ct); return 0; }
+fn b_distribution_ggx() { var r = pbr_distribution_ggx(_ndh, _rough); return 0; }
+fn b_cook_torrance() { var r = pbr_cook_torrance(_ndh, _hdv, _ndv, _ndl, _rough, _f0); return 0; }
+fn b_iridescence() { var r = pbr_iridescence_fresnel(_n1, _nc, _ns, _film_th, _wl_nm, _ct); return 0; }
+fn b_henyey_greenstein() { var r = pbr_henyey_greenstein(_ct, _g); return 0; }
+
+# ── Lens ────────
+fn b_mtf() { var r = lens_mtf_diffraction_limited(_freq, _cutoff); return 0; }
+fn b_seidel() { var r = lens_seidel_coefficients(_sn, _sf, _sp, _sp); return 0; }
+
+# ── Atmosphere ────────
+fn b_rayleigh_cross() { var r = atm_rayleigh_cross_section(_wl_m); return 0; }
+fn b_mie_phase() { var r = atm_mie_phase_cornette_shanks(_ct, _g); return 0; }
+fn b_sky_color() { atm_sky_color_rgb(_sunz, _scat, _out3); return 0; }
+
+# ── Bridge / serialize ────────
+fn b_stellar_rgb() { br_stellar_temperature_to_rgb(_temp, _out3); return 0; }
+fn b_rgb_to_json() { var r = rgb_to_json(_rgb); return 0; }
+
+fn main() {
+    alloc_init();
+    _err = alloc(8);
+    _out3 = alloc(24);
+    _bk7 = sellmeier_bk7();
+    _d65 = illuminant_d65();
+    _rgb = rgb_new(_bf(1, 10), _bf(2, 10), _bf(3, 10));
+    _aperture = alloc(64 * 8);
+    for (var i = 0; i < 64; i = i + 1) {
+        store64(_aperture + i * 8, F64_ONE);
+    }
+    _wl_nm = f64_from(550);
+    _wl_m = _bf(55, 100000000);
+    _diam = _bf(1, 100);
+    _ang = _bf(1, 1000);
+    _i0 = F64_ONE;
+    _n1 = F64_ONE;
+    _n2 = _bf(15, 10);
+    _nc = _bf(138, 100);
+    _ns = _bf(152, 100);
+    _thick = f64_from(100);
+    _f0 = _bf(4, 100);
+    _ct = _bf(7, 10);
+    _ndh = _bf(9, 10);
+    _rough = _bf(3, 10);
+    _hdv = _bf(85, 100);
+    _ndv = _bf(8, 10);
+    _ndl = _bf(7, 10);
+    _g = _bf(76, 100);
+    _film_th = f64_from(300);
+    _freq = f64_from(500);
+    _cutoff = f64_from(649);
+    _sn = _bf(15, 10);
+    _sf = f64_from(100);
+    _sp = f64_neg(F64_ONE);
+    _temp = f64_from(5778);
+    _sunz = _bf(3, 10);
+    _scat = F64_PI_2;
+    _rho = _bf(7, 10);
+    _theta = _bf(5, 10);
+    _na = _bf(22, 100);
+    _x = _bf(15, 10);
+    _slit = _bf(1, 1000);
+
+    # ── ray ──
+    bench("ray/fresnel_unpolarized", &b_fresnel_unpolarized, 500000);
+    bench("ray/fiber_na", &b_fiber_na, 500000);
+    bench("ray/v_number", &b_v_number, 500000);
+    bench("ray/sellmeier_n_at", &b_sellmeier_n_at, 200000);
+    # ── spectral ──
+    bench("spectral/wavelength_to_rgb", &b_wavelength_to_rgb, 200000);
+    bench("spectral/planck_radiance", &b_planck_radiance, 200000);
+    bench("spectral/spd_at", &b_spd_at, 200000);
+    # ── wave ──
+    bench("wave/single_slit_intensity", &b_single_slit, 200000);
+    bench("wave/malus_law", &b_malus_law, 500000);
+    bench("wave/bessel_j1", &b_bessel_j1, 500000);
+    bench("wave/airy_pattern", &b_airy_pattern, 200000);
+    bench("wave/fresnel_integral_c", &b_fresnel_integral_c, 500000);
+    bench("wave/coating_reflectance", &b_coating_reflectance, 200000);
+    bench("wave/zernike_poly", &b_zernike_poly, 200000);
+    bench("wave/diffraction_pattern_2d_8x8", &b_diffraction_2d, 2000);
+    # ── pbr ──
+    bench("pbr/fresnel_schlick", &b_fresnel_schlick, 500000);
+    bench("pbr/distribution_ggx", &b_distribution_ggx, 500000);
+    bench("pbr/cook_torrance", &b_cook_torrance, 200000);
+    bench("pbr/iridescence_fresnel", &b_iridescence, 100000);
+    bench("pbr/henyey_greenstein", &b_henyey_greenstein, 500000);
+    # ── lens ──
+    bench("lens/mtf_diffraction_limited", &b_mtf, 200000);
+    bench("lens/seidel_coefficients", &b_seidel, 200000);
+    # ── atmosphere ──
+    bench("atmosphere/rayleigh_cross_section", &b_rayleigh_cross, 500000);
+    bench("atmosphere/mie_phase_cornette_shanks", &b_mie_phase, 500000);
+    bench("atmosphere/sky_color_rgb", &b_sky_color, 20000);
+    # ── bridge / serialize ──
+    bench("bridge/stellar_temperature_to_rgb", &b_stellar_rgb, 100000);
+    bench("serialize/rgb_to_json", &b_rgb_to_json, 50000);
+
+    println("=== done ===");
+    return 0;
+}
+
+var r = main();
+syscall(60, r);
