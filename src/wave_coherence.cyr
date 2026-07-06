@@ -1,0 +1,35 @@
+# wave_coherence.cyr -- temporal and spatial coherence
+# Usage: include "lib/wave_coherence.cyr"
+#
+# Ported from the Rust `wave/coherence.rs`. Self-contained (no prakash deps).
+
+# Temporal coherence length: l_c = lambda^2 / delta_lambda.
+#must_use
+fn coherence_length(center_wavelength, bandwidth) {
+    return f64_div(f64_mul(center_wavelength, center_wavelength), bandwidth);
+}
+
+# Temporal coherence time (seconds): tau_c = l_c / c.
+#must_use
+fn coherence_time(center_wavelength_m, bandwidth_m) {
+    return f64_div(coherence_length(center_wavelength_m, bandwidth_m), f64_from(299792458));
+}
+
+# Spatial coherence angle (van Cittert-Zernike): theta_c = lambda / d.
+#must_use
+fn spatial_coherence_angle(wavelength, source_diameter) {
+    return f64_div(wavelength, source_diameter);
+}
+
+# Spatial coherence area at distance R: A_c = (lambda * R / d)^2.
+#must_use
+fn coherence_area(wavelength, distance, source_diameter) {
+    var l = f64_div(f64_mul(wavelength, distance), source_diameter);
+    return f64_mul(l, l);
+}
+
+# Number of coherence lengths in a path difference (visibility metric).
+#must_use
+fn coherence_ratio(path_difference, center_wavelength, bandwidth) {
+    return f64_div(path_difference, coherence_length(center_wavelength, bandwidth));
+}
