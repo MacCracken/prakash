@@ -4,8 +4,9 @@
 
 prakash is rewritten from Rust to **Cyrius**, the AGNOS systems language. Every
 optics module — ray, spectral, wave, lens, PBR, atmosphere, bridge, AI, plus
-error/logging — was translated line-by-line from the archived Rust source (now
-in pre-2.0 git tags) into hand-verified Cyrius. **25 science modules, 5251 test
+error/logging — was translated line-by-line from the original Rust source
+(retained in-tree under `rust-old/` as the translation reference) into
+hand-verified Cyrius. **25 science modules, 5251 test
 assertions across 26 suites, and 27 benchmarks are green.** The math is
 bit-faithful to the Rust original: f64 constants are encoded as exact ratios or
 IEEE-754 hex bit patterns, `powi` replicates the compiler's square-and-multiply,
@@ -60,7 +61,9 @@ self-contained Cyrius bundle. soorat, kiran, and ranga remain Rust for now; the
 
 ### Removed
 - **Rust build system** — `Cargo.toml`, `criterion` benches, `cargo`-based CI, and
-  the crates.io publish flow. The Rust source is preserved in pre-2.0 git tags.
+  the crates.io publish flow. The Rust source itself is retained in-tree under
+  `rust-old/` as a translation reference (to be removed a couple releases out) and
+  is also preserved in pre-2.0 git tags.
 - **bijli-backend feature** — already dropped in 1.2.0; the port keeps optics math
   self-contained (the `bridge` module exposes primitive-value cross-crate hooks).
 

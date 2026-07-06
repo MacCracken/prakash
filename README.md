@@ -1,102 +1,108 @@
 # Prakash
 
-> **Prakash** (Sanskrit: light, illumination) -- optics and light simulation for AGNOS
+> **Prakash** (Sanskrit: प्रकाश — light, illumination) — optics and light simulation for AGNOS
 
-Physics of light: ray optics, wave optics, spectral math, lens geometry, atmospheric scattering, and physically-based rendering primitives. Built on [hisab](https://crates.io/crates/hisab) for math foundations.
+Physics of light: ray optics, wave optics, spectral math, lens geometry, atmospheric scattering, and physically-based rendering primitives. Written in [Cyrius](https://github.com/MacCracken/cyrius), ported from Rust (2.0.0). Math foundations (Complex + FFT) come from [hisab](https://github.com/MacCracken/hisab).
 
-## Quick Start
-
-```rust
-use prakash::ray::{Medium, snell, fresnel_normal, brewster_angle, beer_lambert};
-use prakash::spectral::{wavelength_to_rgb, color_temperature_to_rgb, wien_peak};
-use prakash::lens::{thin_lens_image_distance, magnification};
-use prakash::wave::{malus_law, single_slit_intensity};
-
-// Snell's law: light entering glass from air at 30 degrees
-let refracted = snell(Medium::AIR.n, Medium::GLASS.n, 0.5236).unwrap();
-
-// How much light reflects off glass at normal incidence?
-let reflectance = fresnel_normal(1.0, 1.52); // ~4%
-
-// What color is 550nm light?
-let green = wavelength_to_rgb(550.0).unwrap();
-
-// What color is a 2700K warm bulb?
-let warm = color_temperature_to_rgb(2700.0);
-
-// Where does a 50mm lens focus an object at 2 meters?
-let image_dist = thin_lens_image_distance(50.0, 2000.0).unwrap();
-let mag = magnification(2000.0, image_dist);
-
-// Malus's law: light through a polarizer at 45 degrees
-let transmitted = malus_law(1.0, std::f64::consts::FRAC_PI_4); // 50%
-```
+Consumed by [soorat](https://github.com/MacCracken/soorat) (PBR shading), [kiran](https://github.com/MacCracken/kiran) (lighting), and [ranga](https://github.com/MacCracken/ranga) (lens effects) — still Rust for now; the `dist/prakash*.cyr` bundle is the interop surface until they port.
 
 ## Modules
 
-| Module | Description |
-|--------|-------------|
-| `ray` | Geometric optics: Snell's law, Fresnel equations (real and complex refractive index), reflection (2D/3D), critical angle, Brewster angle, Beer-Lambert, total internal reflection. Complex Fresnel for metals/absorbing media. 12 built-in materials. Sequential ray tracer with polarization tracking, optical system builder, paraxial analysis, cardinal point finder. |
-| `wave` | Wave optics: interference, single/double slit diffraction, gratings, thin film reflectance, Malus's law, polarization (Jones/Stokes/Mueller). Zernike polynomials for wavefront decomposition. 2D Fraunhofer diffraction (FFT), multi-source interference, PSF from wavefront error. Gaussian beams and ABCD matrices (via bijli). |
-| `spectral` | Wavelength to RGB conversion, Planck blackbody radiance, Wien displacement law, color temperature to RGB, photon energy (J and eV), wavelength/frequency conversion. CIE 1931 2-degree observer, XYZ tristimulus, SPD integration, standard illuminants (A/D50/D65/E/F2/F11), color rendering index (CRI). Physical constants (c, h, k_B). |
-| `lens` | Thin lens equation, magnification, lensmaker's equation, combined focal length, depth of field, f-number/NA, mirror focal length, lens classification. |
-| `pbr` | Physically-based rendering: Fresnel-Schlick, GGX/Beckmann NDF, geometry Smith, Cook-Torrance specular BRDF, Lambert diffuse, IOR-to-F0 conversion. Full metallic-roughness pipeline. |
-| `atmosphere` | Atmospheric optics: Rayleigh and Mie scattering, sky color computation, air mass, optical depth. |
-| `error` | Unified error types for all modules. |
+| Module | Files | Description |
+|--------|-------|-------------|
+| **ray** | ray_core, ray_fresnel, ray_trace, ray_simulate, ray_system, ray_dispersion, ray_fiber | Geometric optics: Snell, Fresnel (real + complex refractive index), reflection (2D/3D), critical/Brewster angle, Beer-Lambert, TIR, 12 materials. Dispersion (Sellmeier/Cauchy/Herzberger/Schott/Conrady), chromatic aberration, fiber optics. Sequential + recursive ray tracer with polarization, ray fans, spot diagrams, OPD, paraxial system builder, cardinal points |
+| **spectral** | spectral_core, spectral_cie, spectral_photometry | Wavelength↔RGB, Planck (numerically stable), Wien, color-temperature→RGB, photon energy. CIE 1931/1964/2015 observers, XYZ, SPD integration, illuminants (A/D50/D65/E/F2/F11), CRI, photometry (V(λ), luminous flux/efficacy) |
+| **wave** | wave_core, wave_polarization, wave_coherence, wave_airy, wave_fabry_perot, wave_diffraction, wave_zernike, wave_pattern | Interference, single/double-slit + grating diffraction, thin-film reflectance, Malus, Jones/Stokes/Mueller, coherence, Airy/Bessel, Fabry-Pérot, Fraunhofer/Fresnel/Huygens diffraction, AR coatings + TMM, Zernike wavefronts, 2D FFT patterns, PSF |
+| **lens** | lens | Thin/thick lens, lensmaker, mirrors, f-number/NA, FOV, MTF (mono/poly/through-focus), Seidel aberrations, Petzval, depth of field, multi-element systems |
+| **pbr** | pbr_core, pbr_advanced | Cook-Torrance, GGX/Beckmann NDF, Smith geometry, Fresnel-Schlick, Lambert; anisotropy, sheen, clearcoat, SSS, iridescence, volumetric scattering, importance sampling, split-sum IBL |
+| **atmosphere** | atmosphere | Rayleigh/Mie scattering, King factor, sky color, air mass (Kasten-Young), optical depth, sunset gradient |
+| **bridge** | bridge | Primitive-value cross-crate hooks: bijli (EM ↔ wavelength/index), tara (stellar temp → RGB), badal (density/humidity → scattering) |
+| **serialize** | serialize | JSON roundtrips (via bayan) for rgb, medium, sellmeier, lens type, polarization, prescription, SPD |
+| **ai** *(opt-in)* | ai | Daimon/Hoosh AI client — blocking HTTP POST via sandhi. **Not in the core bundle** (pulls the TLS stack); ships in `dist/prakash-ai.cyr` |
+| **error** | error | `PK_ERR_*` codes + `prakash_set_log_level` / trace logging (sakshi) |
 
-## Feature Flags
+## Quick Start
 
-| Feature | Default | Description |
-|---------|---------|-------------|
-| `ray` | yes | Geometric optics, sequential ray tracing, optical system builder |
-| `wave` | yes | Wave optics, interference, diffraction, polarization, FFT patterns |
-| `spectral` | yes | Spectral math, CIE color science, blackbody, color temperature |
-| `lens` | yes | Thin lens, lensmaker, mirrors, depth of field |
-| `pbr` | no | Cook-Torrance BRDF, Fresnel-Schlick, GGX/Beckmann NDF |
-| `atmosphere` | no | Rayleigh/Mie scattering, sky color, air mass |
-| `bijli-backend` | yes | EM-correct Fresnel/Snell via bijli, polarization bridge, Gaussian beam/ABCD, Mie scattering |
-| `ai` | no | AI-assisted optics queries (reqwest/tokio) |
-| `logging` | no | Structured logging via `PRAKASH_LOG` env var |
-| `full` | -- | Enables all features |
+```toml
+# cyrius.cyml
+[package]
+name     = "your-project"
+version  = "${file:VERSION}"
+language = "cyrius"
+cyrius   = "6.4.10"
 
-## Examples
+[deps]
+# ganita provides the transcendentals (acos/asin/atan2/pow/sinh/…) and subsumes
+# matrix/linalg. math stays for comparisons/clamp/lerp/min/max + polyfills.
+stdlib = ["string", "fmt", "alloc", "vec", "str", "math", "ganita", "tagged", "fnptr"]
 
-| Example | Features | Description |
-|---------|----------|-------------|
-| [`basic_optics`](examples/basic_optics.rs) | `ray`, `spectral`, `lens` | Snell's law, Fresnel, wavelength-to-RGB, thin lens |
-| [`rainbow`](examples/rainbow.rs) | `ray`, `spectral` | Rainbow simulation via raindrop refraction |
-| [`camera_lens`](examples/camera_lens.rs) | `ray`, `spectral`, `lens` | Camera lens system analysis with prescriptions |
-| [`pbr_materials`](examples/pbr_materials.rs) | `pbr` | PBR material shading with Cook-Torrance BRDF |
-
-Run an example:
-
-```sh
-cargo run --example basic_optics --features ray,spectral,lens
+[deps.prakash]
+git     = "https://github.com/MacCracken/prakash.git"
+tag     = "2.0.0"
+modules = ["dist/prakash.cyr"]        # math-only core (no TLS)
+# For the AI client instead, pull the ai bundle (adds the sandhi HTTP/TLS stack):
+# modules = ["dist/prakash-ai.cyr"]
 ```
+
+```cyrius
+include "lib/prakash.cyr"    # the vendored bundle
+
+alloc_init();
+var err = alloc(8);          # Result<T> -> err_out pointer (PK_ERR_NONE == 0)
+
+# Snell's law: air (n=1.0) into glass (n=1.52) at 30 degrees
+var angle = f64_div(F64_PI, f64_from(6));                 # 30 deg in radians
+var n_glass = f64_div(f64_from(152), f64_from(100));      # 1.52
+var refracted = ray_snell(F64_ONE, n_glass, angle, err);
+
+# Fresnel reflectance at normal incidence (~4% off glass)
+var reflectance = fresnel_normal(F64_ONE, n_glass);
+
+# 550 nm light -> sRGB (Rgb struct: Rgb_r/_g/_b accessors)
+var green = wavelength_to_rgb(f64_from(550), err);
+
+# Where does a 50 mm lens focus an object at 2 m?
+var image_dist = lens_thin_image_distance(f64_from(50), f64_from(2000), err);
+
+# Malus's law: light through a polarizer at 45 degrees (-> 50%)
+var transmitted = malus_law(F64_ONE, F64_PI_4);
+```
+
+`f64` values are IEEE-754 bit patterns in `i64`; do arithmetic through `f64_add`/`f64_mul`/`f64_sqrt`/… and compare with `f64_lt`/`f64_gt` (which return `1`/`0`). `Result<T>` becomes an `err_out` pointer (check `prakash_is_ok(load64(err))`); `Option<T>` returns `1`/`0` plus an out-pointer; tuples and `[f64; N]` return through caller-supplied buffers.
+
+## Two Bundles
+
+`cyrius distlib` emits two self-contained bundles — a consumer links **one**:
+
+| Bundle | Contents | Pulls TLS? |
+|--------|----------|-----------|
+| `dist/prakash.cyr` | all optics + serialize (math-only core) | no |
+| `dist/prakash-ai.cyr` | the same core **plus** the daimon/hoosh AI client | yes (sandhi) |
 
 ## Architecture
 
 ```
-prakash (this crate)
-  +-- hisab (math: vectors, geometry, calculus, numerical methods)
-  +-- bijli (electromagnetism: Fresnel, Snell, polarization, Gaussian beams, Mie scattering) [optional, default]
+prakash (Cyrius)
+  ├── hisab   (git dep, tag 2.6.8) — Complex + FFT (num_fft/num_ifft) for wave/pattern
+  ├── ganita  (stdlib) — transcendentals + linear algebra
+  ├── bayan   (stdlib) — JSON (serialize module)
+  ├── sakshi  (stdlib) — logging (trace diagnostics)
+  └── sandhi  (stdlib) — HTTP/TLS, ai bundle only
 ```
-
-## Consumer Crates
-
-| Crate | Usage |
-|-------|-------|
-| soorat | PBR shading |
-| kiran | Physically-based lighting |
-| ranga | Lens effects |
 
 ## Building
 
 ```sh
-cargo build --all-features
-cargo test --all-features
+cyrius deps                 # resolve the hisab git dep
+for f in tests/*.tcyr; do cyrius test "$f"; done   # 5251 assertions, 26 suites
+cyrius distlib              # regenerate dist/prakash.cyr
+cyrius distlib ai           # regenerate dist/prakash-ai.cyr
+cyrius bench tests/prakash.bcyr                     # 27 benchmarks
+./scripts/bench-history.sh  # append to the CSV history + benchmarks.md
 ```
+
+The original Rust implementation is retained in-tree under `rust-old/` as the translation reference.
 
 ## License
 
-GPL-3.0-only -- see [LICENSE](LICENSE).
+GPL-3.0-only — see [LICENSE](LICENSE).

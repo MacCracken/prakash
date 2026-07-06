@@ -23,9 +23,9 @@ responsibly through **GitHub Security Advisories**:
 
 ## Scope
 
-This policy covers the `prakash` crate and its published API. Vulnerabilities
-in dependencies should be reported to the respective upstream projects (and
-flagged here if they affect prakash users).
+This policy covers the `prakash` library and its bundled API (`dist/prakash.cyr`
+/ `dist/prakash-ai.cyr`). Vulnerabilities in dependencies should be reported to
+the respective upstream projects (and flagged here if they affect prakash users).
 
 ## Disclosure
 

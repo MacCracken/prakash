@@ -1,7 +1,8 @@
 # Contributing to prakash
 
 Thank you for considering a contribution! This document covers the development
-workflow, coding standards, and review process.
+workflow, coding standards, and review process. prakash is written in
+[Cyrius](https://github.com/MacCracken/cyrius).
 
 ## Development Setup
 
@@ -10,53 +11,73 @@ workflow, coding standards, and review process.
 git clone https://github.com/MacCracken/prakash.git
 cd prakash
 
-# Ensure you have the correct toolchain (see rust-toolchain.toml)
-rustup show
+# Install the Cyrius toolchain pinned in cyrius.cyml (the `cyrius = "..."` line).
+# CI fetches it from github.com/MacCracken/cyrius/releases.
 
-# Run the full local CI suite
-make check
+# Resolve the hisab git dependency (the stdlib subset is vendored under lib/).
+cyrius deps
+```
+
+## Local CI gate
+
+CI runs on every push (`.github/workflows/ci.yml`). Reproduce it locally before
+pushing:
+
+```bash
+# Dependency hashes must match the committed cyrius.lock
+cyrius deps --verify
+
+# Lint + format (must be clean — 0 warnings, 0 drift)
+for f in src/*.cyr tests/*.tcyr tests/*.bcyr; do
+  cyrius lint "$f"          # fails on a `warn` line
+  cyrius fmt "$f" --check   # fails on format drift
+done
+
+# Vet the build entry
+cyrius vet src/main.cyr
+
+# Bundles must match lib/ (regenerate + commit if they drift)
+cyrius distlib && cyrius distlib ai
+git diff --quiet dist/prakash.cyr dist/prakash-ai.cyr || echo "bundles stale — commit them"
+
+# Tests + benchmarks
+for f in tests/*.tcyr; do cyrius test "$f"; done
+cyrius bench tests/prakash.bcyr
 ```
 
 ## Pull Request Process
 
 1. **Fork and branch** — create a feature branch from `main`.
 2. **Keep commits focused** — one logical change per commit.
-3. **Write tests** — new features require tests; bug fixes require a regression
-   test.
-4. **Run CI locally** before pushing:
-   ```bash
-   make check        # fmt + clippy + test + audit
-   ```
-5. **Open a PR** against `main` with a clear description of the change.
-6. **Address review feedback** — maintainers may request changes before merging.
+3. **Write tests** — new features require tests (a `.tcyr` suite); bug fixes
+   require a regression test.
+4. **Regenerate bundles** — if you touch a `[lib]`/`[lib.ai]` module, run
+   `cyrius distlib && cyrius distlib ai` and commit the updated `dist/*.cyr`.
+5. **Run the local CI gate** (above) — lint, fmt, tests, and bench must be green.
+6. **Open a PR** against `main` with a clear description of the change.
 
 ## Code Style
 
-- Follow `rustfmt` defaults (enforced by CI).
-- Zero clippy warnings (`cargo clippy --all-features --all-targets -- -D warnings`).
-- Public API items must have doc comments.
-- Use `#[inline]` on small, hot-path functions.
-- Use `#[non_exhaustive]` on public enums.
-- Physics functions must document units in their doc comments.
+- Zero `cyrius lint` warnings; `cyrius fmt --check` clean (the linter counts
+  **bytes** — keep lines ≤ 120).
+- `#must_use` on pure functions, `#derive(accessors)` on structs. Error and
+  status codes are module-level integer constants (`var PK_ERR_* = ...` in
+  `src/error.cyr`): `0` (`PK_ERR_NONE`) = success, negative = error — there are
+  no enums.
+- No `unwrap`/`panic` equivalents in library code — return `PK_ERR_*` via an
+  `err_out` pointer.
+- Physics functions document their units.
+- **Bit-fidelity to the Rust source** is the porting contract: encode `f64`
+  constants as exact ratios (numerator/denominator < 2^53) or IEEE-754 hex bit
+  patterns; replicate `powi` as square-and-multiply; preserve left-associative
+  fold order. When in doubt, compare against `rust-old/` and add a test.
 
 ## Testing Requirements
 
-- All public API changes must include unit tests.
-- Integration tests go in `tests/`.
-- Benchmarks go in `benches/` and should be run before/after performance-sensitive
-  changes.
-- Target: maintain or improve code coverage on every PR.
-
-```bash
-# Run tests
-cargo test --all-features
-
-# Run benchmarks
-make bench
-
-# Generate coverage report
-make coverage
-```
+- All public API changes need unit tests in a `tests/*.tcyr` suite.
+- Performance-sensitive changes: run `./scripts/bench-history.sh` before and
+  after and cite the CSV numbers — **never claim a speedup without benchmarks.**
+- Target: maintain or improve coverage (80%+) on every PR.
 
 ## Commit Messages
 
