@@ -4745,3 +4745,54 @@ fn airy_first_zero(wavelength, aperture_diameter) {
 fn rayleigh_criterion(wavelength, aperture_diameter) {
     return f64_div(f64_mul(_ar(122, 100), wavelength), aperture_diameter);
 }
+
+# --- wave_fabry_perot.cyr ---
+
+# wave_fabry_perot.cyr -- Fabry-Perot interferometer
+# Usage: include "lib/wave_fabry_perot.cyr"
+#
+# Ported from the Rust `wave/fabry_perot.rs`. Self-contained (no prakash deps).
+
+# Coefficient of finesse: F = 4R / (1-R)^2.
+#must_use
+fn fabry_perot_finesse_coefficient(reflectance) {
+    var one_minus = f64_sub(F64_ONE, reflectance);
+    return f64_div(f64_mul(f64_from(4), reflectance), f64_mul(one_minus, one_minus));
+}
+
+# Finesse (fringe sharpness): F = pi*sqrt(R) / (1-R).
+#must_use
+fn fabry_perot_finesse(reflectance) {
+    return f64_div(f64_mul(F64_PI, f64_sqrt(reflectance)), f64_sub(F64_ONE, reflectance));
+}
+
+# Transmittance (Airy function): T = 1 / (1 + F*sin^2(delta/2)),
+# delta = 4*pi*n*d*cos(theta)/lambda.
+#must_use
+fn fabry_perot_transmittance(wavelength, thickness, n, angle, reflectance) {
+    var delta = f64_div(
+    f64_mul(f64_mul(f64_mul(f64_mul(f64_from(4), F64_PI), n), thickness), f64_cos(angle)),
+    wavelength);
+    var f_coeff = fabry_perot_finesse_coefficient(reflectance);
+    var s = f64_sin(f64_div(delta, F64_TWO));
+    return f64_div(F64_ONE, f64_add(F64_ONE, f64_mul(f_coeff, f64_mul(s, s))));
+}
+
+# Free spectral range: FSR = c / (2*n*d)  (Hz).
+#must_use
+fn fabry_perot_fsr(thickness_m, n) {
+    return f64_div(f64_from(299792458), f64_mul(f64_mul(F64_TWO, n), thickness_m));
+}
+
+# Free spectral range in wavelength units: delta_lambda = lambda^2 / (2*n*d).
+#must_use
+fn fabry_perot_fsr_wavelength(wavelength, thickness, n) {
+    return f64_div(f64_mul(wavelength, wavelength), f64_mul(f64_mul(F64_TWO, n), thickness));
+}
+
+# Resolving power: R = m*F, m = 2*n*d/lambda (order), F = finesse.
+#must_use
+fn fabry_perot_resolving_power(wavelength, thickness, n, reflectance) {
+    var order = f64_div(f64_mul(f64_mul(F64_TWO, n), thickness), wavelength);
+    return f64_mul(order, fabry_perot_finesse(reflectance));
+}

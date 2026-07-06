@@ -1,0 +1,68 @@
+# wave Fabry-Perot test suite — from rust-old/src/wave/mod.rs (fp tests),
+# for functions defined in rust-old/src/wave/fabry_perot.rs.
+
+include "src/error.cyr"
+include "src/wave_fabry_perot.cyr"
+
+fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
+fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
+
+var TOL6 = f64_div(F64_ONE, f64_from(1000000));   # 1e-6
+var TOL3 = f64_div(F64_ONE, f64_from(1000));      # 0.001
+var Z = f64_from(0);
+var WL = f64_div(f64_from(55), f64_from(100000000));   # 550e-9
+var MM = f64_div(F64_ONE, f64_from(1000));            # 1e-3
+
+alloc_init();
+
+# ── finesse ────────
+test_group("finesse");
+
+_assert_near(fabry_perot_finesse_coefficient(_fd(9, 10)), f64_from(360), TOL6, "finesse coeff R=0.9 = 360");
+_assert_near(fabry_perot_finesse_coefficient(Z), Z, TOL6, "finesse coeff R=0 = 0");
+_assert_near(fabry_perot_finesse(_fd(9, 10)), _fd(298, 10), _fd(5, 10), "finesse R=0.9 ~ 29.8");
+assert(f64_gt(fabry_perot_finesse(_fd(95, 100)), fabry_perot_finesse(_fd(5, 10))), "finesse increases with R");
+
+# ── transmittance ────────
+test_group("transmittance");
+
+# resonance: d = lambda/2, normal incidence, T ~ 1
+var d_res = f64_div(WL, F64_TWO);
+_assert_near(
+fabry_perot_transmittance(WL, d_res, F64_ONE, Z, _fd(9, 10)), F64_ONE, TOL3, "transmittance at resonance ~ 1");
+
+# transmittance always in [0, 1+eps]
+var one_eps = f64_add(F64_ONE, TOL6);
+for (var am = 0; am < 100; am = am + 1) {
+    var t = fabry_perot_transmittance(WL, MM, F64_ONE, f64_mul(f64_from(am), MM), _fd(9, 10));
+    assert(f64_ge(t, Z), "transmittance >= 0");
+    assert(f64_le(t, one_eps), "transmittance <= 1");
+}
+
+# low reflectance -> broad (peak and near-peak similar)
+var t_peak = fabry_perot_transmittance(WL, MM, F64_ONE, Z, _fd(1, 10));
+var t_mid = fabry_perot_transmittance(WL, MM, F64_ONE, _fd(1, 100), _fd(1, 10));
+assert(f64_lt(f64_abs(f64_sub(t_peak, t_mid)), _fd(3, 10)), "low reflectance broad peaks");
+
+# ── free spectral range ────────
+test_group("fsr");
+
+# d=1mm, n=1: FSR = c/(2e-3) ~ 1.499e11 Hz
+_assert_near(fabry_perot_fsr(MM, F64_ONE), f64_from(149900000000), f64_from(1000000000), "FSR ~ 1.499e11 Hz");
+# lambda=550, d=1e6, n=1: 550^2/(2e6) ~ 0.15125
+_assert_near(
+fabry_perot_fsr_wavelength(f64_from(550), f64_from(1000000), F64_ONE), _fd(15125, 100000), _fd(1, 100),
+"FSR wavelength ~ 0.15nm");
+assert(
+f64_gt(fabry_perot_fsr(_fd(5, 10000), F64_ONE), fabry_perot_fsr(_fd(2, 1000), F64_ONE)),
+"thicker cavity narrower FSR");
+
+# ── resolving power ────────
+test_group("resolving_power");
+
+assert(f64_gt(fabry_perot_resolving_power(WL, MM, F64_ONE, _fd(95, 100)), f64_from(100000)), "resolving power > 1e5");
+assert(f64_gt(fabry_perot_resolving_power(WL, MM, F64_ONE, _fd(95, 100)),
+fabry_perot_resolving_power(WL, MM, F64_ONE, _fd(5, 10))), "resolving power increases with R");
+
+var r = assert_summary();

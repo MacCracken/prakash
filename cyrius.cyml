@@ -39,6 +39,7 @@ modules = [
     "src/wave_polarization.cyr",
     "src/wave_coherence.cyr",
     "src/wave_airy.cyr",
+    "src/wave_fabry_perot.cyr",
 ]
 
 [deps]
