@@ -1,0 +1,181 @@
+# wave core test suite — ported from rust-old/src/wave/mod.rs (#[cfg(test)]).
+# Covers interference, thin film, diffraction, grating, Malus, polarization,
+# and the Jones->Stokes conversion. (Coherence/Bessel/Airy/Fabry-Perot tests
+# ship with their own sub-modules; serde roundtrip deferred to the bayan bite.)
+
+include "src/error.cyr"
+include "src/wave_core.cyr"
+
+fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
+fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
+
+var TOL6 = f64_div(F64_ONE, f64_from(1000000));   # 1e-6
+var TOL_01 = f64_div(F64_ONE, f64_from(100));     # 0.01
+var Z = f64_from(0);
+var WL = f64_div(f64_from(5), f64_from(10000000000));   # 500e-9
+var SW = f64_div(F64_ONE, f64_from(1000));             # 1e-3
+var GS = f64_div(F64_ONE, f64_from(1000000));          # 1e-6
+
+alloc_init();
+
+# ── interference ────────
+test_group("interference");
+
+assert_eq(is_constructive(f64_from(500), f64_from(500)), 1, "constructive 500/500");
+assert_eq(is_constructive(f64_from(1000), f64_from(500)), 1, "constructive 1000/500");
+assert_eq(is_constructive(Z, f64_from(500)), 1, "constructive 0/500");
+assert_eq(is_constructive(f64_from(250), f64_from(500)), 0, "not constructive 250/500");
+
+assert_eq(is_destructive(f64_from(250), f64_from(500)), 1, "destructive 250/500");
+assert_eq(is_destructive(f64_from(750), f64_from(500)), 1, "destructive 750/500");
+assert_eq(is_destructive(f64_from(500), f64_from(500)), 0, "not destructive 500/500");
+assert_eq(is_destructive(Z, f64_from(500)), 0, "not destructive 0/500");
+
+for (var m = 0; m < 10; m = m + 1) {
+    var path = f64_from(m * 500);
+    var c = is_constructive(path, f64_from(500));
+    var d = is_destructive(path, f64_from(500));
+    assert(((c != d) || (c == 0)), "constructive/destructive not both true");
+}
+
+_assert_near(interference_intensity(F64_ONE, F64_ONE, Z), f64_from(4), TOL6, "constructive max = 4");
+_assert_near(interference_intensity(F64_ONE, F64_ONE, F64_PI), Z, TOL6, "destructive = 0");
+_assert_near(interference_intensity(F64_TWO, F64_ONE, F64_PI), F64_ONE, TOL6, "unequal min = 1");
+_assert_near(interference_intensity(F64_TWO, F64_ONE, Z), f64_from(9), TOL6, "unequal max = 9");
+_assert_near(interference_intensity(f64_from(3), Z, Z), f64_from(9), TOL6, "single wave = 9");
+
+_assert_near(path_to_phase(f64_from(500), f64_from(500)), F64_TAU, TOL6, "path_to_phase 2pi");
+_assert_near(path_to_phase(f64_from(500), f64_from(250)), F64_PI, TOL6, "path_to_phase pi");
+_assert_near(path_to_phase(f64_from(500), Z), Z, TOL6, "path_to_phase 0");
+
+# ── thin film ────────
+test_group("thin_film");
+
+var tf = thin_film_reflectance(f64_from(550), f64_from(100), _fd(15, 10));
+assert(f64_ge(tf, Z), "thin film r >= 0");
+assert(f64_le(tf, F64_ONE), "thin film r <= 1");
+var tf1 = thin_film_reflectance(f64_from(400), f64_from(100), _fd(15, 10));
+var tf2 = thin_film_reflectance(f64_from(600), f64_from(100), _fd(15, 10));
+assert(f64_gt(f64_abs(f64_sub(tf1, tf2)), TOL6), "thin film varies with wavelength");
+# quarter-wave coating: thickness = wl/(4n)
+var t_q = f64_div(f64_from(550), f64_mul(f64_from(4), _fd(15, 10)));
+var r_q = thin_film_reflectance(f64_from(550), t_q, _fd(15, 10));
+assert(f64_ge(r_q, Z), "quarter-wave r >= 0");
+assert(f64_le(r_q, F64_ONE), "quarter-wave r <= 1");
+
+# ── diffraction ────────
+test_group("diffraction");
+
+_assert_near(single_slit_intensity(WL, SW, Z, F64_ONE), F64_ONE, TOL6, "single slit central max = 1");
+assert(f64_lt(single_slit_intensity(WL, SW, _fd(1, 100), F64_ONE), single_slit_intensity(WL, SW, Z, F64_ONE)),
+"single slit decreases off axis");
+var theta_min = ganita_f64_asin(f64_div(WL, SW));
+assert(f64_lt(single_slit_intensity(WL, SW, theta_min, F64_ONE), TOL6), "single slit first minimum ~ 0");
+var ss1 = single_slit_intensity(WL, SW, _fd(1, 100), F64_ONE);
+var ss5 = single_slit_intensity(WL, SW, _fd(1, 100), f64_from(5));
+_assert_near(f64_div(ss5, ss1), f64_from(5), TOL6, "single slit scales with i0");
+for (var am = 0; am < 100; am = am + 1) {
+    assert(f64_ge(single_slit_intensity(WL, SW, f64_div(f64_from(am), f64_from(1000)), F64_ONE), Z),
+    "single slit non-negative");
+}
+
+var sww = _fd(1, 10000);   # 0.1e-3
+var ssp = _fd(5, 10000);   # 0.5e-3
+assert(f64_gt(double_slit_intensity(WL, sww, ssp, Z, F64_ONE), Z), "double slit central > 0");
+assert(f64_gt(double_slit_intensity(WL, sww, ssp, Z, F64_ONE), single_slit_intensity(WL, sww, Z, F64_ONE)),
+"double slit > single at center");
+for (var am2 = 0; am2 < 50; am2 = am2 + 1) {
+    assert(f64_ge(double_slit_intensity(WL, sww, ssp, f64_div(f64_from(am2), f64_from(1000)), F64_ONE), Z),
+    "double slit non-negative");
+}
+
+# ── grating ────────
+test_group("grating");
+
+var g0 = grating_maxima(WL, GS, 0);
+assert_eq(vec_len(g0), 1, "grating zeroth order length 1");
+_assert_near(vec_get(g0, 0), Z, TOL6, "grating zeroth angle ~ 0");
+assert(vec_len(grating_maxima(WL, GS, 2)) >= 3, "grating multiple orders");
+var g1 = grating_maxima(WL, GS, 1);
+assert_eq(vec_len(g1), 3, "grating order 1 has 3 angles");
+_assert_near(f64_add(vec_get(g1, 1), vec_get(g1, 2)), Z, TOL6, "grating +-1 symmetric");
+assert(vec_len(grating_maxima(WL, _fd(6, 10000000000), 5)) <= 3, "grating limited by sin");
+
+# ── Malus ────────
+test_group("malus");
+
+_assert_near(malus_law(F64_ONE, Z), F64_ONE, TOL6, "malus aligned = 1");
+_assert_near(malus_law(F64_ONE, F64_PI_2), Z, TOL6, "malus crossed = 0");
+_assert_near(malus_law(F64_ONE, F64_PI_4), _fd(5, 10), TOL6, "malus 45 = 0.5");
+_assert_near(malus_law(f64_from(10), F64_PI_4), f64_from(5), TOL6, "malus scales = 5");
+_assert_near(malus_law(F64_ONE, f64_div(F64_PI, f64_from(6))), _fd(75, 100), TOL6, "malus 30 = 0.75");
+_assert_near(malus_law(F64_ONE, f64_div(F64_PI, f64_from(3))), _fd(25, 100), TOL6, "malus 60 = 0.25");
+
+# ── polarization ────────
+test_group("polarization");
+
+var ph = polarization_horizontal();
+_assert_near(polarization_intensity(ph), F64_ONE, TOL6, "horizontal intensity 1");
+_assert_near(Polarization_ex(ph), F64_ONE, TOL6, "horizontal ex 1");
+_assert_near(Polarization_ey(ph), Z, TOL6, "horizontal ey 0");
+var pv = polarization_vertical();
+_assert_near(polarization_intensity(pv), F64_ONE, TOL6, "vertical intensity 1");
+_assert_near(Polarization_ex(pv), Z, TOL6, "vertical ex 0");
+_assert_near(Polarization_ey(pv), F64_ONE, TOL6, "vertical ey 1");
+
+_assert_near(polarization_through_polarizer(polarization_horizontal(), Z), F64_ONE, TOL_01, "through aligned ~1");
+assert(f64_lt(polarization_through_polarizer(polarization_horizontal(), F64_PI_2), TOL_01), "through crossed ~0");
+
+var pcr = polarization_circular_right();
+_assert_near(polarization_intensity(pcr), F64_ONE, TOL6, "circular right intensity 1");
+_assert_near(Polarization_phase(pcr), f64_neg(F64_PI_2), TOL6, "circular right phase -pi/2");
+var pcl = polarization_circular_left();
+_assert_near(polarization_intensity(pcl), F64_ONE, TOL6, "circular left intensity 1");
+_assert_near(Polarization_phase(pcl), F64_PI_2, TOL6, "circular left phase pi/2");
+
+# ── Jones -> Stokes ────────
+test_group("jones_stokes");
+
+var sh = polarization_to_stokes(polarization_horizontal());
+_assert_near(StokesVector_s0(sh), F64_ONE, TOL6, "horizontal S0 = 1");
+_assert_near(StokesVector_s1(sh), F64_ONE, TOL6, "horizontal S1 = 1");
+_assert_near(StokesVector_s2(sh), Z, TOL6, "horizontal S2 = 0");
+_assert_near(StokesVector_s3(sh), Z, TOL6, "horizontal S3 = 0");
+
+var sv = polarization_to_stokes(polarization_vertical());
+_assert_near(StokesVector_s0(sv), F64_ONE, TOL6, "vertical S0 = 1");
+_assert_near(StokesVector_s1(sv), f64_neg(F64_ONE), TOL6, "vertical S1 = -1");
+_assert_near(StokesVector_s2(sv), Z, TOL6, "vertical S2 = 0");
+_assert_near(StokesVector_s3(sv), Z, TOL6, "vertical S3 = 0");
+
+var scr = polarization_to_stokes(polarization_circular_right());
+_assert_near(StokesVector_s0(scr), F64_ONE, TOL6, "circular right S0 = 1");
+_assert_near(StokesVector_s1(scr), Z, TOL6, "circular right S1 = 0");
+_assert_near(StokesVector_s2(scr), Z, TOL6, "circular right S2 = 0");
+_assert_near(StokesVector_s3(scr), f64_neg(F64_ONE), TOL_01, "circular right S3 = -1");
+
+var scl = polarization_to_stokes(polarization_circular_left());
+_assert_near(StokesVector_s0(scl), F64_ONE, TOL6, "circular left S0 = 1");
+_assert_near(StokesVector_s1(scl), Z, TOL6, "circular left S1 = 0");
+_assert_near(StokesVector_s2(scl), Z, TOL6, "circular left S2 = 0");
+_assert_near(StokesVector_s3(scl), F64_ONE, TOL_01, "circular left S3 = +1");
+
+var pgen = polarization_new(_fd(8, 10), _fd(6, 10), _fd(5, 10));
+_assert_near(StokesVector_s0(polarization_to_stokes(pgen)), polarization_intensity(pgen), TOL6, "S0 = intensity");
+
+# every pure Jones state is fully polarized (DOP = 1)
+var states = vec_new();
+vec_push(states, polarization_horizontal());
+vec_push(states, polarization_vertical());
+vec_push(states, polarization_circular_right());
+vec_push(states, polarization_circular_left());
+vec_push(states, polarization_new(_fd(8, 10), _fd(6, 10), F64_ONE));
+var si = 0;
+while (si < 5) {
+    _assert_near(stokes_degree_of_polarization(polarization_to_stokes(vec_get(states, si))), F64_ONE, TOL_01,
+    "pure state DOP = 1");
+    si = si + 1;
+}
+
+var r = assert_summary();

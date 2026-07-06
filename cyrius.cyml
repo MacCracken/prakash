@@ -35,6 +35,7 @@ modules = [
     "src/spectral_core.cyr",
     "src/spectral_cie.cyr",
     "src/spectral_photometry.cyr",
+    "src/wave_core.cyr",
 ]
 
 [deps]

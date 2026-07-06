@@ -4140,3 +4140,209 @@ fn luminous_flux_scotopic(spd) {
     }
     return f64_mul(f64_mul(f64_from(1700), sum), f64_from(5));
 }
+
+# --- wave_core.cyr ---
+
+# wave_core.cyr -- wave optics core: interference, diffraction, polarization
+# Usage: include "lib/wave_core.cyr"  (requires error.cyr)
+#
+# Ported from the Rust `wave/mod.rs`. StokesVector (defined in the Rust
+# `wave/polarization.rs`) is placed here because the Jones->Stokes conversion and
+# its tests live in mod.rs; wave_polarization.cyr adds the Mueller/Jones matrices
+# on top of this struct. Rust `.round()` is half-away-from-zero (Cyrius f64_round
+# is banker's), so _wave_round is used for the interference conditions.
+
+fn _wave_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _wave_eps10() { return f64_div(F64_ONE, f64_from(10000000000)); }
+
+# Round half away from zero (matches Rust f64::round).
+fn _wave_round(x) {
+    if (f64_ge(x, f64_from(0)) == 1) {
+        return f64_floor(f64_add(x, F64_HALF));
+    }
+    return f64_ceil(f64_sub(x, F64_HALF));
+}
+
+# ── Interference ────────
+
+# Two-wave interference intensity: A1^2 + A2^2 + 2*A1*A2*cos(delta).
+#must_use
+fn interference_intensity(a1, a2, phase_diff) {
+    return f64_add(f64_add(f64_mul(a1, a1), f64_mul(a2, a2)),
+    f64_mul(f64_mul(f64_mul(F64_TWO, a1), a2), f64_cos(phase_diff)));
+}
+
+# 1 if constructive (path difference is ~ an integer multiple of wavelength).
+#must_use
+fn is_constructive(path_diff, wavelength) {
+    var m = f64_div(path_diff, wavelength);
+    return f64_lt(f64_abs(f64_sub(m, _wave_round(m))), _wave_r(1, 100));
+}
+
+# 1 if destructive (path difference is ~ a half-integer multiple of wavelength).
+#must_use
+fn is_destructive(path_diff, wavelength) {
+    var m = f64_sub(f64_div(path_diff, wavelength), F64_HALF);
+    return f64_lt(f64_abs(f64_sub(m, _wave_round(m))), _wave_r(1, 100));
+}
+
+# Phase difference from path difference: delta = 2*pi*path/lambda.
+#must_use
+fn path_to_phase(wavelength, path_diff) {
+    return f64_div(f64_mul(F64_TAU, path_diff), wavelength);
+}
+
+# ── Thin film interference ────────
+
+# Reflected intensity for a thin film (near-normal): sin^2(delta/2) with a pi
+# phase shift on reflection.
+#must_use
+fn thin_film_reflectance(wavelength_nm, thickness_nm, n_film) {
+    var path = f64_mul(f64_mul(F64_TWO, n_film), thickness_nm);
+    var phase = f64_add(f64_div(f64_mul(F64_TAU, path), wavelength_nm), F64_PI);
+    var half = f64_div(phase, F64_TWO);
+    var s = f64_sin(half);
+    return f64_mul(s, s);
+}
+
+# ── Diffraction ────────
+
+# Single-slit diffraction: I0 * (sin(beta)/beta)^2, beta = pi*a*sin(theta)/lambda.
+#must_use
+fn single_slit_intensity(wavelength, slit_width, angle, i0) {
+    var beta = f64_div(f64_mul(f64_mul(F64_PI, slit_width), f64_sin(angle)), wavelength);
+    if (f64_lt(f64_abs(beta), _wave_eps10()) == 1) {
+        return i0;
+    }
+    var sinc = f64_div(f64_sin(beta), beta);
+    return f64_mul(f64_mul(i0, sinc), sinc);
+}
+
+# Double-slit diffraction: single-slit envelope * two-slit interference * 4.
+#must_use
+fn double_slit_intensity(wavelength, slit_width, slit_spacing, angle, i0) {
+    var sin_angle = f64_sin(angle);
+    var beta = f64_div(f64_mul(f64_mul(F64_PI, slit_width), sin_angle), wavelength);
+    var envelope = F64_ONE;
+    if (f64_lt(f64_abs(beta), _wave_eps10()) == 0) {
+        var sinc = f64_div(f64_sin(beta), beta);
+        envelope = f64_mul(sinc, sinc);
+    }
+    var delta = f64_div(f64_mul(f64_mul(F64_PI, slit_spacing), sin_angle), wavelength);
+    var cos_delta = f64_cos(delta);
+    var interference = f64_mul(cos_delta, cos_delta);
+    return f64_mul(f64_mul(f64_mul(i0, envelope), interference), f64_from(4));
+}
+
+# Diffraction-grating maxima angles (m = 0, +-1, ... up to max_order) as a `vec`.
+#must_use
+fn grating_maxima(wavelength, grating_spacing, max_order) {
+    var angles = vec_new();
+    var m = 0;
+    while (m <= max_order) {
+        var sin_theta = f64_div(f64_mul(f64_from(m), wavelength), grating_spacing);
+        if (f64_le(f64_abs(sin_theta), F64_ONE) == 1) {
+            var angle = ganita_f64_asin(sin_theta);
+            vec_push(angles, angle);
+            if (m != 0) {
+                vec_push(angles, f64_neg(angle));
+            }
+        }
+        m = m + 1;
+    }
+    return angles;
+}
+
+# ── Polarization ────────
+
+# Jones-style polarization state: horizontal/vertical amplitudes + phase.
+#derive(accessors)
+struct Polarization { ex; ey; phase; }
+
+#must_use
+fn polarization_new(ex, ey, phase) {
+    var p = alloc(sizeof(Polarization));
+    Polarization_set_ex(p, ex);
+    Polarization_set_ey(p, ey);
+    Polarization_set_phase(p, phase);
+    return p;
+}
+
+#must_use
+fn polarization_horizontal() { return polarization_new(F64_ONE, f64_from(0), f64_from(0)); }
+#must_use
+fn polarization_vertical() { return polarization_new(f64_from(0), F64_ONE, f64_from(0)); }
+#must_use
+fn polarization_circular_right() {
+    return polarization_new(F64_FRAC_1_SQRT2, F64_FRAC_1_SQRT2, f64_neg(F64_PI_2));
+}
+#must_use
+fn polarization_circular_left() {
+    return polarization_new(F64_FRAC_1_SQRT2, F64_FRAC_1_SQRT2, F64_PI_2);
+}
+
+# Intensity after a linear polarizer (Malus): cos^2(theta - pol_angle) * |E|^2.
+#must_use
+fn polarization_through_polarizer(p, polarizer_angle) {
+    var ex = Polarization_ex(p);
+    var ey = Polarization_ey(p);
+    var pol_angle = ganita_f64_atan2(ey, ex);
+    var c = f64_cos(f64_sub(polarizer_angle, pol_angle));
+    return f64_mul(f64_mul(c, c), f64_add(f64_mul(ex, ex), f64_mul(ey, ey)));
+}
+
+# Total intensity: ex^2 + ey^2.
+#must_use
+fn polarization_intensity(p) {
+    return f64_add(f64_mul(Polarization_ex(p), Polarization_ex(p)),
+    f64_mul(Polarization_ey(p), Polarization_ey(p)));
+}
+
+# ── Stokes vector (shared with wave_polarization) ────────
+
+#derive(accessors)
+struct StokesVector { s0; s1; s2; s3; }
+
+#must_use
+fn stokes_new(s0, s1, s2, s3) {
+    var s = alloc(sizeof(StokesVector));
+    StokesVector_set_s0(s, s0);
+    StokesVector_set_s1(s, s1);
+    StokesVector_set_s2(s, s2);
+    StokesVector_set_s3(s, s3);
+    return s;
+}
+
+# Degree of polarization: sqrt(s1^2 + s2^2 + s3^2) / s0.
+#must_use
+fn stokes_degree_of_polarization(s) {
+    var pol = f64_sqrt(f64_add(f64_add(
+    f64_mul(StokesVector_s1(s), StokesVector_s1(s)),
+    f64_mul(StokesVector_s2(s), StokesVector_s2(s))),
+    f64_mul(StokesVector_s3(s), StokesVector_s3(s))));
+    return f64_div(pol, StokesVector_s0(s));
+}
+
+# Jones polarization -> Stokes vector.
+#must_use
+fn polarization_to_stokes(p) {
+    var ex = Polarization_ex(p);
+    var ey = Polarization_ey(p);
+    var phase = Polarization_phase(p);
+    var ex2 = f64_mul(ex, ex);
+    var ey2 = f64_mul(ey, ey);
+    return stokes_new(
+    f64_add(ex2, ey2),
+    f64_sub(ex2, ey2),
+    f64_mul(f64_mul(f64_mul(F64_TWO, ex), ey), f64_cos(phase)),
+    f64_mul(f64_mul(f64_mul(F64_TWO, ex), ey), f64_sin(phase)));
+}
+
+# ── Malus's law ────────
+
+# Intensity after a polarizer at angle theta: I0 * cos^2(theta).
+#must_use
+fn malus_law(intensity, angle) {
+    var c = f64_cos(angle);
+    return f64_mul(intensity, f64_mul(c, c));
+}
