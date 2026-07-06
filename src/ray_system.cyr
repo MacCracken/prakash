@@ -203,9 +203,9 @@ struct SystemProperties { focal_length; bfd; ffd; power; entrance_pupil; exit_pu
 # system is empty or afocal (zero power).
 #must_use
 fn find_system_properties(prescription, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     if (prescription_is_empty(prescription) == 1) {
-        store64(err_out, PRK_ERR_INVALID_PARAMETER);
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
         return 0;
     }
 
@@ -218,7 +218,7 @@ fn find_system_properties(prescription, err_out) {
         final_ray = vec_get(forward_states, nf - 1);
     }
     if (f64_lt(f64_abs(ParaxialRay_nu(final_ray)), _sys_eps15()) == 1) {
-        store64(err_out, PRK_ERR_DIVISION_BY_ZERO);
+        store64(err_out, PK_ERR_DIVISION_BY_ZERO);
         return 0;
     }
 

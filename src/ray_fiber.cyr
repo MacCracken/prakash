@@ -11,13 +11,13 @@ fn _fib_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
 fn _fib_cutoff() { return _fib_r(2405, 1000); }   # 2.405
 
 # Numerical aperture: NA = sqrt(n_core^2 - n_clad^2). Writes
-# PRK_ERR_INVALID_PARAMETER (returns 0) if n_core < n_clad.
+# PK_ERR_INVALID_PARAMETER (returns 0) if n_core < n_clad.
 #must_use
 fn fiber_na(n_core, n_clad, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     var na2 = f64_sub(f64_mul(n_core, n_core), f64_mul(n_clad, n_clad));
     if (f64_lt(na2, f64_from(0)) == 1) {
-        store64(err_out, PRK_ERR_INVALID_PARAMETER);
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
         return 0;
     }
     return f64_sqrt(na2);

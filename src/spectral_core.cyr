@@ -77,11 +77,11 @@ fn rgb_luminance(c) {
 
 # ── Wavelength -> RGB ────────
 
-# Piecewise-linear CIE approximation. Writes PRK_ERR_WAVELENGTH_RANGE (returns 0)
+# Piecewise-linear CIE approximation. Writes PK_ERR_WAVELENGTH_RANGE (returns 0)
 # outside 380-780 nm (NaN also fails the range test).
 #must_use
 fn wavelength_to_rgb(wavelength_nm, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     var in_range = 0;
     if (f64_ge(wavelength_nm, spec_visible_min_nm()) == 1) {
         if (f64_le(wavelength_nm, spec_visible_max_nm()) == 1) {
@@ -89,7 +89,7 @@ fn wavelength_to_rgb(wavelength_nm, err_out) {
         }
     }
     if (in_range == 0) {
-        store64(err_out, PRK_ERR_WAVELENGTH_RANGE);
+        store64(err_out, PK_ERR_WAVELENGTH_RANGE);
         return 0;
     }
 

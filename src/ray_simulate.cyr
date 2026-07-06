@@ -328,7 +328,7 @@ fn spot_rms_radius(spots) {
 # summed). Writes the error code to err_out (0 on error return).
 #must_use
 fn optical_path_length(ray, surfaces, image_z, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     var e = 0;
     var hits = trace_sequential(ray, surfaces, &e);
     if (prakash_is_err(e) == 1) {
@@ -370,7 +370,7 @@ fn optical_path_length(ray, surfaces, image_z, err_out) {
 # Optical path difference of a ray relative to a chief ray. Writes err to err_out.
 #must_use
 fn optical_path_difference(ray, chief_ray, surfaces, image_z, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     var e1 = 0;
     var opl_ray = optical_path_length(ray, surfaces, image_z, &e1);
     if (prakash_is_err(e1) == 1) {

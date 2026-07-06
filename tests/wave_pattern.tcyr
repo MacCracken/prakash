@@ -1,0 +1,281 @@
+# wave_pattern test suite — from rust-old/src/wave/pattern.rs (inline tests).
+# First hisab dependency: Complex + FFT via lib/hisab.cyr (num_fft/num_ifft).
+
+include "src/error.cyr"
+include "lib/hisab.cyr"
+include "src/wave_pattern.cyr"
+
+fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
+fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
+
+fn _mksrc(buf, i, x, y, amp, ph) {
+    var s = buf + i * sizeof(PointSource);
+    PointSource_set_x(s, x);
+    PointSource_set_y(s, y);
+    PointSource_set_amplitude(s, amp);
+    PointSource_set_phase(s, ph);
+    return 0;
+}
+
+# all pattern data non-negative?
+fn _all_nonneg(p) {
+    var data = Pattern2D_data(p);
+    var total = Pattern2D_width(p) * Pattern2D_height(p);
+    for (var i = 0; i < total; i = i + 1) {
+        if (f64_lt(load64(data + i * 8), f64_from(0)) == 1) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+var EPS = f64_div(F64_ONE, f64_from(1000000));       # 1e-6
+var Z = f64_from(0);
+
+alloc_init();
+
+# ── FFT (hisab, packed complex buffers) ────────
+test_group("fft");
+
+# single element: fft([5+0i]) unchanged
+var d1 = alloc(1 * 16);
+store64(d1, f64_from(5));
+store64(d1 + 8, Z);
+num_fft(d1, 1);
+_assert_near(load64(d1), f64_from(5), EPS, "fft single element");
+
+# two elements: fft([1,1]) -> DC=2, Nyquist=0
+var d2 = alloc(2 * 16);
+store64(d2, F64_ONE);
+store64(d2 + 8, Z);
+store64(d2 + 16, F64_ONE);
+store64(d2 + 24, Z);
+num_fft(d2, 2);
+_assert_near(load64(d2), F64_TWO, EPS, "fft DC = sum");
+assert(f64_lt(_pat_norm_sq(d2, 1), EPS), "fft Nyquist = 0");
+
+# roundtrip: ifft(fft([1,2,3,4])) == original
+var d4 = alloc(4 * 16);
+var o4 = alloc(4 * 16);
+for (var i = 0; i < 4; i = i + 1) {
+    store64(d4 + i * 16, f64_from(i + 1));
+    store64(d4 + i * 16 + 8, Z);
+    store64(o4 + i * 16, f64_from(i + 1));
+    store64(o4 + i * 16 + 8, Z);
+}
+num_fft(d4, 4);
+num_ifft(d4, 4);
+for (var j = 0; j < 4; j = j + 1) {
+    assert(f64_lt(f64_abs(f64_sub(load64(d4 + j * 16), load64(o4 + j * 16))), EPS), "roundtrip re");
+    assert(f64_lt(f64_abs(f64_sub(load64(d4 + j * 16 + 8), load64(o4 + j * 16 + 8))), EPS), "roundtrip im");
+}
+
+# Parseval: sum|x|^2 * N == sum|X|^2
+var dp = alloc(4 * 16);
+store64(dp, F64_ONE);
+store64(dp + 8, Z);
+store64(dp + 16, Z);
+store64(dp + 24, F64_ONE);
+store64(dp + 32, f64_neg(F64_ONE));
+store64(dp + 40, Z);
+store64(dp + 48, Z);
+store64(dp + 56, f64_neg(F64_ONE));
+var et = Z;
+for (var pi = 0; pi < 4; pi = pi + 1) {
+    et = f64_add(et, _pat_norm_sq(dp, pi));
+}
+num_fft(dp, 4);
+var ef = Z;
+for (var pj = 0; pj < 4; pj = pj + 1) {
+    ef = f64_add(ef, _pat_norm_sq(dp, pj));
+}
+_assert_near(f64_mul(et, f64_from(4)), ef, EPS, "Parseval");
+
+# ── 2D diffraction ────────
+test_group("diffraction_2d");
+
+var ap8 = alloc(8 * 8 * 8);
+for (var a8 = 0; a8 < 64; a8 = a8 + 1) {
+    store64(ap8 + a8 * 8, F64_ONE);
+}
+var pat8 = diffraction_pattern_2d(ap8, 8, 8);
+assert_eq(Pattern2D_width(pat8), 8, "2d width 8");
+assert_eq(Pattern2D_height(pat8), 8, "2d height 8");
+
+var ap6 = alloc(6 * 6 * 8);
+for (var a6 = 0; a6 < 36; a6 = a6 + 1) {
+    store64(ap6 + a6 * 8, F64_ONE);
+}
+var pat6 = diffraction_pattern_2d(ap6, 6, 6);
+assert_eq(Pattern2D_width(pat6), 8, "6->8 padded width");
+assert_eq(Pattern2D_height(pat6), 8, "6->8 padded height");
+
+var ap16 = alloc(16 * 16 * 8);
+for (var a16 = 0; a16 < 256; a16 = a16 + 1) {
+    store64(ap16 + a16 * 8, F64_ONE);
+}
+var pat16 = diffraction_pattern_2d(ap16, 16, 16);
+assert(f64_gt(pattern2d_get(pat16, 8, 8), pattern2d_get(pat16, 0, 0)), "center brightest");
+assert_eq(_all_nonneg(pat16), 1, "2d all non-negative");
+
+# circular aperture
+var circ = diffraction_pattern_circular(32, f64_from(8));
+var above = pattern2d_get(circ, 16, 12);
+var below = pattern2d_get(circ, 16, 20);
+var denom_sym = f64_add(f64_add(above, below), 0x39B4484BFEEBC2A0);
+assert(f64_lt(f64_div(f64_abs(f64_sub(above, below)), denom_sym), _fd(1, 10)), "circular symmetric");
+var cmax = pattern2d_max_intensity(circ);
+var ccenter = pattern2d_get(circ, 16, 16);
+assert(f64_lt(f64_div(f64_abs(f64_sub(ccenter, cmax)), cmax), _fd(1, 100)), "circular center = max");
+
+# ── interference ────────
+test_group("interference");
+
+var wl_i = _fd(5, 10000000);   # 0.5e-6
+var one_src = alloc(1 * sizeof(PointSource));
+_mksrc(one_src, 0, Z, Z, F64_ONE, Z);
+var pi_single = interference_pattern(one_src, 1, wl_i, F64_ONE,
+f64_neg(_fd(1, 1000)), _fd(1, 1000), f64_neg(_fd(1, 1000)), _fd(1, 1000), 16, 16);
+assert_eq(Pattern2D_width(pi_single), 16, "interference width 16");
+assert_eq(Pattern2D_height(pi_single), 16, "interference height 16");
+assert_eq(_all_nonneg(pi_single), 1, "interference single non-negative");
+
+# two sources -> fringes
+var two_src = alloc(2 * sizeof(PointSource));
+_mksrc(two_src, 0, f64_neg(_fd(5, 10000)), Z, F64_ONE, Z);
+_mksrc(two_src, 1, _fd(5, 10000), Z, F64_ONE, Z);
+var fr = interference_pattern(two_src, 2, wl_i, F64_ONE,
+f64_neg(_fd(5, 1000)), _fd(5, 1000), Z, Z, 64, 1);
+var fmin = 0x7FF0000000000000;
+var fmax = Z;
+for (var fi = 0; fi < 64; fi = fi + 1) {
+    var fv = load64(Pattern2D_data(fr) + fi * 8);
+    if (f64_lt(fv, fmin) == 1) {
+        fmin = fv;
+    }
+    if (f64_gt(fv, fmax) == 1) {
+        fmax = fv;
+    }
+}
+assert(f64_gt(fmax, f64_mul(fmin, _fd(15, 10))), "two sources produce fringes");
+
+# constructive: 2 co-located in-phase -> 4x one
+var two_co = alloc(2 * sizeof(PointSource));
+_mksrc(two_co, 0, Z, Z, F64_ONE, Z);
+_mksrc(two_co, 1, Z, Z, F64_ONE, Z);
+var p2 = interference_pattern(two_co, 2, wl_i, F64_ONE, Z, Z, Z, Z, 1, 1);
+var p1 = interference_pattern(one_src, 1, wl_i, F64_ONE, Z, Z, Z, Z, 1, 1);
+_assert_near(f64_div(pattern2d_get(p2, 0, 0), pattern2d_get(p1, 0, 0)), f64_from(4), _fd(1, 100),
+"constructive 2 sources = 4x");
+
+# three sources non-negative
+var three_src = alloc(3 * sizeof(PointSource));
+_mksrc(three_src, 0, f64_neg(_fd(1, 1000)), Z, F64_ONE, Z);
+_mksrc(three_src, 1, _fd(1, 1000), Z, F64_ONE, Z);
+_mksrc(three_src, 2, Z, _fd(1, 1000), F64_HALF, F64_HALF);
+var pi3 = interference_pattern(three_src, 3, wl_i, F64_ONE,
+f64_neg(_fd(5, 1000)), _fd(5, 1000), f64_neg(_fd(5, 1000)), _fd(5, 1000), 16, 16);
+assert_eq(_all_nonneg(pi3), 1, "three sources non-negative");
+
+# ── spectrum strip ────────
+test_group("spectrum_strip");
+
+var strip100 = spectrum_strip(100);
+# strip has exactly num_samples entries: every one of the 100 must be in range
+# (raw pointer has no length field, so exercise the full count directly)
+for (var s100 = 0; s100 < 100; s100 = s100 + 1) {
+    var c100 = strip100 + s100 * sizeof(StripColor);
+    assert(f64_ge(StripColor_r(c100), Z), "strip100 R >= 0");
+    assert(f64_le(StripColor_b(c100), F64_ONE), "strip100 B <= 1");
+}
+# range [0,1] for r,g,b across a 50-sample strip
+var strip50 = spectrum_strip(50);
+for (var s5 = 0; s5 < 50; s5 = s5 + 1) {
+    var c5 = strip50 + s5 * sizeof(StripColor);
+    assert(f64_ge(StripColor_r(c5), Z), "R >= 0");
+    assert(f64_le(StripColor_r(c5), F64_ONE), "R <= 1");
+    assert(f64_ge(StripColor_g(c5), Z), "G >= 0");
+    assert(f64_le(StripColor_g(c5), F64_ONE), "G <= 1");
+    assert(f64_ge(StripColor_b(c5), Z), "B >= 0");
+    assert(f64_le(StripColor_b(c5), F64_ONE), "B <= 1");
+}
+# red end
+var last = strip100 + 99 * sizeof(StripColor);
+assert(f64_gt(StripColor_r(last), StripColor_b(last)), "red end red-dominant");
+# blue start (~420nm at index 10)
+var blue = strip100 + 10 * sizeof(StripColor);
+assert(f64_gt(StripColor_b(blue), StripColor_r(blue)), "blue region blue-dominant");
+# custom range 500-600 is green-yellow
+var strip_gr = spectrum_strip_range(f64_from(500), f64_from(600), 20);
+for (var sg = 0; sg < 20; sg = sg + 1) {
+    assert(f64_gt(StripColor_g(strip_gr + sg * sizeof(StripColor)), _fd(3, 10)), "500-600nm green");
+}
+
+# ── PSF ────────
+test_group("psf");
+
+# perfect wavefront: build circular pupil, zero wavefront
+var pn = 32;
+var prad2 = f64_mul(f64_from(8), f64_from(8));
+var pcx = f64_div(f64_from(32), F64_TWO);
+var pupil = alloc(pn * pn * 8);
+var wf0 = alloc(pn * pn * 8);
+for (var pr = 0; pr < 32; pr = pr + 1) {
+    for (var pc = 0; pc < 32; pc = pc + 1) {
+        store64(wf0 + (pr * 32 + pc) * 8, Z);
+        var pdx = f64_sub(f64_from(pc), pcx);
+        var pdy = f64_sub(f64_from(pr), pcx);
+        var v = Z;
+        if (f64_le(f64_add(f64_mul(pdx, pdx), f64_mul(pdy, pdy)), prad2) == 1) {
+            v = F64_ONE;
+        }
+        store64(pupil + (pr * 32 + pc) * 8, v);
+    }
+}
+var psf = psf_from_wavefront(pupil, wf0, 32, 32, _fd(55, 100000000));
+assert(f64_gt(pattern2d_max_intensity(psf), Z), "psf max > 0");
+assert(f64_gt(pattern2d_get(psf, 16, 16), pattern2d_get(psf, 0, 0)), "psf peak at center");
+
+# diffraction limited
+var psf_dl = psf_diffraction_limited(32, f64_from(8));
+assert_eq(Pattern2D_width(psf_dl), 32, "psf_dl width 32");
+assert(f64_gt(pattern2d_max_intensity(psf_dl), Z), "psf_dl max > 0");
+
+# aberrated PSF has lower peak than perfect
+var wf_ab = alloc(pn * pn * 8);
+for (var ar = 0; ar < 32; ar = ar + 1) {
+    for (var ac = 0; ac < 32; ac = ac + 1) {
+        store64(wf_ab + (ar * 32 + ac) * 8, Z);
+        var adx = f64_sub(f64_from(ac), pcx);
+        var ady = f64_sub(f64_from(ar), pcx);
+        var rho2 = f64_add(f64_mul(adx, adx), f64_mul(ady, ady));
+        if (f64_le(rho2, prad2) == 1) {
+            var ratio = f64_div(rho2, prad2);
+            store64(wf_ab + (ar * 32 + ac) * 8, f64_mul(f64_mul(_fd(5, 10000000), ratio), ratio));
+        }
+    }
+}
+var psf_perfect = psf_from_wavefront(pupil, wf0, 32, 32, _fd(55, 100000000));
+var psf_aberr = psf_from_wavefront(pupil, wf_ab, 32, 32, _fd(55, 100000000));
+assert(f64_lt(pattern2d_max_intensity(psf_aberr), pattern2d_max_intensity(psf_perfect)),
+"aberrated PSF lower peak");
+
+# ── Pattern2D ────────
+test_group("pattern2d");
+
+var pp = pattern2d_new(4, 4);
+pattern2d_set(pp, 0, 0, f64_from(10));
+pattern2d_set(pp, 1, 1, f64_from(5));
+var pnorm = pattern2d_normalized(pp);
+_assert_near(pattern2d_get(pnorm, 0, 0), F64_ONE, EPS, "normalized max = 1");
+_assert_near(pattern2d_get(pnorm, 1, 1), F64_HALF, EPS, "normalized mid = 0.5");
+
+var pz = pattern2d_new(4, 4);
+assert(f64_lt(f64_abs(pattern2d_max_intensity(pattern2d_normalized(pz))), EPS), "normalized zero");
+
+var pm = pattern2d_new(4, 4);
+pattern2d_set(pm, 2, 3, f64_from(42));
+_assert_near(pattern2d_max_intensity(pm), f64_from(42), EPS, "max intensity = 42");
+
+var r = assert_summary();

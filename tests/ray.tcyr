@@ -54,11 +54,11 @@ assert_eq(m1_err, 0, "custom 1.0 ok");
 # custom invalid
 var mi_err = 0;
 var _mi1 = medium_custom(_fd(5, 10), "invalid", &mi_err);
-assert_eq(mi_err, PRK_ERR_INVALID_INDEX, "custom 0.5 err");
+assert_eq(mi_err, PK_ERR_INVALID_INDEX, "custom 0.5 err");
 var _mi2 = medium_custom(_fd(999, 1000), "invalid", &mi_err);
-assert_eq(mi_err, PRK_ERR_INVALID_INDEX, "custom 0.999 err");
+assert_eq(mi_err, PK_ERR_INVALID_INDEX, "custom 0.999 err");
 var _mi3 = medium_custom(f64_neg(F64_ONE), "neg", &mi_err);
-assert_eq(mi_err, PRK_ERR_INVALID_INDEX, "custom -1.0 err");
+assert_eq(mi_err, PK_ERR_INVALID_INDEX, "custom -1.0 err");
 
 # ordering: vacuum < air < water < glass < diamond
 assert(f64_lt(Medium_n(medium_vacuum()), Medium_n(medium_air())), "vacuum<air");
@@ -84,7 +84,7 @@ _assert_near(at2, f64_from(0), TOL6, "snell normal incidence = 0");
 
 var e3 = 0;
 var _t3 = ray_snell(Medium_n(medium_glass()), Medium_n(medium_air()), ray_deg_to_rad(f64_from(45)), &e3);
-assert_eq(e3, PRK_ERR_TIR, "snell glass-air 45deg TIR");
+assert_eq(e3, PK_ERR_TIR, "snell glass-air 45deg TIR");
 
 # at exactly the critical angle -> refracted goes to 90deg (pi/2)
 var ecx = 0;
@@ -143,9 +143,9 @@ _assert_near(ray_rad_to_deg(cag), _fd(411, 10), TOL_HALF, "ca glass-air ~41.1deg
 
 var ecb = 0;
 var _cb1 = ray_critical_angle(F64_ONE, _fd(15, 10), &ecb);
-assert_eq(ecb, PRK_ERR_INVALID_PARAMETER, "ca n1<n2 err");
+assert_eq(ecb, PK_ERR_INVALID_PARAMETER, "ca n1<n2 err");
 var _cb2 = ray_critical_angle(_fd(15, 10), _fd(15, 10), &ecb);
-assert_eq(ecb, PRK_ERR_INVALID_PARAMETER, "ca n1==n2 err");
+assert_eq(ecb, PK_ERR_INVALID_PARAMETER, "ca n1==n2 err");
 
 var ecd = 0;
 var ecg = 0;
@@ -224,7 +224,7 @@ var e_t = 0;
 var _rt = ray_refract_3d(
 ray_vec3(_fd(8, 10), f64_from(0), f64_neg(_fd(6, 10))),
 ray_vec3(f64_from(0), f64_from(0), F64_ONE), _fd(15, 10), F64_ONE, &e_t);
-assert_eq(e_t, PRK_ERR_TIR, "refract glass-air TIR");
+assert_eq(e_t, PK_ERR_TIR, "refract glass-air TIR");
 
 # Snell's law holds: n1 sin(i) == n2 sin(t)
 var e_sl = 0;

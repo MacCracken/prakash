@@ -132,15 +132,15 @@ fn abbe_number(sellmeier) {
 
 # ── Prism ────────
 
-# Minimum deviation angle: d_min = 2*asin(n*sin(A/2)) - A. Writes PRK_ERR_TIR
+# Minimum deviation angle: d_min = 2*asin(n*sin(A/2)) - A. Writes PK_ERR_TIR
 # (returns 0) if n*sin(A/2) exceeds 1.
 #must_use
 fn prism_deviation(apex_angle, n, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     var sin_half_a = f64_sin(f64_div(apex_angle, F64_TWO));
     var arg = f64_mul(n, sin_half_a);
     if (f64_gt(f64_abs(arg), F64_ONE) == 1) {
-        store64(err_out, PRK_ERR_TIR);
+        store64(err_out, PK_ERR_TIR);
         return 0;
     }
     return f64_sub(f64_mul(F64_TWO, ganita_f64_asin(arg)), apex_angle);
@@ -160,7 +160,7 @@ struct PrismSpread { dev_short; dev_long; spread; }
 # Angular spread across a wavelength range. Returns a PrismSpread (0 on error).
 #must_use
 fn prism_angular_spread(apex_angle, sellmeier, wavelength_short_um, wavelength_long_um, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     var e1 = 0;
     var dev_short = prism_dispersion(apex_angle, sellmeier, wavelength_short_um, &e1);
     if (prakash_is_err(e1) == 1) {

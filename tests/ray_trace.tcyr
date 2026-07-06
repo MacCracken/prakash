@@ -51,7 +51,7 @@ assert(f64_lt(hz, f64_from(11)), "sphere hit z < 11");
 var e3 = 0;
 var ray_a = trace_ray_new(ray_vec3(f64_from(10), Z, Z), ray_vec3(Z, Z, F64_ONE), F64_ONE);
 var _ha = trace_surface(ray_a, surface_plane(f64_from(10), N15, f64_from(5)), &e3);
-assert_eq(e3, PRK_ERR_INVALID_PARAMETER, "aperture blocks ray");
+assert_eq(e3, PK_ERR_INVALID_PARAMETER, "aperture blocks ray");
 
 # ── trace_sequential ────────
 test_group("trace_sequential");

@@ -1,5 +1,5 @@
 # ray_core.cyr -- geometric (ray) optics core
-# Usage: include "lib/ray_core.cyr"  (requires error.cyr for PRK_ERR_*)
+# Usage: include "lib/ray_core.cyr"  (requires error.cyr for PK_ERR_*)
 #
 # Reflection, refraction, Snell's law, and the common-material refractive-index
 # database. Ported from the Rust `ray/mod.rs`. All angles are in radians unless a
@@ -10,8 +10,8 @@
 # integer (a decimal literal would decode to NaN). Transcendentals come from the
 # stdlib f64 builtins (`f64_sin`, `f64_sqrt`) and ganita (`ganita_f64_asin`).
 #
-# Errors: functions that can fail take an `err_out` pointer and write `ERR_NONE`
-# or a negative `PRK_ERR_*` code there, returning 0 on failure.
+# Errors: functions that can fail take an `err_out` pointer and write `PK_ERR_NONE`
+# or a negative `PK_ERR_*` code there, returning 0 on failure.
 #
 # `snell_3d` lives with the Fresnel module (ray_fresnel.cyr) since it needs the
 # Fresnel s/p reflectances.
@@ -80,13 +80,13 @@ fn medium_acrylic() { return _medium_mk(f64_div(f64_from(149), f64_from(100)), "
 #must_use
 fn medium_polycarbonate() { return _medium_mk(f64_div(f64_from(1585), f64_from(1000)), "polycarbonate"); }
 
-# Custom medium with a given refractive index. Writes PRK_ERR_INVALID_INDEX and
+# Custom medium with a given refractive index. Writes PK_ERR_INVALID_INDEX and
 # returns 0 if n < 1.0.
 #must_use
 fn medium_custom(n, name, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     if (f64_lt(n, F64_ONE) == 1) {
-        store64(err_out, PRK_ERR_INVALID_INDEX);
+        store64(err_out, PK_ERR_INVALID_INDEX);
         return 0;
     }
     return _medium_mk(n, name);
@@ -103,25 +103,25 @@ fn medium_permittivity(m) {
 # ── Snell's Law ────────
 
 # Apply Snell's law: n1 sin(t1) = n2 sin(t2). Returns the refracted angle in
-# radians, or writes PRK_ERR_TIR (and returns 0) on total internal reflection.
+# radians, or writes PK_ERR_TIR (and returns 0) on total internal reflection.
 #must_use
 fn ray_snell(n1, n2, incident_angle, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     var sin_t = f64_mul(f64_div(n1, n2), f64_sin(incident_angle));
     if (f64_gt(f64_abs(sin_t), F64_ONE) == 1) {
-        store64(err_out, PRK_ERR_TIR);
+        store64(err_out, PK_ERR_TIR);
         return 0;
     }
     return ganita_f64_asin(sin_t);
 }
 
 # Critical angle for total internal reflection (requires n1 > n2). Writes
-# PRK_ERR_INVALID_PARAMETER (returns 0) if n1 <= n2.
+# PK_ERR_INVALID_PARAMETER (returns 0) if n1 <= n2.
 #must_use
 fn ray_critical_angle(n1, n2, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     if (f64_le(n1, n2) == 1) {
-        store64(err_out, PRK_ERR_INVALID_PARAMETER);
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
         return 0;
     }
     return ganita_f64_asin(f64_div(n2, n1));
@@ -169,11 +169,11 @@ fn ray_reflect_3d(direction, normal) {
 # Refract a 3D direction through a surface (vector form of Snell's law):
 #   t = ratio*d + (ratio*cos_i - cos_t)*n
 # with ratio = n1/n2, cos_i = -(d.n), cos_t = sqrt(1 - ratio^2 (1 - cos_i^2)).
-# Returns the refracted RayVec3, or writes PRK_ERR_TIR (returns 0) if the
+# Returns the refracted RayVec3, or writes PK_ERR_TIR (returns 0) if the
 # discriminant is negative. `direction` and outward `normal` should be normalized.
 #must_use
 fn ray_refract_3d(direction, normal, n1, n2, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     var dx = RayVec3_x(direction);
     var dy = RayVec3_y(direction);
     var dz = RayVec3_z(direction);
@@ -185,7 +185,7 @@ fn ray_refract_3d(direction, normal, n1, n2, err_out) {
     var cos_i = f64_neg(dot);
     var sin2_t = f64_mul(f64_mul(ratio, ratio), f64_sub(F64_ONE, f64_mul(cos_i, cos_i)));
     if (f64_gt(sin2_t, F64_ONE) == 1) {
-        store64(err_out, PRK_ERR_TIR);
+        store64(err_out, PK_ERR_TIR);
         return 0;
     }
     var cos_t = f64_sqrt(f64_sub(F64_ONE, sin2_t));

@@ -129,7 +129,7 @@ var refl_t = 0;
 var e_t3 = 0;
 var dir_tir = _n3(_fd(8, 10), f64_from(0), f64_neg(_fd(6, 10)));
 var _rt3 = ray_snell_3d(dir_tir, ray_vec3(f64_from(0), f64_from(0), F64_ONE), _fd(15, 10), F64_ONE, &refl_t, &e_t3);
-assert_eq(e_t3, PRK_ERR_TIR, "snell_3d TIR");
+assert_eq(e_t3, PK_ERR_TIR, "snell_3d TIR");
 
 # grazing -> high reflectance
 var refl_g = 0;

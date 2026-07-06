@@ -9,29 +9,29 @@
 # Usage: include "lib/error.cyr"
 #
 # Replaces Rust's PrakashError enum with integer error codes. Functions return
-# ERR_NONE (0) on success or a negative PRK_ERR_* code on failure. Where a
+# PK_ERR_NONE (0) on success or a negative PK_ERR_* code on failure. Where a
 # function also returns an f64 result, it takes an `err_out` pointer and writes
 # the code there. Detailed failure context (angles, indices) is logged via
 # sakshi at the failure site rather than carried in the return value.
 #
 # Pairs with tagged.cyr for Result-like patterns when an Option is needed.
 
-var ERR_NONE                  = 0;
+var PK_ERR_NONE                  = 0;
 
 # Total internal reflection — incident angle exceeds the critical angle.
-var PRK_ERR_TIR               = (0 - 1);
+var PK_ERR_TIR               = (0 - 1);
 # Refractive index is below the physical minimum of 1.0.
-var PRK_ERR_INVALID_INDEX     = (0 - 2);
+var PK_ERR_INVALID_INDEX     = (0 - 2);
 # Wavelength is outside the visible range (380-780 nm).
-var PRK_ERR_WAVELENGTH_RANGE  = (0 - 3);
+var PK_ERR_WAVELENGTH_RANGE  = (0 - 3);
 # Angle is outside the valid range (0-90 deg) for a surface interaction.
-var PRK_ERR_INVALID_ANGLE     = (0 - 4);
+var PK_ERR_INVALID_ANGLE     = (0 - 4);
 # Negative focal length where a positive one is required.
-var PRK_ERR_INVALID_FOCAL     = (0 - 5);
+var PK_ERR_INVALID_FOCAL     = (0 - 5);
 # Division by zero in an optical calculation.
-var PRK_ERR_DIVISION_BY_ZERO  = (0 - 6);
+var PK_ERR_DIVISION_BY_ZERO  = (0 - 6);
 # A parameter is outside the valid range for the operation.
-var PRK_ERR_INVALID_PARAMETER = (0 - 7);
+var PK_ERR_INVALID_PARAMETER = (0 - 7);
 
 # 1 if `code` is an error (negative), else 0.
 fn prakash_is_err(code) {
@@ -39,7 +39,7 @@ fn prakash_is_err(code) {
     return 0;
 }
 
-# 1 if `code` is success (ERR_NONE), else 0.
+# 1 if `code` is success (PK_ERR_NONE), else 0.
 fn prakash_is_ok(code) {
     if (code == 0) { return 1; }
     return 0;
@@ -48,7 +48,7 @@ fn prakash_is_ok(code) {
 # --- ray_core.cyr ---
 
 # ray_core.cyr -- geometric (ray) optics core
-# Usage: include "lib/ray_core.cyr"  (requires error.cyr for PRK_ERR_*)
+# Usage: include "lib/ray_core.cyr"  (requires error.cyr for PK_ERR_*)
 #
 # Reflection, refraction, Snell's law, and the common-material refractive-index
 # database. Ported from the Rust `ray/mod.rs`. All angles are in radians unless a
@@ -59,8 +59,8 @@ fn prakash_is_ok(code) {
 # integer (a decimal literal would decode to NaN). Transcendentals come from the
 # stdlib f64 builtins (`f64_sin`, `f64_sqrt`) and ganita (`ganita_f64_asin`).
 #
-# Errors: functions that can fail take an `err_out` pointer and write `ERR_NONE`
-# or a negative `PRK_ERR_*` code there, returning 0 on failure.
+# Errors: functions that can fail take an `err_out` pointer and write `PK_ERR_NONE`
+# or a negative `PK_ERR_*` code there, returning 0 on failure.
 #
 # `snell_3d` lives with the Fresnel module (ray_fresnel.cyr) since it needs the
 # Fresnel s/p reflectances.
@@ -129,13 +129,13 @@ fn medium_acrylic() { return _medium_mk(f64_div(f64_from(149), f64_from(100)), "
 #must_use
 fn medium_polycarbonate() { return _medium_mk(f64_div(f64_from(1585), f64_from(1000)), "polycarbonate"); }
 
-# Custom medium with a given refractive index. Writes PRK_ERR_INVALID_INDEX and
+# Custom medium with a given refractive index. Writes PK_ERR_INVALID_INDEX and
 # returns 0 if n < 1.0.
 #must_use
 fn medium_custom(n, name, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     if (f64_lt(n, F64_ONE) == 1) {
-        store64(err_out, PRK_ERR_INVALID_INDEX);
+        store64(err_out, PK_ERR_INVALID_INDEX);
         return 0;
     }
     return _medium_mk(n, name);
@@ -152,25 +152,25 @@ fn medium_permittivity(m) {
 # ── Snell's Law ────────
 
 # Apply Snell's law: n1 sin(t1) = n2 sin(t2). Returns the refracted angle in
-# radians, or writes PRK_ERR_TIR (and returns 0) on total internal reflection.
+# radians, or writes PK_ERR_TIR (and returns 0) on total internal reflection.
 #must_use
 fn ray_snell(n1, n2, incident_angle, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     var sin_t = f64_mul(f64_div(n1, n2), f64_sin(incident_angle));
     if (f64_gt(f64_abs(sin_t), F64_ONE) == 1) {
-        store64(err_out, PRK_ERR_TIR);
+        store64(err_out, PK_ERR_TIR);
         return 0;
     }
     return ganita_f64_asin(sin_t);
 }
 
 # Critical angle for total internal reflection (requires n1 > n2). Writes
-# PRK_ERR_INVALID_PARAMETER (returns 0) if n1 <= n2.
+# PK_ERR_INVALID_PARAMETER (returns 0) if n1 <= n2.
 #must_use
 fn ray_critical_angle(n1, n2, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     if (f64_le(n1, n2) == 1) {
-        store64(err_out, PRK_ERR_INVALID_PARAMETER);
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
         return 0;
     }
     return ganita_f64_asin(f64_div(n2, n1));
@@ -218,11 +218,11 @@ fn ray_reflect_3d(direction, normal) {
 # Refract a 3D direction through a surface (vector form of Snell's law):
 #   t = ratio*d + (ratio*cos_i - cos_t)*n
 # with ratio = n1/n2, cos_i = -(d.n), cos_t = sqrt(1 - ratio^2 (1 - cos_i^2)).
-# Returns the refracted RayVec3, or writes PRK_ERR_TIR (returns 0) if the
+# Returns the refracted RayVec3, or writes PK_ERR_TIR (returns 0) if the
 # discriminant is negative. `direction` and outward `normal` should be normalized.
 #must_use
 fn ray_refract_3d(direction, normal, n1, n2, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     var dx = RayVec3_x(direction);
     var dy = RayVec3_y(direction);
     var dz = RayVec3_z(direction);
@@ -234,7 +234,7 @@ fn ray_refract_3d(direction, normal, n1, n2, err_out) {
     var cos_i = f64_neg(dot);
     var sin2_t = f64_mul(f64_mul(ratio, ratio), f64_sub(F64_ONE, f64_mul(cos_i, cos_i)));
     if (f64_gt(sin2_t, F64_ONE) == 1) {
-        store64(err_out, PRK_ERR_TIR);
+        store64(err_out, PK_ERR_TIR);
         return 0;
     }
     var cos_t = f64_sqrt(f64_sub(F64_ONE, sin2_t));
@@ -308,16 +308,16 @@ fn fresnel_normal(n1, n2) {
     return f64_mul(r, r);
 }
 
-# Average (unpolarized) Fresnel reflectance. Writes PRK_ERR_TIR (returns 0) if
+# Average (unpolarized) Fresnel reflectance. Writes PK_ERR_TIR (returns 0) if
 # the incident angle exceeds the critical angle.
 #must_use
 fn fresnel_unpolarized(n1, n2, incident_angle, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     var sin_i = f64_sin(incident_angle);
     var cos_i = f64_cos(incident_angle);
     var sin_t = f64_mul(f64_div(n1, n2), sin_i);
     if (f64_gt(f64_abs(sin_t), F64_ONE) == 1) {
-        store64(err_out, PRK_ERR_TIR);
+        store64(err_out, PK_ERR_TIR);
         return 0;
     }
     var cos_t = f64_sqrt(f64_sub(F64_ONE, f64_mul(sin_t, sin_t)));
@@ -470,7 +470,7 @@ fn beer_lambert(intensity, alpha, distance) {
 # should be normalized.
 #must_use
 fn ray_snell_3d(direction, normal, n1, n2, refl_out, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     store64(refl_out, f64_from(0));
     var dx = RayVec3_x(direction);
     var dy = RayVec3_y(direction);
@@ -483,7 +483,7 @@ fn ray_snell_3d(direction, normal, n1, n2, refl_out, err_out) {
     var ratio = f64_div(n1, n2);
     var sin2_t = f64_mul(f64_mul(ratio, ratio), f64_sub(F64_ONE, f64_mul(cos_i, cos_i)));
     if (f64_gt(sin2_t, F64_ONE) == 1) {
-        store64(err_out, PRK_ERR_TIR);
+        store64(err_out, PK_ERR_TIR);
         return 0;
     }
     var cos_t = f64_sqrt(f64_sub(F64_ONE, sin2_t));
@@ -562,11 +562,11 @@ fn trace_ray_new(pos, dir, n) {
 struct TraceHit { hit_point; normal; ray_after; reflectance; }
 
 # Trace a ray through a single optical surface. Returns a TraceHit (0 on error)
-# and writes ERR_NONE / PRK_ERR_* to err_out. Surfaces are centered on the z
+# and writes PK_ERR_NONE / PK_ERR_* to err_out. Surfaces are centered on the z
 # axis; a spherical surface's center of curvature is at z_position + radius.
 #must_use
 fn trace_surface(ray, surface, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     var pos = TraceRay_pos(ray);
     var dir = TraceRay_dir(ray);
     var px = RayVec3_x(pos);
@@ -587,12 +587,12 @@ fn trace_surface(ray, surface, err_out) {
     if (OpticalSurface_shape_tag(surface) == SURF_PLANE) {
         # Intersection with the z = z_position plane.
         if (f64_lt(f64_abs(dz), _trace_eps15()) == 1) {
-            store64(err_out, PRK_ERR_INVALID_PARAMETER);
+            store64(err_out, PK_ERR_INVALID_PARAMETER);
             return 0;
         }
         var t = f64_div(f64_sub(z_pos, pz), dz);
         if (f64_lt(t, f64_from(0)) == 1) {
-            store64(err_out, PRK_ERR_INVALID_PARAMETER);
+            store64(err_out, PK_ERR_INVALID_PARAMETER);
             return 0;
         }
         hit_x = f64_add(px, f64_mul(t, dx));
@@ -617,7 +617,7 @@ fn trace_surface(ray, surface, err_out) {
         f64_mul(radius, radius));
         var disc = f64_sub(f64_mul(half_b, half_b), cc);
         if (f64_lt(disc, f64_from(0)) == 1) {
-            store64(err_out, PRK_ERR_INVALID_PARAMETER);
+            store64(err_out, PK_ERR_INVALID_PARAMETER);
             return 0;
         }
         var sqrt_d = f64_sqrt(disc);
@@ -629,7 +629,7 @@ fn trace_surface(ray, surface, err_out) {
         } elif (f64_gt(t2, _trace_eps10()) == 1) {
             t = t2;
         } else {
-            store64(err_out, PRK_ERR_INVALID_PARAMETER);
+            store64(err_out, PK_ERR_INVALID_PARAMETER);
             return 0;
         }
         hit_x = f64_add(px, f64_mul(t, dx));
@@ -656,7 +656,7 @@ fn trace_surface(ray, surface, err_out) {
     var r2 = f64_add(f64_mul(hit_x, hit_x), f64_mul(hit_y, hit_y));
     var ap = OpticalSurface_aperture_radius(surface);
     if (f64_gt(r2, f64_mul(ap, ap)) == 1) {
-        store64(err_out, PRK_ERR_INVALID_PARAMETER);
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
         return 0;
     }
 
@@ -684,7 +684,7 @@ fn trace_surface(ray, surface, err_out) {
 # Returns a `vec` of TraceHit (0 on error, with err_out set).
 #must_use
 fn trace_sequential(initial_ray, surfaces, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     var hits = vec_new();
     var current = initial_ray;
     var count = vec_len(surfaces);
@@ -715,7 +715,7 @@ struct PolarizedTraceHit { hit; rp_over_rs; transmittance_s; transmittance_p; }
 # (0 on error, err_out set).
 #must_use
 fn trace_sequential_polarized(initial_ray, surfaces, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     var results = vec_new();
     var current = initial_ray;
     var cum_ts = F64_ONE;
@@ -1095,7 +1095,7 @@ fn spot_rms_radius(spots) {
 # summed). Writes the error code to err_out (0 on error return).
 #must_use
 fn optical_path_length(ray, surfaces, image_z, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     var e = 0;
     var hits = trace_sequential(ray, surfaces, &e);
     if (prakash_is_err(e) == 1) {
@@ -1137,7 +1137,7 @@ fn optical_path_length(ray, surfaces, image_z, err_out) {
 # Optical path difference of a ray relative to a chief ray. Writes err to err_out.
 #must_use
 fn optical_path_difference(ray, chief_ray, surfaces, image_z, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     var e1 = 0;
     var opl_ray = optical_path_length(ray, surfaces, image_z, &e1);
     if (prakash_is_err(e1) == 1) {
@@ -1405,9 +1405,9 @@ struct SystemProperties { focal_length; bfd; ffd; power; entrance_pupil; exit_pu
 # system is empty or afocal (zero power).
 #must_use
 fn find_system_properties(prescription, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     if (prescription_is_empty(prescription) == 1) {
-        store64(err_out, PRK_ERR_INVALID_PARAMETER);
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
         return 0;
     }
 
@@ -1420,7 +1420,7 @@ fn find_system_properties(prescription, err_out) {
         final_ray = vec_get(forward_states, nf - 1);
     }
     if (f64_lt(f64_abs(ParaxialRay_nu(final_ray)), _sys_eps15()) == 1) {
-        store64(err_out, PRK_ERR_DIVISION_BY_ZERO);
+        store64(err_out, PK_ERR_DIVISION_BY_ZERO);
         return 0;
     }
 
@@ -1662,15 +1662,15 @@ fn abbe_number(sellmeier) {
 
 # ── Prism ────────
 
-# Minimum deviation angle: d_min = 2*asin(n*sin(A/2)) - A. Writes PRK_ERR_TIR
+# Minimum deviation angle: d_min = 2*asin(n*sin(A/2)) - A. Writes PK_ERR_TIR
 # (returns 0) if n*sin(A/2) exceeds 1.
 #must_use
 fn prism_deviation(apex_angle, n, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     var sin_half_a = f64_sin(f64_div(apex_angle, F64_TWO));
     var arg = f64_mul(n, sin_half_a);
     if (f64_gt(f64_abs(arg), F64_ONE) == 1) {
-        store64(err_out, PRK_ERR_TIR);
+        store64(err_out, PK_ERR_TIR);
         return 0;
     }
     return f64_sub(f64_mul(F64_TWO, ganita_f64_asin(arg)), apex_angle);
@@ -1690,7 +1690,7 @@ struct PrismSpread { dev_short; dev_long; spread; }
 # Angular spread across a wavelength range. Returns a PrismSpread (0 on error).
 #must_use
 fn prism_angular_spread(apex_angle, sellmeier, wavelength_short_um, wavelength_long_um, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     var e1 = 0;
     var dev_short = prism_dispersion(apex_angle, sellmeier, wavelength_short_um, &e1);
     if (prakash_is_err(e1) == 1) {
@@ -1848,13 +1848,13 @@ fn _fib_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
 fn _fib_cutoff() { return _fib_r(2405, 1000); }   # 2.405
 
 # Numerical aperture: NA = sqrt(n_core^2 - n_clad^2). Writes
-# PRK_ERR_INVALID_PARAMETER (returns 0) if n_core < n_clad.
+# PK_ERR_INVALID_PARAMETER (returns 0) if n_core < n_clad.
 #must_use
 fn fiber_na(n_core, n_clad, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     var na2 = f64_sub(f64_mul(n_core, n_core), f64_mul(n_clad, n_clad));
     if (f64_lt(na2, f64_from(0)) == 1) {
-        store64(err_out, PRK_ERR_INVALID_PARAMETER);
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
         return 0;
     }
     return f64_sqrt(na2);
@@ -1991,11 +1991,11 @@ fn rgb_luminance(c) {
 
 # ── Wavelength -> RGB ────────
 
-# Piecewise-linear CIE approximation. Writes PRK_ERR_WAVELENGTH_RANGE (returns 0)
+# Piecewise-linear CIE approximation. Writes PK_ERR_WAVELENGTH_RANGE (returns 0)
 # outside 380-780 nm (NaN also fails the range test).
 #must_use
 fn wavelength_to_rgb(wavelength_nm, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     var in_range = 0;
     if (f64_ge(wavelength_nm, spec_visible_min_nm()) == 1) {
         if (f64_le(wavelength_nm, spec_visible_max_nm()) == 1) {
@@ -2003,7 +2003,7 @@ fn wavelength_to_rgb(wavelength_nm, err_out) {
         }
     }
     if (in_range == 0) {
-        store64(err_out, PRK_ERR_WAVELENGTH_RANGE);
+        store64(err_out, PK_ERR_WAVELENGTH_RANGE);
         return 0;
     }
 
@@ -5511,3 +5511,363 @@ fn zernike_astigmatism_0(amount) { return _zern_single(6, 5, amount); }
 # Astigmatism 45 degrees (Noll j=5).
 #must_use
 fn zernike_astigmatism_45(amount) { return _zern_single(5, 4, amount); }
+
+# --- wave_pattern.cyr ---
+
+# wave_pattern.cyr -- 2D diffraction / interference / SPD strip / PSF patterns
+# Usage: include "lib/wave_pattern.cyr"  (requires hisab for num_fft/num_ifft)
+#
+# Ported from the Rust `wave/pattern.rs`. Uses hisab's FFT (num_fft) on packed
+# complex buffers: element i has re at byte i*16, im at i*16+8 (matching hisab
+# HComplex layout). Pattern2D.data is a row-major f64 buffer.
+
+fn _pat_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+
+# Next power of two (>= n); npot(0) = 1.
+fn _pat_npot(n) {
+    var p = 1;
+    while (p < n) {
+        p = p * 2;
+    }
+    return p;
+}
+
+# |grid[idx]|^2 = re^2 + im^2 from a packed complex buffer.
+fn _pat_norm_sq(grid, idx) {
+    var re = load64(grid + idx * 16);
+    var im = load64(grid + idx * 16 + 8);
+    return f64_add(f64_mul(re, re), f64_mul(im, im));
+}
+
+# ── Pattern2D ────────
+
+#derive(accessors)
+struct Pattern2D { data; width; height; }
+
+# New zero-filled pattern (width x height, row-major).
+#must_use
+fn pattern2d_new(width, height) {
+    var p = alloc(sizeof(Pattern2D));
+    var total = width * height;
+    var data = alloc(total * 8);
+    for (var i = 0; i < total; i = i + 1) {
+        store64(data + i * 8, f64_from(0));
+    }
+    Pattern2D_set_data(p, data);
+    Pattern2D_set_width(p, width);
+    Pattern2D_set_height(p, height);
+    return p;
+}
+
+#must_use
+fn pattern2d_get(p, col, row) {
+    return load64(Pattern2D_data(p) + (row * Pattern2D_width(p) + col) * 8);
+}
+
+fn pattern2d_set(p, col, row, value) {
+    store64(Pattern2D_data(p) + (row * Pattern2D_width(p) + col) * 8, value);
+    return 0;
+}
+
+# Maximum intensity (fold from 0.0).
+#must_use
+fn pattern2d_max_intensity(p) {
+    var data = Pattern2D_data(p);
+    var total = Pattern2D_width(p) * Pattern2D_height(p);
+    var m = f64_from(0);
+    for (var i = 0; i < total; i = i + 1) {
+        var v = load64(data + i * 8);
+        if (f64_gt(v, m) == 1) {
+            m = v;
+        }
+    }
+    return m;
+}
+
+# Normalize to [0,1] relative to the maximum; clone unchanged if max < 1e-30.
+#must_use
+fn pattern2d_normalized(p) {
+    var maxv = pattern2d_max_intensity(p);
+    var width = Pattern2D_width(p);
+    var height = Pattern2D_height(p);
+    var out = pattern2d_new(width, height);
+    var total = width * height;
+    var data = Pattern2D_data(p);
+    var odata = Pattern2D_data(out);
+    if (f64_lt(maxv, 0x39B4484BFEEBC2A0) == 1) {
+        for (var i = 0; i < total; i = i + 1) {
+            store64(odata + i * 8, load64(data + i * 8));
+        }
+        return out;
+    }
+    var inv = f64_div(F64_ONE, maxv);
+    for (var j = 0; j < total; j = j + 1) {
+        store64(odata + j * 8, f64_mul(load64(data + j * 8), inv));
+    }
+    return out;
+}
+
+# ── 2D FFT plumbing (row FFTs then column FFTs, hisab num_fft) ────────
+
+fn _pat_fft2d(grid, nw, nh) {
+    for (var row = 0; row < nh; row = row + 1) {
+        num_fft(grid + row * nw * 16, nw);
+    }
+    var col_buf = alloc(nh * 16);
+    for (var col = 0; col < nw; col = col + 1) {
+        for (var rr = 0; rr < nh; rr = rr + 1) {
+            store64(col_buf + rr * 16, load64(grid + (rr * nw + col) * 16));
+            store64(col_buf + rr * 16 + 8, load64(grid + (rr * nw + col) * 16 + 8));
+        }
+        num_fft(col_buf, nh);
+        for (var rw = 0; rw < nh; rw = rw + 1) {
+            store64(grid + (rw * nw + col) * 16, load64(col_buf + rw * 16));
+            store64(grid + (rw * nw + col) * 16 + 8, load64(col_buf + rw * 16 + 8));
+        }
+    }
+    return 0;
+}
+
+# |E|^2 with fftshift (DC to center) into a fresh Pattern2D.
+fn _pat_fftshift_to_pattern(grid, nw, nh) {
+    var pattern = pattern2d_new(nw, nh);
+    for (var row = 0; row < nh; row = row + 1) {
+        for (var col = 0; col < nw; col = col + 1) {
+            var sr = (row + nh / 2) % nh;
+            var sc = (col + nw / 2) % nw;
+            pattern2d_set(pattern, col, row, _pat_norm_sq(grid, sr * nw + sc));
+        }
+    }
+    return pattern;
+}
+
+# ── 2D Diffraction ────────
+
+# 2D Fraunhofer diffraction from an arbitrary aperture (row-major f64 grid,
+# 0=opaque..1=clear). Dimensions padded to the next power of 2. Returns |E|^2.
+#must_use
+fn diffraction_pattern_2d(aperture, width, height) {
+    var nw = _pat_npot(width);
+    var nh = _pat_npot(height);
+    var grid = alloc(nw * nh * 16);
+    var total = nw * nh;
+    for (var z = 0; z < total; z = z + 1) {
+        store64(grid + z * 16, f64_from(0));
+        store64(grid + z * 16 + 8, f64_from(0));
+    }
+    for (var row = 0; row < height; row = row + 1) {
+        for (var col = 0; col < width; col = col + 1) {
+            store64(grid + (row * nw + col) * 16, load64(aperture + (row * width + col) * 8));
+            store64(grid + (row * nw + col) * 16 + 8, f64_from(0));
+        }
+    }
+    _pat_fft2d(grid, nw, nh);
+    return _pat_fftshift_to_pattern(grid, nw, nh);
+}
+
+# 2D diffraction pattern of a circular aperture (radius in grid pixels) -> Airy.
+#must_use
+fn diffraction_pattern_circular(grid_size, radius) {
+    var n = _pat_npot(grid_size);
+    var cx = f64_div(f64_from(n), F64_TWO);
+    var cy = f64_div(f64_from(n), F64_TWO);
+    var r2 = f64_mul(radius, radius);
+    var aperture = alloc(n * n * 8);
+    for (var row = 0; row < n; row = row + 1) {
+        for (var col = 0; col < n; col = col + 1) {
+            var dx = f64_sub(f64_from(col), cx);
+            var dy = f64_sub(f64_from(row), cy);
+            var v = f64_from(0);
+            if (f64_le(f64_add(f64_mul(dx, dx), f64_mul(dy, dy)), r2) == 1) {
+                v = F64_ONE;
+            }
+            store64(aperture + (row * n + col) * 8, v);
+        }
+    }
+    return diffraction_pattern_2d(aperture, n, n);
+}
+
+# ── Interference pattern ────────
+
+#derive(accessors)
+struct PointSource { x; y; amplitude; phase; }
+
+#must_use
+fn point_source_new(x, y, amplitude, phase) {
+    var s = alloc(sizeof(PointSource));
+    PointSource_set_x(s, x);
+    PointSource_set_y(s, y);
+    PointSource_set_amplitude(s, amplitude);
+    PointSource_set_phase(s, phase);
+    return s;
+}
+
+# Interference of N point sources on a 2D grid: |sum E|^2 with 1/r falloff.
+# grid_x = (gx0, gx1), grid_y = (gy0, gy1) flattened. sources = contiguous
+# PointSource array (element i at sources + i*sizeof(PointSource)).
+#must_use
+fn interference_pattern(sources, num_sources, wavelength, distance, gx0, gx1, gy0, gy1, nx, ny) {
+    var k = f64_div(F64_TAU, wavelength);
+    var dx = f64_from(0);
+    if (nx > 1) {
+        dx = f64_div(f64_sub(gx1, gx0), f64_sub(f64_from(nx), F64_ONE));
+    }
+    var dy = f64_from(0);
+    if (ny > 1) {
+        dy = f64_div(f64_sub(gy1, gy0), f64_sub(f64_from(ny), F64_ONE));
+    }
+    var pattern = pattern2d_new(nx, ny);
+    for (var row = 0; row < ny; row = row + 1) {
+        var obs_y = f64_add(gy0, f64_mul(f64_from(row), dy));
+        for (var col = 0; col < nx; col = col + 1) {
+            var obs_x = f64_add(gx0, f64_mul(f64_from(col), dx));
+            var e_re = f64_from(0);
+            var e_im = f64_from(0);
+            for (var si = 0; si < num_sources; si = si + 1) {
+                var src = sources + si * sizeof(PointSource);
+                var sx = f64_sub(obs_x, PointSource_x(src));
+                var sy = f64_sub(obs_y, PointSource_y(src));
+                var r = f64_sqrt(f64_add(
+                f64_add(f64_mul(sx, sx), f64_mul(sy, sy)),
+                f64_mul(distance, distance)));
+                var phase = f64_add(f64_mul(k, r), PointSource_phase(src));
+                var amp = f64_div(PointSource_amplitude(src), r);
+                e_re = f64_add(e_re, f64_mul(amp, f64_cos(phase)));
+                e_im = f64_add(e_im, f64_mul(amp, f64_sin(phase)));
+            }
+            pattern2d_set(pattern, col, row, f64_add(f64_mul(e_re, e_re), f64_mul(e_im, e_im)));
+        }
+    }
+    return pattern;
+}
+
+# ── SPD -> RGB strip ────────
+
+#derive(accessors)
+struct StripColor { r; g; b; }
+
+# Piecewise wavelength(nm) -> linear RGB (approx CIE 1931). Writes r,g,b to
+# out+0/+8/+16. Black outside 380..780 nm.
+fn _pat_wl_to_rgb(nm, out) {
+    if (f64_lt(nm, f64_from(380)) == 1) {
+        store64(out, f64_from(0));
+        store64(out + 8, f64_from(0));
+        store64(out + 16, f64_from(0));
+        return 0;
+    }
+    if (f64_gt(nm, f64_from(780)) == 1) {
+        store64(out, f64_from(0));
+        store64(out + 8, f64_from(0));
+        store64(out + 16, f64_from(0));
+        return 0;
+    }
+    var rr = f64_from(0);
+    var gg = f64_from(0);
+    var bb = f64_from(0);
+    if (f64_lt(nm, f64_from(440)) == 1) {
+        rr = f64_div(f64_neg(f64_sub(nm, f64_from(440))), f64_from(60));
+        bb = F64_ONE;
+    } elif (f64_lt(nm, f64_from(490)) == 1) {
+        gg = f64_div(f64_sub(nm, f64_from(440)), f64_from(50));
+        bb = F64_ONE;
+    } elif (f64_lt(nm, f64_from(510)) == 1) {
+        gg = F64_ONE;
+        bb = f64_div(f64_neg(f64_sub(nm, f64_from(510))), f64_from(20));
+    } elif (f64_lt(nm, f64_from(580)) == 1) {
+        rr = f64_div(f64_sub(nm, f64_from(510)), f64_from(70));
+        gg = F64_ONE;
+    } elif (f64_lt(nm, f64_from(645)) == 1) {
+        rr = F64_ONE;
+        gg = f64_div(f64_neg(f64_sub(nm, f64_from(645))), f64_from(65));
+    } else {
+        rr = F64_ONE;
+    }
+    var factor = F64_ONE;
+    if (f64_lt(nm, f64_from(420)) == 1) {
+        factor = f64_add(_pat_r(3, 10),
+        f64_div(f64_mul(_pat_r(7, 10), f64_sub(nm, f64_from(380))), f64_from(40)));
+    } elif (f64_gt(nm, f64_from(700)) == 1) {
+        factor = f64_add(_pat_r(3, 10),
+        f64_div(f64_mul(_pat_r(7, 10), f64_sub(f64_from(780), nm)), f64_from(80)));
+    }
+    store64(out, f64_mul(rr, factor));
+    store64(out + 8, f64_mul(gg, factor));
+    store64(out + 16, f64_mul(bb, factor));
+    return 0;
+}
+
+# Visible-spectrum strip (380-780 nm) as num_samples StripColors (contiguous).
+#must_use
+fn spectrum_strip(num_samples) {
+    var colors = alloc(num_samples * sizeof(StripColor));
+    var rgb = alloc(24);
+    for (var i = 0; i < num_samples; i = i + 1) {
+        var denom = f64_sub(f64_from(num_samples), F64_ONE);
+        if (f64_lt(denom, F64_ONE) == 1) {
+            denom = F64_ONE;
+        }
+        var t = f64_div(f64_from(i), denom);
+        _pat_wl_to_rgb(f64_add(f64_from(380), f64_mul(t, f64_from(400))), rgb);
+        var c = colors + i * sizeof(StripColor);
+        StripColor_set_r(c, load64(rgb));
+        StripColor_set_g(c, load64(rgb + 8));
+        StripColor_set_b(c, load64(rgb + 16));
+    }
+    return colors;
+}
+
+# Spectrum strip for a custom [start_nm, end_nm] range.
+#must_use
+fn spectrum_strip_range(start_nm, end_nm, num_samples) {
+    var colors = alloc(num_samples * sizeof(StripColor));
+    var rgb = alloc(24);
+    for (var i = 0; i < num_samples; i = i + 1) {
+        var denom = f64_sub(f64_from(num_samples), F64_ONE);
+        if (f64_lt(denom, F64_ONE) == 1) {
+            denom = F64_ONE;
+        }
+        var t = f64_div(f64_from(i), denom);
+        _pat_wl_to_rgb(f64_add(start_nm, f64_mul(t, f64_sub(end_nm, start_nm))), rgb);
+        var c = colors + i * sizeof(StripColor);
+        StripColor_set_r(c, load64(rgb));
+        StripColor_set_g(c, load64(rgb + 8));
+        StripColor_set_b(c, load64(rgb + 16));
+    }
+    return colors;
+}
+
+# ── PSF ────────
+
+# Point Spread Function from wavefront error: PSF = |FT{P * exp(i*k*W)}|^2.
+# pupil/wavefront_error are row-major f64 grids (width x height); k = TAU/wl.
+#must_use
+fn psf_from_wavefront(pupil, wavefront_error, width, height, wavelength) {
+    var nw = _pat_npot(width);
+    var nh = _pat_npot(height);
+    var k = f64_div(F64_TAU, wavelength);
+    var grid = alloc(nw * nh * 16);
+    var total = nw * nh;
+    for (var z = 0; z < total; z = z + 1) {
+        store64(grid + z * 16, f64_from(0));
+        store64(grid + z * 16 + 8, f64_from(0));
+    }
+    for (var row = 0; row < height; row = row + 1) {
+        for (var col = 0; col < width; col = col + 1) {
+            var idx = row * width + col;
+            var pp = load64(pupil + idx * 8);
+            if (f64_gt(pp, f64_from(0)) == 1) {
+                var phase = f64_mul(k, load64(wavefront_error + idx * 8));
+                store64(grid + (row * nw + col) * 16, f64_mul(pp, f64_cos(phase)));
+                store64(grid + (row * nw + col) * 16 + 8, f64_mul(pp, f64_sin(phase)));
+            }
+        }
+    }
+    _pat_fft2d(grid, nw, nh);
+    return _pat_fftshift_to_pattern(grid, nw, nh);
+}
+
+# Diffraction-limited PSF (perfect wavefront) = circular-aperture Airy pattern.
+#must_use
+fn psf_diffraction_limited(grid_size, radius) {
+    return diffraction_pattern_circular(grid_size, radius);
+}

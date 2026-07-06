@@ -60,11 +60,11 @@ fn trace_ray_new(pos, dir, n) {
 struct TraceHit { hit_point; normal; ray_after; reflectance; }
 
 # Trace a ray through a single optical surface. Returns a TraceHit (0 on error)
-# and writes ERR_NONE / PRK_ERR_* to err_out. Surfaces are centered on the z
+# and writes PK_ERR_NONE / PK_ERR_* to err_out. Surfaces are centered on the z
 # axis; a spherical surface's center of curvature is at z_position + radius.
 #must_use
 fn trace_surface(ray, surface, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     var pos = TraceRay_pos(ray);
     var dir = TraceRay_dir(ray);
     var px = RayVec3_x(pos);
@@ -85,12 +85,12 @@ fn trace_surface(ray, surface, err_out) {
     if (OpticalSurface_shape_tag(surface) == SURF_PLANE) {
         # Intersection with the z = z_position plane.
         if (f64_lt(f64_abs(dz), _trace_eps15()) == 1) {
-            store64(err_out, PRK_ERR_INVALID_PARAMETER);
+            store64(err_out, PK_ERR_INVALID_PARAMETER);
             return 0;
         }
         var t = f64_div(f64_sub(z_pos, pz), dz);
         if (f64_lt(t, f64_from(0)) == 1) {
-            store64(err_out, PRK_ERR_INVALID_PARAMETER);
+            store64(err_out, PK_ERR_INVALID_PARAMETER);
             return 0;
         }
         hit_x = f64_add(px, f64_mul(t, dx));
@@ -115,7 +115,7 @@ fn trace_surface(ray, surface, err_out) {
         f64_mul(radius, radius));
         var disc = f64_sub(f64_mul(half_b, half_b), cc);
         if (f64_lt(disc, f64_from(0)) == 1) {
-            store64(err_out, PRK_ERR_INVALID_PARAMETER);
+            store64(err_out, PK_ERR_INVALID_PARAMETER);
             return 0;
         }
         var sqrt_d = f64_sqrt(disc);
@@ -127,7 +127,7 @@ fn trace_surface(ray, surface, err_out) {
         } elif (f64_gt(t2, _trace_eps10()) == 1) {
             t = t2;
         } else {
-            store64(err_out, PRK_ERR_INVALID_PARAMETER);
+            store64(err_out, PK_ERR_INVALID_PARAMETER);
             return 0;
         }
         hit_x = f64_add(px, f64_mul(t, dx));
@@ -154,7 +154,7 @@ fn trace_surface(ray, surface, err_out) {
     var r2 = f64_add(f64_mul(hit_x, hit_x), f64_mul(hit_y, hit_y));
     var ap = OpticalSurface_aperture_radius(surface);
     if (f64_gt(r2, f64_mul(ap, ap)) == 1) {
-        store64(err_out, PRK_ERR_INVALID_PARAMETER);
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
         return 0;
     }
 
@@ -182,7 +182,7 @@ fn trace_surface(ray, surface, err_out) {
 # Returns a `vec` of TraceHit (0 on error, with err_out set).
 #must_use
 fn trace_sequential(initial_ray, surfaces, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     var hits = vec_new();
     var current = initial_ray;
     var count = vec_len(surfaces);
@@ -213,7 +213,7 @@ struct PolarizedTraceHit { hit; rp_over_rs; transmittance_s; transmittance_p; }
 # (0 on error, err_out set).
 #must_use
 fn trace_sequential_polarized(initial_ray, surfaces, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     var results = vec_new();
     var current = initial_ray;
     var cum_ts = F64_ONE;

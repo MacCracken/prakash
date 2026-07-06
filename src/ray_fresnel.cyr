@@ -45,16 +45,16 @@ fn fresnel_normal(n1, n2) {
     return f64_mul(r, r);
 }
 
-# Average (unpolarized) Fresnel reflectance. Writes PRK_ERR_TIR (returns 0) if
+# Average (unpolarized) Fresnel reflectance. Writes PK_ERR_TIR (returns 0) if
 # the incident angle exceeds the critical angle.
 #must_use
 fn fresnel_unpolarized(n1, n2, incident_angle, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     var sin_i = f64_sin(incident_angle);
     var cos_i = f64_cos(incident_angle);
     var sin_t = f64_mul(f64_div(n1, n2), sin_i);
     if (f64_gt(f64_abs(sin_t), F64_ONE) == 1) {
-        store64(err_out, PRK_ERR_TIR);
+        store64(err_out, PK_ERR_TIR);
         return 0;
     }
     var cos_t = f64_sqrt(f64_sub(F64_ONE, f64_mul(sin_t, sin_t)));
@@ -207,7 +207,7 @@ fn beer_lambert(intensity, alpha, distance) {
 # should be normalized.
 #must_use
 fn ray_snell_3d(direction, normal, n1, n2, refl_out, err_out) {
-    store64(err_out, ERR_NONE);
+    store64(err_out, PK_ERR_NONE);
     store64(refl_out, f64_from(0));
     var dx = RayVec3_x(direction);
     var dy = RayVec3_y(direction);
@@ -220,7 +220,7 @@ fn ray_snell_3d(direction, normal, n1, n2, refl_out, err_out) {
     var ratio = f64_div(n1, n2);
     var sin2_t = f64_mul(f64_mul(ratio, ratio), f64_sub(F64_ONE, f64_mul(cos_i, cos_i)));
     if (f64_gt(sin2_t, F64_ONE) == 1) {
-        store64(err_out, PRK_ERR_TIR);
+        store64(err_out, PK_ERR_TIR);
         return 0;
     }
     var cos_t = f64_sqrt(f64_sub(F64_ONE, sin2_t));
