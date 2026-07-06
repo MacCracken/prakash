@@ -1,0 +1,65 @@
+# bridge test suite — from rust-old/src/bridge.rs (inline #[cfg(test)] mod).
+
+include "src/error.cyr"
+include "src/bridge.cyr"
+
+fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
+fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
+
+var EPS = f64_div(F64_ONE, f64_from(1000000));   # 1e-6
+var Z = f64_from(0);
+
+alloc_init();
+
+var RGB = alloc(24);
+
+# ── Bijli bridges ────────
+test_group("bijli");
+
+_assert_near(br_em_frequency_to_wavelength_nm(f64_from(545000000000000)), f64_from(550), f64_from(5),
+"545THz ~ 550nm");
+var freq = br_wavelength_nm_to_em_frequency(f64_from(550));
+_assert_near(br_em_frequency_to_wavelength_nm(freq), f64_from(550), _fd(1, 100), "wl<->freq roundtrip");
+assert_eq(br_em_frequency_to_wavelength_nm(Z), 0, "em freq 0 -> 0");
+assert_eq(br_wavelength_nm_to_em_frequency(Z), 0, "wl 0 -> 0");
+var e_intensity = br_e_field_to_intensity(f64_from(100));
+_assert_near(br_intensity_to_e_field(e_intensity), f64_from(100), _fd(1, 100), "E<->I roundtrip");
+assert_eq(br_intensity_to_e_field(Z), 0, "intensity 0 -> 0");
+var n_bk7 = br_refractive_index_cauchy_bk7(f64_from(550));
+assert(f64_gt(n_bk7, _fd(15, 10)), "BK7 n > 1.5");
+assert(f64_lt(n_bk7, _fd(155, 100)), "BK7 n < 1.55");
+
+# ── Tara bridges ────────
+test_group("tara");
+
+br_stellar_temperature_to_rgb(f64_from(5778), RGB);
+assert(f64_gt(load64(RGB), _fd(9, 10)), "sun R > 0.9");
+assert(f64_gt(load64(RGB + 8), _fd(8, 10)), "sun G > 0.8");
+assert(f64_gt(load64(RGB + 16), _fd(7, 10)), "sun B > 0.7");
+br_stellar_temperature_to_rgb(f64_from(30000), RGB);
+assert(f64_gt(load64(RGB + 16), load64(RGB)), "hot star blue > red");
+br_stellar_temperature_to_rgb(f64_from(3000), RGB);
+assert(f64_gt(load64(RGB), load64(RGB + 16)), "cool star red > blue");
+_assert_near(br_color_index_to_temperature(_fd(65, 100)), f64_from(5800), f64_from(300), "sun B-V ~ 5800K");
+assert(f64_gt(br_spectral_class_to_temperature(79), br_spectral_class_to_temperature(77)), "O > M");
+_assert_near(br_spectral_class_to_temperature(71), f64_from(5500), f64_from(500), "G ~ 5500K");
+_assert_near(br_absolute_magnitude_to_luminosity(_fd(483, 100)), F64_ONE, _fd(1, 100), "sun L = 1");
+assert(f64_gt(br_absolute_magnitude_to_luminosity(Z), f64_from(50)), "mag 0 brighter than 50 L_sun");
+
+# ── Badal bridges ────────
+test_group("badal");
+
+_assert_near(br_density_to_rayleigh_scale(_fd(1225, 1000)), F64_ONE, _fd(1, 1000), "sea level scale = 1");
+_assert_near(br_density_to_rayleigh_scale(_fd(6125, 10000)), F64_HALF, _fd(1, 1000), "half density = 0.5");
+assert_eq(br_density_to_rayleigh_scale(Z), 0, "density 0 -> 0");
+_assert_near(br_humidity_to_mie_scale(f64_from(50)), F64_ONE, _fd(1, 100), "humidity baseline = 1");
+assert(f64_gt(br_humidity_to_mie_scale(f64_from(100)), _fd(15, 10)), "high humidity > 1.5");
+_assert_near(br_cloud_cover_to_diffuse_fraction(Z), _fd(1, 10), _fd(1, 100), "clear sky diffuse ~ 0.1");
+_assert_near(br_cloud_cover_to_diffuse_fraction(F64_ONE), _fd(95, 100), _fd(1, 100), "overcast diffuse ~ 0.95");
+var ext = br_visibility_to_extinction(f64_from(20));
+assert(f64_gt(ext, Z), "extinction > 0");
+assert(f64_lt(ext, _fd(1, 1000)), "extinction < 0.001");
+assert_eq(br_visibility_to_extinction(Z), 0, "visibility 0 -> 0");
+
+var r = assert_summary();

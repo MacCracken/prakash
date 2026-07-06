@@ -1,0 +1,205 @@
+# bridge.cyr -- cross-crate bridges: primitive f64 converters from other AGNOS
+# science crates (bijli EM, tara stellar, badal weather) into prakash optics.
+# Usage: include "lib/bridge.cyr"  (requires ganita for pow; math for ln)
+#
+# Ported from the Rust `bridge.rs`. All inputs/outputs are primitive f64 (no
+# science-crate deps). c=299792458 m/s; EPSILON_0=8.854187817e-12 (exact hex);
+# stellar-RGB fit coefficients are exact ratios of the Rust literals.
+
+fn _br_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _br_c() { return f64_from(299792458); }
+fn _br_epsilon0() { return 0x3DA37876F148112E; }   # 8.854187817e-12 F/m
+
+# ── Bijli bridges (electromagnetism) ────────
+
+# EM frequency (Hz) -> optical wavelength (nm): lambda = c/f, then m->nm.
+#must_use
+fn br_em_frequency_to_wavelength_nm(frequency_hz) {
+    if (f64_le(frequency_hz, f64_from(0)) == 1) {
+        return f64_from(0);
+    }
+    return f64_mul(f64_div(_br_c(), frequency_hz), f64_from(1000000000));
+}
+
+# Optical wavelength (nm) -> EM frequency (Hz): f = c/lambda.
+#must_use
+fn br_wavelength_nm_to_em_frequency(wavelength_nm) {
+    if (f64_le(wavelength_nm, f64_from(0)) == 1) {
+        return f64_from(0);
+    }
+    return f64_div(_br_c(), f64_mul(wavelength_nm, _br_r(1, 1000000000)));
+}
+
+# E-field amplitude (V/m) -> intensity (W/m^2): I = 0.5*eps0*c*E^2.
+#must_use
+fn br_e_field_to_intensity(e_amplitude_v_per_m) {
+    return f64_mul(
+    f64_mul(f64_mul(f64_mul(F64_HALF, _br_epsilon0()), _br_c()), e_amplitude_v_per_m),
+    e_amplitude_v_per_m);
+}
+
+# Intensity (W/m^2) -> E-field amplitude (V/m): E = sqrt(2*I/(eps0*c)).
+#must_use
+fn br_intensity_to_e_field(intensity_w_per_m2) {
+    if (f64_le(intensity_w_per_m2, f64_from(0)) == 1) {
+        return f64_from(0);
+    }
+    return f64_sqrt(f64_div(
+    f64_mul(F64_TWO, intensity_w_per_m2),
+    f64_mul(_br_epsilon0(), _br_c())));
+}
+
+# Refractive index from wavelength (nm) via Cauchy BK7 approximation:
+# n = 1.5046 + 0.00420/l2 + 0.0/l2^2, l = wavelength in micrometres.
+#must_use
+fn br_refractive_index_cauchy_bk7(wavelength_nm) {
+    if (f64_le(wavelength_nm, f64_from(0)) == 1) {
+        return F64_ONE;
+    }
+    var lambda_um = f64_mul(wavelength_nm, _br_r(1, 1000));
+    var l2 = f64_mul(lambda_um, lambda_um);
+    return f64_add(
+    f64_add(_br_r(15046, 10000), f64_div(_br_r(42, 10000), l2)),
+    f64_div(f64_from(0), f64_mul(l2, l2)));
+}
+
+# ── Tara bridges (stellar astrophysics) ────────
+
+# Stellar effective temperature (K) -> RGB [r,g,b] in 0..1, into a 3-f64 buffer.
+fn br_stellar_temperature_to_rgb(temperature_k, out) {
+    var t = f64_clamp(f64_div(temperature_k, f64_from(100)), f64_from(10), f64_from(400));
+    var r = F64_ONE;
+    if (f64_le(t, f64_from(66)) == 0) {
+        var xr = f64_sub(t, f64_from(60));
+        r = f64_clamp(
+        f64_div(f64_mul(_br_r(329698727446, 1000000000),
+        ganita_f64_pow(xr, f64_neg(_br_r(1332047592, 10000000000)))), f64_from(255)),
+        f64_from(0), F64_ONE);
+    }
+    var g = f64_from(0);
+    if (f64_le(t, f64_from(66)) == 1) {
+        g = f64_div(
+        f64_clamp(f64_sub(f64_mul(_br_r(994708025861, 10000000000), f64_ln(t)),
+        _br_r(1611195681661, 10000000000)), f64_from(0), f64_from(255)),
+        f64_from(255));
+    } else {
+        var xg = f64_sub(t, f64_from(60));
+        g = f64_clamp(
+        f64_div(f64_mul(_br_r(2881221695283, 10000000000),
+        ganita_f64_pow(xg, f64_neg(_br_r(7551484937, 100000000000)))), f64_from(255)),
+        f64_from(0), F64_ONE);
+    }
+    var b = F64_ONE;
+    if (f64_ge(t, f64_from(66)) == 1) {
+        b = F64_ONE;
+    } elif (f64_le(t, f64_from(19)) == 1) {
+        b = f64_from(0);
+    } else {
+        var xb = f64_sub(t, f64_from(10));
+        b = f64_div(
+        f64_clamp(f64_sub(f64_mul(_br_r(1385177312231, 10000000000), f64_ln(xb)),
+        _br_r(3050447927307, 10000000000)), f64_from(0), f64_from(255)),
+        f64_from(255));
+    }
+    store64(out, r);
+    store64(out + 8, g);
+    store64(out + 16, b);
+    return 0;
+}
+
+# B-V color index -> temperature (K), Ballesteros (2012):
+# T = 4600*(1/(0.92*bv+1.7) + 1/(0.92*bv+0.62)).
+#must_use
+fn br_color_index_to_temperature(b_minus_v) {
+    var a = f64_add(f64_mul(_br_r(92, 100), b_minus_v), _br_r(17, 10));
+    var c = f64_add(f64_mul(_br_r(92, 100), b_minus_v), _br_r(62, 100));
+    return f64_mul(f64_from(4600),
+    f64_add(f64_div(F64_ONE, a), f64_div(F64_ONE, c)));
+}
+
+# Spectral class letter (ASCII code) -> midpoint temperature (K).
+#must_use
+fn br_spectral_class_to_temperature(class) {
+    var cu = class;
+    if (class >= 97) {
+        if (class <= 122) {
+            cu = class - 32;
+        }
+    }
+    if (cu == 79) {
+        return f64_from(35000);
+    }
+    if (cu == 66) {
+        return f64_from(17500);
+    }
+    if (cu == 65) {
+        return f64_from(8750);
+    }
+    if (cu == 70) {
+        return f64_from(6750);
+    }
+    if (cu == 71) {
+        return f64_from(5500);
+    }
+    if (cu == 75) {
+        return f64_from(4250);
+    }
+    if (cu == 77) {
+        return f64_from(3000);
+    }
+    if (cu == 76) {
+        return f64_from(1750);
+    }
+    if (cu == 84) {
+        return f64_from(1000);
+    }
+    if (cu == 89) {
+        return f64_from(500);
+    }
+    return f64_from(5500);
+}
+
+# Absolute magnitude -> luminosity relative to the Sun: 10^((M_sun - M)/2.5).
+#must_use
+fn br_absolute_magnitude_to_luminosity(absolute_magnitude) {
+    return ganita_f64_pow(f64_from(10),
+    f64_div(f64_sub(_br_r(483, 100), absolute_magnitude), _br_r(25, 10)));
+}
+
+# ── Badal bridges (weather/atmosphere) ────────
+
+# Air density (kg/m^3) -> Rayleigh scale factor (1.0 at sea-level 1.225 kg/m^3).
+#must_use
+fn br_density_to_rayleigh_scale(density_kg_m3) {
+    if (f64_le(density_kg_m3, f64_from(0)) == 1) {
+        return f64_from(0);
+    }
+    return f64_div(density_kg_m3, _br_r(1225, 1000));
+}
+
+# Relative humidity (%) -> Mie scale factor (1.0 at 50% RH baseline).
+#must_use
+fn br_humidity_to_mie_scale(relative_humidity_percent) {
+    var rh = f64_clamp(relative_humidity_percent, f64_from(0), f64_from(100));
+    if (f64_lt(rh, f64_from(50)) == 1) {
+        return f64_add(F64_HALF, f64_div(rh, f64_from(100)));
+    }
+    return f64_add(F64_ONE, f64_div(f64_sub(rh, f64_from(50)), f64_from(50)));
+}
+
+# Cloud cover fraction (0..1) -> diffuse light fraction: 0.1 + 0.85*cf.
+#must_use
+fn br_cloud_cover_to_diffuse_fraction(cloud_fraction) {
+    var cf = f64_clamp(cloud_fraction, f64_from(0), F64_ONE);
+    return f64_add(_br_r(1, 10), f64_mul(_br_r(85, 100), cf));
+}
+
+# Visibility (km) -> Mie extinction coefficient (1/m), Koschmieder: 3.912/V_m.
+#must_use
+fn br_visibility_to_extinction(visibility_km) {
+    var v_m = f64_mul(visibility_km, f64_from(1000));
+    if (f64_le(v_m, f64_from(0)) == 1) {
+        return f64_from(0);
+    }
+    return f64_div(_br_r(3912, 1000), v_m);
+}

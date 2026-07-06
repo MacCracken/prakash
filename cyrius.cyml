@@ -47,6 +47,7 @@ modules = [
     "src/pbr_advanced.cyr",
     "src/lens.cyr",
     "src/atmosphere.cyr",
+    "src/bridge.cyr",
 ]
 
 [deps]
