@@ -10,8 +10,10 @@
 # Cyrius toolchain tarball (fetched during CI)
 cyrius-*.tar.gz
 
-# Library crate lock file
+# Rust reference archive (rust-old/) — Cargo build outputs, if ever built
 Cargo.lock
+rust-old/target/
+rust-old/Cargo.lock
 
 # Editor / IDE
 *.swp
@@ -30,23 +32,9 @@ Thumbs.db
 core
 core.*
 
-# Coverage
-lcov.info
-tarpaulin-report.html
-coverage/
-
-# Benchmark output (criterion generates large HTML reports)
-criterion/
-
 # Claude Code
 .claude/
 
 # Environment / secrets
 .env
 .env.*
-
-# Property testing regressions
-proptest-regressions/
-
-# Supply chain cache
-supply-chain/.cache/
