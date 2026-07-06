@@ -5,6 +5,7 @@
 > - **Rust**: criterion v0.8, release mode. Latest run from `rust-old/bench-history.csv` (2026-03-26, commit `01684d4`). f64 throughout.
 > - **Cyrius**: cyrius 6.4.10, `tests/prakash.bcyr`. Run 2026-07-06 (commit `6977621`). f64 (IEEE-754 bits in i64), heap-allocated structs.
 > - **Platform**: x86_64 Linux.
+> - **Pre-SIMD baseline**: Cyrius 6.4.10 emits scalar f64 only — no SIMD (it's on the Cyrius roadmap). Every number here is scalar-vs-scalar (or scalar Cyrius vs Rust's autovectorized/glam paths). The gap is a current-toolchain artifact, not a language ceiling; SIMD closes the vector/FFT-heavy paths.
 > - The full Rust set lives in [`rust-old/benchmarks.md`](../rust-old/benchmarks.md); the Cyrius history in [`../benchmarks.md`](../benchmarks.md).
 
 ## ⚠ Read this first — the Cyrius numbers are measurement-floor-bound
