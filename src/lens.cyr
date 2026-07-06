@@ -205,3 +205,202 @@ fn lens_field_of_view(sensor_size, focal_length) {
 fn lens_field_of_view_diagonal(width, height, focal_length) {
     return lens_field_of_view(ganita_f64_hypot(width, height), focal_length);
 }
+
+# ── MTF ────────
+
+fn _lens_two_over_pi() { return f64_div(F64_TWO, F64_PI); }
+
+# Diffraction-limited cutoff frequency: 1 / (lambda * N).
+#must_use
+fn lens_mtf_cutoff_frequency(wavelength, f_num) {
+    return f64_div(F64_ONE, f64_mul(wavelength, f_num));
+}
+
+# Diffraction-limited MTF: (2/pi)*(acos(v) - v*sqrt(1-v^2)), v = freq/cutoff.
+# 0 above cutoff (v>=1), 1 at/below zero (v<=0).
+#must_use
+fn lens_mtf_diffraction_limited(spatial_freq, cutoff_freq) {
+    var v = f64_div(spatial_freq, cutoff_freq);
+    if (f64_ge(v, F64_ONE) == 1) {
+        return f64_from(0);
+    }
+    if (f64_le(v, f64_from(0)) == 1) {
+        return F64_ONE;
+    }
+    return f64_mul(_lens_two_over_pi(),
+    f64_sub(ganita_f64_acos(v), f64_mul(v, f64_sqrt(f64_sub(F64_ONE, f64_mul(v, v))))));
+}
+
+# Polychromatic MTF: weighted mean of monochromatic MTFs. wavelengths/weights are
+# f64 buffers; missing weights (i >= n_weights) default to 1.0.
+#must_use
+fn lens_mtf_polychromatic(wavelengths, n_wl, weights, n_weights, f_num, spatial_freq) {
+    var sum_w = f64_from(0);
+    var sum_mtf = f64_from(0);
+    for (var i = 0; i < n_wl; i = i + 1) {
+        var w = F64_ONE;
+        if (i < n_weights) {
+            w = load64(weights + i * 8);
+        }
+        var cutoff = lens_mtf_cutoff_frequency(load64(wavelengths + i * 8), f_num);
+        sum_mtf = f64_add(sum_mtf, f64_mul(w, lens_mtf_diffraction_limited(spatial_freq, cutoff)));
+        sum_w = f64_add(sum_w, w);
+    }
+    if (f64_lt(sum_w, _lens_eps15()) == 1) {
+        return f64_from(0);
+    }
+    return f64_div(sum_mtf, sum_w);
+}
+
+# Through-focus MTF: writes (defocus, mtf) pairs to out+i*16. w20 = defocus /
+# (8*N^2*lambda); attenuation = |sinc(pi*w20*v)|.
+fn lens_mtf_through_focus(wavelength, f_num, spatial_freq, defocus_range, n_defocus, out) {
+    var cutoff = lens_mtf_cutoff_frequency(wavelength, f_num);
+    var v = f64_div(spatial_freq, cutoff);
+    for (var i = 0; i < n_defocus; i = i + 1) {
+        var defocus = load64(defocus_range + i * 8);
+        var w20 = f64_div(defocus,
+        f64_mul(f64_mul(f64_mul(f64_from(8), f_num), f_num), wavelength));
+        var attenuation = F64_ONE;
+        if (f64_lt(f64_abs(w20), _lens_eps15()) == 0) {
+            var phi = f64_mul(f64_mul(F64_PI, w20), v);
+            if (f64_lt(f64_abs(phi), _lens_eps15()) == 0) {
+                attenuation = f64_abs(f64_div(f64_sin(phi), phi));
+            }
+        }
+        store64(out + i * 16, defocus);
+        store64(out + i * 16 + 8,
+        f64_mul(lens_mtf_diffraction_limited(spatial_freq, cutoff), attenuation));
+    }
+    return 0;
+}
+
+# ── Seidel Aberrations ────────
+
+# Shape factor: q = (R2 + R1) / (R2 - R1); 0 for equal radii.
+#must_use
+fn lens_shape_factor(r1, r2) {
+    var denom = f64_sub(r2, r1);
+    if (f64_lt(f64_abs(denom), _lens_eps15()) == 1) {
+        return f64_from(0);
+    }
+    return f64_div(f64_add(r2, r1), denom);
+}
+
+# Conjugate (position) factor: p = (di - do) / (di + do); 0 if sum ~ 0.
+#must_use
+fn lens_conjugate_factor(object_distance, image_distance) {
+    var sum = f64_add(image_distance, object_distance);
+    if (f64_lt(f64_abs(sum), _lens_eps15()) == 1) {
+        return f64_from(0);
+    }
+    return f64_div(f64_sub(image_distance, object_distance), sum);
+}
+
+#derive(accessors)
+struct SeidelCoefficients { spherical; coma; astigmatism; field_curvature; distortion; }
+
+# Third-order Seidel aberration coefficients for a thin lens in air.
+#must_use
+fn lens_seidel_coefficients(n, focal_length, q, p) {
+    var phi = f64_div(F64_ONE, focal_length);
+    var nm1 = f64_sub(n, F64_ONE);
+    var term2 = f64_div(n, f64_mul(f64_from(4), _lens_pow2(nm1)));
+    # A = (n+2)/(n*(n-1)) * q * q
+    var sa = f64_mul(f64_mul(f64_div(f64_add(n, F64_TWO), f64_mul(n, nm1)), q), q);
+    # B = (3n+2)*(n-1)/n * p * p
+    var sb = f64_mul(
+    f64_mul(f64_div(f64_mul(f64_add(f64_mul(f64_from(3), n), F64_TWO), nm1), n), p), p);
+    # C = 4*(n+1)/(n*(n-1)) * q * p
+    var sc = f64_mul(
+    f64_mul(f64_div(f64_mul(f64_from(4), f64_add(n, F64_ONE)), f64_mul(n, nm1)), q), p);
+    var spherical = f64_mul(f64_mul(_lens_pow3(phi), term2), f64_add(f64_add(sa, sb), sc));
+    var cterm2 = f64_div(F64_ONE, f64_mul(F64_TWO, nm1));
+    # D = (2*(n+1))/(n*(n-1)) * q
+    var cd = f64_mul(f64_div(f64_mul(F64_TWO, f64_add(n, F64_ONE)), f64_mul(n, nm1)), q);
+    # E = (3n+1)/n * p
+    var ce = f64_mul(f64_div(f64_add(f64_mul(f64_from(3), n), F64_ONE), n), p);
+    var coma = f64_mul(f64_mul(_lens_pow2(phi), cterm2), f64_add(cd, ce));
+    var out = alloc(sizeof(SeidelCoefficients));
+    SeidelCoefficients_set_spherical(out, spherical);
+    SeidelCoefficients_set_coma(out, coma);
+    SeidelCoefficients_set_astigmatism(out, phi);
+    SeidelCoefficients_set_field_curvature(out, f64_div(phi, n));
+    SeidelCoefficients_set_distortion(out, f64_from(0));
+    return out;
+}
+
+# Longitudinal spherical aberration for a marginal ray at ray_height.
+#must_use
+fn lens_longitudinal_spherical_aberration(ray_height, focal_length, n) {
+    var phi = f64_div(F64_ONE, focal_length);
+    var nm1 = f64_sub(n, F64_ONE);
+    var inner = f64_div(f64_mul(f64_add(f64_mul(f64_from(3), n), F64_TWO), nm1), n);
+    var s1 = f64_mul(
+    f64_div(f64_mul(_lens_pow3(phi), n), f64_mul(f64_from(4), _lens_pow2(nm1))),
+    inner);
+    return f64_div(f64_mul(f64_mul(ray_height, ray_height), s1), f64_mul(F64_TWO, phi));
+}
+
+# Longitudinal (axial) chromatic aberration: LCA = f / V.
+#must_use
+fn lens_chromatic_aberration(focal_length, abbe_v) {
+    return f64_div(focal_length, abbe_v);
+}
+
+# Petzval sum S = sum 1/(n_i*f_i). elements is an interleaved (n, f) buffer.
+#must_use
+fn lens_petzval_sum(elements, n_elements) {
+    var sum = f64_from(0);
+    for (var i = 0; i < n_elements; i = i + 1) {
+        sum = f64_add(sum,
+        f64_div(F64_ONE, f64_mul(load64(elements + i * 16), load64(elements + i * 16 + 8))));
+    }
+    return sum;
+}
+
+# Petzval radius R_p = -1/S. Returns 1 and writes R_p to out if S != 0, else 0
+# (flat field, Rust None).
+fn lens_petzval_radius(petzval_sum, out) {
+    if (f64_lt(f64_abs(petzval_sum), _lens_eps15()) == 1) {
+        return 0;
+    }
+    store64(out, f64_div(f64_neg(F64_ONE), petzval_sum));
+    return 1;
+}
+
+# ── Multi-element System ────────
+
+# Two separated thin lenses: 1/f = 1/f1 + 1/f2 - d/(f1*f2).
+#must_use
+fn lens_separated_focal_length(f1, f2, separation, err_out) {
+    store64(err_out, PK_ERR_NONE);
+    var power = f64_sub(
+    f64_add(f64_div(F64_ONE, f1), f64_div(F64_ONE, f2)),
+    f64_div(separation, f64_mul(f1, f2)));
+    if (f64_lt(f64_abs(power), _lens_eps15()) == 1) {
+        store64(err_out, PK_ERR_DIVISION_BY_ZERO);
+        return f64_from(0);
+    }
+    return f64_div(F64_ONE, power);
+}
+
+# Back focal distance of a two-lens system: BFD = f*(1 - d/f1).
+#must_use
+fn lens_separated_bfd(f1, f2, separation, err_out) {
+    var f = lens_separated_focal_length(f1, f2, separation, err_out);
+    if (prakash_is_err(load64(err_out)) == 1) {
+        return f64_from(0);
+    }
+    return f64_mul(f, f64_sub(F64_ONE, f64_div(separation, f1)));
+}
+
+# System magnification = product of individual magnifications (empty = 1).
+#must_use
+fn lens_system_magnification(magnifications, n) {
+    var prod = F64_ONE;
+    for (var i = 0; i < n; i = i + 1) {
+        prod = f64_mul(prod, load64(magnifications + i * 8));
+    }
+    return prod;
+}
