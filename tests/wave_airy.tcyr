@@ -1,0 +1,78 @@
+# wave airy test suite — bessel_j1 + Airy + Rayleigh tests from wave/mod.rs,
+# for functions defined in rust-old/src/wave/airy.rs.
+
+include "src/error.cyr"
+include "src/wave_airy.cyr"
+
+fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
+fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
+fn _is_finite(x) { return f64_lt(f64_abs(x), 0x7FF0000000000000); }
+
+var TOL6 = f64_div(F64_ONE, f64_from(1000000));   # 1e-6
+var TOL3 = f64_div(F64_ONE, f64_from(1000));      # 0.001
+var Z = f64_from(0);
+var WL = f64_div(f64_from(55), f64_from(100000000));   # 550e-9
+var DIAM = f64_div(F64_ONE, f64_from(100));            # 10e-3
+
+alloc_init();
+
+# ── Bessel J1 ────────
+test_group("bessel_j1");
+
+assert(f64_lt(f64_abs(bessel_j1(Z)), TOL6), "J1(0) = 0");
+_assert_near(bessel_j1(F64_ONE), _fd(44005, 100000), TOL3, "J1(1) ~ 0.44005");
+assert(f64_lt(f64_abs(bessel_j1(_fd(38317, 10000))), TOL3), "J1(3.8317) ~ 0 (first zero)");
+_assert_near(bessel_j1(F64_PI), _fd(28468, 100000), TOL3, "J1(pi) ~ 0.28468");
+
+# odd symmetry: J1(-x) = -J1(x)
+var xs = vec_new();
+vec_push(xs, _fd(5, 10));
+vec_push(xs, F64_ONE);
+vec_push(xs, F64_TWO);
+vec_push(xs, f64_from(5));
+vec_push(xs, f64_from(10));
+vec_push(xs, f64_from(15));
+var xi = 0;
+while (xi < 6) {
+    var xv = vec_get(xs, xi);
+    assert(f64_lt(f64_abs(f64_add(bessel_j1(f64_neg(xv)), bessel_j1(xv))), TOL3), "J1 odd symmetry");
+    xi = xi + 1;
+}
+
+_assert_near(bessel_j1(f64_from(10)), _fd(4347, 100000), TOL3, "J1(10) ~ 0.04347");
+assert_eq(_is_finite(bessel_j1(f64_from(20))), 1, "J1(20) finite");
+assert(f64_lt(f64_abs(bessel_j1(f64_from(20))), F64_ONE), "J1(20) bounded");
+
+# polynomial/asymptotic branches meet at x=8
+assert(f64_lt(f64_abs(f64_sub(bessel_j1(_fd(7999, 1000)), bessel_j1(_fd(8001, 1000)))), TOL3),
+"J1 continuous at x=8 boundary");
+
+# ── Airy pattern ────────
+test_group("airy");
+
+_assert_near(airy_pattern(WL, DIAM, Z, F64_ONE), F64_ONE, TOL6, "airy central max = 1");
+assert(f64_lt(airy_pattern(WL, DIAM, _fd(1, 100000), F64_ONE), airy_pattern(WL, DIAM, Z, F64_ONE)),
+"airy decreases off axis");
+
+var theta_zero = airy_first_zero(WL, DIAM);
+assert(f64_lt(airy_pattern(WL, DIAM, theta_zero, F64_ONE), TOL3), "airy first zero ~ 0");
+
+for (var ai = 0; ai < 100; ai = ai + 1) {
+    assert(f64_ge(airy_pattern(WL, DIAM, f64_mul(f64_from(ai), _fd(1, 100000)), F64_ONE), Z),
+    "airy non-negative");
+}
+
+var a1 = airy_pattern(WL, DIAM, _fd(1, 100000), F64_ONE);
+var a5 = airy_pattern(WL, DIAM, _fd(1, 100000), f64_from(5));
+_assert_near(f64_div(a5, a1), f64_from(5), TOL6, "airy scales with i0");
+
+# ── Rayleigh ────────
+test_group("rayleigh");
+
+# 1.22 * 550e-9 / 0.1 = 6.71e-6 rad
+_assert_near(rayleigh_criterion(WL, _fd(1, 10)), _fd(671, 100000000), _fd(1, 10000000), "rayleigh ~ 6.71e-6");
+assert(f64_gt(rayleigh_criterion(WL, _fd(5, 100)), rayleigh_criterion(WL, _fd(20, 100))),
+"larger aperture better resolution");
+
+var r = assert_summary();
