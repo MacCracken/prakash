@@ -43,6 +43,7 @@ modules = [
     "src/wave_diffraction.cyr",
     "src/wave_zernike.cyr",
     "src/wave_pattern.cyr",
+    "src/pbr_core.cyr",
 ]
 
 [deps]

@@ -1,0 +1,115 @@
+# pbr_core.cyr -- physically-based rendering primitives (BRDFs)
+# Usage: include "lib/pbr_core.cyr"
+#
+# Ported from the Rust `pbr/mod.rs`. Fresnel-Schlick, GGX/Beckmann NDFs, Smith
+# geometry, Cook-Torrance, Lambert diffuse, IOR->F0. RGB variants take an
+# f0/albedo buffer (3 f64) and write to a 3-f64 out buffer. FRAC_1_PI is the
+# exact IEEE-754 hex of Rust's constant (not 1.0/PI, which could differ 1 ULP).
+# `_pbr_pow5` replicates Rust `powi(5)` (square-and-multiply): x * (x^2)^2.
+
+fn _pbr_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _pbr_eps15() { return f64_div(F64_ONE, f64_from(1000000000000000)); }
+fn _pbr_frac_1_pi() { return 0x3FD45F306DC9C883; }
+
+# x^5 via square-and-multiply (matches Rust f64::powi(5)): x * (x*x)^2.
+fn _pbr_pow5(x) {
+    var x2 = f64_mul(x, x);
+    var x4 = f64_mul(x2, x2);
+    return f64_mul(x, x4);
+}
+
+# Fresnel-Schlick: F = F0 + (1-F0)*(1-ct)^5, ct = clamp(cos_theta, 0, 1).
+#must_use
+fn pbr_fresnel_schlick(f0, cos_theta) {
+    var ct = f64_clamp(cos_theta, f64_from(0), F64_ONE);
+    return f64_add(f0, f64_mul(f64_sub(F64_ONE, f0), _pbr_pow5(f64_sub(F64_ONE, ct))));
+}
+
+# Fresnel-Schlick per RGB channel. f0/out are 3-f64 buffers.
+fn pbr_fresnel_schlick_rgb(f0, cos_theta, out) {
+    var ct = f64_clamp(cos_theta, f64_from(0), F64_ONE);
+    var factor = _pbr_pow5(f64_sub(F64_ONE, ct));
+    for (var i = 0; i < 3; i = i + 1) {
+        var c = load64(f0 + i * 8);
+        store64(out + i * 8, f64_add(c, f64_mul(f64_sub(F64_ONE, c), factor)));
+    }
+    return 0;
+}
+
+# GGX/Trowbridge-Reitz NDF: D = a^2 / (pi * denom^2 + 1e-15),
+# a = roughness^2, denom = (n.h)^2*(a^2-1) + 1.
+#must_use
+fn pbr_distribution_ggx(n_dot_h, roughness) {
+    var a = f64_mul(roughness, roughness);
+    var a2 = f64_mul(a, a);
+    var ndh = f64_clamp(n_dot_h, f64_from(0), F64_ONE);
+    var denom = f64_add(f64_mul(f64_mul(ndh, ndh), f64_sub(a2, F64_ONE)), F64_ONE);
+    return f64_div(a2, f64_add(f64_mul(f64_mul(F64_PI, denom), denom), _pbr_eps15()));
+}
+
+# Beckmann NDF: exp(-tan2/a^2) / (pi*a^2*cos2^2 + 1e-15).
+#must_use
+fn pbr_distribution_beckmann(n_dot_h, roughness) {
+    var a = f64_mul(roughness, roughness);
+    var ndh = f64_clamp(n_dot_h, f64_from(0), F64_ONE);
+    var cos2 = f64_mul(ndh, ndh);
+    var tan2 = f64_div(f64_sub(F64_ONE, cos2), f64_add(cos2, _pbr_eps15()));
+    var exp_term = f64_exp(f64_div(f64_neg(tan2), f64_mul(a, a)));
+    var denom = f64_add(
+    f64_mul(f64_mul(f64_mul(f64_mul(F64_PI, a), a), cos2), cos2),
+    _pbr_eps15());
+    return f64_div(exp_term, denom);
+}
+
+# Schlick-GGX geometry (single direction): G1 = ndv / (ndv*(1-k) + k + 1e-15),
+# k = (roughness+1)^2 / 8 (direct lighting).
+#must_use
+fn pbr_geometry_schlick_ggx(n_dot_v, roughness) {
+    var r = f64_add(roughness, F64_ONE);
+    var k = f64_div(f64_mul(r, r), f64_from(8));
+    var ndv = f64_clamp(n_dot_v, f64_from(0), F64_ONE);
+    return f64_div(ndv,
+    f64_add(f64_add(f64_mul(ndv, f64_sub(F64_ONE, k)), k), _pbr_eps15()));
+}
+
+# Smith geometry: G = G1(n.v) * G1(n.l).
+#must_use
+fn pbr_geometry_smith(n_dot_v, n_dot_l, roughness) {
+    return f64_mul(
+    pbr_geometry_schlick_ggx(n_dot_v, roughness),
+    pbr_geometry_schlick_ggx(n_dot_l, roughness));
+}
+
+# Cook-Torrance specular: D*F*G / (4 * clamp(n.v,.001,1) * clamp(n.l,.001,1)).
+#must_use
+fn pbr_cook_torrance(n_dot_h, h_dot_v, n_dot_v, n_dot_l, roughness, f0) {
+    var d = pbr_distribution_ggx(n_dot_h, roughness);
+    var f = pbr_fresnel_schlick(f0, h_dot_v);
+    var g = pbr_geometry_smith(n_dot_v, n_dot_l, roughness);
+    var denom = f64_mul(
+    f64_mul(f64_from(4), f64_clamp(n_dot_v, _pbr_r(1, 1000), F64_ONE)),
+    f64_clamp(n_dot_l, _pbr_r(1, 1000), F64_ONE));
+    return f64_div(f64_mul(f64_mul(d, f), g), denom);
+}
+
+# Lambertian diffuse: albedo / pi.
+#must_use
+fn pbr_lambert_diffuse(albedo) {
+    return f64_mul(albedo, _pbr_frac_1_pi());
+}
+
+# Lambertian diffuse per RGB channel. albedo/out are 3-f64 buffers.
+fn pbr_lambert_diffuse_rgb(albedo, out) {
+    for (var i = 0; i < 3; i = i + 1) {
+        store64(out + i * 8, f64_mul(load64(albedo + i * 8), _pbr_frac_1_pi()));
+    }
+    return 0;
+}
+
+# Index of refraction -> F0 (reflectance at normal incidence, air n1=1):
+# F0 = ((1-ior)/(1+ior))^2.
+#must_use
+fn pbr_ior_to_f0(ior) {
+    var r = f64_div(f64_sub(F64_ONE, ior), f64_add(F64_ONE, ior));
+    return f64_mul(r, r);
+}

@@ -1,0 +1,200 @@
+# pbr_core test suite — from rust-old/src/pbr/mod.rs (inline tests).
+
+include "src/error.cyr"
+include "src/pbr_core.cyr"
+
+fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
+fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
+
+fn _mk3(buf, a, b, c) {
+    store64(buf, a);
+    store64(buf + 8, b);
+    store64(buf + 16, c);
+    return 0;
+}
+
+var EPS = f64_div(F64_ONE, f64_from(1000000));   # 1e-6
+var Z = f64_from(0);
+var F04 = f64_div(f64_from(4), f64_from(100));   # 0.04
+var INV_PI = f64_div(F64_ONE, F64_PI);
+
+alloc_init();
+
+var in3 = alloc(24);
+var out3 = alloc(24);
+
+# ── Fresnel-Schlick ────────
+test_group("fresnel_schlick");
+
+_assert_near(pbr_fresnel_schlick(F04, F64_ONE), F04, EPS, "schlick normal = 0.04");
+_assert_near(pbr_fresnel_schlick(F04, Z), F64_ONE, EPS, "schlick grazing = 1");
+_assert_near(pbr_fresnel_schlick(_fd(95, 100), F64_ONE), _fd(95, 100), EPS, "schlick metal = 0.95");
+
+# monotonic: reflectance rises as cos_theta falls
+var prev = pbr_fresnel_schlick(F04, F64_ONE);
+for (var mi = 9; mi >= 0; mi = mi - 1) {
+    var f = pbr_fresnel_schlick(F04, _fd(mi, 10));
+    assert(f64_ge(f, f64_sub(prev, EPS)), "schlick monotonic");
+    prev = f;
+}
+
+# range: 0.04-EPS <= f <= 1+EPS
+var cts = alloc(7 * 8);
+_mk3(cts, Z, _fd(1, 10), _fd(3, 10));
+store64(cts + 24, F64_HALF);
+store64(cts + 32, _fd(7, 10));
+store64(cts + 40, _fd(9, 10));
+store64(cts + 48, F64_ONE);
+for (var ri = 0; ri < 7; ri = ri + 1) {
+    var fr = pbr_fresnel_schlick(F04, load64(cts + ri * 8));
+    assert(f64_ge(fr, f64_sub(F04, EPS)), "schlick range lo");
+    assert(f64_le(fr, f64_add(F64_ONE, EPS)), "schlick range hi");
+}
+
+# clamps input
+_assert_near(pbr_fresnel_schlick(F04, f64_neg(F64_HALF)), F64_ONE, EPS, "clamp neg -> 1");
+_assert_near(pbr_fresnel_schlick(F04, _fd(15, 10)), F04, EPS, "clamp >1 -> 0.04");
+
+# ── Fresnel-Schlick RGB ────────
+test_group("fresnel_schlick_rgb");
+
+_mk3(in3, F04, F04, F04);
+pbr_fresnel_schlick_rgb(in3, F64_ONE, out3);
+_assert_near(load64(out3), F04, EPS, "rgb normal R");
+_assert_near(load64(out3 + 8), F04, EPS, "rgb normal G");
+_assert_near(load64(out3 + 16), F04, EPS, "rgb normal B");
+
+_mk3(in3, F04, F64_HALF, _fd(95, 100));
+pbr_fresnel_schlick_rgb(in3, Z, out3);
+_assert_near(load64(out3), F64_ONE, EPS, "rgb grazing R");
+_assert_near(load64(out3 + 8), F64_ONE, EPS, "rgb grazing G");
+_assert_near(load64(out3 + 16), F64_ONE, EPS, "rgb grazing B");
+
+for (var si = 0; si < 4; si = si + 1) {
+    var sct = load64(cts + si * 8);
+    _mk3(in3, F04, F04, F04);
+    pbr_fresnel_schlick_rgb(in3, sct, out3);
+    _assert_near(load64(out3), pbr_fresnel_schlick(F04, sct), EPS, "rgb matches scalar");
+}
+
+# ── NDF ────────
+test_group("ndf");
+
+assert(f64_gt(pbr_distribution_ggx(F64_ONE, _fd(1, 100)),
+f64_mul(pbr_distribution_ggx(F64_HALF, _fd(1, 100)), f64_from(100))), "ggx smooth peaky");
+var dpr = pbr_distribution_ggx(F64_ONE, _fd(9, 10));
+var dor = pbr_distribution_ggx(F64_HALF, _fd(9, 10));
+assert(f64_gt(dpr, dor), "ggx rough peak > off");
+assert(f64_lt(dpr, f64_mul(dor, f64_from(100))), "ggx rough broad");
+
+var ndhs = alloc(5 * 8);
+_mk3(ndhs, Z, _fd(1, 10), F64_HALF);
+store64(ndhs + 24, _fd(9, 10));
+store64(ndhs + 32, F64_ONE);
+var roughs = alloc(5 * 8);
+_mk3(roughs, _fd(1, 100), _fd(1, 10), F64_HALF);
+store64(roughs + 24, _fd(9, 10));
+store64(roughs + 32, F64_ONE);
+# Rust per-test grids (match exactly): r_pk={.1,.3,.5,.7,.9}, nd_bk adds .3/.7/1,
+# r_geo={0,.3,.5,.7,1} includes the roughness=0 edge case.
+var r_pk = alloc(5 * 8);
+_mk3(r_pk, _fd(1, 10), _fd(3, 10), F64_HALF);
+store64(r_pk + 24, _fd(7, 10));
+store64(r_pk + 32, _fd(9, 10));
+var nd_bk = alloc(6 * 8);
+_mk3(nd_bk, _fd(1, 10), _fd(3, 10), F64_HALF);
+store64(nd_bk + 24, _fd(7, 10));
+store64(nd_bk + 32, _fd(9, 10));
+store64(nd_bk + 40, F64_ONE);
+var r_geo = alloc(5 * 8);
+_mk3(r_geo, Z, _fd(3, 10), F64_HALF);
+store64(r_geo + 24, _fd(7, 10));
+store64(r_geo + 32, F64_ONE);
+for (var gi = 0; gi < 5; gi = gi + 1) {
+    for (var gj = 0; gj < 5; gj = gj + 1) {
+        assert(f64_ge(pbr_distribution_ggx(load64(ndhs + gi * 8), load64(roughs + gj * 8)), Z),
+        "ggx non-negative");
+    }
+}
+for (var pk = 0; pk < 5; pk = pk + 1) {
+    var rr = load64(r_pk + pk * 8);
+    assert(f64_ge(pbr_distribution_ggx(F64_ONE, rr), pbr_distribution_ggx(F64_HALF, rr)),
+    "ggx peaks at ndh=1");
+}
+
+assert(f64_gt(pbr_distribution_beckmann(_fd(8, 10), F64_HALF), Z), "beckmann positive");
+assert(f64_gt(pbr_distribution_beckmann(F64_ONE, _fd(3, 10)),
+pbr_distribution_beckmann(_fd(7, 10), _fd(3, 10))), "beckmann peak at normal");
+for (var bi = 0; bi < 6; bi = bi + 1) {
+    for (var bj = 0; bj < 5; bj = bj + 1) {
+        assert(f64_ge(pbr_distribution_beckmann(load64(nd_bk + bi * 8), load64(r_pk + bj * 8)), Z),
+        "beckmann non-negative");
+    }
+}
+
+# ── Geometry ────────
+test_group("geometry");
+
+assert(f64_gt(pbr_geometry_schlick_ggx(F64_ONE, F64_HALF), _fd(9, 10)), "g1 normal > 0.9");
+assert(f64_lt(pbr_geometry_schlick_ggx(_fd(1, 100), F64_HALF), _fd(1, 10)), "g1 grazing < 0.1");
+for (var xi = 0; xi < 5; xi = xi + 1) {
+    for (var xj = 0; xj < 5; xj = xj + 1) {
+        var g = pbr_geometry_schlick_ggx(load64(ndhs + xi * 8), load64(r_geo + xj * 8));
+        assert(f64_ge(g, Z), "g1 range lo");
+        assert(f64_le(g, f64_add(F64_ONE, EPS)), "g1 range hi");
+    }
+}
+assert(f64_gt(pbr_geometry_smith(F64_ONE, F64_ONE, _fd(1, 10)), _fd(9, 10)), "smith no occlusion");
+assert(f64_lt(pbr_geometry_smith(_fd(1, 100), _fd(1, 100), F64_HALF), _fd(1, 10)), "smith grazing");
+_assert_near(pbr_geometry_smith(_fd(8, 10), _fd(6, 10), _fd(3, 10)),
+pbr_geometry_smith(_fd(6, 10), _fd(8, 10), _fd(3, 10)), EPS, "smith symmetric");
+
+# ── Cook-Torrance ────────
+test_group("cook_torrance");
+
+assert(f64_gt(pbr_cook_torrance(_fd(9, 10), _fd(85, 100), _fd(8, 10), _fd(7, 10), _fd(3, 10), F04), Z),
+"cook-torrance positive");
+var smooth = pbr_cook_torrance(F64_ONE, _fd(9, 10), _fd(8, 10), _fd(7, 10), _fd(1, 10), F04);
+var rough = pbr_cook_torrance(F64_ONE, _fd(9, 10), _fd(8, 10), _fd(7, 10), _fd(9, 10), F04);
+assert(f64_gt(smooth, rough), "smooth higher peak");
+var diel = pbr_cook_torrance(_fd(9, 10), _fd(85, 100), _fd(8, 10), _fd(7, 10), _fd(3, 10), F04);
+var metal = pbr_cook_torrance(_fd(9, 10), _fd(85, 100), _fd(8, 10), _fd(7, 10), _fd(3, 10), _fd(95, 100));
+assert(f64_gt(metal, diel), "metal higher reflectance");
+
+# ── Lambert diffuse ────────
+test_group("lambert");
+
+_assert_near(pbr_lambert_diffuse(F64_ONE), INV_PI, EPS, "lambert 1 = 1/pi");
+assert(f64_lt(f64_abs(pbr_lambert_diffuse(Z)), EPS), "lambert 0 = 0");
+_mk3(in3, F64_HALF, _fd(3, 10), _fd(1, 10));
+pbr_lambert_diffuse_rgb(in3, out3);
+_assert_near(load64(out3), f64_div(F64_HALF, F64_PI), EPS, "lambert rgb R");
+_assert_near(load64(out3 + 8), f64_div(_fd(3, 10), F64_PI), EPS, "lambert rgb G");
+_assert_near(load64(out3 + 16), f64_div(_fd(1, 10), F64_PI), EPS, "lambert rgb B");
+_mk3(in3, _fd(7, 10), _fd(7, 10), _fd(7, 10));
+pbr_lambert_diffuse_rgb(in3, out3);
+_assert_near(load64(out3), pbr_lambert_diffuse(_fd(7, 10)), EPS, "lambert rgb matches scalar");
+
+# ── IOR to F0 ────────
+test_group("ior_to_f0");
+
+_assert_near(pbr_ior_to_f0(_fd(15, 10)), F04, _fd(1, 1000), "glass f0 ~ 0.04");
+_assert_near(pbr_ior_to_f0(_fd(1333, 1000)), _fd(2, 100), _fd(5, 1000), "water f0 ~ 0.02");
+assert(f64_gt(pbr_ior_to_f0(_fd(2417, 1000)), _fd(15, 100)), "diamond f0 > 0.15");
+assert(f64_lt(f64_abs(pbr_ior_to_f0(F64_ONE)), EPS), "air f0 = 0");
+assert(f64_lt(pbr_ior_to_f0(_fd(1333, 1000)), pbr_ior_to_f0(_fd(15, 10))), "water < glass");
+assert(f64_lt(pbr_ior_to_f0(_fd(15, 10)), pbr_ior_to_f0(_fd(2417, 1000))), "glass < diamond");
+var iors = alloc(7 * 8);
+_mk3(iors, F64_ONE, _fd(11, 10), _fd(15, 10));
+store64(iors + 24, F64_TWO);
+store64(iors + 32, _fd(25, 10));
+store64(iors + 40, f64_from(3));
+store64(iors + 48, f64_from(4));
+for (var ii = 0; ii < 7; ii = ii + 1) {
+    var f0 = pbr_ior_to_f0(load64(iors + ii * 8));
+    assert(f64_ge(f0, Z), "f0 range lo");
+    assert(f64_lt(f0, F64_ONE), "f0 range hi");
+}
+
+var r = assert_summary();
