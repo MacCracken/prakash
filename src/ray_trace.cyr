@@ -1,0 +1,262 @@
+# ray_trace.cyr -- sequential ray tracing through optical surfaces
+# Usage: include "lib/ray_trace.cyr"  (requires error.cyr, ray_core.cyr, ray_fresnel.cyr)
+#
+# Ported from the Rust `ray/trace.rs`. The Rust `SurfaceShape` enum
+# (Sphere{radius} | Plane) is flattened into OpticalSurface as a shape_tag +
+# radius (radius unused for Plane). Vectors of hits use the stdlib `vec`.
+
+# Surface shape tags (was the SurfaceShape enum).
+var SURF_SPHERE = 0;
+var SURF_PLANE = 1;
+
+# Small geometry thresholds (Rust literals 1e-15 / 1e-10).
+fn _trace_eps15() { return f64_div(F64_ONE, f64_from(1000000000000000)); }
+fn _trace_eps10() { return f64_div(F64_ONE, f64_from(10000000000)); }
+
+# An interface between two media. shape_tag is SURF_SPHERE/SURF_PLANE; radius is
+# the radius of curvature (sphere only; +radius = center to the right).
+#derive(accessors)
+struct OpticalSurface { shape_tag; radius; z_position; n_after; aperture_radius; }
+
+#must_use
+fn surface_sphere(radius, z_position, n_after, aperture_radius) {
+    var s = alloc(sizeof(OpticalSurface));
+    OpticalSurface_set_shape_tag(s, SURF_SPHERE);
+    OpticalSurface_set_radius(s, radius);
+    OpticalSurface_set_z_position(s, z_position);
+    OpticalSurface_set_n_after(s, n_after);
+    OpticalSurface_set_aperture_radius(s, aperture_radius);
+    return s;
+}
+
+#must_use
+fn surface_plane(z_position, n_after, aperture_radius) {
+    var s = alloc(sizeof(OpticalSurface));
+    OpticalSurface_set_shape_tag(s, SURF_PLANE);
+    OpticalSurface_set_radius(s, f64_from(0));
+    OpticalSurface_set_z_position(s, z_position);
+    OpticalSurface_set_n_after(s, n_after);
+    OpticalSurface_set_aperture_radius(s, aperture_radius);
+    return s;
+}
+
+# A ray state during tracing: position, direction (normalized), medium index n.
+# position and direction are RayVec3.
+#derive(accessors)
+struct TraceRay { pos; dir; n; }
+
+#must_use
+fn trace_ray_new(pos, dir, n) {
+    var r = alloc(sizeof(TraceRay));
+    TraceRay_set_pos(r, pos);
+    TraceRay_set_dir(r, dir);
+    TraceRay_set_n(r, n);
+    return r;
+}
+
+# Result of tracing through one surface: hit point, outward normal (both
+# RayVec3), refracted ray_after (TraceRay), and Fresnel reflectance.
+#derive(accessors)
+struct TraceHit { hit_point; normal; ray_after; reflectance; }
+
+# Trace a ray through a single optical surface. Returns a TraceHit (0 on error)
+# and writes ERR_NONE / PRK_ERR_* to err_out. Surfaces are centered on the z
+# axis; a spherical surface's center of curvature is at z_position + radius.
+#must_use
+fn trace_surface(ray, surface, err_out) {
+    store64(err_out, ERR_NONE);
+    var pos = TraceRay_pos(ray);
+    var dir = TraceRay_dir(ray);
+    var px = RayVec3_x(pos);
+    var py = RayVec3_y(pos);
+    var pz = RayVec3_z(pos);
+    var dx = RayVec3_x(dir);
+    var dy = RayVec3_y(dir);
+    var dz = RayVec3_z(dir);
+    var z_pos = OpticalSurface_z_position(surface);
+
+    var hit_x = f64_from(0);
+    var hit_y = f64_from(0);
+    var hit_z = f64_from(0);
+    var nx = f64_from(0);
+    var ny = f64_from(0);
+    var nz = f64_from(0);
+
+    if (OpticalSurface_shape_tag(surface) == SURF_PLANE) {
+        # Intersection with the z = z_position plane.
+        if (f64_lt(f64_abs(dz), _trace_eps15()) == 1) {
+            store64(err_out, PRK_ERR_INVALID_PARAMETER);
+            return 0;
+        }
+        var t = f64_div(f64_sub(z_pos, pz), dz);
+        if (f64_lt(t, f64_from(0)) == 1) {
+            store64(err_out, PRK_ERR_INVALID_PARAMETER);
+            return 0;
+        }
+        hit_x = f64_add(px, f64_mul(t, dx));
+        hit_y = f64_add(py, f64_mul(t, dy));
+        hit_z = f64_add(pz, f64_mul(t, dz));
+        # Normal points back against propagation.
+        if (f64_gt(dz, f64_from(0)) == 1) {
+            nz = f64_neg(F64_ONE);
+        } else {
+            nz = F64_ONE;
+        }
+    } else {
+        # Spherical surface. Center of curvature at [0, 0, z_pos + radius].
+        var radius = OpticalSurface_radius(surface);
+        var cz = f64_add(z_pos, radius);
+        var ocx = px;
+        var ocy = py;
+        var ocz = f64_sub(pz, cz);
+        var half_b = f64_add(f64_add(f64_mul(ocx, dx), f64_mul(ocy, dy)), f64_mul(ocz, dz));
+        var cc = f64_sub(
+        f64_add(f64_add(f64_mul(ocx, ocx), f64_mul(ocy, ocy)), f64_mul(ocz, ocz)),
+        f64_mul(radius, radius));
+        var disc = f64_sub(f64_mul(half_b, half_b), cc);
+        if (f64_lt(disc, f64_from(0)) == 1) {
+            store64(err_out, PRK_ERR_INVALID_PARAMETER);
+            return 0;
+        }
+        var sqrt_d = f64_sqrt(disc);
+        var t1 = f64_sub(f64_neg(half_b), sqrt_d);
+        var t2 = f64_add(f64_neg(half_b), sqrt_d);
+        var t = f64_from(0);
+        if (f64_gt(t1, _trace_eps10()) == 1) {
+            t = t1;
+        } elif (f64_gt(t2, _trace_eps10()) == 1) {
+            t = t2;
+        } else {
+            store64(err_out, PRK_ERR_INVALID_PARAMETER);
+            return 0;
+        }
+        hit_x = f64_add(px, f64_mul(t, dx));
+        hit_y = f64_add(py, f64_mul(t, dy));
+        hit_z = f64_add(pz, f64_mul(t, dz));
+        # Outward normal = (hit - center) / |hit - center|.
+        nx = hit_x;
+        ny = hit_y;
+        nz = f64_sub(hit_z, cz);
+        var nlen = f64_sqrt(f64_add(f64_add(f64_mul(nx, nx), f64_mul(ny, ny)), f64_mul(nz, nz)));
+        nx = f64_div(nx, nlen);
+        ny = f64_div(ny, nlen);
+        nz = f64_div(nz, nlen);
+        # Ensure the normal faces the incoming ray.
+        var dot_dn = f64_add(f64_add(f64_mul(dx, nx), f64_mul(dy, ny)), f64_mul(dz, nz));
+        if (f64_gt(dot_dn, f64_from(0)) == 1) {
+            nx = f64_neg(nx);
+            ny = f64_neg(ny);
+            nz = f64_neg(nz);
+        }
+    }
+
+    # Aperture check.
+    var r2 = f64_add(f64_mul(hit_x, hit_x), f64_mul(hit_y, hit_y));
+    var ap = OpticalSurface_aperture_radius(surface);
+    if (f64_gt(r2, f64_mul(ap, ap)) == 1) {
+        store64(err_out, PRK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
+
+    # Refract through the surface.
+    var normal = ray_vec3(nx, ny, nz);
+    var refl = f64_from(0);
+    var serr = 0;
+    var refr_dir = ray_snell_3d(dir, normal, TraceRay_n(ray), OpticalSurface_n_after(surface), &refl, &serr);
+    if (prakash_is_err(serr) == 1) {
+        store64(err_out, serr);
+        return 0;
+    }
+
+    var hit_point = ray_vec3(hit_x, hit_y, hit_z);
+    var ray_after = trace_ray_new(hit_point, refr_dir, OpticalSurface_n_after(surface));
+    var hit = alloc(sizeof(TraceHit));
+    TraceHit_set_hit_point(hit, hit_point);
+    TraceHit_set_normal(hit, normal);
+    TraceHit_set_ray_after(hit, ray_after);
+    TraceHit_set_reflectance(hit, refl);
+    return hit;
+}
+
+# Trace a ray through a sequence of surfaces (a `vec` of OpticalSurface).
+# Returns a `vec` of TraceHit (0 on error, with err_out set).
+#must_use
+fn trace_sequential(initial_ray, surfaces, err_out) {
+    store64(err_out, ERR_NONE);
+    var hits = vec_new();
+    var current = initial_ray;
+    var count = vec_len(surfaces);
+    var i = 0;
+    while (i < count) {
+        var surface = vec_get(surfaces, i);
+        var he = 0;
+        var hit = trace_surface(current, surface, &he);
+        if (prakash_is_err(he) == 1) {
+            store64(err_out, he);
+            return 0;
+        }
+        current = TraceHit_ray_after(hit);
+        vec_push(hits, hit);
+        i = i + 1;
+    }
+    return hits;
+}
+
+# ── Polarization ray tracing ────────
+
+# A geometric hit plus cumulative s/p transmittance and the R_p/R_s ratio.
+#derive(accessors)
+struct PolarizedTraceHit { hit; rp_over_rs; transmittance_s; transmittance_p; }
+
+# Trace with polarization tracking: at each surface accumulate the s- and
+# p-polarized Fresnel transmittances. Returns a `vec` of PolarizedTraceHit
+# (0 on error, err_out set).
+#must_use
+fn trace_sequential_polarized(initial_ray, surfaces, err_out) {
+    store64(err_out, ERR_NONE);
+    var results = vec_new();
+    var current = initial_ray;
+    var cum_ts = F64_ONE;
+    var cum_tp = F64_ONE;
+    var count = vec_len(surfaces);
+    var i = 0;
+    while (i < count) {
+        var surface = vec_get(surfaces, i);
+        var he = 0;
+        var hit = trace_surface(current, surface, &he);
+        if (prakash_is_err(he) == 1) {
+            store64(err_out, he);
+            return 0;
+        }
+        var nrm = TraceHit_normal(hit);
+        var cdir = TraceRay_dir(current);
+        var dot_i = f64_add(
+        f64_add(f64_mul(RayVec3_x(cdir), RayVec3_x(nrm)), f64_mul(RayVec3_y(cdir), RayVec3_y(nrm))),
+        f64_mul(RayVec3_z(cdir), RayVec3_z(nrm)));
+        var cos_i = f64_neg(f64_abs(dot_i));
+        var adir = TraceRay_dir(TraceHit_ray_after(hit));
+        var dot_t = f64_add(
+        f64_add(f64_mul(RayVec3_x(adir), RayVec3_x(nrm)), f64_mul(RayVec3_y(adir), RayVec3_y(nrm))),
+        f64_mul(RayVec3_z(adir), RayVec3_z(nrm)));
+        var cos_t = f64_neg(f64_abs(dot_t));
+        var n1 = TraceRay_n(current);
+        var n2 = OpticalSurface_n_after(surface);
+        var rs = fresnel_s(n1, n2, cos_i, cos_t);
+        var rp = fresnel_p(n1, n2, cos_i, cos_t);
+        cum_ts = f64_mul(cum_ts, f64_sub(F64_ONE, rs));
+        cum_tp = f64_mul(cum_tp, f64_sub(F64_ONE, rp));
+        var rp_over_rs = f64_from(0);
+        if (f64_gt(rs, _trace_eps15()) == 1) {
+            rp_over_rs = f64_div(rp, rs);
+        }
+        var pth = alloc(sizeof(PolarizedTraceHit));
+        PolarizedTraceHit_set_hit(pth, hit);
+        PolarizedTraceHit_set_rp_over_rs(pth, rp_over_rs);
+        PolarizedTraceHit_set_transmittance_s(pth, cum_ts);
+        PolarizedTraceHit_set_transmittance_p(pth, cum_tp);
+        vec_push(results, pth);
+        current = TraceHit_ray_after(hit);
+        i = i + 1;
+    }
+    return results;
+}

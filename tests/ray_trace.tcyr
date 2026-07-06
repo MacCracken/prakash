@@ -1,0 +1,148 @@
+# ray tracing test suite — ported from rust-old/src/ray/trace.rs (#[cfg(test)]).
+# Covers trace_surface (plane/sphere/aperture), trace_sequential, and the
+# polarization-tracking variant.
+
+include "src/error.cyr"
+include "src/ray_core.cyr"
+include "src/ray_fresnel.cyr"
+include "src/ray_trace.cyr"
+
+fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
+fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
+fn _in01(r) {
+    if (f64_lt(r, f64_from(0)) == 1) { return 0; }
+    if (f64_gt(r, F64_ONE) == 1) { return 0; }
+    return 1;
+}
+
+var TOL6 = f64_div(F64_ONE, f64_from(1000000));   # 1e-6
+var TOL_01 = f64_div(F64_ONE, f64_from(100));     # 0.01
+var Z = f64_from(0);
+var N15 = f64_div(f64_from(15), f64_from(10));     # 1.5
+
+alloc_init();
+
+# ── trace_surface ────────
+test_group("trace_surface");
+
+# plane, normal incidence: hits z=10, no bending
+var e = 0;
+var ray_p = trace_ray_new(ray_vec3(Z, Z, Z), ray_vec3(Z, Z, F64_ONE), F64_ONE);
+var surf_p = surface_plane(f64_from(10), N15, f64_from(5));
+var hit_p = trace_surface(ray_p, surf_p, &e);
+assert_eq(e, 0, "plane ok");
+_assert_near(RayVec3_z(TraceHit_hit_point(hit_p)), f64_from(10), TOL6, "plane hit z=10");
+_assert_near(RayVec3_z(TraceRay_dir(TraceHit_ray_after(hit_p))), F64_ONE, TOL_01, "plane no bending");
+
+# sphere, on-axis
+var e2 = 0;
+var ray_s = trace_ray_new(ray_vec3(Z, Z, Z), ray_vec3(Z, Z, F64_ONE), F64_ONE);
+var surf_s = surface_sphere(f64_from(50), f64_from(10), N15, f64_from(25));
+var hit_s = trace_surface(ray_s, surf_s, &e2);
+assert_eq(e2, 0, "sphere ok");
+_assert_near(RayVec3_x(TraceHit_hit_point(hit_s)), Z, TOL6, "sphere hit x=0");
+_assert_near(RayVec3_y(TraceHit_hit_point(hit_s)), Z, TOL6, "sphere hit y=0");
+var hz = RayVec3_z(TraceHit_hit_point(hit_s));
+assert(f64_gt(hz, f64_from(9)), "sphere hit z > 9");
+assert(f64_lt(hz, f64_from(11)), "sphere hit z < 11");
+
+# aperture blocks a far-off-axis ray
+var e3 = 0;
+var ray_a = trace_ray_new(ray_vec3(f64_from(10), Z, Z), ray_vec3(Z, Z, F64_ONE), F64_ONE);
+var _ha = trace_surface(ray_a, surface_plane(f64_from(10), N15, f64_from(5)), &e3);
+assert_eq(e3, PRK_ERR_INVALID_PARAMETER, "aperture blocks ray");
+
+# ── trace_sequential ────────
+test_group("trace_sequential");
+
+# biconvex lens: two spherical surfaces, on-axis ray stays on-axis
+var surfs_bx = vec_new();
+vec_push(surfs_bx, surface_sphere(f64_from(100), Z, N15, f64_from(25)));
+vec_push(surfs_bx, surface_sphere(f64_neg(f64_from(100)), f64_from(5), F64_ONE, f64_from(25)));
+var ray_bx = trace_ray_new(ray_vec3(Z, Z, f64_neg(f64_from(50))), ray_vec3(Z, Z, F64_ONE), F64_ONE);
+var e_bx = 0;
+var hits_bx = trace_sequential(ray_bx, surfs_bx, &e_bx);
+assert_eq(e_bx, 0, "biconvex ok");
+assert_eq(vec_len(hits_bx), 2, "biconvex 2 hits");
+var last_bx = vec_get(hits_bx, 1);
+_assert_near(RayVec3_x(TraceRay_dir(TraceHit_ray_after(last_bx))), Z, TOL_01, "biconvex on-axis stays on-axis");
+
+# off-axis parallel ray through converging lens bends toward axis (dx < 0)
+var surfs_oa = vec_new();
+vec_push(surfs_oa, surface_sphere(f64_from(50), Z, N15, f64_from(25)));
+vec_push(surfs_oa, surface_sphere(f64_neg(f64_from(50)), f64_from(5), F64_ONE, f64_from(25)));
+var ray_oa = trace_ray_new(ray_vec3(f64_from(5), Z, f64_neg(f64_from(50))), ray_vec3(Z, Z, F64_ONE), F64_ONE);
+var e_oa = 0;
+var hits_oa = trace_sequential(ray_oa, surfs_oa, &e_oa);
+assert_eq(e_oa, 0, "off-axis ok");
+var last_oa = vec_get(hits_oa, 1);
+assert(f64_lt(RayVec3_x(TraceRay_dir(TraceHit_ray_after(last_oa))), Z), "off-axis bends toward axis");
+
+# empty surface list
+var e_empty = 0;
+var ray_e = trace_ray_new(ray_vec3(Z, Z, Z), ray_vec3(Z, Z, F64_ONE), F64_ONE);
+var hits_e = trace_sequential(ray_e, vec_new(), &e_empty);
+assert_eq(e_empty, 0, "empty ok");
+assert_eq(vec_len(hits_e), 0, "empty gives no hits");
+
+# ── trace_sequential_polarized ────────
+test_group("trace_polarized");
+
+# normal incidence: s and p transmittance equal, both high
+var ep = 0;
+var ray_pn = trace_ray_new(ray_vec3(Z, Z, Z), ray_vec3(Z, Z, F64_ONE), F64_ONE);
+var surfs_pn = vec_new();
+vec_push(surfs_pn, surface_plane(f64_from(10), N15, f64_from(5)));
+var res_pn = trace_sequential_polarized(ray_pn, surfs_pn, &ep);
+assert_eq(ep, 0, "polarized normal ok");
+assert_eq(vec_len(res_pn), 1, "polarized normal 1 result");
+var pn0 = vec_get(res_pn, 0);
+_assert_near(
+PolarizedTraceHit_transmittance_s(pn0),
+PolarizedTraceHit_transmittance_p(pn0), TOL_01, "s=p at normal incidence");
+assert(f64_gt(PolarizedTraceHit_transmittance_s(pn0), _fd(9, 10)), "Ts > 0.9 at normal");
+
+# oblique 45deg: s transmits less than p
+var s2v = f64_div(F64_ONE, f64_sqrt(F64_TWO));
+var eq = 0;
+var ray_ob = trace_ray_new(ray_vec3(f64_neg(f64_from(5)), Z, Z), ray_vec3(s2v, Z, s2v), F64_ONE);
+var surfs_ob = vec_new();
+vec_push(surfs_ob, surface_plane(f64_from(5), N15, f64_from(10)));
+var res_ob = trace_sequential_polarized(ray_ob, surfs_ob, &eq);
+assert_eq(eq, 0, "polarized oblique ok");
+var ob0 = vec_get(res_ob, 0);
+assert(
+f64_lt(PolarizedTraceHit_transmittance_s(ob0), PolarizedTraceHit_transmittance_p(ob0)),
+"s transmits less than p at 45deg");
+
+# multi-surface: cumulative transmittance multiplies
+var em = 0;
+var ray_ms = trace_ray_new(ray_vec3(Z, Z, Z), ray_vec3(Z, Z, F64_ONE), F64_ONE);
+var surfs_ms = vec_new();
+vec_push(surfs_ms, surface_plane(f64_from(10), N15, f64_from(5)));
+vec_push(surfs_ms, surface_plane(f64_from(20), F64_ONE, f64_from(5)));
+var res_ms = trace_sequential_polarized(ray_ms, surfs_ms, &em);
+assert_eq(em, 0, "polarized multi ok");
+assert_eq(vec_len(res_ms), 2, "polarized multi 2 results");
+var ms0 = vec_get(res_ms, 0);
+var ms1 = vec_get(res_ms, 1);
+assert(
+f64_lt(PolarizedTraceHit_transmittance_s(ms1), PolarizedTraceHit_transmittance_s(ms0)),
+"Ts decreases after 2nd surface");
+var t2_single = f64_sub(F64_ONE, fresnel_normal(N15, F64_ONE));
+_assert_near(
+PolarizedTraceHit_transmittance_s(ms1),
+f64_mul(PolarizedTraceHit_transmittance_s(ms0), t2_single), TOL_01, "cumulative multiplies");
+
+# transmittance in [0,1]
+var er = 0;
+var ray_tr = trace_ray_new(ray_vec3(Z, Z, Z), ray_vec3(Z, Z, F64_ONE), F64_ONE);
+var surfs_tr = vec_new();
+vec_push(surfs_tr, surface_plane(f64_from(10), N15, f64_from(5)));
+var res_tr = trace_sequential_polarized(ray_tr, surfs_tr, &er);
+var tr0 = vec_get(res_tr, 0);
+assert(_in01(PolarizedTraceHit_transmittance_s(tr0)), "Ts in [0,1]");
+assert(_in01(PolarizedTraceHit_transmittance_p(tr0)), "Tp in [0,1]");
+
+var r = assert_summary();
