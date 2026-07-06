@@ -1,0 +1,156 @@
+# ai.cyr -- daimon/hoosh AI client (OUT of the core distlib bundle)
+# Usage: include "lib/ai.cyr"  (requires error.cyr; bayan for JSON; sandhi for HTTP)
+#
+# Ported from the Rust `ai.rs`. This module is deliberately NOT in the prakash
+# [lib] bundle — it pulls the sandhi HTTP/TLS stack, mirroring the old `ai` cargo
+# feature. Consumers opt in explicitly (stdlib: bayan, sandhi + companions).
+#
+# String fields are cstrings; Option<String> api_key = cstr or 0 (None).
+# JSON via bayan: build with str_from() keys/values, parse with parse_str
+# (str_data,str_len) — the built Str is not NUL-terminated.
+
+#derive(accessors)
+struct DaimonConfig { endpoint; api_key; }
+
+#derive(accessors)
+struct HooshConfig { endpoint; }
+
+#derive(accessors)
+struct DaimonClient { config; }
+
+# ── DaimonConfig ────────
+
+#must_use
+fn ai_daimon_config_new(endpoint, api_key) {
+    var c = alloc(sizeof(DaimonConfig));
+    DaimonConfig_set_endpoint(c, endpoint);
+    DaimonConfig_set_api_key(c, api_key);
+    return c;
+}
+
+# Default daimon config: endpoint http://localhost:8090, no api key.
+#must_use
+fn ai_daimon_config_default() {
+    return ai_daimon_config_new("http://localhost:8090", 0);
+}
+
+# ── HooshConfig ────────
+
+#must_use
+fn ai_hoosh_config_new(endpoint) {
+    var c = alloc(sizeof(HooshConfig));
+    HooshConfig_set_endpoint(c, endpoint);
+    return c;
+}
+
+# Default hoosh config: endpoint http://localhost:8088.
+#must_use
+fn ai_hoosh_config_default() {
+    return ai_hoosh_config_new("http://localhost:8088");
+}
+
+# ── DaimonClient ────────
+
+# Create a daimon client from config (30s timeout is applied per-request in
+# register_agent via sandhi options). Never fails in the Cyrius port.
+#must_use
+fn ai_daimon_client_new(config, err_out) {
+    store64(err_out, PK_ERR_NONE);
+    var cl = alloc(sizeof(DaimonClient));
+    DaimonClient_set_config(cl, config);
+    return cl;
+}
+
+# ── JSON serialization (bayan) ────────
+
+# DaimonConfig -> JSON Str: {"endpoint":"...","api_key":"..."|null}.
+#must_use
+fn ai_daimon_config_to_json(config) {
+    var obj = bayan_json_v_obj_new();
+    bayan_json_v_obj_set(obj, str_from("endpoint"),
+    bayan_json_v_str_new(str_from(DaimonConfig_endpoint(config))));
+    var ak = DaimonConfig_api_key(config);
+    if (ak == 0) {
+        bayan_json_v_obj_set(obj, str_from("api_key"), bayan_json_v_null());
+    } else {
+        bayan_json_v_obj_set(obj, str_from("api_key"), bayan_json_v_str_new(str_from(ak)));
+    }
+    return bayan_json_v_build(obj);
+}
+
+# JSON (data ptr + byte length) -> DaimonConfig (api_key = 0 when null/absent).
+#must_use
+fn ai_daimon_config_from_json(json, len) {
+    var v = bayan_json_v_parse_str(json, len);
+    var endpoint = str_data(bayan_json_v_str(bayan_json_v_obj_get(v, "endpoint")));
+    var ak_v = bayan_json_v_obj_get(v, "api_key");
+    var api_key = 0;
+    if (bayan_json_v_is_str(ak_v) == 1) {
+        api_key = str_data(bayan_json_v_str(ak_v));
+    }
+    return ai_daimon_config_new(endpoint, api_key);
+}
+
+# HooshConfig -> JSON Str: {"endpoint":"..."}.
+#must_use
+fn ai_hoosh_config_to_json(config) {
+    var obj = bayan_json_v_obj_new();
+    bayan_json_v_obj_set(obj, str_from("endpoint"),
+    bayan_json_v_str_new(str_from(HooshConfig_endpoint(config))));
+    return bayan_json_v_build(obj);
+}
+
+# JSON (data ptr + byte length) -> HooshConfig.
+#must_use
+fn ai_hoosh_config_from_json(json, len) {
+    var v = bayan_json_v_parse_str(json, len);
+    return ai_hoosh_config_new(str_data(bayan_json_v_str(bayan_json_v_obj_get(v, "endpoint"))));
+}
+
+# ── Agent registration (sandhi HTTP POST) ────────
+
+# Register prakash as an agent with the daimon service. Blocking sandhi POST of
+# {"name":"prakash","capabilities":[...]} to <endpoint>/v1/agents/register;
+# returns the "agent_id" cstring ("unknown" if absent). Sets err_out on failure.
+#
+# Not unit-tested — needs a live daimon server (matches the Rust module, which
+# has no register_agent test).
+#must_use
+fn ai_register_agent(client, err_out) {
+    store64(err_out, PK_ERR_NONE);
+    var config = DaimonClient_config(client);
+    # Request body: {"name":"prakash","capabilities":[...5 caps...]}
+    var body = bayan_json_v_obj_new();
+    bayan_json_v_obj_set(body, str_from("name"), bayan_json_v_str_new(str_from("prakash")));
+    var caps = bayan_json_v_arr_new();
+    bayan_json_v_arr_push(caps, bayan_json_v_str_new(str_from("optics")));
+    bayan_json_v_arr_push(caps, bayan_json_v_str_new(str_from("ray_tracing")));
+    bayan_json_v_arr_push(caps, bayan_json_v_str_new(str_from("spectral")));
+    bayan_json_v_arr_push(caps, bayan_json_v_str_new(str_from("pbr")));
+    bayan_json_v_arr_push(caps, bayan_json_v_str_new(str_from("wave_optics")));
+    bayan_json_v_obj_set(body, str_from("capabilities"), caps);
+    var body_str = bayan_json_v_build(body);
+    # URL: endpoint + "/v1/agents/register"
+    var url = str_cat(str_from(DaimonConfig_endpoint(config)), str_from("/v1/agents/register"));
+    var headers = sandhi_headers_new();
+    sandhi_headers_set(headers, "content-type", "application/json");
+    var opts = sandhi_http_options_new();
+    sandhi_http_options_total_ms(opts, 30000);
+    var resp = sandhi_http_post_opts(str_data(url), headers, str_data(body_str),
+    str_len(body_str), opts);
+    if (sandhi_http_err_kind(resp) != SANDHI_OK) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return "unknown";
+    }
+    var data = bayan_json_v_parse_str(sandhi_http_body(resp), sandhi_http_body_len(resp));
+    if (data == 0) {
+        # invalid registration response (parse failure) -> error, matches Rust
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return "unknown";
+    }
+    var aid = bayan_json_v_obj_get(data, "agent_id");
+    if (bayan_json_v_is_str(aid) == 1) {
+        return str_data(bayan_json_v_str(aid));
+    }
+    return "unknown";
+}

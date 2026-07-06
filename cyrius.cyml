@@ -50,6 +50,39 @@ modules = [
     "src/bridge.cyr",
 ]
 
+# `[lib.ai]` — the opt-in profile that ADDS the daimon/hoosh AI client
+# (`cyrius distlib ai` -> dist/prakash-ai.cyr). Same optics core as [lib] PLUS
+# `src/ai.cyr`, which pulls the sandhi HTTP/TLS stack. Consumers pick ONE bundle:
+# dist/prakash.cyr (math-only, no TLS) or dist/prakash-ai.cyr (with the AI client).
+[lib.ai]
+modules = [
+    "src/error.cyr",
+    "src/ray_core.cyr",
+    "src/ray_fresnel.cyr",
+    "src/ray_trace.cyr",
+    "src/ray_simulate.cyr",
+    "src/ray_system.cyr",
+    "src/ray_dispersion.cyr",
+    "src/ray_fiber.cyr",
+    "src/spectral_core.cyr",
+    "src/spectral_cie.cyr",
+    "src/spectral_photometry.cyr",
+    "src/wave_core.cyr",
+    "src/wave_polarization.cyr",
+    "src/wave_coherence.cyr",
+    "src/wave_airy.cyr",
+    "src/wave_fabry_perot.cyr",
+    "src/wave_diffraction.cyr",
+    "src/wave_zernike.cyr",
+    "src/wave_pattern.cyr",
+    "src/pbr_core.cyr",
+    "src/pbr_advanced.cyr",
+    "src/lens.cyr",
+    "src/atmosphere.cyr",
+    "src/bridge.cyr",
+    "src/ai.cyr",
+]
+
 [deps]
 stdlib = [
     "syscalls",
@@ -61,19 +94,29 @@ stdlib = [
     "io",
     "args",
     "assert",
+    "result",
     "math",
     "ganita",
     "tagged",
     "fnptr",
     "bench",
     "callback",
+    "bayan",
+    "net",
+    "http",
+    "tls",
+    "async",
+    "random",
+    "fdlopen",
+    "dynlib",
+    "chrono",
+    "sandhi",
 ]
 
-# hisab (higher mathematics) — prakash uses only Complex + FFT (num_fft/num_ifft)
-# for wave/pattern (2D diffraction, PSF). hisab exposes ERR_NONE and its own
-# ERR_* codes; prakash namespaces its own errors PK_ERR_* to avoid the
-# last-one-wins global collision.
+# hisab (higher mathematics) — Complex + FFT (num_fft/num_ifft) for wave/pattern.
+# 2.6.8 = collision-hardening patch (FLOAT_RENDER_BUF stack-array -> alloc; ERR_* ->
+# HSB_ERR_) so hisab co-compiles with the sandhi/TLS stack pulled by [lib.ai].
 [deps.hisab]
 git = "https://github.com/MacCracken/hisab.git"
-tag = "2.6.7"
+tag = "2.6.8"
 modules = ["dist/hisab.cyr"]

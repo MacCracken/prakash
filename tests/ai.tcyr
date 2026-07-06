@@ -1,0 +1,60 @@
+# ai test suite — from rust-old/src/ai.rs (inline #[cfg(test)] mod).
+# Config + serde tests; register_agent is not unit-tested (needs a live server),
+# matching the Rust module. bayan/sandhi resolve from [deps] stdlib.
+
+include "src/error.cyr"
+include "src/ai.cyr"
+
+alloc_init();
+
+var ER = alloc(8);
+
+# ── Config defaults ────────
+test_group("config_defaults");
+
+var dc = ai_daimon_config_default();
+assert(streq(DaimonConfig_endpoint(dc), "http://localhost:8090") == 1, "daimon default endpoint");
+assert_eq(DaimonConfig_api_key(dc), 0, "daimon default api_key none");
+
+var hc = ai_hoosh_config_default();
+assert(streq(HooshConfig_endpoint(hc), "http://localhost:8088") == 1, "hoosh default endpoint");
+
+# ── Client ────────
+test_group("client");
+
+var client = ai_daimon_client_new(ai_daimon_config_default(), ER);
+assert_eq(load64(ER), PK_ERR_NONE, "client_new ok");
+assert(streq(DaimonConfig_endpoint(DaimonClient_config(client)), "http://localhost:8090") == 1,
+"client holds config");
+
+# ── Config with api key ────────
+test_group("config_api_key");
+
+var dc2 = ai_daimon_config_new("https://custom.host:9090", "test-key");
+assert(streq(DaimonConfig_api_key(dc2), "test-key") == 1, "api_key set");
+assert(streq(DaimonConfig_endpoint(dc2), "https://custom.host:9090") == 1, "endpoint set");
+
+# ── Serde roundtrip ────────
+test_group("serde");
+
+# daimon: endpoint + api_key
+var d = ai_daimon_config_new("http://example.com", "key123");
+var djs = ai_daimon_config_to_json(d);
+var dback = ai_daimon_config_from_json(str_data(djs), str_len(djs));
+assert(streq(DaimonConfig_endpoint(dback), "http://example.com") == 1, "daimon roundtrip endpoint");
+assert(streq(DaimonConfig_api_key(dback), "key123") == 1, "daimon roundtrip api_key");
+
+# daimon: null api_key (default) roundtrips to None
+var dnull = ai_daimon_config_default();
+var dnjs = ai_daimon_config_to_json(dnull);
+var dnback = ai_daimon_config_from_json(str_data(dnjs), str_len(dnjs));
+assert(streq(DaimonConfig_endpoint(dnback), "http://localhost:8090") == 1, "daimon null roundtrip endpoint");
+assert_eq(DaimonConfig_api_key(dnback), 0, "daimon null roundtrip api_key none");
+
+# hoosh: endpoint
+var h = ai_hoosh_config_default();
+var hjs = ai_hoosh_config_to_json(h);
+var hback = ai_hoosh_config_from_json(str_data(hjs), str_len(hjs));
+assert(streq(HooshConfig_endpoint(hback), "http://localhost:8088") == 1, "hoosh roundtrip endpoint");
+
+var r = assert_summary();
