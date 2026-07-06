@@ -1,0 +1,200 @@
+# ray system test suite — ported from rust-old/src/ray/system.rs.
+# Covers paraxial trace, prescription builder, cardinal points, common designs.
+# (serde roundtrip deferred to the bayan bite)
+
+include "src/error.cyr"
+include "src/ray_core.cyr"
+include "src/ray_fresnel.cyr"
+include "src/ray_trace.cyr"
+include "src/ray_system.cyr"
+
+fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
+fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
+
+var TOL15 = f64_div(F64_ONE, f64_from(1000000000000000));   # ~1e-15
+var TOL10 = f64_div(F64_ONE, f64_from(10000000000));        # 1e-10
+var TOL_01 = f64_div(F64_ONE, f64_from(100));               # 0.01
+var TOL2 = F64_TWO;                                         # 2.0
+var TOL5 = f64_from(5);                                     # 5.0
+var Z = f64_from(0);
+var N15 = f64_div(f64_from(15), f64_from(10));              # 1.5
+
+alloc_init();
+
+# ── paraxial ray trace ────────
+test_group("paraxial");
+
+# refract zero power: unchanged
+var pr0 = paraxial_refract(paraxial_ray_new(f64_from(5), _fd(1, 10)), Z);
+_assert_near(ParaxialRay_y(pr0), f64_from(5), TOL15, "refract 0 power y unchanged");
+_assert_near(ParaxialRay_nu(pr0), _fd(1, 10), TOL15, "refract 0 power nu unchanged");
+
+# refract converging: nu goes negative
+var prc = paraxial_refract(paraxial_marginal(f64_from(10)), _fd(1, 100));
+assert(f64_lt(ParaxialRay_nu(prc), Z), "converging deflects ray down");
+
+# transfer free space: y = 5 + 10*0.1 = 6, nu unchanged
+var pt = paraxial_transfer(paraxial_ray_new(f64_from(5), _fd(1, 10)), f64_from(10));
+_assert_near(ParaxialRay_y(pt), f64_from(6), TOL15, "transfer y = 6");
+_assert_near(ParaxialRay_nu(pt), _fd(1, 10), TOL15, "transfer nu unchanged");
+
+# single lens trace: states.len 2, final nu = -0.1
+var surfs1 = vec_new();
+vec_push(surfs1, paraxsurf_new(_fd(1, 100), Z));
+var st1 = paraxial_trace(paraxial_marginal(f64_from(10)), surfs1);
+assert_eq(vec_len(st1), 2, "single lens 2 states");
+_assert_near(ParaxialRay_nu(vec_get(st1, 1)), f64_neg(_fd(1, 10)), TOL10, "single lens final nu = -0.1");
+
+# two surfaces: states.len 3
+var surfs2 = vec_new();
+vec_push(surfs2, paraxsurf_new(_fd(5, 1000), F64_ONE));
+vec_push(surfs2, paraxsurf_new(_fd(5, 1000), Z));
+assert_eq(vec_len(paraxial_trace(paraxial_marginal(f64_from(10)), surfs2)), 3, "two surfaces 3 states");
+
+# empty trace: states.len 1, y = 10
+var st_e = paraxial_trace(paraxial_marginal(f64_from(10)), vec_new());
+assert_eq(vec_len(st_e), 1, "empty trace 1 state");
+_assert_near(ParaxialRay_y(vec_get(st_e, 0)), f64_from(10), TOL15, "empty trace y = 10");
+
+# marginal constructor: y = 5, nu = 0
+var mg = paraxial_marginal(f64_from(5));
+_assert_near(ParaxialRay_y(mg), f64_from(5), TOL15, "marginal y = 5");
+_assert_near(ParaxialRay_nu(mg), Z, TOL15, "marginal nu = 0");
+
+# chief constructor: y = 0, nu = n*angle = 1.5*0.1 = 0.15
+var ch = paraxial_chief(_fd(1, 10), N15);
+_assert_near(ParaxialRay_y(ch), Z, TOL15, "chief y = 0");
+_assert_near(ParaxialRay_nu(ch), _fd(15, 100), TOL10, "chief nu = 0.15");
+
+# ── prescription builder ────────
+test_group("prescription");
+
+var p_new = prescription_new("test");
+assert_eq(streq(Prescription_name(p_new), "test"), 1, "prescription name");
+assert_eq(prescription_is_empty(p_new), 1, "new is empty");
+assert_eq(prescription_len(p_new), 0, "new len 0");
+
+var p_add = prescription_new("test");
+var _a1 = prescription_add_surface(p_add, f64_from(100), TOL5, N15, f64_from(25));
+var _a2 = prescription_add_surface(p_add, f64_neg(f64_from(100)), Z, F64_ONE, f64_from(25));
+assert_eq(prescription_len(p_add), 2, "add 2 surfaces len 2");
+assert_eq(prescription_is_empty(p_add), 0, "not empty after add");
+
+# to_trace_surfaces: z positions 0 and 5
+var p_ts = prescription_new("test");
+var _t1 = prescription_add_surface(p_ts, f64_from(100), TOL5, N15, f64_from(25));
+var _t2 = prescription_add_surface(p_ts, f64_neg(f64_from(100)), f64_from(10), F64_ONE, f64_from(25));
+var trace_surfs = prescription_to_trace_surfaces(p_ts);
+assert_eq(vec_len(trace_surfs), 2, "trace surfaces len 2");
+_assert_near(OpticalSurface_z_position(vec_get(trace_surfs, 0)), Z, TOL15, "z[0] = 0");
+_assert_near(OpticalSurface_z_position(vec_get(trace_surfs, 1)), TOL5, TOL15, "z[1] = 5");
+
+# flat surfaces become planes
+var p_flat = prescription_new("window");
+var _f1 = prescription_add_surface(p_flat, _sys_inf(), TOL5, N15, f64_from(25));
+var _f2 = prescription_add_surface(p_flat, _sys_inf(), Z, F64_ONE, f64_from(25));
+var flat_surfs = prescription_to_trace_surfaces(p_flat);
+assert_eq(OpticalSurface_shape_tag(vec_get(flat_surfs, 0)), SURF_PLANE, "flat[0] is plane");
+assert_eq(OpticalSurface_shape_tag(vec_get(flat_surfs, 1)), SURF_PLANE, "flat[1] is plane");
+
+# to_paraxial: powers 0.005 and 0.005
+var p_px = prescription_new("test");
+var _x1 = prescription_add_surface(p_px, f64_from(100), TOL5, N15, f64_from(25));
+var _x2 = prescription_add_surface(p_px, f64_neg(f64_from(100)), Z, F64_ONE, f64_from(25));
+var px = prescription_to_paraxial_surfaces(p_px);
+assert_eq(vec_len(px), 2, "paraxial len 2");
+_assert_near(ParaxSurf_power(vec_get(px, 0)), _fd(5, 1000), TOL10, "power[0] = 0.005");
+_assert_near(ParaxSurf_power(vec_get(px, 1)), _fd(5, 1000), TOL10, "power[1] = 0.005");
+
+# initial medium
+var p_im = prescription_with_initial_medium(prescription_new("underwater"), _fd(1333, 1000));
+_assert_near(Prescription_n_initial(p_im), _fd(1333, 1000), TOL10, "n_initial = 1.333");
+
+# ── system properties ────────
+test_group("system_properties");
+
+fn _thin_biconvex() {
+    var p = prescription_new("biconvex");
+    var _s1 = prescription_add_surface(p, f64_from(100), _fd(1, 10), N15, f64_from(25));
+    var _s2 = prescription_add_surface(p, f64_neg(f64_from(100)), Z, F64_ONE, f64_from(25));
+    return p;
+}
+fn _thick_biconvex() {
+    var p = prescription_new("test");
+    var _s1 = prescription_add_surface(p, f64_from(100), TOL5, N15, f64_from(25));
+    var _s2 = prescription_add_surface(p, f64_neg(f64_from(100)), Z, F64_ONE, f64_from(25));
+    return p;
+}
+
+var e_stl = 0;
+var props_stl = find_system_properties(_thin_biconvex(), &e_stl);
+assert_eq(e_stl, 0, "thin lens props ok");
+_assert_near(SystemProperties_focal_length(props_stl), f64_from(100), TOL2, "EFL ~100mm");
+
+var e_bfd = 0;
+var props_bfd = find_system_properties(_thick_biconvex(), &e_bfd);
+assert(f64_gt(SystemProperties_bfd(props_bfd), Z), "BFD positive");
+_assert_near(SystemProperties_power(props_bfd),
+f64_div(F64_ONE, SystemProperties_focal_length(props_bfd)), TOL10, "power = 1/EFL");
+
+var e_empty = 0;
+var _pe = find_system_properties(prescription_new("empty"), &e_empty);
+assert(prakash_is_err(e_empty), "empty prescription errors");
+
+var p_win = prescription_new("window");
+var _w1 = prescription_add_surface(p_win, _sys_inf(), TOL5, N15, f64_from(25));
+var _w2 = prescription_add_surface(p_win, _sys_inf(), Z, F64_ONE, f64_from(25));
+var e_win = 0;
+var _pw = find_system_properties(p_win, &e_win);
+assert(prakash_is_err(e_win), "flat window (zero power) errors");
+
+var p_div = prescription_new("biconcave");
+var _d1 = prescription_add_surface(p_div, f64_neg(f64_from(100)), _fd(1, 10), N15, f64_from(25));
+var _d2 = prescription_add_surface(p_div, f64_from(100), Z, F64_ONE, f64_from(25));
+var e_div = 0;
+var props_div = find_system_properties(p_div, &e_div);
+assert_eq(e_div, 0, "biconcave ok");
+assert(f64_lt(SystemProperties_focal_length(props_div), Z), "biconcave EFL negative");
+
+# ── common prescriptions ────────
+test_group("common_prescriptions");
+
+var p_bx = prescription_biconvex(f64_from(100), N15, f64_from(25), TOL5);
+assert_eq(prescription_len(p_bx), 2, "biconvex len 2");
+assert_eq(streq(Prescription_name(p_bx), "biconvex"), 1, "biconvex name");
+var bx_surfs = Prescription_surfaces(p_bx);
+_assert_near(
+f64_add(PrescriptionSurface_radius(vec_get(bx_surfs, 0)), PrescriptionSurface_radius(vec_get(bx_surfs, 1))),
+Z, TOL10, "biconvex R1 = -R2");
+var e_bx = 0;
+var props_bx = find_system_properties(p_bx, &e_bx);
+_assert_near(SystemProperties_focal_length(props_bx), f64_from(100), TOL5, "biconvex EFL ~100");
+
+var p_pc = prescription_planoconvex(f64_from(100), N15, f64_from(25), f64_from(3));
+assert_eq(prescription_len(p_pc), 2, "planoconvex len 2");
+assert_eq(_sys_is_inf(PrescriptionSurface_radius(vec_get(Prescription_surfaces(p_pc), 0))), 1,
+"planoconvex first surface flat");
+
+var p_db = prescription_doublet(f64_from(200), _fd(1517, 1000), f64_from(64),
+_fd(1648, 1000), f64_from(34), f64_from(25), f64_from(4), F64_TWO);
+assert_eq(prescription_len(p_db), 3, "doublet len 3");
+assert_eq(streq(Prescription_name(p_db), "achromatic doublet"), 1, "doublet name");
+
+# ── paraxial vs full trace consistency ────────
+test_group("paraxial_vs_full");
+
+var p_cons = _thick_biconvex();
+var px_cons = prescription_to_paraxial_surfaces(p_cons);
+var p_final = vec_get(paraxial_trace(paraxial_marginal(_fd(1, 10)), px_cons),
+vec_len(paraxial_trace(paraxial_marginal(_fd(1, 10)), px_cons)) - 1);
+var trace_cons = prescription_to_trace_surfaces(p_cons);
+var ray_cons = trace_ray_new(ray_vec3(Z, _fd(1, 10), f64_neg(f64_from(100))), ray_vec3(Z, Z, F64_ONE), F64_ONE);
+var e_cons = 0;
+var hits_cons = trace_sequential(ray_cons, trace_cons, &e_cons);
+assert_eq(e_cons, 0, "full trace ok");
+var final_full = TraceHit_ray_after(vec_get(hits_cons, vec_len(hits_cons) - 1));
+var full_angle = f64_div(RayVec3_y(TraceRay_dir(final_full)), RayVec3_z(TraceRay_dir(final_full)));
+_assert_near(ParaxialRay_nu(p_final), full_angle, TOL_01, "paraxial matches full trace on axis");
+
+var r = assert_summary();

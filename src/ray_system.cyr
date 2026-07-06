@@ -1,0 +1,325 @@
+# ray_system.cyr -- optical bench: paraxial trace, prescriptions, cardinal points
+# Usage: include "lib/ray_system.cyr"
+#   (requires error.cyr, ray_core.cyr, ray_fresnel.cyr, ray_trace.cyr)
+#
+# Ported from the Rust `ray/system.rs`. `f64::INFINITY` (flat surface radius) is
+# the bit pattern 0x7FF0000000000000; is_infinite is detected via f64_abs. The
+# `(power, reduced_thickness)` tuple becomes a ParaxSurf struct; String names are
+# cstr pointers (compared with streq). Vectors use the stdlib `vec`.
+
+fn _sys_eps15() { return f64_div(F64_ONE, f64_from(1000000000000000)); }
+
+# Positive-infinity bit pattern (flat-surface radius).
+fn _sys_inf() { return 0x7FF0000000000000; }
+
+# 1 if x is +inf or -inf (f64_abs clears the sign bit).
+fn _sys_is_inf(x) {
+    if (f64_abs(x) == 0x7FF0000000000000) { return 1; }
+    return 0;
+}
+
+# ── Paraxial ray trace (y-nu method) ────────
+
+# Paraxial ray: height y and optical direction cosine nu = n*u.
+#derive(accessors)
+struct ParaxialRay { y; nu; }
+
+#must_use
+fn paraxial_ray_new(y, nu) {
+    var r = alloc(sizeof(ParaxialRay));
+    ParaxialRay_set_y(r, y);
+    ParaxialRay_set_nu(r, nu);
+    return r;
+}
+
+# Marginal ray: enters at the aperture edge, parallel to the axis (nu = 0).
+#must_use
+fn paraxial_marginal(aperture_height) {
+    return paraxial_ray_new(aperture_height, f64_from(0));
+}
+
+# Chief ray: enters on-axis from a field point at angle field_angle in medium n.
+#must_use
+fn paraxial_chief(field_angle, n) {
+    return paraxial_ray_new(f64_from(0), f64_mul(n, field_angle));
+}
+
+# Refract a paraxial ray at a surface of power phi: nu' = nu - y*phi.
+#must_use
+fn paraxial_refract(ray, power) {
+    return paraxial_ray_new(ParaxialRay_y(ray),
+    f64_sub(ParaxialRay_nu(ray), f64_mul(ParaxialRay_y(ray), power)));
+}
+
+# Transfer a paraxial ray across a reduced thickness t/n: y' = y + (t/n)*nu.
+#must_use
+fn paraxial_transfer(ray, reduced_thickness) {
+    return paraxial_ray_new(
+    f64_add(ParaxialRay_y(ray), f64_mul(reduced_thickness, ParaxialRay_nu(ray))),
+    ParaxialRay_nu(ray));
+}
+
+# A (power, reduced_thickness) paraxial surface parameter pair.
+#derive(accessors)
+struct ParaxSurf { power; reduced_t; }
+
+#must_use
+fn paraxsurf_new(power, reduced_t) {
+    var p = alloc(sizeof(ParaxSurf));
+    ParaxSurf_set_power(p, power);
+    ParaxSurf_set_reduced_t(p, reduced_t);
+    return p;
+}
+
+# Trace a paraxial ray through a `vec` of ParaxSurf. Returns a `vec` of the ray
+# state after each surface (including the input state). Last thickness ignored.
+#must_use
+fn paraxial_trace(ray, surfaces) {
+    var states = vec_new();
+    var current = ray;
+    vec_push(states, current);
+    var count = vec_len(surfaces);
+    var i = 0;
+    while (i < count) {
+        var ps = vec_get(surfaces, i);
+        current = paraxial_refract(current, ParaxSurf_power(ps));
+        vec_push(states, current);
+        if (i < count - 1) {
+            current = paraxial_transfer(current, ParaxSurf_reduced_t(ps));
+        }
+        i = i + 1;
+    }
+    return states;
+}
+
+# ── Optical system builder ────────
+
+# One surface in a prescription. radius is _sys_inf() for a flat surface.
+#derive(accessors)
+struct PrescriptionSurface { radius; thickness; n_after; aperture_radius; }
+
+# A complete system prescription: name (cstr), surfaces (vec), n_initial.
+#derive(accessors)
+struct Prescription { name; surfaces; n_initial; }
+
+#must_use
+fn prescription_new(name) {
+    var p = alloc(sizeof(Prescription));
+    Prescription_set_name(p, name);
+    Prescription_set_surfaces(p, vec_new());
+    Prescription_set_n_initial(p, F64_ONE);
+    return p;
+}
+
+# Set the initial medium index (before the first surface). Returns the prescription.
+#must_use
+fn prescription_with_initial_medium(p, n) {
+    Prescription_set_n_initial(p, n);
+    return p;
+}
+
+# Append a surface. Mutates and returns the prescription (for chaining).
+#must_use
+fn prescription_add_surface(p, radius, thickness, n_after, aperture_radius) {
+    var ps = alloc(sizeof(PrescriptionSurface));
+    PrescriptionSurface_set_radius(ps, radius);
+    PrescriptionSurface_set_thickness(ps, thickness);
+    PrescriptionSurface_set_n_after(ps, n_after);
+    PrescriptionSurface_set_aperture_radius(ps, aperture_radius);
+    vec_push(Prescription_surfaces(p), ps);
+    return p;
+}
+
+#must_use
+fn prescription_len(p) { return vec_len(Prescription_surfaces(p)); }
+
+#must_use
+fn prescription_is_empty(p) {
+    if (vec_len(Prescription_surfaces(p)) == 0) { return 1; }
+    return 0;
+}
+
+# Convert to a `vec` of OpticalSurface with absolute z-positions from cumulative
+# thicknesses (flat radius -> plane surface).
+#must_use
+fn prescription_to_trace_surfaces(p) {
+    var surfaces = vec_new();
+    var z = f64_from(0);
+    var ps_vec = Prescription_surfaces(p);
+    var count = vec_len(ps_vec);
+    var i = 0;
+    while (i < count) {
+        var ps = vec_get(ps_vec, i);
+        var radius = PrescriptionSurface_radius(ps);
+        var na = PrescriptionSurface_n_after(ps);
+        var ap = PrescriptionSurface_aperture_radius(ps);
+        var os = 0;
+        if (_sys_is_inf(radius) == 1) {
+            os = surface_plane(z, na, ap);
+        } else {
+            os = surface_sphere(radius, z, na, ap);
+        }
+        vec_push(surfaces, os);
+        z = f64_add(z, PrescriptionSurface_thickness(ps));
+        i = i + 1;
+    }
+    return surfaces;
+}
+
+# Convert to a `vec` of ParaxSurf (power, reduced_thickness) pairs.
+#must_use
+fn prescription_to_paraxial_surfaces(p) {
+    var result = vec_new();
+    var n_before = Prescription_n_initial(p);
+    var ps_vec = Prescription_surfaces(p);
+    var count = vec_len(ps_vec);
+    var i = 0;
+    while (i < count) {
+        var ps = vec_get(ps_vec, i);
+        var na = PrescriptionSurface_n_after(ps);
+        var power = f64_from(0);
+        if (_sys_is_inf(PrescriptionSurface_radius(ps)) == 0) {
+            power = f64_div(f64_sub(na, n_before), PrescriptionSurface_radius(ps));
+        }
+        var reduced_t = PrescriptionSurface_thickness(ps);
+        if (f64_gt(f64_abs(na), _sys_eps15()) == 1) {
+            reduced_t = f64_div(PrescriptionSurface_thickness(ps), na);
+        }
+        vec_push(result, paraxsurf_new(power, reduced_t));
+        n_before = na;
+        i = i + 1;
+    }
+    return result;
+}
+
+# ── System cardinal points ────────
+
+# Cardinal points and properties of a complete system.
+#derive(accessors)
+struct SystemProperties { focal_length; bfd; ffd; power; entrance_pupil; exit_pupil; }
+
+# Find the cardinal points from a prescription by tracing marginal paraxial rays
+# forward (EFL, BFD) and reverse (FFD). Returns 0 and writes an error code if the
+# system is empty or afocal (zero power).
+#must_use
+fn find_system_properties(prescription, err_out) {
+    store64(err_out, ERR_NONE);
+    if (prescription_is_empty(prescription) == 1) {
+        store64(err_out, PRK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
+
+    var paraxial_surfaces = prescription_to_paraxial_surfaces(prescription);
+    var marginal = paraxial_marginal(F64_ONE);
+    var forward_states = paraxial_trace(marginal, paraxial_surfaces);
+    var nf = vec_len(forward_states);
+    var final_ray = marginal;
+    if (nf > 0) {
+        final_ray = vec_get(forward_states, nf - 1);
+    }
+    if (f64_lt(f64_abs(ParaxialRay_nu(final_ray)), _sys_eps15()) == 1) {
+        store64(err_out, PRK_ERR_DIVISION_BY_ZERO);
+        return 0;
+    }
+
+    var efl = f64_div(f64_neg(ParaxialRay_y(marginal)), ParaxialRay_nu(final_ray));
+    var power = f64_div(F64_ONE, efl);
+    var bfd = f64_div(f64_neg(ParaxialRay_y(final_ray)), ParaxialRay_nu(final_ray));
+
+    # Reverse marginal ray for FFD: reverse surface order, negate radii, swap media.
+    var ps_vec = Prescription_surfaces(prescription);
+    var num = vec_len(ps_vec);
+    var n_values = vec_new();
+    vec_push(n_values, Prescription_n_initial(prescription));
+    var k = 0;
+    while (k < num) {
+        vec_push(n_values, PrescriptionSurface_n_after(vec_get(ps_vec, k)));
+        k = k + 1;
+    }
+
+    var reverse_surfaces = vec_new();
+    var i = num - 1;
+    while (i >= 0) {
+        var ps = vec_get(ps_vec, i);
+        var n_before_reverse = vec_get(n_values, i + 1);
+        var n_after_reverse = vec_get(n_values, i);
+        var power_reverse = f64_from(0);
+        if (_sys_is_inf(PrescriptionSurface_radius(ps)) == 0) {
+            power_reverse = f64_div(f64_sub(n_after_reverse, n_before_reverse),
+            f64_neg(PrescriptionSurface_radius(ps)));
+        }
+        var thickness = f64_from(0);
+        if (i > 0) {
+            thickness = PrescriptionSurface_thickness(vec_get(ps_vec, i - 1));
+        }
+        var reduced_t = thickness;
+        if (f64_gt(f64_abs(n_after_reverse), _sys_eps15()) == 1) {
+            reduced_t = f64_div(thickness, n_after_reverse);
+        }
+        vec_push(reverse_surfaces, paraxsurf_new(power_reverse, reduced_t));
+        i = i - 1;
+    }
+
+    var reverse_marginal = paraxial_marginal(F64_ONE);
+    var reverse_states = paraxial_trace(reverse_marginal, reverse_surfaces);
+    var nr = vec_len(reverse_states);
+    var reverse_final = reverse_marginal;
+    if (nr > 0) {
+        reverse_final = vec_get(reverse_states, nr - 1);
+    }
+    var ffd = _sys_inf();
+    if (f64_gt(f64_abs(ParaxialRay_nu(reverse_final)), _sys_eps15()) == 1) {
+        ffd = f64_div(ParaxialRay_y(reverse_final), ParaxialRay_nu(reverse_final));
+    }
+
+    var props = alloc(sizeof(SystemProperties));
+    SystemProperties_set_focal_length(props, efl);
+    SystemProperties_set_bfd(props, bfd);
+    SystemProperties_set_ffd(props, ffd);
+    SystemProperties_set_power(props, power);
+    SystemProperties_set_entrance_pupil(props, f64_from(0));
+    SystemProperties_set_exit_pupil(props, f64_sub(bfd, efl));
+    return props;
+}
+
+# ── Common prescriptions ────────
+
+# Symmetric biconvex thin lens: R = 2*f*(n-1), R1 = -R2.
+#must_use
+fn prescription_biconvex(focal_length, n, aperture, thickness) {
+    var r = f64_mul(f64_mul(F64_TWO, focal_length), f64_sub(n, F64_ONE));
+    var p = prescription_new("biconvex");
+    var _p1 = prescription_add_surface(p, r, thickness, n, aperture);
+    var _p2 = prescription_add_surface(p, f64_neg(r), f64_from(0), F64_ONE, aperture);
+    return p;
+}
+
+# Plano-convex lens, flat side first: R = -f*(n-1).
+#must_use
+fn prescription_planoconvex(focal_length, n, aperture, thickness) {
+    var r = f64_mul(f64_neg(focal_length), f64_sub(n, F64_ONE));
+    var p = prescription_new("plano-convex");
+    var _p1 = prescription_add_surface(p, _sys_inf(), thickness, n, aperture);
+    var _p2 = prescription_add_surface(p, r, f64_from(0), F64_ONE, aperture);
+    return p;
+}
+
+# Cemented achromatic doublet. Achromatic condition phi1/v1 + phi2/v2 = 0.
+#must_use
+fn prescription_doublet(focal_length, n1, v1, n2, v2, aperture, t1, t2) {
+    var phi = f64_div(F64_ONE, focal_length);
+    var phi1 = f64_div(f64_mul(phi, v1), f64_sub(v1, v2));
+    var phi2 = f64_sub(phi, phi1);
+    var r1 = f64_div(f64_mul(F64_TWO, f64_sub(n1, F64_ONE)), phi1);
+    var r2 = f64_div(f64_sub(n1, F64_ONE), f64_div(phi1, F64_TWO));
+    var r4 = _sys_inf();
+    if (f64_gt(f64_abs(phi2), _sys_eps15()) == 1) {
+        r4 = f64_div(f64_mul(f64_neg(r2), f64_sub(n2, F64_ONE)),
+        f64_add(f64_mul(r2, phi2), f64_sub(n2, F64_ONE)));
+    }
+    var p = prescription_new("achromatic doublet");
+    var _p1 = prescription_add_surface(p, r1, t1, n1, aperture);
+    var _p2 = prescription_add_surface(p, r2, t2, n2, aperture);
+    var _p3 = prescription_add_surface(p, r4, f64_from(0), F64_ONE, aperture);
+    return p;
+}
