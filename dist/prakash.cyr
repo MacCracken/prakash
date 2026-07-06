@@ -762,3 +762,438 @@ fn trace_sequential_polarized(initial_ray, surfaces, err_out) {
     }
     return results;
 }
+
+# --- ray_simulate.cyr ---
+
+# ray_simulate.cyr -- recursive ray tracing, ray fans, spot diagrams, OPD
+# Usage: include "lib/ray_simulate.cyr"
+#   (requires error.cyr, ray_core.cyr, ray_fresnel.cyr, ray_trace.cyr)
+#
+# Ported from the Rust `ray/simulate.rs`. The TraceEvent enum
+# (Refraction{reflectance,surface_idx} | Reflection{surface_idx} | Escaped |
+# Terminated) is flattened into TraceSegment as event_tag + reflectance +
+# surface_idx. Vectors use the stdlib `vec`.
+
+var EVENT_REFRACTION = 0;
+var EVENT_REFLECTION = 1;
+var EVENT_ESCAPED = 2;
+var EVENT_TERMINATED = 3;
+
+fn _sim_eps15() { return f64_div(F64_ONE, f64_from(1000000000000000)); }
+
+# Euclidean distance between two RayVec3 points.
+fn _sim_dist(a, b) {
+    var dx = f64_sub(RayVec3_x(b), RayVec3_x(a));
+    var dy = f64_sub(RayVec3_y(b), RayVec3_y(a));
+    var dz = f64_sub(RayVec3_z(b), RayVec3_z(a));
+    return f64_sqrt(f64_add(f64_add(f64_mul(dx, dx), f64_mul(dy, dy)), f64_mul(dz, dz)));
+}
+
+# ── Recursive ray tracing ────────
+
+# A segment of a recursively traced path. origin/direction are RayVec3. event_tag
+# is EVENT_*; reflectance/surface_idx are meaningful for Refraction/Reflection.
+#derive(accessors)
+struct TraceSegment {
+    origin; direction; n; path_length; optical_path; energy; depth; event_tag; reflectance; surface_idx;
+}
+
+fn _seg_new(origin, direction, n, path_length, optical_path, energy, depth, event_tag, reflectance, surface_idx) {
+    var s = alloc(sizeof(TraceSegment));
+    TraceSegment_set_origin(s, origin);
+    TraceSegment_set_direction(s, direction);
+    TraceSegment_set_n(s, n);
+    TraceSegment_set_path_length(s, path_length);
+    TraceSegment_set_optical_path(s, optical_path);
+    TraceSegment_set_energy(s, energy);
+    TraceSegment_set_depth(s, depth);
+    TraceSegment_set_event_tag(s, event_tag);
+    TraceSegment_set_reflectance(s, reflectance);
+    TraceSegment_set_surface_idx(s, surface_idx);
+    return s;
+}
+
+# Recursive-trace configuration: max_depth (int), min_energy (f64).
+#derive(accessors)
+struct TraceConfig { max_depth; min_energy; }
+
+#must_use
+fn trace_config_new(max_depth, min_energy) {
+    var c = alloc(sizeof(TraceConfig));
+    TraceConfig_set_max_depth(c, max_depth);
+    TraceConfig_set_min_energy(c, min_energy);
+    return c;
+}
+
+# Defaults: max_depth = 8, min_energy = 0.001.
+#must_use
+fn trace_config_default() {
+    return trace_config_new(8, f64_div(F64_ONE, f64_from(1000)));
+}
+
+# Flat list of all traced segments (depth-first) plus interaction count.
+#derive(accessors)
+struct TraceTree { segments; interactions; }
+
+# Trace a ray recursively, following refracted + reflected paths at each surface.
+#must_use
+fn trace_recursive(ray, surfaces, config) {
+    var segments = vec_new();
+    var interactions = 0;
+    _trace_recursive_inner(ray, surfaces, config, F64_ONE, 0, segments, &interactions);
+    var tree = alloc(sizeof(TraceTree));
+    TraceTree_set_segments(tree, segments);
+    TraceTree_set_interactions(tree, interactions);
+    return tree;
+}
+
+fn _trace_recursive_inner(ray, surfaces, config, energy, depth, segments, inter_ptr) {
+    if (depth >= TraceConfig_max_depth(config)) {
+        vec_push(segments, _seg_new(TraceRay_pos(ray), TraceRay_dir(ray), TraceRay_n(ray),
+        f64_from(0), f64_from(0), energy, depth, EVENT_TERMINATED, f64_from(0), 0));
+        return 0;
+    }
+    if (f64_lt(energy, TraceConfig_min_energy(config)) == 1) {
+        vec_push(segments, _seg_new(TraceRay_pos(ray), TraceRay_dir(ray), TraceRay_n(ray),
+        f64_from(0), f64_from(0), energy, depth, EVENT_TERMINATED, f64_from(0), 0));
+        return 0;
+    }
+
+    # Find the nearest surface hit.
+    var best_idx = (0 - 1);
+    var best_dist = f64_from(0);
+    var best_hit = 0;
+    var count = vec_len(surfaces);
+    var i = 0;
+    while (i < count) {
+        var e = 0;
+        var hit = trace_surface(ray, vec_get(surfaces, i), &e);
+        if (prakash_is_err(e) == 0) {
+            var dist = _sim_dist(TraceRay_pos(ray), TraceHit_hit_point(hit));
+            if (best_idx < 0) {
+                best_idx = i;
+                best_dist = dist;
+                best_hit = hit;
+            } elif (f64_lt(dist, best_dist) == 1) {
+                best_idx = i;
+                best_dist = dist;
+                best_hit = hit;
+            }
+        }
+        i = i + 1;
+    }
+
+    if (best_idx < 0) {
+        vec_push(segments, _seg_new(TraceRay_pos(ray), TraceRay_dir(ray), TraceRay_n(ray),
+        f64_from(0), f64_from(0), energy, depth, EVENT_ESCAPED, f64_from(0), 0));
+        return 0;
+    }
+
+    store64(inter_ptr, load64(inter_ptr) + 1);
+    var path_len = best_dist;
+    var optical_path = f64_mul(TraceRay_n(ray), path_len);
+    var reflectance = TraceHit_reflectance(best_hit);
+    var transmittance = f64_sub(F64_ONE, reflectance);
+
+    vec_push(segments, _seg_new(TraceRay_pos(ray), TraceRay_dir(ray), TraceRay_n(ray),
+    path_len, optical_path, f64_mul(energy, transmittance), depth, EVENT_REFRACTION, reflectance, best_idx));
+
+    var refracted_energy = f64_mul(energy, transmittance);
+    if (f64_ge(refracted_energy, TraceConfig_min_energy(config)) == 1) {
+        _trace_recursive_inner(TraceHit_ray_after(best_hit), surfaces, config,
+        refracted_energy, depth + 1, segments, inter_ptr);
+    }
+
+    var reflected_energy = f64_mul(energy, reflectance);
+    if (f64_ge(reflected_energy, TraceConfig_min_energy(config)) == 1) {
+        var reflected_dir = ray_reflect_3d(TraceRay_dir(ray), TraceHit_normal(best_hit));
+        var reflected_ray = trace_ray_new(TraceHit_hit_point(best_hit), reflected_dir, TraceRay_n(ray));
+        vec_push(segments, _seg_new(TraceHit_hit_point(best_hit), reflected_dir, TraceRay_n(ray),
+        f64_from(0), f64_from(0), reflected_energy, depth, EVENT_REFLECTION, f64_from(0), best_idx));
+        _trace_recursive_inner(reflected_ray, surfaces, config,
+        reflected_energy, depth + 1, segments, inter_ptr);
+    }
+    return 0;
+}
+
+# ── Ray fan generators ────────
+
+# A ray in a fan tagged with its normalized aperture height.
+#derive(accessors)
+struct FanRay { ray; aperture_height; }
+
+fn _fan_ray(tr, aperture_height) {
+    var fr = alloc(sizeof(FanRay));
+    FanRay_set_ray(fr, tr);
+    FanRay_set_aperture_height(fr, aperture_height);
+    return fr;
+}
+
+# Normalized fan parameter t in [-1, 1] for ray i of num_rays (0 if single ray).
+fn _fan_t(i, num_rays) {
+    if (num_rays == 1) { return f64_from(0); }
+    return f64_add(f64_neg(F64_ONE),
+    f64_div(f64_mul(F64_TWO, f64_from(i)), f64_from(num_rays - 1)));
+}
+
+# Meridional ray fan (rays spread across y in the y-z plane).
+#must_use
+fn ray_fan_meridional(aperture_radius, num_rays, field_angle, start_z) {
+    var rays = vec_new();
+    var sin_f = f64_sin(field_angle);
+    var cos_f = f64_cos(field_angle);
+    var i = 0;
+    while (i < num_rays) {
+        var t = _fan_t(i, num_rays);
+        var tr = trace_ray_new(ray_vec3(f64_from(0), f64_mul(t, aperture_radius), start_z),
+        ray_vec3(f64_from(0), sin_f, cos_f), F64_ONE);
+        vec_push(rays, _fan_ray(tr, t));
+        i = i + 1;
+    }
+    return rays;
+}
+
+# Sagittal ray fan (rays spread across x in the x-z plane).
+#must_use
+fn ray_fan_sagittal(aperture_radius, num_rays, field_angle, start_z) {
+    var rays = vec_new();
+    var sin_f = f64_sin(field_angle);
+    var cos_f = f64_cos(field_angle);
+    var i = 0;
+    while (i < num_rays) {
+        var t = _fan_t(i, num_rays);
+        var tr = trace_ray_new(ray_vec3(f64_mul(t, aperture_radius), f64_from(0), start_z),
+        ray_vec3(sin_f, f64_from(0), cos_f), F64_ONE);
+        vec_push(rays, _fan_ray(tr, t));
+        i = i + 1;
+    }
+    return rays;
+}
+
+# Radial ray bundle: a chief ray plus num_rings concentric rings of num_arms rays.
+#must_use
+fn ray_bundle(aperture_radius, num_rings, num_arms, field_angle, start_z) {
+    var rays = vec_new();
+    var sin_f = f64_sin(field_angle);
+    var cos_f = f64_cos(field_angle);
+    vec_push(rays, _fan_ray(
+    trace_ray_new(ray_vec3(f64_from(0), f64_from(0), start_z),
+    ray_vec3(f64_from(0), sin_f, cos_f), F64_ONE), f64_from(0)));
+    var ring = 1;
+    while (ring <= num_rings) {
+        # Match Rust's left-associative order: (ap * ring) / num_rings.
+        var r = f64_div(f64_mul(aperture_radius, f64_from(ring)), f64_from(num_rings));
+        var t = f64_div(r, aperture_radius);
+        var arm = 0;
+        while (arm < num_arms) {
+            # Match Rust's order: ((2*PI) * arm) / num_arms.
+            var phi = f64_div(f64_mul(f64_mul(F64_TWO, F64_PI), f64_from(arm)), f64_from(num_arms));
+            var x = f64_mul(r, f64_cos(phi));
+            var y = f64_mul(r, f64_sin(phi));
+            vec_push(rays, _fan_ray(
+            trace_ray_new(ray_vec3(x, y, start_z),
+            ray_vec3(f64_from(0), sin_f, cos_f), F64_ONE), t));
+            arm = arm + 1;
+        }
+        ring = ring + 1;
+    }
+    return rays;
+}
+
+# ── Spot diagram ────────
+
+# A point where a ray crosses the image plane.
+#derive(accessors)
+struct SpotPoint { x; y; optical_path; aperture_height; }
+
+# Trace a ray bundle through the surfaces and record image-plane crossings.
+# Vignetted / parallel / behind rays are silently skipped.
+#must_use
+fn spot_diagram(surfaces, aperture_radius, num_rings, num_arms, field_angle, start_z, image_z) {
+    var bundle = ray_bundle(aperture_radius, num_rings, num_arms, field_angle, start_z);
+    var spots = vec_new();
+    var count = vec_len(bundle);
+    var i = 0;
+    while (i < count) {
+        var fan_ray = vec_get(bundle, i);
+        var fr_ray = FanRay_ray(fan_ray);
+        var e = 0;
+        var hits = trace_sequential(fr_ray, surfaces, &e);
+        if (prakash_is_err(e) == 0) {
+            var nhits = vec_len(hits);
+            var final_ray = fr_ray;
+            if (nhits > 0) {
+                final_ray = TraceHit_ray_after(vec_get(hits, nhits - 1));
+            }
+            var fdir = TraceRay_dir(final_ray);
+            var fpos = TraceRay_pos(final_ray);
+            var dz = RayVec3_z(fdir);
+            if (f64_ge(f64_abs(dz), _sim_eps15()) == 1) {
+                var t = f64_div(f64_sub(image_z, RayVec3_z(fpos)), dz);
+                if (f64_ge(t, f64_from(0)) == 1) {
+                    var img_x = f64_add(RayVec3_x(fpos), f64_mul(t, RayVec3_x(fdir)));
+                    var img_y = f64_add(RayVec3_y(fpos), f64_mul(t, RayVec3_y(fdir)));
+                    var opl = f64_from(0);
+                    var prev_pos = TraceRay_pos(fr_ray);
+                    var prev_n = TraceRay_n(fr_ray);
+                    var j = 0;
+                    while (j < nhits) {
+                        var hit = vec_get(hits, j);
+                        opl = f64_add(opl, f64_mul(prev_n, _sim_dist(prev_pos, TraceHit_hit_point(hit))));
+                        prev_pos = TraceHit_hit_point(hit);
+                        prev_n = TraceRay_n(TraceHit_ray_after(hit));
+                        j = j + 1;
+                    }
+                    var img_pt = ray_vec3(img_x, img_y, image_z);
+                    opl = f64_add(opl, f64_mul(prev_n, _sim_dist(prev_pos, img_pt)));
+                    var sp = alloc(sizeof(SpotPoint));
+                    SpotPoint_set_x(sp, img_x);
+                    SpotPoint_set_y(sp, img_y);
+                    SpotPoint_set_optical_path(sp, opl);
+                    SpotPoint_set_aperture_height(sp, FanRay_aperture_height(fan_ray));
+                    vec_push(spots, sp);
+                }
+            }
+        }
+        i = i + 1;
+    }
+    return spots;
+}
+
+# RMS distance of spot points from their centroid (0 for empty).
+#must_use
+fn spot_rms_radius(spots) {
+    var n = vec_len(spots);
+    if (n == 0) { return f64_from(0); }
+    var nf = f64_from(n);
+    var sx = f64_from(0);
+    var sy = f64_from(0);
+    var i = 0;
+    while (i < n) {
+        var s = vec_get(spots, i);
+        sx = f64_add(sx, SpotPoint_x(s));
+        sy = f64_add(sy, SpotPoint_y(s));
+        i = i + 1;
+    }
+    var cx = f64_div(sx, nf);
+    var cy = f64_div(sy, nf);
+    var sum_r2 = f64_from(0);
+    i = 0;
+    while (i < n) {
+        var s = vec_get(spots, i);
+        var ddx = f64_sub(SpotPoint_x(s), cx);
+        var ddy = f64_sub(SpotPoint_y(s), cy);
+        sum_r2 = f64_add(sum_r2, f64_add(f64_mul(ddx, ddx), f64_mul(ddy, ddy)));
+        i = i + 1;
+    }
+    return f64_sqrt(f64_div(sum_r2, nf));
+}
+
+# ── Optical path difference ────────
+
+# Optical path length of a ray through the system to image_z (n * distance,
+# summed). Writes the error code to err_out (0 on error return).
+#must_use
+fn optical_path_length(ray, surfaces, image_z, err_out) {
+    store64(err_out, ERR_NONE);
+    var e = 0;
+    var hits = trace_sequential(ray, surfaces, &e);
+    if (prakash_is_err(e) == 1) {
+        store64(err_out, e);
+        return f64_from(0);
+    }
+    var opl = f64_from(0);
+    var prev_pos = TraceRay_pos(ray);
+    var prev_n = TraceRay_n(ray);
+    var nhits = vec_len(hits);
+    var i = 0;
+    while (i < nhits) {
+        var hit = vec_get(hits, i);
+        opl = f64_add(opl, f64_mul(prev_n, _sim_dist(prev_pos, TraceHit_hit_point(hit))));
+        prev_pos = TraceHit_hit_point(hit);
+        prev_n = TraceRay_n(TraceHit_ray_after(hit));
+        i = i + 1;
+    }
+    var final_ray = ray;
+    if (nhits > 0) {
+        final_ray = TraceHit_ray_after(vec_get(hits, nhits - 1));
+    }
+    var fdir = TraceRay_dir(final_ray);
+    var fpos = TraceRay_pos(final_ray);
+    var dz = RayVec3_z(fdir);
+    if (f64_gt(f64_abs(dz), _sim_eps15()) == 1) {
+        var t = f64_div(f64_sub(image_z, RayVec3_z(fpos)), dz);
+        if (f64_gt(t, f64_from(0)) == 1) {
+            var end = ray_vec3(
+            f64_add(RayVec3_x(fpos), f64_mul(t, RayVec3_x(fdir))),
+            f64_add(RayVec3_y(fpos), f64_mul(t, RayVec3_y(fdir))),
+            image_z);
+            opl = f64_add(opl, f64_mul(prev_n, _sim_dist(prev_pos, end)));
+        }
+    }
+    return opl;
+}
+
+# Optical path difference of a ray relative to a chief ray. Writes err to err_out.
+#must_use
+fn optical_path_difference(ray, chief_ray, surfaces, image_z, err_out) {
+    store64(err_out, ERR_NONE);
+    var e1 = 0;
+    var opl_ray = optical_path_length(ray, surfaces, image_z, &e1);
+    if (prakash_is_err(e1) == 1) {
+        store64(err_out, e1);
+        return f64_from(0);
+    }
+    var e2 = 0;
+    var opl_chief = optical_path_length(chief_ray, surfaces, image_z, &e2);
+    if (prakash_is_err(e2) == 1) {
+        store64(err_out, e2);
+        return f64_from(0);
+    }
+    return f64_sub(opl_ray, opl_chief);
+}
+
+# An (aperture_height, opd) pair for opd_fan results.
+#derive(accessors)
+struct OpdPoint { height; opd; }
+
+# OPD for each ray in a fan relative to the chief ray (min |aperture_height|).
+# Returns a `vec` of OpdPoint; vignetted rays are excluded, empty on failure.
+#must_use
+fn opd_fan(fan, surfaces, image_z) {
+    var result = vec_new();
+    var count = vec_len(fan);
+    if (count == 0) {
+        return result;
+    }
+    var chief_idx = 0;
+    var best_abs = f64_abs(FanRay_aperture_height(vec_get(fan, 0)));
+    var i = 1;
+    while (i < count) {
+        var h = f64_abs(FanRay_aperture_height(vec_get(fan, i)));
+        if (f64_lt(h, best_abs) == 1) {
+            best_abs = h;
+            chief_idx = i;
+        }
+        i = i + 1;
+    }
+    var ec = 0;
+    var opl_chief = optical_path_length(FanRay_ray(vec_get(fan, chief_idx)), surfaces, image_z, &ec);
+    if (prakash_is_err(ec) == 1) {
+        return result;
+    }
+    i = 0;
+    while (i < count) {
+        var fr = vec_get(fan, i);
+        var e = 0;
+        var opl = optical_path_length(FanRay_ray(fr), surfaces, image_z, &e);
+        if (prakash_is_err(e) == 0) {
+            var op = alloc(sizeof(OpdPoint));
+            OpdPoint_set_height(op, FanRay_aperture_height(fr));
+            OpdPoint_set_opd(op, f64_sub(opl, opl_chief));
+            vec_push(result, op);
+        }
+        i = i + 1;
+    }
+    return result;
+}

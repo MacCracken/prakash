@@ -1,0 +1,240 @@
+# ray simulation test suite — ported from rust-old/src/ray/simulate.rs.
+# Covers recursive tracing, ray fans, spot diagrams, and OPD.
+
+include "src/error.cyr"
+include "src/ray_core.cyr"
+include "src/ray_fresnel.cyr"
+include "src/ray_trace.cyr"
+include "src/ray_simulate.cyr"
+
+fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
+fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
+
+var TOL6 = f64_div(F64_ONE, f64_from(1000000));   # 1e-6
+var Z = f64_from(0);
+var N15 = f64_div(f64_from(15), f64_from(10));      # 1.5
+
+fn biconvex_lens() {
+    var s = vec_new();
+    vec_push(s, surface_sphere(f64_from(100), Z, N15, f64_from(25)));
+    vec_push(s, surface_sphere(f64_neg(f64_from(100)), f64_from(5), F64_ONE, f64_from(25)));
+    return s;
+}
+fn on_axis_ray(z) { return trace_ray_new(ray_vec3(Z, Z, z), ray_vec3(Z, Z, F64_ONE), F64_ONE); }
+fn off_axis_ray(y, z) { return trace_ray_new(ray_vec3(Z, y, z), ray_vec3(Z, Z, F64_ONE), F64_ONE); }
+fn _spot(x, y) {
+    var s = alloc(sizeof(SpotPoint));
+    SpotPoint_set_x(s, x);
+    SpotPoint_set_y(s, y);
+    SpotPoint_set_optical_path(s, f64_from(0));
+    SpotPoint_set_aperture_height(s, f64_from(0));
+    return s;
+}
+
+alloc_init();
+
+# ── recursive tracing ────────
+test_group("trace_recursive");
+
+# empty scene: 1 escaped segment, 0 interactions
+var tree_e = trace_recursive(on_axis_ray(f64_neg(f64_from(50))), vec_new(), trace_config_default());
+assert_eq(vec_len(TraceTree_segments(tree_e)), 1, "empty scene 1 segment");
+assert_eq(TraceTree_interactions(tree_e), 0, "empty scene 0 interactions");
+assert_eq(TraceSegment_event_tag(vec_get(TraceTree_segments(tree_e), 0)), EVENT_ESCAPED, "empty scene escaped");
+
+# single surface: at least one interaction, at least two segments
+var surfs_ss = vec_new();
+vec_push(surfs_ss, surface_plane(f64_from(10), N15, f64_from(25)));
+var tree_ss = trace_recursive(on_axis_ray(Z), surfs_ss, trace_config_default());
+assert(TraceTree_interactions(tree_ss) >= 1, "single surface >=1 interaction");
+assert(vec_len(TraceTree_segments(tree_ss)) >= 2, "single surface >=2 segments");
+
+# energy conservation: leaf (escaped/terminated) energies sum to <= 1.0
+var tree_ec = trace_recursive(on_axis_ray(f64_neg(f64_from(50))), biconvex_lens(), trace_config_default());
+var segs_ec = TraceTree_segments(tree_ec);
+var total_energy = f64_from(0);
+var ie = 0;
+while (ie < vec_len(segs_ec)) {
+    var seg = vec_get(segs_ec, ie);
+    var tag = TraceSegment_event_tag(seg);
+    if (tag == EVENT_ESCAPED) {
+        total_energy = f64_add(total_energy, TraceSegment_energy(seg));
+    } elif (tag == EVENT_TERMINATED) {
+        total_energy = f64_add(total_energy, TraceSegment_energy(seg));
+    }
+    ie = ie + 1;
+}
+assert(f64_le(total_energy, f64_add(F64_ONE, TOL6)), "energy conserved (<= 1.0)");
+
+# max_depth respected
+var tree_md = trace_recursive(on_axis_ray(f64_neg(f64_from(50))), biconvex_lens(), trace_config_new(1, f64_from(0)));
+var segs_md = TraceTree_segments(tree_md);
+var imd = 0;
+while (imd < vec_len(segs_md)) {
+    assert(TraceSegment_depth(vec_get(segs_md, imd)) <= 1, "depth <= max_depth");
+    imd = imd + 1;
+}
+
+# min_energy terminates quickly
+var tree_me = trace_recursive(on_axis_ray(f64_neg(f64_from(50))), biconvex_lens(), trace_config_new(100, F64_HALF));
+assert(vec_len(TraceTree_segments(tree_me)) < 20, "min_energy terminates quickly");
+
+# off-axis generates at least one reflection segment
+var tree_rf = trace_recursive(
+off_axis_ray(f64_from(5), f64_neg(f64_from(50))), biconvex_lens(),
+trace_config_new(4, _fd(1, 1000)));
+var segs_rf = TraceTree_segments(tree_rf);
+var has_reflection = 0;
+var irf = 0;
+while (irf < vec_len(segs_rf)) {
+    if (TraceSegment_event_tag(vec_get(segs_rf, irf)) == EVENT_REFLECTION) { has_reflection = 1; }
+    irf = irf + 1;
+}
+assert_eq(has_reflection, 1, "off-axis generates a reflection");
+
+# optical path and path length non-negative
+var tree_op = trace_recursive(on_axis_ray(f64_neg(f64_from(50))), biconvex_lens(), trace_config_default());
+var segs_op = TraceTree_segments(tree_op);
+var iop = 0;
+while (iop < vec_len(segs_op)) {
+    var so = vec_get(segs_op, iop);
+    assert(f64_ge(TraceSegment_optical_path(so), Z), "optical_path >= 0");
+    assert(f64_ge(TraceSegment_path_length(so), Z), "path_length >= 0");
+    iop = iop + 1;
+}
+
+# ── ray fans ────────
+test_group("ray_fans");
+
+var mer = ray_fan_meridional(f64_from(10), 11, Z, f64_neg(f64_from(50)));
+assert_eq(vec_len(mer), 11, "meridional count 11");
+var mer_first = vec_get(mer, 0);
+var mer_last = vec_get(mer, 10);
+_assert_near(
+f64_add(RayVec3_y(TraceRay_pos(FanRay_ray(mer_first))), RayVec3_y(TraceRay_pos(FanRay_ray(mer_last)))),
+Z, TOL6, "meridional symmetric position");
+_assert_near(
+f64_add(FanRay_aperture_height(mer_first), FanRay_aperture_height(mer_last)),
+Z, TOL6, "meridional symmetric aperture");
+var mer_center = vec_get(mer, 5);
+_assert_near(RayVec3_y(TraceRay_pos(FanRay_ray(mer_center))), Z, TOL6, "meridional center on axis");
+_assert_near(FanRay_aperture_height(mer_center), Z, TOL6, "meridional center aperture 0");
+
+var mer21 = ray_fan_meridional(f64_from(10), 21, Z, f64_neg(f64_from(50)));
+var im = 0;
+while (im < vec_len(mer21)) {
+    var yy = f64_abs(RayVec3_y(TraceRay_pos(FanRay_ray(vec_get(mer21, im)))));
+    assert(f64_le(yy, f64_add(f64_from(10), TOL6)), "meridional within aperture");
+    im = im + 1;
+}
+
+var sag = ray_fan_sagittal(f64_from(10), 11, Z, f64_neg(f64_from(50)));
+assert_eq(vec_len(sag), 11, "sagittal count 11");
+var isg = 0;
+while (isg < vec_len(sag)) {
+    var sy = f64_abs(RayVec3_y(TraceRay_pos(FanRay_ray(vec_get(sag, isg)))));
+    assert(f64_lt(sy, TOL6), "sagittal in x-z plane");
+    isg = isg + 1;
+}
+
+var bun = ray_bundle(f64_from(10), 3, 6, Z, f64_neg(f64_from(50)));
+assert_eq(vec_len(bun), 19, "bundle count rings*arms+1");
+var bun0 = vec_get(bun, 0);
+_assert_near(RayVec3_x(TraceRay_pos(FanRay_ray(bun0))), Z, TOL6, "bundle chief x=0");
+_assert_near(RayVec3_y(TraceRay_pos(FanRay_ray(bun0))), Z, TOL6, "bundle chief y=0");
+_assert_near(FanRay_aperture_height(bun0), Z, TOL6, "bundle chief aperture 0");
+
+var bun8 = ray_bundle(f64_from(10), 3, 8, Z, f64_neg(f64_from(50)));
+var ib = 0;
+while (ib < vec_len(bun8)) {
+    var bp = TraceRay_pos(FanRay_ray(vec_get(bun8, ib)));
+    var r2 = f64_add(f64_mul(RayVec3_x(bp), RayVec3_x(bp)), f64_mul(RayVec3_y(bp), RayVec3_y(bp)));
+    assert(f64_le(r2, f64_add(f64_from(100), TOL6)), "bundle within aperture");
+    ib = ib + 1;
+}
+
+var mer_fa = ray_fan_meridional(f64_from(10), 5, _fd(5, 100), f64_neg(f64_from(50)));
+var ifa = 0;
+while (ifa < vec_len(mer_fa)) {
+    var dy = f64_abs(RayVec3_y(TraceRay_dir(FanRay_ray(vec_get(mer_fa, ifa)))));
+    assert(f64_gt(dy, _fd(1, 100)), "field angle gives nonzero dir.y");
+    ifa = ifa + 1;
+}
+
+# ── spot diagram ────────
+test_group("spot_diagram");
+
+var spots_ax = spot_diagram(biconvex_lens(), f64_from(5), 2, 6, Z, f64_neg(f64_from(50)), f64_from(200));
+assert(vec_len(spots_ax) > 0, "spot diagram not empty");
+var isa = 0;
+while (isa < vec_len(spots_ax)) {
+    assert(f64_gt(SpotPoint_optical_path(vec_get(spots_ax, isa)), Z), "spot OPL positive");
+    isa = isa + 1;
+}
+
+var spots_near = spot_diagram(biconvex_lens(), F64_ONE, 1, 4, Z, f64_neg(f64_from(50)), f64_from(200));
+var isn = 0;
+while (isn < vec_len(spots_near)) {
+    var sp = vec_get(spots_near, isn);
+    assert(f64_lt(f64_abs(SpotPoint_x(sp)), F64_ONE), "on-axis spot x near origin");
+    assert(f64_lt(f64_abs(SpotPoint_y(sp)), F64_ONE), "on-axis spot y near origin");
+    isn = isn + 1;
+}
+
+# spot_rms
+_assert_near(spot_rms_radius(vec_new()), Z, TOL6, "rms empty = 0");
+var one_spot = vec_new();
+vec_push(one_spot, _spot(F64_ONE, F64_TWO));
+_assert_near(spot_rms_radius(one_spot), Z, TOL6, "rms single point = 0");
+var four = vec_new();
+vec_push(four, _spot(F64_ONE, Z));
+vec_push(four, _spot(f64_neg(F64_ONE), Z));
+vec_push(four, _spot(Z, F64_ONE));
+vec_push(four, _spot(Z, f64_neg(F64_ONE)));
+_assert_near(spot_rms_radius(four), F64_ONE, TOL6, "rms of unit cross = 1.0");
+
+var rms_small = spot_rms_radius(spot_diagram(biconvex_lens(), F64_TWO, 2, 6, Z, f64_neg(f64_from(50)), f64_from(200)));
+var rms_large = spot_rms_radius(
+spot_diagram(biconvex_lens(), f64_from(10), 2, 6, Z, f64_neg(f64_from(50)), f64_from(200)));
+assert(f64_ge(rms_large, rms_small), "larger aperture -> larger spot");
+
+# ── OPD ────────
+test_group("opd");
+
+var eo = 0;
+var opl = optical_path_length(on_axis_ray(f64_neg(f64_from(50))), biconvex_lens(), f64_from(200), &eo);
+assert_eq(eo, 0, "opl ok");
+assert(f64_gt(opl, Z), "opl positive");
+assert(f64_gt(opl, f64_from(250)), "opl exceeds geometric distance (glass)");
+
+var ed = 0;
+var opd_cc = optical_path_difference(
+on_axis_ray(f64_neg(f64_from(50))), on_axis_ray(f64_neg(f64_from(50))),
+biconvex_lens(), f64_from(200), &ed);
+assert_eq(ed, 0, "opd chief ok");
+_assert_near(opd_cc, Z, TOL6, "chief vs chief OPD = 0");
+
+var ed2 = 0;
+var opd_off = optical_path_difference(
+off_axis_ray(f64_from(5), f64_neg(f64_from(50))), on_axis_ray(f64_neg(f64_from(50))),
+biconvex_lens(), f64_from(200), &ed2);
+assert_eq(ed2, 0, "opd off-axis ok");
+assert(f64_gt(f64_abs(opd_off), TOL6), "off-axis OPD nonzero");
+
+var fan_opd = ray_fan_meridional(f64_from(10), 11, Z, f64_neg(f64_from(50)));
+var opd_data = opd_fan(fan_opd, biconvex_lens(), f64_from(200));
+assert(vec_len(opd_data) > 0, "opd_fan not empty");
+var iod = 0;
+while (iod < vec_len(opd_data)) {
+    var op = vec_get(opd_data, iod);
+    if (f64_lt(f64_abs(OpdPoint_height(op)), TOL6) == 1) {
+        assert(f64_lt(f64_abs(OpdPoint_opd(op)), TOL6), "chief ray OPD ~0");
+    }
+    iod = iod + 1;
+}
+
+var opd_empty = opd_fan(vec_new(), biconvex_lens(), f64_from(200));
+assert_eq(vec_len(opd_empty), 0, "opd_fan empty input");
+
+var r = assert_summary();

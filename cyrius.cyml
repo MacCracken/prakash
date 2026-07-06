@@ -5,7 +5,7 @@ description = "prakash — optics and light simulation (ray optics, wave optics,
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/prakash"
 language = "cyrius"
-cyrius = "6.4.9"
+cyrius = "6.4.10"
 
 [build]
 src = "src/main.cyr"
@@ -28,6 +28,7 @@ modules = [
     "src/ray_core.cyr",
     "src/ray_fresnel.cyr",
     "src/ray_trace.cyr",
+    "src/ray_simulate.cyr",
 ]
 
 [deps]
