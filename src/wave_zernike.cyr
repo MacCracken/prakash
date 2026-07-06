@@ -1,0 +1,325 @@
+# wave_zernike.cyr -- Zernike polynomials for wavefront / aberration analysis
+# Usage: include "lib/wave_zernike.cyr"  (requires ganita for atan2)
+#
+# Ported from the Rust `wave/zernike.rs`. Noll sequential ordering. A
+# ZernikeWavefront is a coefficient buffer (Noll order, index 0 = j=1 = piston)
+# plus a length. `_zern_powi` replicates Rust `f64::powi` (square-and-multiply,
+# __powidf2) so integer powers are bit-identical, not naive repeated multiply.
+
+# Integer factorial (exact; Zernike needs only small arguments).
+fn _zern_factorial(n) {
+    var result = 1;
+    var i = 2;
+    while (i <= n) {
+        result = result * i;
+        i = i + 1;
+    }
+    return result;
+}
+
+# Integer power of an f64 base via square-and-multiply (matches Rust powi).
+fn _zern_powi(base, exp) {
+    var r = F64_ONE;
+    var a = base;
+    var b = exp;
+    var go = 1;
+    while (go == 1) {
+        if (b % 2 == 1) {
+            r = f64_mul(r, a);
+        }
+        b = b / 2;
+        if (b == 0) {
+            go = 0;
+        } else {
+            a = f64_mul(a, a);
+        }
+    }
+    return r;
+}
+
+fn _zern_eps15() { return f64_div(F64_ONE, f64_from(1000000000000000)); }
+fn _zern_is_finite(x) { return f64_lt(f64_abs(x), 0x7FF0000000000000); }
+
+# Radial Zernike polynomial R_n^|m|(rho). Returns 0 when n<|m| or (n-|m|) is odd.
+#must_use
+fn zernike_radial(n, m_abs, rho) {
+    if (n < m_abs) {
+        return f64_from(0);
+    }
+    if ((n - m_abs) % 2 == 1) {
+        return f64_from(0);
+    }
+    var half = (n - m_abs) / 2;
+    var sum = f64_from(0);
+    for (var s = 0; s <= half; s = s + 1) {
+        var sign = F64_ONE;
+        if (s % 2 == 1) {
+            sign = f64_neg(F64_ONE);
+        }
+        var num = _zern_factorial(n - s);
+        var d1 = _zern_factorial(s);
+        var d2 = _zern_factorial((n + m_abs) / 2 - s);
+        var d3 = _zern_factorial(half - s);
+        var denom = d1 * d2 * d3;
+        var powval = _zern_powi(rho, n - 2 * s);
+        var term = f64_mul(
+        f64_div(f64_mul(sign, f64_from(num)), f64_from(denom)),
+        powval);
+        sum = f64_add(sum, term);
+    }
+    return sum;
+}
+
+# Single Zernike polynomial Z_n^m(rho, theta). Norm = sqrt(n+1) for m=0,
+# sqrt(2(n+1)) otherwise; angular = cos(|m|θ) (m>0), sin(|m|θ) (m<0), 1 (m=0).
+# Returns 0 outside the unit disk (rho>1).
+#must_use
+fn zernike_poly(n, m, rho, theta) {
+    if (f64_gt(rho, F64_ONE) == 1) {
+        return f64_from(0);
+    }
+    var m_abs = m;
+    if (m < 0) {
+        m_abs = 0 - m;
+    }
+    var r = zernike_radial(n, m_abs, rho);
+    var norm = f64_sqrt(f64_from(n + 1));
+    if (m == 0) {
+        norm = f64_sqrt(f64_from(n + 1));
+    } else {
+        norm = f64_sqrt(f64_mul(F64_TWO, f64_from(n + 1)));
+    }
+    var angular = F64_ONE;
+    if (m > 0) {
+        angular = f64_cos(f64_mul(f64_from(m_abs), theta));
+    } else {
+        if (m < 0) {
+            angular = f64_sin(f64_mul(f64_from(m_abs), theta));
+        }
+    }
+    return f64_mul(f64_mul(norm, r), angular);
+}
+
+# Noll sequential index j (1-based) -> (n, m). Writes n to n_out, m to m_out.
+fn zernike_noll_to_nm(j, n_out, m_out) {
+    if (j == 0) {
+        store64(n_out, 0);
+        store64(m_out, 0);
+        return 0;
+    }
+    var n = 0;
+    while ((n + 1) * (n + 2) / 2 < j) {
+        n = n + 1;
+    }
+    var k = j - n * (n + 1) / 2 - 1;
+    var m_abs = 0;
+    if (n % 2 == 0) {
+        if (k == 0) {
+            m_abs = 0;
+        } else {
+            m_abs = ((k + 1) / 2) * 2;
+        }
+    } else {
+        m_abs = (k / 2) * 2 + 1;
+    }
+    var m = 0;
+    if (m_abs == 0) {
+        m = 0;
+    } else {
+        if (j % 2 == 0) {
+            m = m_abs;
+        } else {
+            m = 0 - m_abs;
+        }
+    }
+    store64(n_out, n);
+    store64(m_out, m);
+    return 0;
+}
+
+# (n, m) -> Noll sequential index j (1-based).
+#must_use
+fn zernike_nm_to_noll(n, m) {
+    var m_abs = m;
+    if (m < 0) {
+        m_abs = 0 - m;
+    }
+    var base = n * (n + 1) / 2 + 1;
+    var slot_start = 0;
+    if (n % 2 == 0) {
+        if (m_abs == 0) {
+            slot_start = 0;
+        } else {
+            slot_start = 2 * (m_abs / 2) - 1;
+        }
+    } else {
+        slot_start = 2 * ((m_abs - 1) / 2);
+    }
+    if (m_abs == 0) {
+        return base;
+    }
+    var j_first = base + slot_start;
+    if (m > 0) {
+        if (j_first % 2 == 0) {
+            return j_first;
+        }
+        return j_first + 1;
+    }
+    if (j_first % 2 == 1) {
+        return j_first;
+    }
+    return j_first + 1;
+}
+
+# ── Zernike wavefront (coefficient buffer in Noll order) ────────
+
+#derive(accessors)
+struct ZernikeWavefront { coeffs; len; }
+
+# New wavefront from a Noll-ordered coefficient buffer (coeffs = ptr, len count).
+#must_use
+fn zernike_wf_new(coeffs, len) {
+    var wf = alloc(sizeof(ZernikeWavefront));
+    ZernikeWavefront_set_coeffs(wf, coeffs);
+    ZernikeWavefront_set_len(wf, len);
+    return wf;
+}
+
+# Flat (zero-aberration) wavefront.
+#must_use
+fn zernike_wf_flat() {
+    return zernike_wf_new(0, 0);
+}
+
+# Evaluate the wavefront W(rho,theta) = sum_j c_j Z_j. Returns 0 outside pupil.
+#must_use
+fn zernike_wf_evaluate(wf, rho, theta) {
+    if (f64_gt(rho, F64_ONE) == 1) {
+        return f64_from(0);
+    }
+    var coeffs = ZernikeWavefront_coeffs(wf);
+    var len = ZernikeWavefront_len(wf);
+    var w = f64_from(0);
+    var nm = alloc(16);
+    for (var idx = 0; idx < len; idx = idx + 1) {
+        var coeff = load64(coeffs + idx * 8);
+        if (f64_lt(f64_abs(coeff), _zern_eps15()) == 0) {
+            zernike_noll_to_nm(idx + 1, nm, nm + 8);
+            var n = load64(nm);
+            var m = load64(nm + 8);
+            w = f64_add(w, f64_mul(coeff, zernike_poly(n, m, rho, theta)));
+        }
+    }
+    return w;
+}
+
+# Sample the wavefront on a grid_size x grid_size grid (row-major); points
+# outside the unit disk are 0. Returns a freshly allocated f64 buffer.
+#must_use
+fn zernike_wf_to_grid(wf, grid_size) {
+    var total = grid_size * grid_size;
+    var grid = alloc(total * 8);
+    for (var z = 0; z < total; z = z + 1) {
+        store64(grid + z * 8, f64_from(0));
+    }
+    var center = f64_div(f64_sub(f64_from(grid_size), F64_ONE), F64_TWO);
+    for (var iy = 0; iy < grid_size; iy = iy + 1) {
+        for (var ix = 0; ix < grid_size; ix = ix + 1) {
+            var x = f64_div(f64_sub(f64_from(ix), center), center);
+            var y = f64_div(f64_sub(f64_from(iy), center), center);
+            var rho = f64_sqrt(f64_add(f64_mul(x, x), f64_mul(y, y)));
+            if (f64_le(rho, F64_ONE) == 1) {
+                var theta = ganita_f64_atan2(y, x);
+                store64(grid + (iy * grid_size + ix) * 8, zernike_wf_evaluate(wf, rho, theta));
+            }
+        }
+    }
+    return grid;
+}
+
+# RMS wavefront error (excludes piston j=1, tilt Y j=2, tilt X j=3):
+# RMS = sqrt(sum_{j>3} c_j^2).
+#must_use
+fn zernike_wf_rms_error(wf) {
+    var coeffs = ZernikeWavefront_coeffs(wf);
+    var len = ZernikeWavefront_len(wf);
+    var sum = f64_from(0);
+    for (var idx = 3; idx < len; idx = idx + 1) {
+        var c = load64(coeffs + idx * 8);
+        sum = f64_add(sum, f64_mul(c, c));
+    }
+    return f64_sqrt(sum);
+}
+
+# Peak-to-valley wavefront error, grid-sampled over the unit pupil.
+#must_use
+fn zernike_wf_peak_to_valley(wf, samples) {
+    var minv = 0x7FF0000000000000;
+    var maxv = 0xFFF0000000000000;
+    var center = f64_div(f64_sub(f64_from(samples), F64_ONE), F64_TWO);
+    for (var iy = 0; iy < samples; iy = iy + 1) {
+        for (var ix = 0; ix < samples; ix = ix + 1) {
+            var x = f64_div(f64_sub(f64_from(ix), center), center);
+            var y = f64_div(f64_sub(f64_from(iy), center), center);
+            var rho = f64_sqrt(f64_add(f64_mul(x, x), f64_mul(y, y)));
+            if (f64_le(rho, F64_ONE) == 1) {
+                var w = zernike_wf_evaluate(wf, rho, ganita_f64_atan2(y, x));
+                if (f64_lt(w, minv) == 1) {
+                    minv = w;
+                }
+                if (f64_gt(w, maxv) == 1) {
+                    maxv = w;
+                }
+            }
+        }
+    }
+    if (_zern_is_finite(minv) == 1) {
+        if (_zern_is_finite(maxv) == 1) {
+            return f64_sub(maxv, minv);
+        }
+    }
+    return f64_from(0);
+}
+
+# Strehl ratio (Marechal): S = exp(-(2*pi*sigma)^2), sigma = RMS/wavelength.
+#must_use
+fn zernike_wf_strehl_ratio(wf, wavelength) {
+    var sigma = f64_div(zernike_wf_rms_error(wf), wavelength);
+    var x = f64_mul(f64_mul(F64_TWO, F64_PI), sigma);
+    return f64_exp(f64_neg(f64_mul(x, x)));
+}
+
+# ── Named aberrations ────────
+
+fn _zern_single(len, idx, amount) {
+    var c = alloc(len * 8);
+    for (var i = 0; i < len; i = i + 1) {
+        store64(c + i * 8, f64_from(0));
+    }
+    store64(c + idx * 8, amount);
+    return zernike_wf_new(c, len);
+}
+
+# Defocus (Noll j=4).
+#must_use
+fn zernike_defocus(amount) { return _zern_single(4, 3, amount); }
+
+# Primary spherical aberration (Noll j=11).
+#must_use
+fn zernike_spherical(amount) { return _zern_single(11, 10, amount); }
+
+# Primary coma X (Noll j=8).
+#must_use
+fn zernike_coma_x(amount) { return _zern_single(8, 7, amount); }
+
+# Primary coma Y (Noll j=7).
+#must_use
+fn zernike_coma_y(amount) { return _zern_single(7, 6, amount); }
+
+# Astigmatism 0 degrees (Noll j=6).
+#must_use
+fn zernike_astigmatism_0(amount) { return _zern_single(6, 5, amount); }
+
+# Astigmatism 45 degrees (Noll j=5).
+#must_use
+fn zernike_astigmatism_45(amount) { return _zern_single(5, 4, amount); }

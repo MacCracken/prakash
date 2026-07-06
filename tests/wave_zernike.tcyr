@@ -1,0 +1,190 @@
+# wave_zernike test suite — from rust-old/src/wave/zernike.rs (inline tests).
+
+include "src/error.cyr"
+include "src/wave_zernike.cyr"
+
+fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
+fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
+
+var EPS = f64_div(F64_ONE, f64_from(1000000));       # 1e-6
+var Z = f64_from(0);
+var SQRT3 = f64_sqrt(f64_from(3));
+var WL = f64_div(f64_from(55), f64_from(100000000));  # 550e-9
+
+fn _count_nonzero(wf) {
+    var coeffs = ZernikeWavefront_coeffs(wf);
+    var len = ZernikeWavefront_len(wf);
+    var cnt = 0;
+    for (var i = 0; i < len; i = i + 1) {
+        if (f64_gt(f64_abs(load64(coeffs + i * 8)), EPS) == 1) {
+            cnt = cnt + 1;
+        }
+    }
+    return cnt;
+}
+
+alloc_init();
+
+var NM = alloc(16);
+
+# ── radial polynomial ────────
+test_group("radial");
+
+# R_0^0(rho) = 1
+_assert_near(zernike_radial(0, 0, Z), F64_ONE, EPS, "R00(0) = 1");
+_assert_near(zernike_radial(0, 0, F64_HALF), F64_ONE, EPS, "R00(0.5) = 1");
+_assert_near(zernike_radial(0, 0, F64_ONE), F64_ONE, EPS, "R00(1) = 1");
+# R_1^1(rho) = rho
+assert(f64_lt(f64_abs(zernike_radial(1, 1, Z)), EPS), "R11(0) = 0");
+_assert_near(zernike_radial(1, 1, F64_HALF), F64_HALF, EPS, "R11(0.5) = 0.5");
+_assert_near(zernike_radial(1, 1, F64_ONE), F64_ONE, EPS, "R11(1) = 1");
+# R_2^0(rho) = 2rho^2 - 1
+_assert_near(zernike_radial(2, 0, Z), f64_neg(F64_ONE), EPS, "R20(0) = -1");
+_assert_near(zernike_radial(2, 0, F64_ONE), F64_ONE, EPS, "R20(1) = 1");
+var mid = f64_div(F64_ONE, f64_sqrt(F64_TWO));
+assert(f64_lt(f64_abs(zernike_radial(2, 0, mid)), _fd(1, 100)), "R20(1/sqrt2) ~ 0");
+# R_4^0(rho) = 6rho^4 - 6rho^2 + 1
+_assert_near(zernike_radial(4, 0, Z), F64_ONE, EPS, "R40(0) = 1");
+_assert_near(zernike_radial(4, 0, F64_ONE), F64_ONE, EPS, "R40(1) = 1");
+# invalid (n<m, or n-m odd) -> 0
+assert(f64_lt(f64_abs(zernike_radial(1, 2, F64_HALF)), EPS), "R12 invalid = 0");
+assert(f64_lt(f64_abs(zernike_radial(3, 2, F64_HALF)), EPS), "R32 (n-m odd) = 0");
+
+# ── zernike polynomial ────────
+test_group("zernike_poly");
+
+_assert_near(zernike_poly(0, 0, F64_HALF, Z), F64_ONE, EPS, "piston = 1");
+_assert_near(zernike_poly(1, 1, F64_ONE, Z), F64_TWO, EPS, "tilt X = 2");
+_assert_near(zernike_poly(1, (0 - 1), F64_ONE, F64_PI_2), F64_TWO, EPS, "tilt Y = 2");
+_assert_near(zernike_poly(2, 0, Z, Z), f64_neg(SQRT3), EPS, "defocus center = -sqrt3");
+_assert_near(zernike_poly(2, 0, F64_ONE, Z), SQRT3, EPS, "defocus edge = +sqrt3");
+assert(f64_lt(f64_abs(zernike_poly(2, 0, _fd(15, 10), Z)), EPS), "outside pupil = 0");
+
+# orthogonality: integral of Z_j*Z_k over unit disk ~ pi*delta_jk (grid, n=100)
+var sum11 = Z;
+var sum14 = Z;
+var sum44 = Z;
+var da = _fd(4, 10000);   # 4 / (100*100)
+var half_n = f64_div(f64_from(100), F64_TWO);
+for (var iy = 0; iy < 100; iy = iy + 1) {
+    for (var ix = 0; ix < 100; ix = ix + 1) {
+        var x = f64_sub(f64_div(f64_add(f64_from(ix), F64_HALF), half_n), F64_ONE);
+        var y = f64_sub(f64_div(f64_add(f64_from(iy), F64_HALF), half_n), F64_ONE);
+        var rho = f64_sqrt(f64_add(f64_mul(x, x), f64_mul(y, y)));
+        if (f64_le(rho, F64_ONE) == 1) {
+            var theta = ganita_f64_atan2(y, x);
+            var z1 = zernike_poly(0, 0, rho, theta);
+            var z4 = zernike_poly(2, 0, rho, theta);
+            sum11 = f64_add(sum11, f64_mul(f64_mul(z1, z1), da));
+            sum14 = f64_add(sum14, f64_mul(f64_mul(z1, z4), da));
+            sum44 = f64_add(sum44, f64_mul(f64_mul(z4, z4), da));
+        }
+    }
+}
+_assert_near(sum11, F64_PI, _fd(1, 10), "Z1.Z1 ~ pi");
+assert(f64_lt(f64_abs(sum14), _fd(1, 10)), "Z1.Z4 ~ 0");
+_assert_near(sum44, F64_PI, _fd(1, 10), "Z4.Z4 ~ pi");
+
+# ── Noll index ────────
+test_group("noll");
+
+zernike_noll_to_nm(1, NM, NM + 8);
+assert_eq(load64(NM), 0, "noll 1 -> n=0");
+assert_eq(load64(NM + 8), 0, "noll 1 -> m=0");
+zernike_noll_to_nm(2, NM, NM + 8);
+assert_eq(load64(NM), 1, "noll 2 -> n=1");
+assert_eq(load64(NM + 8), 1, "noll 2 -> m=1");
+zernike_noll_to_nm(3, NM, NM + 8);
+assert_eq(load64(NM), 1, "noll 3 -> n=1");
+assert_eq(load64(NM + 8), (0 - 1), "noll 3 -> m=-1");
+zernike_noll_to_nm(4, NM, NM + 8);
+assert_eq(load64(NM), 2, "noll 4 -> n=2");
+assert_eq(load64(NM + 8), 0, "noll 4 -> m=0");
+zernike_noll_to_nm(5, NM, NM + 8);
+assert_eq(load64(NM), 2, "noll 5 -> n=2");
+assert_eq(load64(NM + 8), (0 - 2), "noll 5 -> m=-2");
+zernike_noll_to_nm(6, NM, NM + 8);
+assert_eq(load64(NM), 2, "noll 6 -> n=2");
+assert_eq(load64(NM + 8), 2, "noll 6 -> m=2");
+zernike_noll_to_nm(7, NM, NM + 8);
+assert_eq(load64(NM), 3, "noll 7 -> n=3");
+assert_eq(load64(NM + 8), (0 - 1), "noll 7 -> m=-1");
+zernike_noll_to_nm(8, NM, NM + 8);
+assert_eq(load64(NM), 3, "noll 8 -> n=3");
+assert_eq(load64(NM + 8), 1, "noll 8 -> m=1");
+zernike_noll_to_nm(11, NM, NM + 8);
+assert_eq(load64(NM), 4, "noll 11 -> n=4");
+assert_eq(load64(NM + 8), 0, "noll 11 -> m=0");
+
+# roundtrip j -> (n,m) -> j for j=1..11
+for (var jj = 1; jj <= 11; jj = jj + 1) {
+    zernike_noll_to_nm(jj, NM, NM + 8);
+    assert_eq(zernike_nm_to_noll(load64(NM), load64(NM + 8)), jj, "noll roundtrip");
+}
+
+# ── wavefront ────────
+test_group("wavefront");
+
+var flat = zernike_wf_flat();
+assert(f64_lt(f64_abs(zernike_wf_evaluate(flat, F64_HALF, Z)), EPS), "flat evaluate = 0");
+assert(f64_lt(f64_abs(zernike_wf_rms_error(flat)), EPS), "flat rms = 0");
+
+var wdef = zernike_defocus(F64_HALF);
+assert(f64_lt(zernike_wf_evaluate(wdef, Z, Z), Z), "defocus center < 0");
+assert(f64_gt(zernike_wf_evaluate(wdef, F64_ONE, Z), Z), "defocus edge > 0");
+
+_assert_near(zernike_wf_rms_error(zernike_defocus(_fd(1, 10))), _fd(1, 10), EPS, "rms defocus 0.1 = 0.1");
+
+# rms excludes piston + tilt
+var c1 = alloc(4 * 8);
+store64(c1, F64_ONE);
+store64(c1 + 8, F64_HALF);
+store64(c1 + 16, F64_HALF);
+store64(c1 + 24, Z);
+assert(f64_lt(f64_abs(zernike_wf_rms_error(zernike_wf_new(c1, 4))), EPS), "piston+tilt rms = 0");
+var c2 = alloc(5 * 8);
+store64(c2, F64_ONE);
+store64(c2 + 8, F64_HALF);
+store64(c2 + 16, F64_HALF);
+store64(c2 + 24, _fd(2, 10));
+store64(c2 + 32, Z);
+_assert_near(zernike_wf_rms_error(zernike_wf_new(c2, 5)), _fd(2, 10), EPS, "defocus rms = 0.2");
+
+# strehl
+_assert_near(zernike_wf_strehl_ratio(zernike_wf_flat(), WL), F64_ONE, EPS, "flat strehl = 1");
+var rms_m = f64_div(WL, f64_from(14));
+var cm = alloc(11 * 8);
+for (var mi = 0; mi < 11; mi = mi + 1) {
+    store64(cm + mi * 8, Z);
+}
+store64(cm + 10 * 8, rms_m);
+_assert_near(zernike_wf_strehl_ratio(zernike_wf_new(cm, 11), WL), _fd(8, 10), _fd(5, 100),
+"marechal strehl ~ 0.8");
+
+# to_grid
+var grid = zernike_wf_to_grid(zernike_defocus(_fd(1, 10)), 32);
+assert(f64_gt(f64_abs(load64(grid + (16 * 32 + 16) * 8)), EPS), "grid center nonzero");
+assert(f64_lt(f64_abs(load64(grid)), EPS), "grid corner zero (outside pupil)");
+
+# peak-to-valley
+var pv = zernike_wf_peak_to_valley(zernike_defocus(F64_HALF), 64);
+assert(f64_gt(pv, Z), "P-V positive");
+var pv_exp = f64_mul(f64_mul(F64_TWO, F64_HALF), SQRT3);
+assert(f64_lt(f64_abs(f64_sub(pv, pv_exp)), _fd(1, 10)), "defocus P-V ~ 2*0.5*sqrt3");
+
+# named aberrations: exactly one nonzero coefficient each
+assert_eq(_count_nonzero(zernike_defocus(F64_ONE)), 1, "defocus 1 nonzero");
+assert_eq(_count_nonzero(zernike_spherical(F64_ONE)), 1, "spherical 1 nonzero");
+assert_eq(_count_nonzero(zernike_coma_x(F64_ONE)), 1, "coma_x 1 nonzero");
+assert_eq(_count_nonzero(zernike_coma_y(F64_ONE)), 1, "coma_y 1 nonzero");
+assert_eq(_count_nonzero(zernike_astigmatism_0(F64_ONE)), 1, "astig0 1 nonzero");
+assert_eq(_count_nonzero(zernike_astigmatism_45(F64_ONE)), 1, "astig45 1 nonzero");
+
+# coma X symmetric about x-axis
+var wcoma = zernike_coma_x(F64_HALF);
+var v1 = zernike_wf_evaluate(wcoma, _fd(7, 10), F64_PI_4);
+var v2 = zernike_wf_evaluate(wcoma, _fd(7, 10), f64_neg(F64_PI_4));
+assert(f64_lt(f64_abs(f64_sub(v1, v2)), EPS), "coma X x-axis symmetric");
+
+var r = assert_summary();
