@@ -1,0 +1,236 @@
+# ray_fresnel.cyr -- Fresnel equations (real + complex), Brewster, Beer-Lambert
+# Usage: include "lib/ray_fresnel.cyr"  (requires error.cyr, ray_core.cyr)
+#
+# Ported from the Rust `ray/fresnel.rs`, plus `snell_3d` (which needs the s/p
+# reflectances). All angles in radians. f64 values are bit patterns; see
+# ray_core.cyr for the f64 conventions.
+
+# Denominator-underflow guards (Rust used 1e-15 / 1e-30 literals).
+fn _fr_eps15() { return f64_div(F64_ONE, f64_from(1000000000000000)); }
+fn _fr_eps30() {
+    var e = f64_div(F64_ONE, f64_from(1000000000000000));
+    return f64_mul(e, e);
+}
+
+# ── Fresnel equations (real refractive index) ────────
+
+# Fresnel reflectance for s-polarized light (TE mode).
+#must_use
+fn fresnel_s(n1, n2, cos_i, cos_t) {
+    var num = f64_sub(f64_mul(n1, cos_i), f64_mul(n2, cos_t));
+    var den = f64_add(f64_mul(n1, cos_i), f64_mul(n2, cos_t));
+    if (f64_lt(f64_abs(den), _fr_eps15()) == 1) {
+        return F64_ONE;
+    }
+    var r = f64_div(num, den);
+    return f64_mul(r, r);
+}
+
+# Fresnel reflectance for p-polarized light (TM mode).
+#must_use
+fn fresnel_p(n1, n2, cos_i, cos_t) {
+    var num = f64_sub(f64_mul(n2, cos_i), f64_mul(n1, cos_t));
+    var den = f64_add(f64_mul(n2, cos_i), f64_mul(n1, cos_t));
+    if (f64_lt(f64_abs(den), _fr_eps15()) == 1) {
+        return F64_ONE;
+    }
+    var r = f64_div(num, den);
+    return f64_mul(r, r);
+}
+
+# Fresnel reflectance at normal incidence: R = ((n1-n2)/(n1+n2))^2.
+#must_use
+fn fresnel_normal(n1, n2) {
+    var r = f64_div(f64_sub(n1, n2), f64_add(n1, n2));
+    return f64_mul(r, r);
+}
+
+# Average (unpolarized) Fresnel reflectance. Writes PRK_ERR_TIR (returns 0) if
+# the incident angle exceeds the critical angle.
+#must_use
+fn fresnel_unpolarized(n1, n2, incident_angle, err_out) {
+    store64(err_out, ERR_NONE);
+    var sin_i = f64_sin(incident_angle);
+    var cos_i = f64_cos(incident_angle);
+    var sin_t = f64_mul(f64_div(n1, n2), sin_i);
+    if (f64_gt(f64_abs(sin_t), F64_ONE) == 1) {
+        store64(err_out, PRK_ERR_TIR);
+        return 0;
+    }
+    var cos_t = f64_sqrt(f64_sub(F64_ONE, f64_mul(sin_t, sin_t)));
+    var rs = fresnel_s(n1, n2, cos_i, cos_t);
+    var rp = fresnel_p(n1, n2, cos_i, cos_t);
+    return f64_mul(F64_HALF, f64_add(rs, rp));
+}
+
+# ── Brewster's angle ────────
+
+# Brewster's angle: atan(n2/n1) — reflected light is fully s-polarized.
+#must_use
+fn brewster_angle(n1, n2) {
+    return ganita_f64_atan2(f64_div(n2, n1), F64_ONE);
+}
+
+# ── Complex Fresnel (absorbing media) ────────
+
+# Complex refractive index medium: n~ = n + i*k. { n, k, name }.
+#derive(accessors)
+struct ComplexMedium { n; k; name; }
+
+fn _cm_mk(n, k, name) {
+    var m = alloc(sizeof(ComplexMedium));
+    ComplexMedium_set_n(m, n);
+    ComplexMedium_set_k(m, k);
+    ComplexMedium_set_name(m, name);
+    return m;
+}
+
+#must_use
+fn complex_gold_550nm() {
+    return _cm_mk(f64_div(f64_from(43), f64_from(100)), f64_div(f64_from(246), f64_from(100)), "gold (550nm)");
+}
+#must_use
+fn complex_silver_550nm() {
+    return _cm_mk(f64_div(f64_from(59), f64_from(1000)), f64_div(f64_from(333), f64_from(100)), "silver (550nm)");
+}
+#must_use
+fn complex_copper_550nm() {
+    return _cm_mk(f64_div(f64_from(113), f64_from(100)), f64_div(f64_from(260), f64_from(100)), "copper (550nm)");
+}
+#must_use
+fn complex_aluminum_550nm() {
+    return _cm_mk(f64_div(f64_from(96), f64_from(100)), f64_div(f64_from(669), f64_from(100)), "aluminum (550nm)");
+}
+
+# Dielectric (non-absorbing) complex medium (k = 0).
+#must_use
+fn complex_dielectric(n, name) {
+    return _cm_mk(n, f64_from(0), name);
+}
+
+# Fresnel reflectance at normal incidence for an absorbing medium:
+# R = ((n1-n2)^2 + k2^2) / ((n1+n2)^2 + k2^2).
+#must_use
+fn fresnel_normal_complex(n1, medium) {
+    var mn = ComplexMedium_n(medium);
+    var mk = ComplexMedium_k(medium);
+    var dn = f64_sub(n1, mn);
+    var dp = f64_add(n1, mn);
+    var k2 = f64_mul(mk, mk);
+    return f64_div(f64_add(f64_mul(dn, dn), k2), f64_add(f64_mul(dp, dp), k2));
+}
+
+# Complex cos(theta_t) = principal sqrt(u + i*v) where
+#   cos^2(theta_t) = 1 - (n1/n~)^2 sin^2(theta_i).
+# Writes the real/imag parts through cos_re_out/cos_im_out.
+fn _fr_complex_cos_t(n1, mn, mk, incident_angle, cos_re_out, cos_im_out) {
+    var sin_i = f64_sin(incident_angle);
+    var sin2_i = f64_mul(sin_i, sin_i);
+    var n2_sq = f64_sub(f64_mul(mn, mn), f64_mul(mk, mk));
+    var n2_im = f64_mul(f64_mul(F64_TWO, mn), mk);
+    var denom = f64_add(f64_mul(n2_sq, n2_sq), f64_mul(n2_im, n2_im));
+    var n1_sin2 = f64_mul(f64_mul(n1, n1), sin2_i);
+    var u = f64_sub(F64_ONE, f64_div(f64_mul(n1_sin2, n2_sq), denom));
+    var v = f64_div(f64_mul(n1_sin2, n2_im), denom);
+    var mag = f64_sqrt(f64_add(f64_mul(u, u), f64_mul(v, v)));
+    var cos_re = f64_sqrt(f64_div(f64_add(mag, u), F64_TWO));
+    var cos_im = f64_sqrt(f64_div(f64_sub(mag, u), F64_TWO));
+    if (f64_lt(v, f64_from(0)) == 1) {
+        cos_im = f64_neg(cos_im);
+    }
+    store64(cos_re_out, cos_re);
+    store64(cos_im_out, cos_im);
+    return 0;
+}
+
+# Fresnel reflectance for s-polarized light on an absorbing medium. R_s = |r_s|^2.
+#must_use
+fn fresnel_s_complex(n1, medium, incident_angle) {
+    var mn = ComplexMedium_n(medium);
+    var mk = ComplexMedium_k(medium);
+    var cos_i = f64_cos(incident_angle);
+    var cos_t_re = 0;
+    var cos_t_im = 0;
+    _fr_complex_cos_t(n1, mn, mk, incident_angle, &cos_t_re, &cos_t_im);
+    var nt_re = f64_sub(f64_mul(mn, cos_t_re), f64_mul(mk, cos_t_im));
+    var nt_im = f64_add(f64_mul(mn, cos_t_im), f64_mul(mk, cos_t_re));
+    var num_re = f64_sub(f64_mul(n1, cos_i), nt_re);
+    var num_im = f64_neg(nt_im);
+    var den_re = f64_add(f64_mul(n1, cos_i), nt_re);
+    var den_im = nt_im;
+    var num_mag = f64_add(f64_mul(num_re, num_re), f64_mul(num_im, num_im));
+    var den_mag = f64_add(f64_add(f64_mul(den_re, den_re), f64_mul(den_im, den_im)), _fr_eps30());
+    return f64_div(num_mag, den_mag);
+}
+
+# Fresnel reflectance for p-polarized light on an absorbing medium. R_p = |r_p|^2.
+#must_use
+fn fresnel_p_complex(n1, medium, incident_angle) {
+    var mn = ComplexMedium_n(medium);
+    var mk = ComplexMedium_k(medium);
+    var cos_i = f64_cos(incident_angle);
+    var cos_t_re = 0;
+    var cos_t_im = 0;
+    _fr_complex_cos_t(n1, mn, mk, incident_angle, &cos_t_re, &cos_t_im);
+    var nci_re = f64_mul(mn, cos_i);
+    var nci_im = f64_mul(mk, cos_i);
+    var num_re = f64_sub(nci_re, f64_mul(n1, cos_t_re));
+    var num_im = f64_sub(nci_im, f64_mul(n1, cos_t_im));
+    var den_re = f64_add(nci_re, f64_mul(n1, cos_t_re));
+    var den_im = f64_add(nci_im, f64_mul(n1, cos_t_im));
+    var num_mag = f64_add(f64_mul(num_re, num_re), f64_mul(num_im, num_im));
+    var den_mag = f64_add(f64_add(f64_mul(den_re, den_re), f64_mul(den_im, den_im)), _fr_eps30());
+    return f64_div(num_mag, den_mag);
+}
+
+# Average (unpolarized) Fresnel reflectance on an absorbing medium.
+#must_use
+fn fresnel_unpolarized_complex(n1, medium, incident_angle) {
+    var rs = fresnel_s_complex(n1, medium, incident_angle);
+    var rp = fresnel_p_complex(n1, medium, incident_angle);
+    return f64_mul(F64_HALF, f64_add(rs, rp));
+}
+
+# ── Attenuation ────────
+
+# Beer-Lambert law: I = intensity * exp(-alpha * distance).
+#must_use
+fn beer_lambert(intensity, alpha, distance) {
+    return f64_mul(intensity, f64_exp(f64_neg(f64_mul(alpha, distance))));
+}
+
+# ── 3D Snell's law (refracted direction + Fresnel reflectance) ────────
+
+# Compute the refracted direction and unpolarized Fresnel reflectance for a 3D
+# ray. Returns the refracted RayVec3 (0 on TIR); writes the reflectance to
+# refl_out and the error code to err_out. `direction` and outward `normal`
+# should be normalized.
+#must_use
+fn ray_snell_3d(direction, normal, n1, n2, refl_out, err_out) {
+    store64(err_out, ERR_NONE);
+    store64(refl_out, f64_from(0));
+    var dx = RayVec3_x(direction);
+    var dy = RayVec3_y(direction);
+    var dz = RayVec3_z(direction);
+    var nx = RayVec3_x(normal);
+    var ny = RayVec3_y(normal);
+    var nz = RayVec3_z(normal);
+    var dot = f64_add(f64_add(f64_mul(dx, nx), f64_mul(dy, ny)), f64_mul(dz, nz));
+    var cos_i = f64_neg(dot);
+    var ratio = f64_div(n1, n2);
+    var sin2_t = f64_mul(f64_mul(ratio, ratio), f64_sub(F64_ONE, f64_mul(cos_i, cos_i)));
+    if (f64_gt(sin2_t, F64_ONE) == 1) {
+        store64(err_out, PRK_ERR_TIR);
+        return 0;
+    }
+    var cos_t = f64_sqrt(f64_sub(F64_ONE, sin2_t));
+    var factor = f64_sub(f64_mul(ratio, cos_i), cos_t);
+    var refr = ray_vec3(
+    f64_add(f64_mul(ratio, dx), f64_mul(factor, nx)),
+    f64_add(f64_mul(ratio, dy), f64_mul(factor, ny)),
+    f64_add(f64_mul(ratio, dz), f64_mul(factor, nz)));
+    var rs = fresnel_s(n1, n2, cos_i, cos_t);
+    var rp = fresnel_p(n1, n2, cos_i, cos_t);
+    store64(refl_out, f64_mul(F64_HALF, f64_add(rs, rp)));
+    return refr;
+}

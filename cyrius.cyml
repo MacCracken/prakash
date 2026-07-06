@@ -26,6 +26,7 @@ output = "build/prakash"
 modules = [
     "src/error.cyr",
     "src/ray_core.cyr",
+    "src/ray_fresnel.cyr",
 ]
 
 [deps]

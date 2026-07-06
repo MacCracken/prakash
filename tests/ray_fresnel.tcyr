@@ -1,0 +1,201 @@
+# ray Fresnel test suite — ported from rust-old/src/ray/mod.rs (#[cfg(test)]).
+# Covers fresnel_s/p/normal/unpolarized, Brewster, Beer-Lambert, snell_3d, and
+# the complex-index (absorbing-media) Fresnel functions.
+
+include "src/error.cyr"
+include "src/ray_core.cyr"
+include "src/ray_fresnel.cyr"
+
+fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
+fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
+fn _n3(x, y, z) {
+    var l = f64_sqrt(f64_add(f64_add(f64_mul(x, x), f64_mul(y, y)), f64_mul(z, z)));
+    return ray_vec3(f64_div(x, l), f64_div(y, l), f64_div(z, l));
+}
+fn _in01(r) {
+    if (f64_lt(r, f64_from(0)) == 1) { return 0; }
+    if (f64_gt(r, F64_ONE) == 1) { return 0; }
+    return 1;
+}
+
+var TOL6 = f64_div(F64_ONE, f64_from(1000000));   # 1e-6
+var TOL_HALF = f64_div(F64_ONE, F64_TWO);         # 0.5
+var TOL_01 = f64_div(F64_ONE, f64_from(100));     # 0.01
+var TOL_02 = f64_div(F64_ONE, f64_from(50));      # 0.02
+var TOL_001 = f64_div(F64_ONE, f64_from(1000));   # 0.001
+var TOL_05 = f64_div(F64_ONE, f64_from(20));      # 0.05
+
+alloc_init();
+
+# ── fresnel_normal ────────
+test_group("fresnel_normal");
+
+_assert_near(fresnel_normal(Medium_n(medium_air()), Medium_n(medium_glass())), _fd(4, 100), TOL_01, "air-glass ~0.04");
+_assert_near(fresnel_normal(F64_ONE, _fd(15, 10)), fresnel_normal(_fd(15, 10), F64_ONE), TOL6, "symmetric");
+_assert_near(fresnel_normal(_fd(15, 10), _fd(15, 10)), f64_from(0), TOL6, "same medium 0");
+
+# range [0,1] for several pairs
+assert(_in01(fresnel_normal(F64_ONE, _fd(15, 10))), "range 1-1.5");
+assert(_in01(fresnel_normal(F64_ONE, _fd(2417, 1000))), "range 1-2.417");
+assert(_in01(fresnel_normal(_fd(1333, 1000), _fd(152, 100))), "range 1.333-1.52");
+assert(_in01(fresnel_normal(F64_ONE, f64_from(4))), "range 1-4");
+
+# diamond high reflectance ~0.17
+_assert_near(fresnel_normal(Medium_n(medium_air()), Medium_n(medium_diamond())), _fd(17, 100), TOL_02, "diamond ~0.17");
+
+# higher index contrast -> more reflection
+var r_water = fresnel_normal(F64_ONE, Medium_n(medium_water()));
+var r_glass = fresnel_normal(F64_ONE, Medium_n(medium_glass()));
+var r_diamond = fresnel_normal(F64_ONE, Medium_n(medium_diamond()));
+assert(f64_lt(r_water, r_glass), "water < glass reflectance");
+assert(f64_lt(r_glass, r_diamond), "glass < diamond reflectance");
+
+# ── fresnel_s / fresnel_p at Brewster ────────
+test_group("fresnel_brewster");
+
+var ba = brewster_angle(F64_ONE, _fd(15, 10));
+var eb = 0;
+var t_at_ba = ray_snell(F64_ONE, _fd(15, 10), ba, &eb);
+var cos_i_ba = f64_cos(ba);
+var cos_t_ba = f64_cos(t_at_ba);
+var rp_ba = fresnel_p(F64_ONE, _fd(15, 10), cos_i_ba, cos_t_ba);
+assert(f64_lt(rp_ba, _fd(1, 1000)), "p-pol ~0 at Brewster");
+var rs_ba = fresnel_s(F64_ONE, _fd(15, 10), cos_i_ba, cos_t_ba);
+assert(f64_gt(rs_ba, rp_ba), "s-pol > p-pol at Brewster");
+
+# ── fresnel_unpolarized ────────
+test_group("fresnel_unpolarized");
+
+var eu = 0;
+var ru_low = fresnel_unpolarized(F64_ONE, _fd(15, 10), ray_deg_to_rad(f64_from(10)), &eu);
+assert_eq(eu, 0, "unpol low ok");
+_assert_near(ru_low, fresnel_normal(F64_ONE, _fd(15, 10)), TOL_01, "unpol low ~ normal");
+
+var ru_high = fresnel_unpolarized(F64_ONE, _fd(15, 10), ray_deg_to_rad(f64_from(80)), &eu);
+assert_eq(eu, 0, "unpol high ok");
+assert(f64_gt(ru_high, _fd(3, 10)), "unpol high > 0.3");
+
+# monotonic increase in reflectance with angle (air->glass)
+var prev = f64_from(0);
+for (var deg = 0; deg <= 85; deg = deg + 5) {
+    var em = 0;
+    var rm = fresnel_unpolarized(F64_ONE, _fd(15, 10), ray_deg_to_rad(f64_from(deg)), &em);
+    assert(f64_ge(rm, f64_sub(prev, TOL6)), "unpol monotonic increasing");
+    prev = rm;
+}
+
+# ── Brewster's angle ────────
+test_group("brewster");
+
+_assert_near(ray_rad_to_deg(brewster_angle(F64_ONE, _fd(15, 10))), _fd(563, 10), TOL_HALF, "brewster ~56.3deg");
+var b1 = brewster_angle(F64_ONE, _fd(15, 10));
+var b2 = brewster_angle(_fd(15, 10), F64_ONE);
+_assert_near(f64_add(b1, b2), F64_PI_2, TOL6, "brewster complementary sum pi/2");
+
+# ── Beer-Lambert ────────
+test_group("beer_lambert");
+
+_assert_near(beer_lambert(F64_ONE, f64_from(0), f64_from(10)), F64_ONE, TOL6, "no absorption");
+_assert_near(beer_lambert(F64_ONE, F64_ONE, F64_ONE), f64_exp(f64_neg(F64_ONE)), TOL6, "exp(-1)");
+var i1 = beer_lambert(F64_ONE, _fd(5, 10), F64_ONE);
+var i2 = beer_lambert(F64_ONE, _fd(5, 10), F64_TWO);
+_assert_near(i2, f64_mul(i1, i1), TOL6, "double distance squares attenuation");
+_assert_near(beer_lambert(f64_from(5), f64_from(100), f64_from(0)), f64_from(5), TOL6, "zero distance");
+assert(f64_ge(beer_lambert(F64_ONE, f64_from(10), f64_from(100)), f64_from(0)), "always non-negative");
+
+# ── 3D Snell's law ────────
+test_group("snell_3d");
+
+var refl = 0;
+var e_s3 = 0;
+var dir_s3 = _n3(_fd(5, 10), f64_from(0), f64_neg(_fd(866, 1000)));
+var refr_s3 = ray_snell_3d(dir_s3, ray_vec3(f64_from(0), f64_from(0), F64_ONE), F64_ONE, _fd(15, 10), &refl, &e_s3);
+assert_eq(e_s3, 0, "snell_3d ok");
+assert(_in01(refl), "snell_3d reflectance in [0,1]");
+assert(f64_lt(RayVec3_z(refr_s3), f64_from(0)), "snell_3d still forward (-z)");
+
+# normal incidence reflectance matches fresnel_normal
+var refl_n = 0;
+var e_n = 0;
+var _rn3 = ray_snell_3d(
+ray_vec3(f64_from(0), f64_from(0), f64_neg(F64_ONE)),
+ray_vec3(f64_from(0), f64_from(0), F64_ONE), F64_ONE, _fd(15, 10), &refl_n, &e_n);
+assert_eq(e_n, 0, "snell_3d normal ok");
+_assert_near(refl_n, fresnel_normal(F64_ONE, _fd(15, 10)), TOL_01, "snell_3d normal ~ fresnel_normal");
+
+# TIR
+var refl_t = 0;
+var e_t3 = 0;
+var dir_tir = _n3(_fd(8, 10), f64_from(0), f64_neg(_fd(6, 10)));
+var _rt3 = ray_snell_3d(dir_tir, ray_vec3(f64_from(0), f64_from(0), F64_ONE), _fd(15, 10), F64_ONE, &refl_t, &e_t3);
+assert_eq(e_t3, PRK_ERR_TIR, "snell_3d TIR");
+
+# grazing -> high reflectance
+var refl_g = 0;
+var e_g = 0;
+var dir_g = _n3(_fd(98, 100), f64_from(0), f64_neg(_fd(2, 10)));
+var _rg = ray_snell_3d(dir_g, ray_vec3(f64_from(0), f64_from(0), F64_ONE), F64_ONE, _fd(15, 10), &refl_g, &e_g);
+assert(f64_gt(refl_g, _fd(3, 10)), "snell_3d grazing high reflectance");
+
+# ── Complex Fresnel ────────
+test_group("fresnel_complex");
+
+# dielectric medium: n=1.52, k=0
+var die = complex_dielectric(_fd(152, 100), "glass");
+_assert_near(ComplexMedium_n(die), _fd(152, 100), TOL6, "dielectric n=1.52");
+_assert_near(ComplexMedium_k(die), f64_from(0), TOL6, "dielectric k=0");
+
+# complex normal for dielectric matches real
+_assert_near(
+fresnel_normal_complex(F64_ONE, die),
+fresnel_normal(F64_ONE, _fd(152, 100)), TOL_001, "complex dielectric ~ real");
+
+# gold ~0.82
+_assert_near(fresnel_normal_complex(F64_ONE, complex_gold_550nm()), _fd(82, 100), TOL_05, "gold ~0.82");
+# silver & aluminum highly reflective
+assert(f64_gt(fresnel_normal_complex(F64_ONE, complex_silver_550nm()), _fd(9, 10)), "silver > 0.9");
+assert(f64_gt(fresnel_normal_complex(F64_ONE, complex_aluminum_550nm()), _fd(9, 10)), "aluminum > 0.9");
+
+# s and p at normal incidence match fresnel_normal_complex
+var gold = complex_gold_550nm();
+var r_normal_g = fresnel_normal_complex(F64_ONE, gold);
+_assert_near(fresnel_s_complex(F64_ONE, gold, f64_from(0)), r_normal_g, TOL_01, "s at 0 ~ normal");
+_assert_near(fresnel_p_complex(F64_ONE, gold, f64_from(0)), r_normal_g, TOL_01, "p at 0 ~ normal");
+
+# unpolarized complex for dielectric matches real at 30deg
+var ang30 = ray_deg_to_rad(f64_from(30));
+var eu2 = 0;
+var ru_real = fresnel_unpolarized(F64_ONE, _fd(152, 100), ang30, &eu2);
+_assert_near(
+fresnel_unpolarized_complex(F64_ONE, die, ang30), ru_real, TOL_01,
+"complex unpol dielectric ~ real at 30deg");
+
+# grazing dielectric high reflectance
+assert(
+f64_gt(fresnel_unpolarized_complex(F64_ONE, die, ray_deg_to_rad(f64_from(85))), TOL_HALF),
+"complex grazing > 0.5");
+
+# range valid: metals, all angles r_s,r_p in [0, 1.001]
+var au = complex_gold_550nm();
+var ag = complex_silver_550nm();
+var cu = complex_copper_550nm();
+var al = complex_aluminum_550nm();
+var one_plus = f64_add(F64_ONE, TOL_001);
+for (var degc = 0; degc <= 85; degc = degc + 5) {
+    var ang = ray_deg_to_rad(f64_from(degc));
+    assert(f64_ge(fresnel_s_complex(F64_ONE, au, ang), f64_from(0)), "gold s >= 0");
+    assert(f64_le(fresnel_s_complex(F64_ONE, au, ang), one_plus), "gold s <= 1");
+    assert(f64_ge(fresnel_p_complex(F64_ONE, ag, ang), f64_from(0)), "silver p >= 0");
+    assert(f64_le(fresnel_p_complex(F64_ONE, ag, ang), one_plus), "silver p <= 1");
+    assert(f64_le(fresnel_s_complex(F64_ONE, cu, ang), one_plus), "copper s <= 1");
+    assert(f64_le(fresnel_p_complex(F64_ONE, al, ang), one_plus), "aluminum p <= 1");
+}
+
+# aluminum always highly reflective
+for (var dega = 0; dega <= 80; dega = dega + 10) {
+    var ra = fresnel_unpolarized_complex(F64_ONE, al, ray_deg_to_rad(f64_from(dega)));
+    assert(f64_gt(ra, _fd(8, 10)), "aluminum reflectance > 0.8");
+}
+
+var r = assert_summary();
