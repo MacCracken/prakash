@@ -1,0 +1,140 @@
+# wave polarization test suite — ported from rust-old/src/wave/polarization.rs.
+# Covers StokesVector constructors/angles, Mueller matrices, and birefringence.
+
+include "src/error.cyr"
+include "src/wave_core.cyr"
+include "src/wave_polarization.cyr"
+
+fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
+fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
+fn _assert_mm_eq(a, b, tol, msg) {
+    var i = 0;
+    while (i < 4) {
+        var j = 0;
+        while (j < 4) {
+            assert(f64_lt(f64_abs(f64_sub(mueller_get(a, i, j), mueller_get(b, i, j))), tol), msg);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+var TOL6 = f64_div(F64_ONE, f64_from(1000000));   # 1e-6
+var TOL_01 = f64_div(F64_ONE, f64_from(100));     # 0.01
+var TOL3 = f64_div(F64_ONE, f64_from(1000));      # 0.001
+var Z = f64_from(0);
+
+alloc_init();
+
+# ── Stokes vector ────────
+test_group("stokes");
+
+var su = stokes_unpolarized(F64_ONE);
+_assert_near(StokesVector_s0(su), F64_ONE, TOL6, "unpolarized s0 = 1");
+_assert_near(StokesVector_s1(su), Z, TOL6, "unpolarized s1 = 0");
+_assert_near(StokesVector_s2(su), Z, TOL6, "unpolarized s2 = 0");
+_assert_near(StokesVector_s3(su), Z, TOL6, "unpolarized s3 = 0");
+_assert_near(stokes_degree_of_polarization(su), Z, TOL6, "unpolarized DOP = 0");
+
+var shz = stokes_horizontal(F64_ONE);
+_assert_near(stokes_degree_of_polarization(shz), F64_ONE, TOL6, "horizontal DOP = 1");
+_assert_near(StokesVector_s1(shz), F64_ONE, TOL6, "horizontal s1 = 1");
+var svt = stokes_vertical(F64_ONE);
+_assert_near(stokes_degree_of_polarization(svt), F64_ONE, TOL6, "vertical DOP = 1");
+_assert_near(StokesVector_s1(svt), f64_neg(F64_ONE), TOL6, "vertical s1 = -1");
+
+var scr = stokes_circular_right(F64_ONE);
+_assert_near(stokes_degree_of_polarization(scr), F64_ONE, TOL6, "circular right DOP = 1");
+_assert_near(StokesVector_s3(scr), F64_ONE, TOL6, "circular right s3 = 1");
+_assert_near(StokesVector_s3(stokes_circular_left(F64_ONE)), f64_neg(F64_ONE), TOL6, "circular left s3 = -1");
+
+_assert_near(
+stokes_degree_of_polarization(stokes_new(F64_ONE, _fd(5, 10), Z, Z)), _fd(5, 10), TOL6, "partial DOP = 0.5");
+
+_assert_near(stokes_ellipticity_angle(stokes_horizontal(F64_ONE)), Z, TOL6, "linear ellipticity = 0");
+_assert_near(stokes_ellipticity_angle(stokes_circular_right(F64_ONE)), F64_PI_4, TOL_01, "circular ellipticity = pi/4");
+_assert_near(stokes_orientation_angle(stokes_horizontal(F64_ONE)), Z, TOL6, "horizontal orientation = 0");
+_assert_near(stokes_orientation_angle(stokes_diagonal_plus(F64_ONE)), F64_PI_4, TOL_01, "diagonal+ orientation = pi/4");
+_assert_near(stokes_degree_of_polarization(stokes_new(Z, Z, Z, Z)), Z, TOL6, "zero intensity DOP = 0");
+
+# ── Mueller matrices ────────
+test_group("mueller");
+
+var mi = mueller_apply(mueller_identity(), stokes_horizontal(F64_ONE));
+_assert_near(StokesVector_s0(mi), F64_ONE, TOL6, "identity preserves s0");
+_assert_near(StokesVector_s1(mi), F64_ONE, TOL6, "identity preserves s1");
+
+_assert_near(StokesVector_s0(mueller_apply(mueller_polarizer_horizontal(), stokes_horizontal(F64_ONE))),
+F64_ONE, TOL6, "H polarizer passes horizontal");
+_assert_near(StokesVector_s0(mueller_apply(mueller_polarizer_horizontal(), stokes_vertical(F64_ONE))),
+Z, TOL6, "H polarizer blocks vertical");
+_assert_near(StokesVector_s0(mueller_apply(mueller_polarizer_horizontal(), stokes_unpolarized(F64_ONE))),
+_fd(5, 10), TOL6, "H polarizer halves unpolarized");
+
+var after_h = mueller_apply(mueller_polarizer_horizontal(), stokes_unpolarized(F64_ONE));
+var after_v = mueller_apply(mueller_polarizer_vertical(), after_h);
+_assert_near(StokesVector_s0(after_v), Z, TOL6, "crossed polarizers block all");
+
+_assert_mm_eq(mueller_polarizer(Z), mueller_polarizer_horizontal(), TOL6, "polarizer(0) matches horizontal");
+
+var mqw = mueller_apply(mueller_quarter_wave_horizontal(), stokes_diagonal_plus(F64_ONE));
+assert(f64_gt(f64_abs(StokesVector_s3(mqw)), _fd(9, 10)), "QWP diagonal -> circular");
+
+var mhw = mueller_apply(mueller_half_wave_horizontal(), stokes_new(F64_ONE, Z, _fd(5, 10), _fd(5, 10)));
+_assert_near(StokesVector_s0(mhw), F64_ONE, TOL6, "HWP preserves s0");
+_assert_near(StokesVector_s2(mhw), f64_neg(_fd(5, 10)), TOL6, "HWP flips s2");
+_assert_near(StokesVector_s3(mhw), f64_neg(_fd(5, 10)), TOL6, "HWP flips s3");
+
+_assert_mm_eq(mueller_retarder(Z), mueller_identity(), TOL6, "retarder(0) is identity");
+_assert_mm_eq(mueller_retarder(F64_PI), mueller_half_wave_horizontal(), TOL6, "retarder(pi) is HWP");
+_assert_mm_eq(mueller_retarder(F64_PI_2), mueller_quarter_wave_horizontal(), TOL6, "retarder(pi/2) is QWP");
+
+_assert_mm_eq(mueller_multiply(mueller_identity(), mueller_polarizer_horizontal()),
+mueller_polarizer_horizontal(), TOL6, "identity * M = M");
+
+var chain = vec_new();
+vec_push(chain, mueller_polarizer_horizontal());
+vec_push(chain, mueller_polarizer_vertical());
+_assert_near(
+StokesVector_s0(mueller_chain(stokes_unpolarized(F64_ONE), chain)), Z, TOL6, "chained crossed polarizers block");
+
+_assert_near(StokesVector_s0(mueller_apply(mueller_rotation(f64_div(F64_PI, f64_from(6))), stokes_horizontal(F64_ONE))),
+F64_ONE, TOL6, "rotation preserves intensity");
+
+# ── birefringence ────────
+test_group("birefringence");
+
+assert(f64_lt(biref_birefringence(biref_calcite()), Z), "calcite negative birefringence");
+assert(f64_gt(biref_birefringence(biref_quartz()), Z), "quartz positive birefringence");
+_assert_near(f64_abs(biref_birefringence(biref_calcite())), _fd(172, 1000), TOL3, "calcite |dn| ~ 0.172");
+
+var qz = biref_quartz();
+var d_qw = biref_quarter_wave_thickness(qz, f64_from(550));
+_assert_near(biref_retardation(qz, d_qw, f64_from(550)), F64_PI_2, TOL_01, "QWP retardation = pi/2");
+var d_hw = biref_half_wave_thickness(qz, f64_from(550));
+_assert_near(biref_retardation(qz, d_hw, f64_from(550)), F64_PI, TOL_01, "HWP retardation = pi");
+
+var cal = biref_calcite();
+var cq = biref_quarter_wave_thickness(cal, _fd(6328, 10));
+var ch = biref_half_wave_thickness(cal, _fd(6328, 10));
+_assert_near(f64_div(ch, cq), F64_TWO, TOL6, "HWP = 2x QWP thickness");
+
+_assert_mm_eq(biref_to_mueller(qz, biref_quarter_wave_thickness(qz, f64_from(550)), f64_from(550)),
+mueller_quarter_wave_horizontal(), TOL_01, "quartz QWP Mueller ~ QWP matrix");
+
+var presets = vec_new();
+vec_push(presets, biref_calcite());
+vec_push(presets, biref_quartz());
+vec_push(presets, biref_rutile());
+vec_push(presets, biref_mica());
+var pi = 0;
+while (pi < 4) {
+    var mat = vec_get(presets, pi);
+    assert(f64_ge(BirefringentMaterial_n_o(mat), F64_ONE), "preset n_o >= 1");
+    assert(f64_ge(BirefringentMaterial_n_e(mat), F64_ONE), "preset n_e >= 1");
+    assert(f64_gt(f64_abs(biref_birefringence(mat)), TOL3), "preset measurable birefringence");
+    pi = pi + 1;
+}
+
+var r = assert_summary();

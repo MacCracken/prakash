@@ -171,6 +171,9 @@ fn stokes_new(s0, s1, s2, s3) {
 # Degree of polarization: sqrt(s1^2 + s2^2 + s3^2) / s0.
 #must_use
 fn stokes_degree_of_polarization(s) {
+    if (f64_lt(f64_abs(StokesVector_s0(s)), _wave_r(1, 1000000000000000)) == 1) {
+        return f64_from(0);
+    }
     var pol = f64_sqrt(f64_add(f64_add(
     f64_mul(StokesVector_s1(s), StokesVector_s1(s)),
     f64_mul(StokesVector_s2(s), StokesVector_s2(s))),
