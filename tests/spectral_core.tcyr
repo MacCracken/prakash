@@ -1,0 +1,202 @@
+# spectral core test suite — ported from rust-old/src/spectral/mod.rs.
+# Covers Rgb, wavelength->RGB, blackbody/Wien, color temperature, photon energy.
+# (serde roundtrip deferred to the bayan bite)
+
+include "src/error.cyr"
+include "src/spectral_core.cyr"
+
+fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
+fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
+fn _in01(x) {
+    if (f64_lt(x, f64_from(0)) == 1) { return 0; }
+    if (f64_gt(x, F64_ONE) == 1) { return 0; }
+    return 1;
+}
+fn _is_finite(x) { return f64_lt(f64_abs(x), 0x7FF0000000000000); }
+
+var TOL6 = f64_div(F64_ONE, f64_from(1000000));   # 1e-6
+var Z = f64_from(0);
+var NAN = 0x7FF8000000000000;
+
+alloc_init();
+
+# ── Rgb ────────
+test_group("rgb");
+
+_assert_near(rgb_luminance(rgb_white()), F64_ONE, TOL6, "white luminance = 1");
+# Rec. 709 coefficients 0.2126 + 0.7152 + 0.0722 = 1.0
+_assert_near(rgb_luminance(rgb_white()), F64_ONE, TOL6, "luminance coefficients sum to 1");
+_assert_near(rgb_luminance(rgb_black()), Z, TOL6, "black luminance = 0");
+assert(f64_gt(rgb_luminance(rgb_new(Z, F64_ONE, Z)), rgb_luminance(rgb_new(F64_ONE, Z, Z))), "green lum > red lum");
+
+var u_white = rgb_to_u8(rgb_white());
+assert_eq(RgbU8_r(u_white), 255, "white u8 r");
+assert_eq(RgbU8_g(u_white), 255, "white u8 g");
+assert_eq(RgbU8_b(u_white), 255, "white u8 b");
+var u_black = rgb_to_u8(rgb_black());
+assert_eq(RgbU8_r(u_black), 0, "black u8 r");
+var u_half = rgb_to_u8(rgb_new(_fd(5, 10), _fd(5, 10), _fd(5, 10)));
+assert_eq(RgbU8_r(u_half), 128, "half u8 = 128");
+
+var u_over = rgb_to_u8(rgb_new(F64_TWO, f64_neg(F64_ONE), _fd(5, 10)));
+assert_eq(RgbU8_r(u_over), 255, "overrange r clamps to 255");
+assert_eq(RgbU8_g(u_over), 0, "underrange g clamps to 0");
+assert_eq(RgbU8_b(u_over), 128, "mid b = 128");
+
+var clamped = rgb_clamp(rgb_new(_fd(15, 10), f64_neg(_fd(5, 10)), _fd(5, 10)));
+_assert_near(Rgb_r(clamped), F64_ONE, TOL6, "clamp r to 1");
+_assert_near(Rgb_g(clamped), Z, TOL6, "clamp g to 0");
+_assert_near(Rgb_b(clamped), _fd(5, 10), TOL6, "clamp b unchanged");
+
+var valid = rgb_clamp(rgb_new(_fd(3, 10), _fd(6, 10), _fd(9, 10)));
+_assert_near(Rgb_r(valid), _fd(3, 10), TOL6, "valid r unchanged");
+_assert_near(Rgb_g(valid), _fd(6, 10), TOL6, "valid g unchanged");
+_assert_near(Rgb_b(valid), _fd(9, 10), TOL6, "valid b unchanged");
+
+# ── wavelength -> RGB ────────
+test_group("wavelength_to_rgb");
+
+var e = 0;
+var red = wavelength_to_rgb(f64_from(650), &e);
+assert_eq(e, 0, "650 ok");
+assert(f64_gt(Rgb_r(red), _fd(8, 10)), "650 r > 0.8");
+assert(f64_lt(Rgb_g(red), _fd(2, 10)), "650 g < 0.2");
+assert(f64_lt(Rgb_b(red), _fd(1, 10)), "650 b < 0.1");
+
+assert(f64_gt(Rgb_g(wavelength_to_rgb(f64_from(530), &e)), _fd(8, 10)), "530 g > 0.8");
+assert(f64_gt(Rgb_b(wavelength_to_rgb(f64_from(450), &e)), _fd(8, 10)), "450 b > 0.8");
+
+var yellow = wavelength_to_rgb(f64_from(580), &e);
+assert(f64_gt(Rgb_r(yellow), _fd(5, 10)), "580 r > 0.5");
+assert(f64_gt(Rgb_g(yellow), _fd(5, 10)), "580 g > 0.5");
+assert(f64_lt(Rgb_b(yellow), _fd(1, 10)), "580 b < 0.1");
+
+var cyan = wavelength_to_rgb(f64_from(490), &e);
+assert(f64_gt(Rgb_g(cyan), _fd(5, 10)), "490 g > 0.5");
+assert(f64_gt(Rgb_b(cyan), _fd(5, 10)), "490 b > 0.5");
+
+# out of range (including NaN)
+var eo = 0;
+var _o1 = wavelength_to_rgb(f64_from(300), &eo);
+assert(prakash_is_err(eo), "300 out of range");
+var _o2 = wavelength_to_rgb(f64_from(800), &eo);
+assert(prakash_is_err(eo), "800 out of range");
+var _o3 = wavelength_to_rgb(Z, &eo);
+assert(prakash_is_err(eo), "0 out of range");
+var _o4 = wavelength_to_rgb(f64_neg(f64_from(100)), &eo);
+assert(prakash_is_err(eo), "-100 out of range");
+var _o5 = wavelength_to_rgb(NAN, &eo);
+assert(prakash_is_err(eo), "NaN out of range");
+
+# boundaries
+var eb = 0;
+var _b1 = wavelength_to_rgb(f64_from(380), &eb);
+assert_eq(eb, 0, "380 ok");
+var _b2 = wavelength_to_rgb(f64_from(780), &eb);
+assert_eq(eb, 0, "780 ok");
+var _b3 = wavelength_to_rgb(_fd(3799, 10), &eb);
+assert(prakash_is_err(eb), "379.9 err");
+var _b4 = wavelength_to_rgb(_fd(7801, 10), &eb);
+assert(prakash_is_err(eb), "780.1 err");
+
+# sweep: all components in [0,1]
+for (var nm = 380; nm <= 780; nm = nm + 5) {
+    var esw = 0;
+    var c = wavelength_to_rgb(f64_from(nm), &esw);
+    assert(_in01(Rgb_r(c)), "sweep r in [0,1]");
+    assert(_in01(Rgb_g(c)), "sweep g in [0,1]");
+    assert(_in01(Rgb_b(c)), "sweep b in [0,1]");
+}
+
+# edge falloff: 390nm dimmer than 500nm
+var ef = 0;
+var edge = wavelength_to_rgb(f64_from(390), &ef);
+var center = wavelength_to_rgb(f64_from(500), &ef);
+var edge_lum = f64_add(f64_add(Rgb_r(edge), Rgb_g(edge)), Rgb_b(edge));
+var center_lum = f64_add(f64_add(Rgb_r(center), Rgb_g(center)), Rgb_b(center));
+assert(f64_lt(edge_lum, center_lum), "edge intensity < center");
+
+# ── blackbody & Wien ────────
+test_group("blackbody");
+
+var wl_sun = _fd(5, 10000000);   # 500e-9 m = 5e-7
+assert(f64_gt(planck_radiance(wl_sun, f64_from(5778)), Z), "planck positive");
+
+var peak_wl = wien_peak(f64_from(5778));
+var r_peak = planck_radiance(peak_wl, f64_from(5778));
+assert(f64_gt(r_peak, planck_radiance(f64_mul(peak_wl, _fd(5, 10)), f64_from(5778))), "peak > shorter");
+assert(f64_gt(r_peak, planck_radiance(f64_mul(peak_wl, F64_TWO), f64_from(5778))), "peak > longer");
+
+assert(
+f64_gt(planck_radiance(wl_sun, f64_from(6000)), planck_radiance(wl_sun, f64_from(3000))),
+"hotter more radiance");
+
+assert_eq(f64_to(planck_radiance(wl_sun, Z)), 0, "T=0 gives 0");
+assert_eq(f64_to(planck_radiance(wl_sun, f64_neg(f64_from(100)))), 0, "T<0 gives 0");
+
+var r_low = planck_radiance(_fd(1, 10000000), f64_from(300));   # 100e-9, 300K
+assert_eq(_is_finite(r_low), 1, "extreme low finite");
+assert(f64_ge(r_low, Z), "extreme low >= 0");
+
+var r_high = planck_radiance(_fd(1, 100000), f64_from(100000));  # 10e-6, 1e5 K
+assert_eq(_is_finite(r_high), 1, "extreme high finite");
+assert(f64_gt(r_high, Z), "extreme high > 0");
+
+var r_wien = planck_radiance(_fd(5, 100000000), f64_from(100));  # 50e-9 = 5e-8, 100K (Wien regime)
+assert_eq(_is_finite(r_wien), 1, "wien regime finite");
+assert(f64_ge(r_wien, Z), "wien regime >= 0");
+
+_assert_near(
+f64_mul(wien_peak(f64_from(5778)), f64_from(1000000000)),
+f64_from(502), f64_from(5), "wien sun peak ~502nm");
+assert(f64_lt(wien_peak(f64_from(10000)), wien_peak(f64_from(5000))), "hotter shorter peak");
+_assert_near(f64_div(wien_peak(f64_from(3000)), wien_peak(f64_from(6000))), F64_TWO, TOL6, "wien inverse proportional");
+
+# ── color temperature ────────
+test_group("color_temperature");
+
+var warm = color_temperature_to_rgb(f64_from(2700));
+assert(f64_gt(Rgb_r(warm), Rgb_b(warm)), "warm r > b");
+var cool = color_temperature_to_rgb(f64_from(10000));
+assert(f64_gt(Rgb_b(cool), f64_mul(Rgb_r(cool), _fd(5, 10))), "cool b > r*0.5");
+var day = color_temperature_to_rgb(f64_from(6500));
+assert(f64_gt(Rgb_r(day), _fd(8, 10)), "daylight r > 0.8");
+assert(f64_gt(Rgb_g(day), _fd(8, 10)), "daylight g > 0.8");
+assert(f64_gt(Rgb_b(day), _fd(8, 10)), "daylight b > 0.8");
+var candle = color_temperature_to_rgb(f64_from(1800));
+assert(f64_gt(Rgb_r(candle), _fd(8, 10)), "candle r > 0.8");
+assert(f64_lt(Rgb_b(candle), _fd(3, 10)), "candle b < 0.3");
+
+for (var k = 1000; k <= 20000; k = k + 500) {
+    var ck = color_temperature_to_rgb(f64_from(k));
+    assert(_in01(Rgb_r(ck)), "color temp r in [0,1]");
+    assert(_in01(Rgb_g(ck)), "color temp g in [0,1]");
+    assert(_in01(Rgb_b(ck)), "color temp b in [0,1]");
+}
+
+# ── frequency & photon energy ────────
+test_group("frequency_energy");
+
+_assert_near(frequency_to_wavelength(wavelength_to_frequency(f64_from(380))), f64_from(380), TOL6, "roundtrip 380");
+_assert_near(frequency_to_wavelength(wavelength_to_frequency(f64_from(500))), f64_from(500), TOL6, "roundtrip 500");
+_assert_near(frequency_to_wavelength(wavelength_to_frequency(f64_from(550))), f64_from(550), TOL6, "roundtrip 550");
+_assert_near(frequency_to_wavelength(wavelength_to_frequency(f64_from(650))), f64_from(650), TOL6, "roundtrip 650");
+_assert_near(frequency_to_wavelength(wavelength_to_frequency(f64_from(780))), f64_from(780), TOL6, "roundtrip 780");
+assert(
+f64_gt(wavelength_to_frequency(f64_from(450)), wavelength_to_frequency(f64_from(700))),
+"shorter wl higher freq");
+_assert_near(photon_energy_ev(f64_from(550)), _fd(225, 100), _fd(1, 10), "photon energy 550nm ~ 2.25 eV");
+assert(f64_gt(photon_energy(f64_from(450)), photon_energy(f64_from(700))), "blue photon > red");
+assert(f64_gt(photon_energy_ev(f64_from(550)), Z), "photon energy eV positive");
+assert(f64_gt(photon_energy(f64_from(550)), Z), "photon energy J positive");
+assert(f64_lt(photon_energy(f64_from(550)), 0x3C670EF54646D497), "photon energy J < 1e-17");
+
+# ── physical constant sanity ────────
+test_group("constants");
+
+_assert_near(spec_speed_of_light(), f64_from(299800000), f64_from(100000), "c ~ 2.998e8");
+_assert_near(spec_planck_h(), 0x390B85F8C5445F02, 0x38754484932D2E72, "h ~ 6.626e-34");
+_assert_near(spec_boltzmann_k(), 0x3B30B1FCECA05DB0, 0x3ABEF2D0F5DA7DD9, "k ~ 1.381e-23");
+
+var r = assert_summary();

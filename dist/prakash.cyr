@@ -1909,3 +1909,232 @@ fn coupling_efficiency_gaussian(w_beam, w_fiber) {
     var ratio = f64_div(num, den);
     return f64_mul(ratio, ratio);
 }
+
+# --- spectral_core.cyr ---
+
+# spectral_core.cyr -- wavelength<->RGB, blackbody radiation, color temperature
+# Usage: include "lib/spectral_core.cyr"  (requires error.cyr)
+#
+# Ported from the Rust `spectral/mod.rs`. Extreme-magnitude physical constants
+# (Planck, Boltzmann) are encoded as exact IEEE-754 hex bit patterns; other
+# non-integers are exact ratios. Rust `exp_m1` has no Cyrius stdlib equivalent,
+# so the straightforward exp(x)-1 is used (differs only for |x| << 1, which does
+# not arise in the Planck regimes exercised here).
+
+fn _r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+
+# ── Physical constants ────────
+fn spec_visible_min_nm() { return f64_from(380); }
+fn spec_visible_max_nm() { return f64_from(780); }
+fn spec_speed_of_light() { return f64_from(299792458); }        # m/s
+fn spec_planck_h() { return 0x390B860BDE023111; }               # 6.62607015e-34 J*s
+fn spec_boltzmann_k() { return 0x3B30B0E6D55E647C; }            # 1.380649e-23 J/K
+
+# First/second radiation constants (2*h*c*c ; h*c/k), left-associative like Rust.
+fn _planck_c1() {
+    return f64_mul(f64_mul(f64_mul(F64_TWO, spec_planck_h()), spec_speed_of_light()), spec_speed_of_light());
+}
+fn _planck_c2() {
+    return f64_div(f64_mul(spec_planck_h(), spec_speed_of_light()), spec_boltzmann_k());
+}
+
+# ── Rgb ────────
+
+#derive(accessors)
+struct Rgb { r; g; b; }
+
+#must_use
+fn rgb_new(r, g, b) {
+    var c = alloc(sizeof(Rgb));
+    Rgb_set_r(c, r);
+    Rgb_set_g(c, g);
+    Rgb_set_b(c, b);
+    return c;
+}
+
+#must_use
+fn rgb_black() { return rgb_new(f64_from(0), f64_from(0), f64_from(0)); }
+#must_use
+fn rgb_white() { return rgb_new(F64_ONE, F64_ONE, F64_ONE); }
+
+# Clamp all channels to [0, 1].
+#must_use
+fn rgb_clamp(c) {
+    return rgb_new(
+    f64_clamp(Rgb_r(c), f64_from(0), F64_ONE),
+    f64_clamp(Rgb_g(c), f64_from(0), F64_ONE),
+    f64_clamp(Rgb_b(c), f64_from(0), F64_ONE));
+}
+
+# 8-bit sRGB channels (0-255).
+#derive(accessors)
+struct RgbU8 { r; g; b; }
+
+#must_use
+fn rgb_to_u8(c) {
+    var cc = rgb_clamp(c);
+    var u = alloc(sizeof(RgbU8));
+    RgbU8_set_r(u, f64_to(f64_add(f64_mul(Rgb_r(cc), f64_from(255)), _r(5, 10))));
+    RgbU8_set_g(u, f64_to(f64_add(f64_mul(Rgb_g(cc), f64_from(255)), _r(5, 10))));
+    RgbU8_set_b(u, f64_to(f64_add(f64_mul(Rgb_b(cc), f64_from(255)), _r(5, 10))));
+    return u;
+}
+
+# Rec. 709 luminance: 0.2126*r + 0.7152*g + 0.0722*b.
+#must_use
+fn rgb_luminance(c) {
+    return f64_add(f64_add(
+    f64_mul(_r(2126, 10000), Rgb_r(c)),
+    f64_mul(_r(7152, 10000), Rgb_g(c))),
+    f64_mul(_r(722, 10000), Rgb_b(c)));
+}
+
+# ── Wavelength -> RGB ────────
+
+# Piecewise-linear CIE approximation. Writes PRK_ERR_WAVELENGTH_RANGE (returns 0)
+# outside 380-780 nm (NaN also fails the range test).
+#must_use
+fn wavelength_to_rgb(wavelength_nm, err_out) {
+    store64(err_out, ERR_NONE);
+    var in_range = 0;
+    if (f64_ge(wavelength_nm, spec_visible_min_nm()) == 1) {
+        if (f64_le(wavelength_nm, spec_visible_max_nm()) == 1) {
+            in_range = 1;
+        }
+    }
+    if (in_range == 0) {
+        store64(err_out, PRK_ERR_WAVELENGTH_RANGE);
+        return 0;
+    }
+
+    var w = wavelength_nm;
+    var r = f64_from(0);
+    var g = f64_from(0);
+    var b = f64_from(0);
+    if (f64_lt(w, f64_from(440)) == 1) {
+        r = f64_div(f64_neg(f64_sub(w, f64_from(440))), f64_sub(f64_from(440), f64_from(380)));
+        b = F64_ONE;
+    } elif (f64_lt(w, f64_from(490)) == 1) {
+        g = f64_div(f64_sub(w, f64_from(440)), f64_sub(f64_from(490), f64_from(440)));
+        b = F64_ONE;
+    } elif (f64_lt(w, f64_from(510)) == 1) {
+        g = F64_ONE;
+        b = f64_div(f64_neg(f64_sub(w, f64_from(510))), f64_sub(f64_from(510), f64_from(490)));
+    } elif (f64_lt(w, f64_from(580)) == 1) {
+        r = f64_div(f64_sub(w, f64_from(510)), f64_sub(f64_from(580), f64_from(510)));
+        g = F64_ONE;
+    } elif (f64_lt(w, f64_from(645)) == 1) {
+        r = F64_ONE;
+        g = f64_div(f64_neg(f64_sub(w, f64_from(645))), f64_sub(f64_from(645), f64_from(580)));
+    } else {
+        r = F64_ONE;
+    }
+
+    var factor = F64_ONE;
+    if (f64_lt(w, f64_from(420)) == 1) {
+        factor = f64_add(_r(3, 10),
+        f64_div(f64_mul(_r(7, 10), f64_sub(w, f64_from(380))), f64_sub(f64_from(420), f64_from(380))));
+    } elif (f64_gt(w, f64_from(700)) == 1) {
+        factor = f64_add(_r(3, 10),
+        f64_div(f64_mul(_r(7, 10), f64_sub(f64_from(780), w)), f64_sub(f64_from(780), f64_from(700))));
+    }
+
+    return rgb_new(f64_mul(r, factor), f64_mul(g, factor), f64_mul(b, factor));
+}
+
+# ── Blackbody radiation ────────
+
+# exp(x) - 1 (Cyrius has no expm1; adequate outside the |x|<<1 cancellation regime).
+fn _expm1(x) { return f64_sub(f64_exp(x), F64_ONE); }
+
+# Planck's law: spectral radiance (W*sr^-1*m^-3) at wavelength_m and temperature_k.
+# Uses the Wien approximation for x > 500 to avoid exp overflow; 0 for T <= 0.
+#must_use
+fn planck_radiance(wavelength_m, temperature_k) {
+    if (f64_le(temperature_k, f64_from(0)) == 1) {
+        return f64_from(0);
+    }
+    var x = f64_div(_planck_c2(), f64_mul(wavelength_m, temperature_k));
+    # lambda^5 as an exact integer power (powi 5): wl * (wl^2)^2.
+    var wl2 = f64_mul(wavelength_m, wavelength_m);
+    var wl4 = f64_mul(wl2, wl2);
+    var lambda5 = f64_mul(wavelength_m, wl4);
+    if (f64_gt(x, f64_from(500)) == 1) {
+        return f64_div(_planck_c1(), f64_mul(lambda5, f64_exp(x)));
+    }
+    return f64_div(_planck_c1(), f64_mul(lambda5, _expm1(x)));
+}
+
+# Wien's displacement law: peak wavelength (m) = 2.897771955e-3 / T.
+#must_use
+fn wien_peak(temperature_k) {
+    return f64_div(_r(2897771955, 1000000000000), temperature_k);
+}
+
+# Color temperature (Kelvin) -> RGB via Tanner Helland's algorithm.
+#must_use
+fn color_temperature_to_rgb(kelvin) {
+    var temp = f64_clamp(f64_div(kelvin, f64_from(100)), f64_from(10), f64_from(400));
+
+    var r = F64_ONE;
+    if (f64_gt(temp, f64_from(66)) == 1) {
+        var xr = f64_sub(temp, f64_from(60));
+        r = f64_clamp(
+        f64_div(f64_mul(_r(329698727446, 1000000000),
+        ganita_f64_pow(xr, f64_neg(_r(1332047592, 10000000000)))), f64_from(255)),
+        f64_from(0), F64_ONE);
+    }
+
+    var g = f64_from(0);
+    if (f64_le(temp, f64_from(66)) == 1) {
+        g = f64_div(f64_clamp(
+        f64_sub(f64_mul(_r(994708025861, 10000000000), f64_ln(temp)), _r(1611195681661, 10000000000)),
+        f64_from(0), f64_from(255)), f64_from(255));
+    } else {
+        var xg = f64_sub(temp, f64_from(60));
+        g = f64_clamp(
+        f64_div(f64_mul(_r(2881221695283, 10000000000),
+        ganita_f64_pow(xg, f64_neg(_r(7551484937, 100000000000)))), f64_from(255)),
+        f64_from(0), F64_ONE);
+    }
+
+    var b = F64_ONE;
+    if (f64_ge(temp, f64_from(66)) == 1) {
+        b = F64_ONE;
+    } elif (f64_le(temp, f64_from(19)) == 1) {
+        b = f64_from(0);
+    } else {
+        var xb = f64_sub(temp, f64_from(10));
+        b = f64_div(f64_clamp(
+        f64_sub(f64_mul(_r(1385177312231, 10000000000), f64_ln(xb)), _r(3050447927307, 10000000000)),
+        f64_from(0), f64_from(255)), f64_from(255));
+    }
+
+    return rgb_new(r, g, b);
+}
+
+# ── Frequency & photon energy ────────
+
+# Wavelength (nm) -> frequency (Hz).
+#must_use
+fn wavelength_to_frequency(wavelength_nm) {
+    return f64_div(spec_speed_of_light(), f64_mul(wavelength_nm, _r(1, 1000000000)));
+}
+
+# Frequency (Hz) -> wavelength (nm).
+#must_use
+fn frequency_to_wavelength(frequency_hz) {
+    return f64_mul(f64_div(spec_speed_of_light(), frequency_hz), f64_from(1000000000));
+}
+
+# Photon energy (Joules) for a wavelength (nm).
+#must_use
+fn photon_energy(wavelength_nm) {
+    return f64_mul(spec_planck_h(), wavelength_to_frequency(wavelength_nm));
+}
+
+# Photon energy (electron-volts) for a wavelength (nm).
+#must_use
+fn photon_energy_ev(wavelength_nm) {
+    return f64_div(photon_energy(wavelength_nm), 0x3C07A4DA290C1653);   # / 1.602176634e-19
+}
