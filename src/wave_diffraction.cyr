@@ -1,0 +1,208 @@
+# wave_diffraction.cyr -- Fraunhofer / Fresnel / Huygens-Fresnel diffraction
+# Usage: include "lib/wave_diffraction.cyr"  (requires wave_core.cyr for
+# single_slit_intensity; ganita for hypot)
+#
+# Ported from the Rust `wave/diffraction.rs`. Part 1 of 2: diffraction patterns
+# (Fraunhofer, Fresnel integrals, Huygens-Fresnel). Part 2 adds AR coatings and
+# the multilayer transfer-matrix method.
+#
+# Aperture slices `&[(pos, amplitude)]` are passed as an interleaved buffer:
+# pos at offset i*16, amplitude at i*16+8, plus a pair count. Fresnel auxiliary
+# constants are exact ratios of the Rust f64 literals (Boersma 1960 / A&S).
+
+fn _diff_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+
+# Fraunhofer diffraction for a rectangular aperture:
+# I = single_slit(wl,w,ax) * single_slit(wl,h,ay) * i0.
+#must_use
+fn fraunhofer_rect(wavelength, width, height, angle_x, angle_y, i0) {
+    var sx = single_slit_intensity(wavelength, width, angle_x, F64_ONE);
+    var sy = single_slit_intensity(wavelength, height, angle_y, F64_ONE);
+    return f64_mul(f64_mul(sx, sy), i0);
+}
+
+# Fraunhofer diffraction for a 1D aperture (interleaved pos/amplitude buffer):
+# k = TAU*sin(angle)/wl; accumulate E; return |E|^2.
+#must_use
+fn fraunhofer_1d(aperture, pairs, wavelength, angle) {
+    var k_sin = f64_div(f64_mul(F64_TAU, f64_sin(angle)), wavelength);
+    var real = f64_from(0);
+    var imag = f64_from(0);
+    for (var i = 0; i < pairs; i = i + 1) {
+        var x = load64(aperture + i * 16);
+        var amplitude = load64(aperture + i * 16 + 8);
+        var phase = f64_mul(k_sin, x);
+        real = f64_add(real, f64_mul(amplitude, f64_cos(phase)));
+        imag = f64_add(imag, f64_mul(amplitude, f64_sin(phase)));
+    }
+    return f64_add(f64_mul(real, real), f64_mul(imag, imag));
+}
+
+# Fresnel number: N_F = a^2 / (wl*z).
+#must_use
+fn fresnel_number(wavelength, aperture_radius, distance) {
+    return f64_div(
+    f64_mul(aperture_radius, aperture_radius),
+    f64_mul(wavelength, distance));
+}
+
+# Auxiliary functions f(x), g(x) for the Fresnel integrals (x >= 1),
+# rational approximation (Boersma 1960). Results written to f_out, g_out.
+fn _fresnel_fg(x, f_out, g_out) {
+    var x2 = f64_mul(x, x);
+    var x3 = f64_mul(x2, x);
+    var x4 = f64_mul(x2, x2);
+    # f = (1 + 0.926*x2) / (2 + 1.792*x2 + 3.104*x4) / x
+    var fnum = f64_add(F64_ONE, f64_mul(_diff_r(926, 1000), x2));
+    var fden = f64_add(
+    f64_add(F64_TWO, f64_mul(_diff_r(1792, 1000), x2)),
+    f64_mul(_diff_r(3104, 1000), x4));
+    store64(f_out, f64_div(f64_div(fnum, fden), x));
+    # g = 1 / (2 + 4.142*x2 + 3.492*x4 + 6.670*x2*x4) / x3
+    var gden = f64_add(
+    f64_add(
+    f64_add(F64_TWO, f64_mul(_diff_r(4142, 1000), x2)),
+    f64_mul(_diff_r(3492, 1000), x4)),
+    f64_mul(f64_mul(_diff_r(6670, 1000), x2), x4));
+    store64(g_out, f64_div(f64_div(F64_ONE, gden), x3));
+}
+
+# Fresnel cosine integral C(x) = integral_0^x cos(pi*t^2/2) dt.
+#must_use
+fn fresnel_integral_c(x) {
+    var ax = f64_abs(x);
+    var result = f64_from(0);
+    if (f64_lt(ax, F64_ONE) == 1) {
+        var x2 = f64_mul(ax, ax);
+        var t = f64_mul(F64_PI_2, x2);
+        var t2 = f64_mul(t, t);
+        # ax * (1 - t2/20 + t2*t2/1680)
+        var inner = f64_add(
+        f64_sub(F64_ONE, f64_div(t2, f64_from(20))),
+        f64_div(f64_mul(t2, t2), f64_from(1680)));
+        result = f64_mul(ax, inner);
+    } else {
+        var pi_x2 = f64_mul(f64_mul(F64_PI_2, ax), ax);
+        var fg = alloc(16);
+        _fresnel_fg(ax, fg, fg + 8);
+        var f = load64(fg);
+        var g = load64(fg + 8);
+        # 0.5 + f*sin(pi_x2) - g*cos(pi_x2)
+        result = f64_sub(
+        f64_add(F64_HALF, f64_mul(f, f64_sin(pi_x2))),
+        f64_mul(g, f64_cos(pi_x2)));
+    }
+    if (f64_lt(x, f64_from(0)) == 1) {
+        return f64_neg(result);
+    }
+    return result;
+}
+
+# Fresnel sine integral S(x) = integral_0^x sin(pi*t^2/2) dt.
+#must_use
+fn fresnel_integral_s(x) {
+    var ax = f64_abs(x);
+    var result = f64_from(0);
+    if (f64_lt(ax, F64_ONE) == 1) {
+        var x2 = f64_mul(ax, ax);
+        var t = f64_mul(F64_PI_2, x2);
+        var t2 = f64_mul(t, t);
+        # ax * x2 * (PI_2/3) * (1 - t2/42 + t2*t2/3960)
+        var inner = f64_add(
+        f64_sub(F64_ONE, f64_div(t2, f64_from(42))),
+        f64_div(f64_mul(t2, t2), f64_from(3960)));
+        result = f64_mul(
+        f64_mul(f64_mul(ax, x2), f64_div(F64_PI_2, f64_from(3))),
+        inner);
+    } else {
+        var pi_x2 = f64_mul(f64_mul(F64_PI_2, ax), ax);
+        var fg = alloc(16);
+        _fresnel_fg(ax, fg, fg + 8);
+        var f = load64(fg);
+        var g = load64(fg + 8);
+        # 0.5 - f*cos(pi_x2) - g*sin(pi_x2)
+        result = f64_sub(
+        f64_sub(F64_HALF, f64_mul(f, f64_cos(pi_x2))),
+        f64_mul(g, f64_sin(pi_x2)));
+    }
+    if (f64_lt(x, f64_from(0)) == 1) {
+        return f64_neg(result);
+    }
+    return result;
+}
+
+# Both Fresnel integrals together, sharing work; writes C(x), S(x) to c_out, s_out.
+fn fresnel_integral_cs(x, c_out, s_out) {
+    var ax = f64_abs(x);
+    var c_val = f64_from(0);
+    var s_val = f64_from(0);
+    if (f64_lt(ax, F64_ONE) == 1) {
+        var x2 = f64_mul(ax, ax);
+        var t = f64_mul(F64_PI_2, x2);
+        var t2 = f64_mul(t, t);
+        var c_inner = f64_add(
+        f64_sub(F64_ONE, f64_div(t2, f64_from(20))),
+        f64_div(f64_mul(t2, t2), f64_from(1680)));
+        c_val = f64_mul(ax, c_inner);
+        var s_inner = f64_add(
+        f64_sub(F64_ONE, f64_div(t2, f64_from(42))),
+        f64_div(f64_mul(t2, t2), f64_from(3960)));
+        s_val = f64_mul(
+        f64_mul(f64_mul(ax, x2), f64_div(F64_PI_2, f64_from(3))),
+        s_inner);
+    } else {
+        var pi_x2 = f64_mul(f64_mul(F64_PI_2, ax), ax);
+        var fg = alloc(16);
+        _fresnel_fg(ax, fg, fg + 8);
+        var f = load64(fg);
+        var g = load64(fg + 8);
+        var sin_px2 = f64_sin(pi_x2);
+        var cos_px2 = f64_cos(pi_x2);
+        c_val = f64_sub(f64_add(F64_HALF, f64_mul(f, sin_px2)), f64_mul(g, cos_px2));
+        s_val = f64_sub(f64_sub(F64_HALF, f64_mul(f, cos_px2)), f64_mul(g, sin_px2));
+    }
+    if (f64_lt(x, f64_from(0)) == 1) {
+        store64(c_out, f64_neg(c_val));
+        store64(s_out, f64_neg(s_val));
+        return 0;
+    }
+    store64(c_out, c_val);
+    store64(s_out, s_val);
+    return 0;
+}
+
+# Fresnel straight-edge intensity: I/I0 = [(C(u)+0.5)^2 + (S(u)+0.5)^2] / 2.
+#must_use
+fn fresnel_edge_intensity(u) {
+    var cs = alloc(16);
+    fresnel_integral_cs(u, cs, cs + 8);
+    var c = f64_add(load64(cs), F64_HALF);
+    var s = f64_add(load64(cs + 8), F64_HALF);
+    return f64_div(f64_add(f64_mul(c, c), f64_mul(s, s)), F64_TWO);
+}
+
+# Fresnel parameter: u = x * sqrt(2 / (wl*z)).
+#must_use
+fn fresnel_parameter(wavelength, x, distance) {
+    return f64_mul(x, f64_sqrt(f64_div(F64_TWO, f64_mul(wavelength, distance))));
+}
+
+# Huygens-Fresnel 1D integral: complex field at x_obs from secondary wavelets;
+# returns |E|^2. Aperture is an interleaved pos/amplitude buffer.
+#must_use
+fn huygens_fresnel_1d(aperture, pairs, wavelength, z, x_obs) {
+    var k = f64_div(F64_TAU, wavelength);
+    var real = f64_from(0);
+    var imag = f64_from(0);
+    for (var i = 0; i < pairs; i = i + 1) {
+        var x_ap = load64(aperture + i * 16);
+        var amplitude = load64(aperture + i * 16 + 8);
+        var dx = f64_sub(x_obs, x_ap);
+        var r = ganita_f64_hypot(z, dx);
+        var phase = f64_mul(k, r);
+        var weight = f64_div(f64_mul(amplitude, z), f64_mul(r, r));
+        real = f64_add(real, f64_mul(weight, f64_cos(phase)));
+        imag = f64_add(imag, f64_mul(weight, f64_sin(phase)));
+    }
+    return f64_add(f64_mul(real, real), f64_mul(imag, imag));
+}

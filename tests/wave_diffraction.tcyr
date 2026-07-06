@@ -1,0 +1,112 @@
+# wave_diffraction test suite (part 1) — Fraunhofer / Fresnel / Huygens tests
+# from rust-old/src/wave/diffraction.rs (inline #[cfg(test)] mod).
+
+include "src/error.cyr"
+include "src/wave_core.cyr"
+include "src/wave_diffraction.cyr"
+
+fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
+fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
+fn _is_finite(x) { return f64_lt(f64_abs(x), 0x7FF0000000000000); }
+
+var EPS = f64_div(F64_ONE, f64_from(1000000));       # 1e-6
+var Z = f64_from(0);
+var WL = f64_div(f64_from(55), f64_from(100000000));  # 550e-9
+var MM = f64_div(F64_ONE, f64_from(1000));           # 1e-3
+
+alloc_init();
+
+# ── Fraunhofer rectangular ────────
+test_group("fraunhofer_rect");
+
+_assert_near(fraunhofer_rect(WL, MM, MM, Z, Z, F64_ONE), F64_ONE, EPS, "central max = 1");
+
+var i_center = fraunhofer_rect(WL, MM, MM, Z, Z, F64_ONE);
+var i_off = fraunhofer_rect(WL, MM, MM, _fd(1, 1000), Z, F64_ONE);
+assert(f64_lt(i_off, i_center), "decreases off axis");
+
+# separable: rect pattern = product of two 1D patterns
+var w2 = _fd(5, 10000);   # 0.5e-3
+var ax_ss = single_slit_intensity(WL, MM, _fd(1, 1000), F64_ONE);
+var ay_ss = single_slit_intensity(WL, w2, _fd(2, 1000), F64_ONE);
+var i_rect = fraunhofer_rect(WL, MM, w2, _fd(1, 1000), _fd(2, 1000), F64_ONE);
+_assert_near(i_rect, f64_mul(ax_ss, ay_ss), EPS, "rect separable into 1D patterns");
+
+# ── Fraunhofer 1D ────────
+test_group("fraunhofer_1d");
+
+# uniform aperture, n=100: x = -width/2 + width*i/(n-1)
+var ap100 = alloc(100 * 16);
+for (var i = 0; i < 100; i = i + 1) {
+    var x = f64_add(
+    f64_neg(f64_div(MM, F64_TWO)),
+    f64_div(f64_mul(MM, f64_from(i)), f64_from(99)));
+    store64(ap100 + i * 16, x);
+    store64(ap100 + i * 16 + 8, F64_ONE);
+}
+var u_center = fraunhofer_1d(ap100, 100, WL, Z);
+var u_off = fraunhofer_1d(ap100, 100, WL, _fd(1, 1000));
+assert(f64_gt(u_center, u_off), "central max brightest");
+assert(f64_gt(u_center, Z), "central max positive");
+
+# non-negative across angles; 50-pair aperture x = (i-25)*1e-5
+var ap50 = alloc(50 * 16);
+for (var j = 0; j < 50; j = j + 1) {
+    store64(ap50 + j * 16, f64_mul(f64_sub(f64_from(j), f64_from(25)), _fd(1, 100000)));
+    store64(ap50 + j * 16 + 8, F64_ONE);
+}
+for (var m = 0; m < 20; m = m + 1) {
+    var ang = f64_mul(f64_from(m), _fd(1, 1000));
+    assert(f64_ge(fraunhofer_1d(ap50, 50, WL, ang), Z), "1d non-negative");
+}
+
+# ── Fresnel number ────────
+test_group("fresnel_number");
+
+assert(f64_lt(fresnel_number(WL, _fd(1, 10000), F64_ONE), F64_ONE), "far field N_F < 1");
+assert(f64_gt(fresnel_number(WL, _fd(5, 1000), _fd(1, 100)), F64_ONE), "near field N_F > 1");
+
+# ── Fresnel integrals C, S ────────
+test_group("fresnel_integrals");
+
+assert(f64_lt(f64_abs(fresnel_integral_c(Z)), EPS), "C(0) = 0");
+assert(f64_lt(f64_abs(fresnel_integral_s(Z)), EPS), "S(0) = 0");
+_assert_near(fresnel_integral_c(f64_from(10)), F64_HALF, _fd(5, 100), "C(10) ~ 0.5");
+_assert_near(fresnel_integral_s(f64_from(10)), F64_HALF, _fd(5, 100), "S(10) ~ 0.5");
+assert(f64_lt(f64_abs(f64_add(fresnel_integral_c(f64_neg(F64_TWO)), fresnel_integral_c(F64_TWO))),
+_fd(1, 100)), "C odd function");
+assert(f64_lt(f64_abs(f64_add(fresnel_integral_s(f64_neg(F64_TWO)), fresnel_integral_s(F64_TWO))),
+_fd(1, 100)), "S odd function");
+_assert_near(fresnel_integral_c(F64_ONE), _fd(7799, 10000), _fd(1, 100), "C(1) ~ 0.7799");
+_assert_near(fresnel_integral_s(F64_ONE), _fd(4383, 10000), _fd(1, 100), "S(1) ~ 0.4383");
+
+# ── Fresnel straight-edge ────────
+test_group("fresnel_edge");
+
+_assert_near(fresnel_edge_intensity(Z), _fd(1, 4), _fd(1, 100), "edge boundary I ~ 0.25");
+assert(f64_lt(fresnel_edge_intensity(f64_from(0 - 5)), _fd(1, 100)), "deep shadow ~ 0");
+_assert_near(fresnel_edge_intensity(f64_from(5)), F64_ONE, _fd(5, 100), "illuminated ~ 1");
+
+# ── Fresnel parameter ────────
+test_group("fresnel_parameter");
+
+var up = fresnel_parameter(WL, MM, F64_ONE);
+assert(f64_gt(up, Z), "parameter positive");
+assert_eq(_is_finite(up), 1, "parameter finite");
+
+# ── Huygens-Fresnel 1D ────────
+test_group("huygens_fresnel");
+
+assert(f64_gt(huygens_fresnel_1d(ap50, 50, WL, _fd(1, 10), Z), Z), "huygens positive");
+
+var ap100b = alloc(100 * 16);
+for (var h = 0; h < 100; h = h + 1) {
+    store64(ap100b + h * 16, f64_mul(f64_sub(f64_from(h), f64_from(50)), _fd(1, 100000)));
+    store64(ap100b + h * 16 + 8, F64_ONE);
+}
+var h_center = huygens_fresnel_1d(ap100b, 100, WL, _fd(1, 10), Z);
+var h_off = huygens_fresnel_1d(ap100b, 100, WL, _fd(1, 10), MM);
+assert(f64_gt(h_center, h_off), "on-axis brightest");
+
+var r = assert_summary();
