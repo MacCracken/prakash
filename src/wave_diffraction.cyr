@@ -2,13 +2,15 @@
 # Usage: include "lib/wave_diffraction.cyr"  (requires wave_core.cyr for
 # single_slit_intensity; ganita for hypot)
 #
-# Ported from the Rust `wave/diffraction.rs`. Part 1 of 2: diffraction patterns
-# (Fraunhofer, Fresnel integrals, Huygens-Fresnel). Part 2 adds AR coatings and
-# the multilayer transfer-matrix method.
+# Ported from the Rust `wave/diffraction.rs`. Two sections: (1) diffraction
+# patterns (Fraunhofer, Fresnel integrals, Huygens-Fresnel); (2) anti-reflection
+# coatings and the multilayer transfer-matrix method (single- and multi-layer,
+# plus the full oblique-incidence s/p-split TMM `multilayer_rt`).
 #
-# Aperture slices `&[(pos, amplitude)]` are passed as an interleaved buffer:
-# pos at offset i*16, amplitude at i*16+8, plus a pair count. Fresnel auxiliary
-# constants are exact ratios of the Rust f64 literals (Boersma 1960 / A&S).
+# Aperture slices `&[(pos, amplitude)]` and layer slices `&[(n, thickness)]` are
+# passed as interleaved buffers: element i has field-0 at offset i*16, field-1 at
+# i*16+8, plus a count. Fresnel auxiliary constants are exact ratios of the Rust
+# f64 literals (Boersma 1960 / A&S).
 
 fn _diff_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
 
@@ -205,4 +207,178 @@ fn huygens_fresnel_1d(aperture, pairs, wavelength, z, x_obs) {
         imag = f64_add(imag, f64_mul(weight, f64_sin(phase)));
     }
     return f64_add(f64_mul(real, real), f64_mul(imag, imag));
+}
+
+# ── Anti-Reflection Coatings ────────
+
+# Ideal quarter-wave AR coating index: n = sqrt(n1*n2).
+#must_use
+fn ar_ideal_index(n1, n2) {
+    return f64_sqrt(f64_mul(n1, n2));
+}
+
+# Quarter-wave coating thickness for a design wavelength: d = wl / (4*n_coating).
+#must_use
+fn ar_quarter_wave_thickness(wavelength, n_coating) {
+    return f64_div(wavelength, f64_mul(f64_from(4), n_coating));
+}
+
+# Single-layer thin-film reflectance at normal incidence (exact formula):
+# R = (a^2*sin^2 d) / (b^2*sin^2 d + c^2*cos^2 d), delta = TAU*nc*d/wl,
+# a = ni*ns - nc^2, b = ni*ns + nc^2, c = nc*(ni+ns).
+#must_use
+fn coating_reflectance(wavelength, n_incident, n_coating, n_substrate, thickness) {
+    var delta = f64_div(
+    f64_mul(f64_mul(F64_TAU, n_coating), thickness),
+    wavelength);
+    var sin_d = f64_sin(delta);
+    var cos_d = f64_cos(delta);
+    var nc2 = f64_mul(n_coating, n_coating);
+    var ni_ns = f64_mul(n_incident, n_substrate);
+    var a = f64_sub(ni_ns, nc2);
+    var b = f64_add(ni_ns, nc2);
+    var c = f64_mul(n_coating, f64_add(n_incident, n_substrate));
+    var num = f64_mul(f64_mul(f64_mul(a, a), sin_d), sin_d);
+    var den = f64_add(
+    f64_mul(f64_mul(f64_mul(b, b), sin_d), sin_d),
+    f64_mul(f64_mul(f64_mul(c, c), cos_d), cos_d));
+    return f64_div(num, den);
+}
+
+# V-coat (quarter-wave) reflectance at the design wavelength:
+# R = [(n1*n3 - n2^2) / (n1*n3 + n2^2)]^2.
+#must_use
+fn vcoat_reflectance(n1, n2, n3) {
+    var n2sq = f64_mul(n2, n2);
+    var n1n3 = f64_mul(n1, n3);
+    var frac = f64_div(f64_sub(n1n3, n2sq), f64_add(n1n3, n2sq));
+    return f64_mul(frac, frac);
+}
+
+# Multilayer reflectance (transfer matrix, normal incidence). Layers are an
+# interleaved (n, thickness) buffer. Matrix M = product of layer matrices, with
+# M12/M21 purely imaginary (tracked as *_i), M11/M22 purely real (*_r).
+#must_use
+fn multilayer_reflectance(wavelength, n_incident, n_substrate, layers, num_layers) {
+    var m11_r = F64_ONE;
+    var m12_i = f64_from(0);
+    var m21_i = f64_from(0);
+    var m22_r = F64_ONE;
+    for (var i = 0; i < num_layers; i = i + 1) {
+        var n = load64(layers + i * 16);
+        var d = load64(layers + i * 16 + 8);
+        var delta = f64_div(f64_mul(f64_mul(F64_TAU, n), d), wavelength);
+        var sin_d = f64_sin(delta);
+        var cos_d = f64_cos(delta);
+        var n11 = f64_sub(f64_mul(m11_r, cos_d), f64_mul(f64_mul(m12_i, n), sin_d));
+        var n12 = f64_add(f64_div(f64_mul(f64_neg(m11_r), sin_d), n), f64_mul(m12_i, cos_d));
+        var n21 = f64_sub(f64_mul(m21_i, cos_d), f64_mul(f64_mul(m22_r, n), sin_d));
+        var n22 = f64_add(f64_div(f64_mul(f64_neg(m21_i), sin_d), n), f64_mul(m22_r, cos_d));
+        m11_r = n11;
+        m12_i = n12;
+        m21_i = n21;
+        m22_r = n22;
+    }
+    var ni = n_incident;
+    var ns = n_substrate;
+    var num_r = f64_sub(f64_mul(ni, m11_r), f64_mul(ns, m22_r));
+    var num_i = f64_sub(f64_mul(f64_mul(ni, ns), m12_i), m21_i);
+    var den_r = f64_add(f64_mul(ni, m11_r), f64_mul(ns, m22_r));
+    var den_i = f64_add(f64_mul(f64_mul(ni, ns), m12_i), m21_i);
+    return f64_div(
+    f64_add(f64_mul(num_r, num_r), f64_mul(num_i, num_i)),
+    f64_add(f64_mul(den_r, den_r), f64_mul(den_i, den_i)));
+}
+
+# ── Full Transfer Matrix Method (oblique incidence, s/p split) ────────
+
+#derive(accessors)
+struct ThinFilmResult { r_s; r_p; t_s; t_p; r_avg; t_avg; }
+
+# cos(theta) in a medium of index n via Snell's law (ni_sin_i is the invariant);
+# returns 0 on total internal reflection (evanescent).
+fn _diff_cos_in_medium(n, ni_sin_i) {
+    var sin_t = f64_div(ni_sin_i, n);
+    if (f64_gt(f64_abs(sin_t), F64_ONE) == 1) {
+        return f64_from(0);
+    }
+    return f64_sqrt(f64_sub(F64_ONE, f64_mul(sin_t, sin_t)));
+}
+
+# Optical admittance eta: s-pol eta = n*cos; p-pol eta = n/cos (guarded).
+fn _diff_eta(n, cos_t, is_p) {
+    if (is_p == 0) {
+        return f64_mul(n, cos_t);
+    }
+    if (f64_lt(f64_abs(cos_t), f64_div(F64_ONE, f64_from(1000000000000000))) == 1) {
+        return f64_mul(n, f64_from(1000000000000000));
+    }
+    return f64_div(n, cos_t);
+}
+
+# One TMM stack for a single polarization (is_p: 0=s, 1=p). Writes reflectance to
+# rt_out and transmittance (1-R, lossless) to rt_out+8.
+fn _diff_tmm_stack(wavelength, ni, ns, layers, num_layers, cos_i, cos_sub, ni_sin_i, is_p, rt_out) {
+    var m11_r = F64_ONE;
+    var m12_i = f64_from(0);
+    var m21_i = f64_from(0);
+    var m22_r = F64_ONE;
+    for (var i = 0; i < num_layers; i = i + 1) {
+        var n = load64(layers + i * 16);
+        var d = load64(layers + i * 16 + 8);
+        var cos_l = _diff_cos_in_medium(n, ni_sin_i);
+        var delta = f64_div(
+        f64_mul(f64_mul(f64_mul(F64_TAU, n), d), cos_l),
+        wavelength);
+        var eta = _diff_eta(n, cos_l, is_p);
+        var sin_d = f64_sin(delta);
+        var cos_d = f64_cos(delta);
+        var n11 = f64_sub(f64_mul(m11_r, cos_d), f64_mul(f64_mul(m12_i, eta), sin_d));
+        var n12 = f64_add(f64_div(f64_mul(f64_neg(m11_r), sin_d), eta), f64_mul(m12_i, cos_d));
+        var n21 = f64_sub(f64_mul(m21_i, cos_d), f64_mul(f64_mul(m22_r, eta), sin_d));
+        var n22 = f64_add(f64_div(f64_mul(f64_neg(m21_i), sin_d), eta), f64_mul(m22_r, cos_d));
+        m11_r = n11;
+        m12_i = n12;
+        m21_i = n21;
+        m22_r = n22;
+    }
+    var eta_i = _diff_eta(ni, cos_i, is_p);
+    var eta_s = _diff_eta(ns, cos_sub, is_p);
+    var num_r = f64_sub(f64_mul(eta_i, m11_r), f64_mul(eta_s, m22_r));
+    var num_i = f64_sub(f64_mul(f64_mul(eta_i, eta_s), m12_i), m21_i);
+    var den_r = f64_add(f64_mul(eta_i, m11_r), f64_mul(eta_s, m22_r));
+    var den_i = f64_add(f64_mul(f64_mul(eta_i, eta_s), m12_i), m21_i);
+    var r = f64_div(
+    f64_add(f64_mul(num_r, num_r), f64_mul(num_i, num_i)),
+    f64_add(f64_mul(den_r, den_r), f64_mul(den_i, den_i)));
+    store64(rt_out, r);
+    store64(rt_out + 8, f64_sub(F64_ONE, r));
+}
+
+# Full multilayer TMM at oblique incidence; returns a ThinFilmResult with the
+# s/p reflectances/transmittances and their unpolarized averages.
+#must_use
+fn multilayer_rt(wavelength, angle, n_incident, n_substrate, layers, num_layers) {
+    var cos_i = f64_cos(angle);
+    var sin_i = f64_sin(angle);
+    var ni_sin_i = f64_mul(n_incident, sin_i);
+    var cos_sub = _diff_cos_in_medium(n_substrate, ni_sin_i);
+    var rt_s = alloc(16);
+    _diff_tmm_stack(wavelength, n_incident, n_substrate, layers, num_layers,
+    cos_i, cos_sub, ni_sin_i, 0, rt_s);
+    var rt_p = alloc(16);
+    _diff_tmm_stack(wavelength, n_incident, n_substrate, layers, num_layers,
+    cos_i, cos_sub, ni_sin_i, 1, rt_p);
+    var r_s = load64(rt_s);
+    var t_s = load64(rt_s + 8);
+    var r_p = load64(rt_p);
+    var t_p = load64(rt_p + 8);
+    var res = alloc(sizeof(ThinFilmResult));
+    ThinFilmResult_set_r_s(res, r_s);
+    ThinFilmResult_set_r_p(res, r_p);
+    ThinFilmResult_set_t_s(res, t_s);
+    ThinFilmResult_set_t_p(res, t_p);
+    ThinFilmResult_set_r_avg(res, f64_mul(F64_HALF, f64_add(r_s, r_p)));
+    ThinFilmResult_set_t_avg(res, f64_mul(F64_HALF, f64_add(t_s, t_p)));
+    return res;
 }

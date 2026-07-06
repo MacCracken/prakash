@@ -109,4 +109,130 @@ var h_center = huygens_fresnel_1d(ap100b, 100, WL, _fd(1, 10), Z);
 var h_off = huygens_fresnel_1d(ap100b, 100, WL, _fd(1, 10), MM);
 assert(f64_gt(h_center, h_off), "on-axis brightest");
 
+# ── AR coatings ────────
+test_group("ar_coatings");
+
+var N152 = _fd(152, 100);   # 1.52 glass
+var N138 = _fd(138, 100);   # 1.38 MgF2
+var N210 = _fd(21, 10);     # 2.1 ZrO2
+var TOL3 = _fd(1, 1000);    # 0.001
+
+# air->glass: sqrt(1*1.52) ~ 1.233
+_assert_near(ar_ideal_index(F64_ONE, N152), _fd(1233, 1000), TOL3, "ideal index ~ 1.233");
+_assert_near(
+ar_quarter_wave_thickness(f64_from(550), N138),
+f64_div(f64_from(550), f64_mul(f64_from(4), N138)), EPS, "quarter-wave thickness");
+
+# ideal V-coat (n2 = sqrt(n1*n3)) -> ~0 reflectance
+var n2_ideal = f64_sqrt(f64_mul(F64_ONE, N152));
+assert(f64_lt(vcoat_reflectance(F64_ONE, n2_ideal, N152), EPS), "ideal V-coat ~ 0");
+# MgF2 on glass: small but nonzero
+var r_mgf2 = vcoat_reflectance(F64_ONE, N138, N152);
+assert(f64_gt(r_mgf2, Z), "MgF2 V-coat > 0");
+assert(f64_lt(r_mgf2, _fd(2, 100)), "MgF2 V-coat < 0.02");
+
+# quarter-wave coating at design wavelength matches V-coat
+var d_qw = ar_quarter_wave_thickness(f64_from(550), N138);
+var r_coat = coating_reflectance(f64_from(550), F64_ONE, N138, N152, d_qw);
+var r_v = vcoat_reflectance(F64_ONE, N138, N152);
+_assert_near(r_coat, r_v, TOL3, "coating at design lambda matches V-coat");
+
+# reflectance varies with wavelength
+var r_design = coating_reflectance(f64_from(550), F64_ONE, N138, N152, d_qw);
+var r_off_wl = coating_reflectance(f64_from(450), F64_ONE, N138, N152, d_qw);
+assert(f64_gt(f64_abs(f64_sub(r_design, r_off_wl)), TOL3), "reflectance varies with wavelength");
+
+# reflectance in [0,1] across 400..700nm
+for (var wl = 400; wl <= 700; wl = wl + 10) {
+    var rc = coating_reflectance(f64_from(wl), F64_ONE, N138, N152, d_qw);
+    assert(f64_ge(rc, Z), "coating R >= 0");
+    assert(f64_le(rc, F64_ONE), "coating R <= 1");
+}
+
+# ── multilayer reflectance ────────
+test_group("multilayer");
+
+# single layer matches coating_reflectance
+var lay1 = alloc(16);
+store64(lay1, N138);
+store64(lay1 + 8, d_qw);
+var r_single = coating_reflectance(f64_from(550), F64_ONE, N138, N152, d_qw);
+var r_multi = multilayer_reflectance(f64_from(550), F64_ONE, N152, lay1, 1);
+_assert_near(r_single, r_multi, TOL3, "single layer matches coating");
+
+# no layers = bare interface: ((1-1.52)/(1+1.52))^2
+var frac_bare = f64_div(f64_sub(F64_ONE, N152), f64_add(F64_ONE, N152));
+var r_bare = f64_mul(frac_bare, frac_bare);
+_assert_near(multilayer_reflectance(f64_from(550), F64_ONE, N152, 0, 0), r_bare, TOL3, "no layers = bare");
+
+# two-layer valid reflectance in [0,1]
+var d_zro2 = ar_quarter_wave_thickness(f64_from(550), N210);
+var lay2 = alloc(32);
+store64(lay2, N138);
+store64(lay2 + 8, d_qw);
+store64(lay2 + 16, N210);
+store64(lay2 + 24, d_zro2);
+var r_two = multilayer_reflectance(f64_from(550), F64_ONE, N152, lay2, 2);
+assert(f64_ge(r_two, Z), "two-layer R >= 0");
+assert(f64_le(r_two, F64_ONE), "two-layer R <= 1");
+
+# range across 400..700nm
+for (var wl2 = 400; wl2 <= 700; wl2 = wl2 + 10) {
+    var rm = multilayer_reflectance(f64_from(wl2), F64_ONE, N152, lay2, 2);
+    assert(f64_ge(rm, Z), "multilayer R >= 0");
+    assert(f64_le(rm, f64_add(F64_ONE, EPS)), "multilayer R <= 1");
+}
+
+# ── full TMM (s/p split) ────────
+test_group("multilayer_rt");
+
+# TMM at normal incidence matches simple multilayer_reflectance (r_avg)
+var r_simple = multilayer_reflectance(f64_from(550), F64_ONE, N152, lay1, 1);
+var res_n = multilayer_rt(f64_from(550), Z, F64_ONE, N152, lay1, 1);
+_assert_near(ThinFilmResult_r_avg(res_n), r_simple, _fd(1, 100), "TMM normal matches simple");
+
+# s and p equal at normal incidence
+var lay_996 = alloc(16);
+store64(lay_996, N138);
+store64(lay_996 + 8, _fd(996, 10));   # 99.6
+var res_sp = multilayer_rt(f64_from(550), Z, F64_ONE, N152, lay_996, 1);
+assert(f64_lt(f64_abs(f64_sub(ThinFilmResult_r_s(res_sp), ThinFilmResult_r_p(res_sp))), _fd(1, 100)),
+"s=p at normal");
+
+# s and p differ at 45 degrees
+var res_ob = multilayer_rt(f64_from(550), F64_PI_4, F64_ONE, N152, lay_996, 1);
+assert(f64_gt(f64_abs(f64_sub(ThinFilmResult_r_s(res_ob), ThinFilmResult_r_p(res_ob))), TOL3),
+"s!=p at oblique");
+
+# energy conservation R + T ~ 1
+var lay_ec = alloc(32);
+store64(lay_ec, N138);
+store64(lay_ec + 8, _fd(996, 10));
+store64(lay_ec + 16, N210);
+store64(lay_ec + 24, _fd(655, 10));   # 65.5
+var res_ec = multilayer_rt(f64_from(550), _fd(3, 10), F64_ONE, N152, lay_ec, 2);
+assert(f64_lt(f64_abs(f64_sub(f64_add(ThinFilmResult_r_s(res_ec), ThinFilmResult_t_s(res_ec)), F64_ONE)),
+_fd(1, 100)), "R_s + T_s ~ 1");
+assert(f64_lt(f64_abs(f64_sub(f64_add(ThinFilmResult_r_p(res_ec), ThinFilmResult_t_p(res_ec)), F64_ONE)),
+_fd(1, 100)), "R_p + T_p ~ 1");
+
+# bare surface at angle: in range, s >= p - 0.01
+var res_bare = multilayer_rt(f64_from(550), _fd(5, 10), F64_ONE, N152, 0, 0);
+assert(f64_ge(ThinFilmResult_r_s(res_bare), Z), "bare R_s >= 0");
+assert(f64_le(ThinFilmResult_r_s(res_bare), F64_ONE), "bare R_s <= 1");
+assert(f64_ge(ThinFilmResult_r_p(res_bare), Z), "bare R_p >= 0");
+assert(f64_le(ThinFilmResult_r_p(res_bare), F64_ONE), "bare R_p <= 1");
+assert(f64_ge(ThinFilmResult_r_s(res_bare), f64_sub(ThinFilmResult_r_p(res_bare), _fd(1, 100))),
+"s >= p for dielectric at oblique");
+
+# reflectance in range across incidence angles 0..80 deg
+for (var ad = 0; ad <= 80; ad = ad + 10) {
+    var ang = f64_div(f64_mul(f64_from(ad), F64_PI), f64_from(180));
+    var res_a = multilayer_rt(f64_from(550), ang, F64_ONE, N152, lay_996, 1);
+    assert(f64_ge(ThinFilmResult_r_s(res_a), Z), "range R_s >= 0");
+    assert(f64_le(ThinFilmResult_r_s(res_a), f64_add(F64_ONE, _fd(1, 100))), "range R_s <= 1");
+    assert(f64_ge(ThinFilmResult_r_p(res_a), Z), "range R_p >= 0");
+    assert(f64_le(ThinFilmResult_r_p(res_a), f64_add(F64_ONE, _fd(1, 100))), "range R_p <= 1");
+}
+
 var r = assert_summary();
