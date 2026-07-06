@@ -276,7 +276,10 @@ Config round-trip tests port to bayan (§8). Kept out of the core distlib bundle
       clean, `cyrfmt --check` clean, `cyrius distlib` → `dist/prakash.cyr` OK.
       (`VERSION`→2.0.0 deferred to M8 per "version 2.0.0 when port completed".
       `constants.cyr` lands with the first module that needs it — spectral.)
-- [ ] **M1 Ray** — 7 modules + tests + benches.
+- [x] **M1 Ray** — 7 modules DONE & verified: ray_core (96), ray_fresnel (175),
+      ray_trace (28), ray_simulate (180), ray_system (46), ray_dispersion (54),
+      ray_fiber (14) = **593 test assertions**, all lint/fmt clean, each with a
+      passing adversarial-verify workflow. (benches deferred to a later pass.)
 - [ ] **M2 Spectral** — 3 modules (incl. CIE tables) + tests.
 - [ ] **M3 Wave** — 8 modules (pattern last, on hisab FFT) + tests.
 - [ ] **M4 Lens / PBR / Atmosphere** — + tests.

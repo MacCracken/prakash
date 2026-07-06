@@ -1,0 +1,77 @@
+# ray fiber test suite — ported from rust-old/src/ray/fiber.rs.
+# Covers numerical aperture, V-number, mode count, MFD, and coupling efficiency.
+
+include "src/error.cyr"
+include "src/ray_fiber.cyr"
+
+fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
+fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
+
+var TOL6 = f64_div(F64_ONE, f64_from(1000000));    # 1e-6
+var TOL_02 = f64_div(F64_ONE, f64_from(50));       # 0.02
+var TOL2 = F64_TWO;                                # 2.0
+var HALF = F64_HALF;                               # 0.5
+
+alloc_init();
+
+# ── numerical aperture ────────
+test_group("fiber_na");
+
+# SMF-28: n_core=1.4682, n_clad=1.4629 -> NA ~ 0.12
+var e_na = 0;
+var na = fiber_na(_fd(14682, 10000), _fd(14629, 10000), &e_na);
+assert_eq(e_na, 0, "SMF-28 NA ok");
+_assert_near(na, _fd(12, 100), TOL_02, "SMF-28 NA ~ 0.12");
+
+# core index below cladding index -> error
+var e_bad = 0;
+var _nb = fiber_na(_fd(145, 100), _fd(147, 100), &e_bad);
+assert(prakash_is_err(e_bad), "core < clad errors");
+
+# ── V-number ────────
+test_group("v_number");
+
+# SMF-28 at 1550nm: single-mode (V < 2.405)
+var v_sm = v_number(_fd(41, 10000000), _fd(12, 100), _fd(155, 100000000));
+assert(f64_lt(v_sm, _fd(2405, 1000)), "SMF-28 at 1550nm single-mode");
+
+# large-core fiber: multimode (V > 2.405)
+var v_mm = v_number(_fd(25, 1000000), _fd(22, 100), _fd(85, 100000000));
+assert(f64_gt(v_mm, _fd(2405, 1000)), "25um core multimode");
+
+# ── mode count ────────
+test_group("num_modes");
+
+assert_eq(num_modes(F64_TWO), 1, "V=2.0 single mode");
+assert(num_modes(v_mm) > 100, "multimode fiber has many modes");
+assert_eq(is_single_mode(F64_TWO), 1, "V=2.0 is single-mode");
+assert_eq(is_single_mode(f64_from(3)), 0, "V=3.0 is not single-mode");
+
+# ── mode field diameter ────────
+test_group("mfd");
+
+# SMF-28 at 1550nm: MFD ~ 10.4um
+var v_mfd = v_number(_fd(41, 10000000), _fd(12, 100), _fd(155, 100000000));
+var mfd = mode_field_diameter(_fd(41, 10000000), v_mfd);
+_assert_near(f64_mul(mfd, f64_from(1000000)), _fd(104, 10), TOL2, "MFD ~ 10.4um");
+
+# ── coupling efficiency ────────
+test_group("coupling");
+
+# equal radii -> perfect coupling
+_assert_near(
+coupling_efficiency_gaussian(_fd(5, 1000000), _fd(5, 1000000)),
+F64_ONE, TOL6, "equal radii perfect coupling");
+
+# mismatched radii -> reduced but > 0.5
+var eta_mm = coupling_efficiency_gaussian(_fd(5, 1000000), _fd(10, 1000000));
+assert(f64_lt(eta_mm, F64_ONE), "mismatch < 1");
+assert(f64_gt(eta_mm, HALF), "mismatch > 0.5");
+
+# symmetric in its arguments
+_assert_near(
+coupling_efficiency_gaussian(_fd(3, 1000000), _fd(5, 1000000)),
+coupling_efficiency_gaussian(_fd(5, 1000000), _fd(3, 1000000)), TOL6, "coupling symmetric");
+
+var r = assert_summary();

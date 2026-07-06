@@ -1832,3 +1832,80 @@ fn lateral_chromatic_aberration(image_height, abbe_num) {
 fn secondary_spectrum(focal_length, delta_p, abbe_num) {
     return f64_div(f64_mul(focal_length, delta_p), abbe_num);
 }
+
+# --- ray_fiber.cyr ---
+
+# ray_fiber.cyr -- fiber optics: numerical aperture, V-number, modes, coupling
+# Usage: include "lib/ray_fiber.cyr"  (requires error.cyr)
+#
+# Ported from the Rust `ray/fiber.rs`. Non-integer literals are exact ratios.
+# `v.powf(-1.5)` uses ganita_f64_pow (transcendental, like Rust powf); `v.powi(-6)`
+# is an exact integer power computed as 1/v^6 by squaring (not a transcendental).
+
+fn _fib_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+
+# Single-mode cutoff V-number (first zero of the J0 Bessel function).
+fn _fib_cutoff() { return _fib_r(2405, 1000); }   # 2.405
+
+# Numerical aperture: NA = sqrt(n_core^2 - n_clad^2). Writes
+# PRK_ERR_INVALID_PARAMETER (returns 0) if n_core < n_clad.
+#must_use
+fn fiber_na(n_core, n_clad, err_out) {
+    store64(err_out, ERR_NONE);
+    var na2 = f64_sub(f64_mul(n_core, n_core), f64_mul(n_clad, n_clad));
+    if (f64_lt(na2, f64_from(0)) == 1) {
+        store64(err_out, PRK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
+    return f64_sqrt(na2);
+}
+
+# V-number (normalized frequency): V = 2*pi*a*NA/lambda. Single-mode at V < 2.405.
+#must_use
+fn v_number(core_radius, na, wavelength) {
+    return f64_div(f64_mul(f64_mul(f64_mul(F64_TWO, F64_PI), core_radius), na), wavelength);
+}
+
+# Approximate guided-mode count in a step-index multimode fiber: N ~ V^2/2
+# (>= 1). Single-mode (V < 2.405) has exactly one mode.
+#must_use
+fn num_modes(v) {
+    if (f64_lt(v, _fib_cutoff()) == 1) {
+        return 1;
+    }
+    var n = f64_to(f64_div(f64_mul(v, v), F64_TWO));
+    if (n < 1) {
+        return 1;
+    }
+    return n;
+}
+
+# 1 if the fiber supports only a single mode at this V-number (V < 2.405).
+#must_use
+fn is_single_mode(v) {
+    return f64_lt(v, _fib_cutoff());
+}
+
+# Mode field diameter (Marcuse): MFD ~ 2a*(0.65 + 1.619*V^-1.5 + 2.879*V^-6).
+# Valid for 0.8 < V < 2.5.
+#must_use
+fn mode_field_diameter(core_radius, v) {
+    # V^-6 as an exact integer power: 1 / (V^2 * (V^2 * V^2)), matching powi.
+    var v2 = f64_mul(v, v);
+    var v6 = f64_mul(v2, f64_mul(v2, v2));
+    var inv_v6 = f64_div(F64_ONE, v6);
+    var term_pm15 = f64_mul(_fib_r(1619, 1000), ganita_f64_pow(v, f64_neg(_fib_r(15, 10))));
+    var term_pm6 = f64_mul(_fib_r(2879, 1000), inv_v6);
+    var factor = f64_add(f64_add(_fib_r(65, 100), term_pm15), term_pm6);
+    return f64_mul(f64_mul(F64_TWO, core_radius), factor);
+}
+
+# Gaussian-beam / single-mode-fiber coupling efficiency:
+# eta = (2*w_beam*w_fiber / (w_beam^2 + w_fiber^2))^2. eta = 1 when w_beam = w_fiber.
+#must_use
+fn coupling_efficiency_gaussian(w_beam, w_fiber) {
+    var num = f64_mul(f64_mul(F64_TWO, w_beam), w_fiber);
+    var den = f64_add(f64_mul(w_beam, w_beam), f64_mul(w_fiber, w_fiber));
+    var ratio = f64_div(num, den);
+    return f64_mul(ratio, ratio);
+}

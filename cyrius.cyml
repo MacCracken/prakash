@@ -31,6 +31,7 @@ modules = [
     "src/ray_simulate.cyr",
     "src/ray_system.cyr",
     "src/ray_dispersion.cyr",
+    "src/ray_fiber.cyr",
 ]
 
 [deps]
