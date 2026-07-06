@@ -1,5 +1,14 @@
 # Build artifacts
 /target/
+/build/
+
+# Distlib companions — leaf-requirements manifests emitted alongside the
+# tracked dist/*.cyr bundles by `cyrius distlib`; only the bundles are tracked.
+/dist/prakash.deps
+/dist/prakash-ai.deps
+
+# Cyrius toolchain tarball (fetched during CI)
+cyrius-*.tar.gz
 
 # Library crate lock file
 Cargo.lock
