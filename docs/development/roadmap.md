@@ -25,6 +25,7 @@ Prakash does NOT own:
 | V2.0.2 | Audit & hardening | Six-dimension P(-1) sweep with adversarial verification. Fixed 7 public entry points that SIGSEGVed on malformed input, unchecked/overflowing allocations, missing bounds checks on Pattern2D and Mueller accessors, an out-of-bounds read in `spd_at`, silent fabrication on bad JSON, flat-surface JSON corruption, and three math boundaries that diverged from Rust. 5251 → 5334 assertions, 26 → 27 suites. See the [2.0.2] CHANGELOG entry. |
 | **V2.1.0** | **Error channels** | **Every `*_from_json` (9 functions) takes a trailing `err_out` and reports `PK_ERR_PARSE` (bad bytes) / `PK_ERR_INVALID_PARAMETER` (wrong schema) / `PK_ERR_ALLOCATION`, closing the gap 2.0.2 left open. Breaking signature change; migration table in the [2.1.0] CHANGELOG entry. 5361 assertions.** |
 | **V2.1.1** | **Audit cleanup** | **Clears every remaining 2.0.2 audit item: trig out-of-domain (`f64_sin(1e300)` returned 1e300), `expm1` precision loss below 1e-16, the unusable `point_source_new`, and 46 unguarded constructor allocs. Closes all three coverage gaps and adds 8 composite benchmarks (27 → 35) — `interference_pattern` is 7× the slowest previously measured op. 5424 assertions.** |
+| **V2.1.2** | **hisab interop** | **`tests/hisab_interop.tcyr` pins the `RayVec3` ↔ `HVec3` layout contract (identical `{x;y;z}`), so all 26 `hvec3_*` ops work on prakash vectors unconverted — incl. `ray_reflect_3d` agreeing with `hvec3_reflect` over 121 cases. Internal `hvec3_dot` adoption measured at 2–11% slower and reverted; hisab quadrature investigated and does not apply. No behaviour change. 5444 assertions, 28 suites.** |
 
 ### V2.0 exit criteria (met)
 
@@ -51,13 +52,34 @@ The `bridge` module ships primitive-value hooks — no dependency on sibling cra
 
 - [ ] soorat / kiran / ranga: consume `dist/prakash.cyr` directly once they move to Cyrius
 
-### Dependency adoption (actionable now — hisab 2.11.1 is already a dep)
+### Dependency adoption (settled in 2.1.2 — both investigated, one shipped)
 
-Neither waits on a consumer port; `hvec3_*` and the quadrature routines ship in
-the `dist/hisab.cyr` we already pull.
+- [x] **hisab geometry bridge — shipped as a tested interop contract, not an
+      internal swap.** `RayVec3` and `HVec3` are both `{ x; y; z; }`, so a prakash
+      vector is already an hisab vector and all 26 `hvec3_*` ops work on it
+      unconverted. `tests/hisab_interop.tcyr` now pins the layout, the field
+      order, and that `ray_reflect_3d` agrees with `hvec3_reflect` (121 cases).
+      ⚠ **prakash does NOT call `hvec3_*` internally, and that is measured, not
+      assumed:** routing the tracer's dot products through `hvec3_dot` cost
+      **2–11%** on `ray/trace_surface`, `ray/trace_sequential` and
+      `ray/fresnel_unpolarized` across three runs, because it is two nested calls
+      (`hvec3_dot` → `f64v_dot`) where the inline form is straight-line
+      arithmetic. Reverted. Revisit only if hisab gains an inlinable form.
+- [x] **hisab numerical integration — investigated, DOES NOT APPLY.** hisab does
+      ship quadrature (`calc_integral_gauss5(f, a, b)`, `calc_integral_simpson`,
+      `calc_adaptive_simpson`), but none of the named targets is a quadrature:
+      - `_spd_integrate` is the **CIE-defined weighted sum** over the tabulated
+        81-entry CMFs at 5 nm. It is the standard's method, not an approximation
+        to improve; replacing it would change published colour values and break
+        1168 `spectral_cie` assertions.
+      - `huygens_fresnel_1d` integrates a **caller-supplied discrete sample
+        buffer** — there is no continuous integrand to hand a quadrature rule.
+      - `spd_blackbody` **samples** 81 points; it does not integrate.
 
-- [ ] hisab geometry bridge: adopt `hisab` `HVec3`/ray types in the tracer (currently local `RayVec3`)
-- [ ] hisab numerical integration: use `hisab` Gauss-Legendre for Huygens-Fresnel / SPD generation
+      `src/` contains **zero `fncall` sites**, i.e. no prakash function takes the
+      callable integrand these routines require. If a continuous-integrand entry
+      point is ever wanted (e.g. `spd_from_function(f, start, end)`), that is a
+      new feature, not dependency adoption — filed under Accuracy below.
 
 ### Performance (from the 2.0.1 measurement)
 
@@ -128,6 +150,9 @@ that release. They are real and reproduced; none is a guess.
 - [ ] Hermite-Gaussian / Laguerre-Gaussian beam modes; M² beam quality
 - [ ] Higher-order (5th-order Buchdahl) aberrations; wavefront coefficients (W_040, …) from Seidel sums
 - [ ] Aberrated MTF from generalized pupil-function autocorrelation
+- [ ] `spd_from_function(f, start_nm, end_nm)` — build an SPD from a continuous
+      spectral function via hisab `calc_integral_gauss5`. The one place hisab's
+      quadrature would genuinely fit; a new capability rather than an adoption.
 
 ### Advanced / demand-gated
 
@@ -139,7 +164,11 @@ that release. They are real and reproduced; none is a guess.
 
 ### Housekeeping
 
-- [ ] Remove `rust-old/` a couple releases out (retained now as the translation reference; also in pre-2.0 git tags)
+- [ ] **Port-completeness review against `rust-old/`** — confirm nothing from the
+      Rust original was left on the table (functions, tests, benchmarks, doc
+      content) before anything is deleted.
+- [ ] Remove `rust-old/` — **gated on the review above**, not on a version number
+      (it is also preserved in the pre-2.0 git tags).
 
 ## Consumers
 

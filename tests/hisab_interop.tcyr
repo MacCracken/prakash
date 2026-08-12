@@ -1,0 +1,102 @@
+# hisab_interop.tcyr — pins the RayVec3 <-> HVec3 layout contract.
+#
+# prakash's RayVec3 and hisab's HVec3 are both `{ x; y; z; }`, so a RayVec3
+# pointer IS an HVec3 pointer and all 26 of hisab's `hvec3_*` operations work on
+# prakash vectors with ZERO conversion. That is a deliberate guarantee (the
+# comment above `struct RayVec3` has claimed it since the port) but nothing
+# tested it — a field reorder or an added field in either project would break
+# every consumer silently, at the point of a wrong number rather than a compile
+# error. These assertions are the tripwire.
+#
+# prakash does NOT call hvec3_* internally: measured, routing the tracer's dot
+# products through `hvec3_dot` costs 2-11% on ray/trace_surface,
+# ray/trace_sequential and ray/fresnel_unpolarized, because it is two nested
+# calls (hvec3_dot -> f64v_dot) where the inline form is straight-line
+# arithmetic. The contract is for CONSUMERS; the hot paths stay inline.
+
+include "lib/hisab.cyr"
+include "src/error.cyr"
+include "src/ray_core.cyr"
+include "src/ray_fresnel.cyr"
+
+fn _fd(n, d) { return f64_div(f64_from(n), f64_from(d)); }
+fn _near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
+fn _bits(a, b) { if (a == b) { return 1; } return 0; }
+
+var TOL = f64_div(F64_ONE, f64_from(1000000000000));
+
+alloc_init();
+
+# ── Layout ────────
+test_group("RayVec3 and HVec3 are layout-identical");
+
+assert(sizeof(RayVec3) == sizeof(HVec3), "sizeof(RayVec3) == sizeof(HVec3)");
+
+var v = ray_vec3(_fd(3, 2), _fd(5, 4), _fd(7, 8));
+assert(_bits(HVec3_x(v), RayVec3_x(v)) == 1, "HVec3_x reads a prakash RayVec3");
+assert(_bits(HVec3_y(v), RayVec3_y(v)) == 1, "HVec3_y reads a prakash RayVec3");
+assert(_bits(HVec3_z(v), RayVec3_z(v)) == 1, "HVec3_z reads a prakash RayVec3");
+
+var h = hvec3_new(_fd(3, 2), _fd(5, 4), _fd(7, 8));
+assert(_bits(RayVec3_x(h), HVec3_x(h)) == 1, "RayVec3_x reads a hisab HVec3 (the reverse direction)");
+assert(_bits(RayVec3_z(h), HVec3_z(h)) == 1, "RayVec3_z reads a hisab HVec3");
+
+# field ORDER, not just size — a reorder would keep sizeof equal
+assert(_bits(RayVec3_x(v), load64(v)) == 1, "x is at offset 0");
+assert(_bits(RayVec3_y(v), load64(v + 8)) == 1, "y is at offset 8");
+assert(_bits(RayVec3_z(v), load64(v + 16)) == 1, "z is at offset 16");
+
+# ── hisab operations on prakash vectors ────────
+test_group("hisab hvec3_* operate on prakash vectors unconverted");
+
+var a = ray_vec3(F64_ONE, F64_TWO, f64_from(3));
+var b = ray_vec3(f64_from(4), f64_from(5), f64_from(6));
+
+# dot: 1*4 + 2*5 + 3*6 = 32
+assert(_bits(hvec3_dot(a, b), f64_from(32)) == 1, "hvec3_dot on prakash vectors = 32");
+# and bit-identical to prakash's own inline form
+var inline_dot = f64_add(f64_add(
+f64_mul(RayVec3_x(a), RayVec3_x(b)),
+f64_mul(RayVec3_y(a), RayVec3_y(b))),
+f64_mul(RayVec3_z(a), RayVec3_z(b)));
+assert(_bits(hvec3_dot(a, b), inline_dot) == 1, "hvec3_dot is bit-identical to the inline dot");
+
+# length of (3,4,0) is exactly 5
+var c345 = ray_vec3(f64_from(3), f64_from(4), f64_from(0));
+assert(_bits(hvec3_length(c345), f64_from(5)) == 1, "hvec3_length on a prakash vector = 5");
+assert(_bits(hvec3_length_sq(c345), f64_from(25)) == 1, "hvec3_length_sq = 25");
+
+# cross(x, y) = z
+var cx = hvec3_cross(ray_vec3(F64_ONE, f64_from(0), f64_from(0)),
+ray_vec3(f64_from(0), F64_ONE, f64_from(0)));
+assert(_bits(RayVec3_x(cx), f64_from(0)) == 1, "cross(x,y).x = 0 (read back through prakash accessors)");
+assert(_bits(RayVec3_y(cx), f64_from(0)) == 1, "cross(x,y).y = 0");
+assert(_bits(RayVec3_z(cx), F64_ONE) == 1, "cross(x,y).z = 1");
+
+# normalize returns a unit vector readable as a RayVec3
+var nz = hvec3_normalize(ray_vec3(f64_from(3), f64_from(4), f64_from(0)));
+assert(_near(hvec3_length(nz), F64_ONE, TOL) == 1, "hvec3_normalize yields a unit vector");
+assert(_near(RayVec3_x(nz), _fd(6, 10), TOL) == 1, "normalized x = 0.6 via prakash accessor");
+
+# ── Semantic agreement ────────
+# A consumer may reasonably reach for either library's reflect; they must agree.
+test_group("prakash and hisab agree on shared geometry");
+
+var mismatches = 0;
+var checked = 0;
+for (var i = 1; i < 12; i = i + 1) {
+    for (var j = 1; j < 12; j = j + 1) {
+        var d = hvec3_normalize(ray_vec3(_fd(i, 5), _fd(0 - j, 7), _fd(i + j, 11)));
+        var n = hvec3_normalize(ray_vec3(_fd(0 - j, 13), _fd(i, 3), _fd(j, 17)));
+        var pk = ray_reflect_3d(d, n);
+        var hs = hvec3_reflect(d, n);
+        if (_near(RayVec3_x(pk), HVec3_x(hs), TOL) == 0) { mismatches = mismatches + 1; }
+        if (_near(RayVec3_y(pk), HVec3_y(hs), TOL) == 0) { mismatches = mismatches + 1; }
+        if (_near(RayVec3_z(pk), HVec3_z(hs), TOL) == 0) { mismatches = mismatches + 1; }
+        checked = checked + 1;
+    }
+}
+assert(checked == 121, "checked 121 reflect cases");
+assert(mismatches == 0, "ray_reflect_3d agrees with hvec3_reflect on all 121 cases");
+
+var r = assert_summary();

@@ -1,5 +1,65 @@
 # Changelog
 
+## [2.1.2] - 2026-08-12 — hisab interop, measured
+
+Settles both hisab adoption items. One shipped as a tested contract; the other
+was investigated and does not apply. No behaviour changes, no signature changes —
+`src/` is unchanged apart from documentation and one new test suite.
+
+Suite **5424 → 5444** assertions across **27 → 28** suites.
+
+### Added
+- **`tests/hisab_interop.tcyr` — the `RayVec3` ↔ `HVec3` layout contract is now
+  enforced.** Both are `{ x; y; z; }`, so a prakash vector **is** an hisab vector:
+  all 26 of hisab's `hvec3_*` operations (dot, cross, normalize, reflect,
+  project, angle, …) work on prakash vectors with **zero conversion**, and hisab
+  results read back through the `RayVec3` accessors. The port has claimed this
+  since 2.0.0 but nothing tested it — a field reorder or an added field in either
+  project would have broken every consumer silently, at the point of a wrong
+  number rather than a compile error. The suite pins:
+  - `sizeof(RayVec3) == sizeof(HVec3)`, and the field **order** (x@0, y@8, z@16),
+    which a size check alone would not catch
+  - hisab ops on prakash vectors in both directions, with exact expected values
+  - `hvec3_dot` bit-identical to prakash's inline dot
+  - `ray_reflect_3d` agreeing with `hvec3_reflect` across **121 cases**, so a
+    consumer may reach for either library's geometry and get the same answer
+
+### Changed
+- `src/ray_core.cyr` documents the interop guarantee at `struct RayVec3`, and why
+  prakash does not use it internally.
+
+### Investigated and rejected
+- ⚠ **prakash does NOT call `hvec3_*` internally — measured, not assumed.**
+  Routing the tracer's dot products through `hvec3_dot` (which is allocation-free
+  and SIMD-backed, so it looked like a free win) cost **2–11%** across three runs:
+
+  | Benchmark | inline | via `hvec3_dot` |
+  |---|--:|--:|
+  | `ray/trace_sequential` | 957–964 ns | 985–1068 ns |
+  | `ray/trace_surface` | 329–334 ns | 340–360 ns |
+  | `ray/fresnel_unpolarized` | 116–117 ns | 121–123 ns |
+
+  `hvec3_dot` is two nested calls (`hvec3_dot` → `f64v_dot`) where the inline form
+  is straight-line arithmetic; for a 3-element dot the call overhead exceeds any
+  vectorisation gain. Reverted. `hvec3_reflect` is worse still for the hot path —
+  it composes `hvec3_sub(hvec3_scale(…))`, **two allocations** where prakash's
+  does one.
+- ⚠ **hisab quadrature does not apply to the named targets.** hisab does ship
+  `calc_integral_gauss5(f, a, b)`, `calc_integral_simpson` and
+  `calc_adaptive_simpson`, but:
+  - `_spd_integrate` is the **CIE-defined weighted sum** over the tabulated
+    81-entry CMFs at 5 nm — the standard's method, not an approximation to
+    improve. Replacing it would change published colour values and break 1168
+    `spectral_cie` assertions.
+  - `huygens_fresnel_1d` integrates a **caller-supplied discrete sample buffer**;
+    there is no continuous integrand to hand a quadrature rule.
+  - `spd_blackbody` **samples** 81 points, it does not integrate.
+
+  `src/` contains **zero `fncall` sites** — no prakash function takes the callable
+  integrand these routines require. A `spd_from_function(f, start, end)` entry
+  point would be the one genuine fit; it is filed on the roadmap as a new
+  capability, not as dependency adoption.
+
 ## [2.1.1] - 2026-08-12 — The audit's remaining defects and coverage gaps
 
 Clears every item the 2.0.2 audit reproduced but deferred, plus the three coverage

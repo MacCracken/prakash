@@ -19,7 +19,7 @@ source retained under `rust-old/`.
 | `serialize` | serialize.cyr | 31 | (free functions) | JSON roundtrips (bayan) for the seven serde-tested types; floats are bit-exact (Grisu2) since bayan 1.2.1; every `*_from_json` reports via `err_out` |
 | `ai` | ai.cyr | 24 | `DaimonClient`, `DaimonConfig`, `HooshConfig` | AI-assisted optics queries via sandhi HTTP POST — **not in the core bundle** |
 
-**Total**: 25 science modules + error, **5424 test assertions across 27 suites**,
+**Total**: 25 science modules + error, **5444 test assertions across 28 suites**,
 35 benchmarks. (`tests/hardening.tcyr` is the cross-module regression suite for the
 2.0.2 audit repairs and the 2.1.0 error channels — see those CHANGELOG entries.)
 
@@ -110,7 +110,7 @@ the check that actually has teeth.
 
 | Dependency | Kind | Purpose |
 |-----------|------|---------|
-| `hisab` | git dep (tag 2.11.1) | FFT (`num_fft`) for `wave_pattern` (the suite also exercises `num_ifft`) |
+| `hisab` | git dep (tag 2.11.1) | FFT (`num_fft`) for `wave_pattern` (the suite also exercises `num_ifft`). `RayVec3` is layout-identical to hisab's `HVec3`, so all 26 `hvec3_*` ops work on prakash vectors unconverted — contract pinned by `tests/hisab_interop.tcyr` |
 | `ganita` | stdlib | Transcendentals (acos/asin/atan2/pow/sinh/…) + linear algebra |
 | `math` | stdlib | Comparisons, clamp/lerp/min/max, `F64_PI` etc., aarch64 polyfills |
 | `bayan` | stdlib | JSON (`serialize` module) |
