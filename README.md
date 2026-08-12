@@ -29,7 +29,7 @@ Consumed by [soorat](https://github.com/MacCracken/soorat) (PBR shading), [kiran
 name     = "your-project"
 version  = "${file:VERSION}"
 language = "cyrius"
-cyrius   = "6.4.10"
+cyrius   = "6.5.20"
 
 [deps]
 # ganita provides the transcendentals (acos/asin/atan2/pow/sinh/…) and subsumes
@@ -38,7 +38,7 @@ stdlib = ["string", "fmt", "alloc", "vec", "str", "math", "ganita", "tagged", "f
 
 [deps.prakash]
 git     = "https://github.com/MacCracken/prakash.git"
-tag     = "2.0.0"
+tag     = "2.0.1"
 modules = ["dist/prakash.cyr"]        # math-only core (no TLS)
 # For the AI client instead, pull the ai bundle (adds the sandhi HTTP/TLS stack):
 # modules = ["dist/prakash-ai.cyr"]
@@ -83,7 +83,7 @@ var transmitted = malus_law(F64_ONE, F64_PI_4);
 
 ```
 prakash (Cyrius)
-  ├── hisab   (git dep, tag 2.6.8) — Complex + FFT (num_fft/num_ifft) for wave/pattern
+  ├── hisab   (git dep, tag 2.11.1) — Complex + FFT (num_fft/num_ifft) for wave/pattern
   ├── ganita  (stdlib) — transcendentals + linear algebra
   ├── bayan   (stdlib) — JSON (serialize module)
   ├── sakshi  (stdlib) — logging (trace diagnostics)

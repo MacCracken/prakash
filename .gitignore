@@ -2,10 +2,12 @@
 /target/
 /build/
 
-# Distlib companions — leaf-requirements manifests emitted alongside the
-# tracked dist/*.cyr bundles by `cyrius distlib`; only the bundles are tracked.
-/dist/prakash.deps
-/dist/prakash-ai.deps
+# NOTE: dist/*.deps are deliberately TRACKED (they were listed here until 2.0.1,
+# while also being tracked — an incoherent state). `cyrius deps` validates a
+# consumer's `[deps] stdlib` against them, so they are part of the published
+# contract, and prakash maintains them itself via scripts/sync-deps-sidecar.sh
+# because the generator's base-vs-profile rule is backwards for our inverted
+# two-bundle layout. See that script's header.
 
 # Cyrius toolchain tarball (fetched during CI)
 cyrius-*.tar.gz

@@ -83,11 +83,27 @@ avoid cross-module coupling:
 the 8 wave → pbr_core, pbr_advanced → lens → atmosphere → bridge → serialize.
 `[lib.ai]` is the same list plus `ai.cyr`.
 
+### The `dist/*.deps` sidecars
+
+Each bundle ships a `.deps` sidecar naming the stdlib folds a consumer must have
+in scope; `cyrius deps` **validates** a consumer's `[deps] stdlib` against it and
+hard-errors on anything missing, so it is a contract rather than documentation.
+
+prakash's bundle layout is **inverted** relative to what `cyrius distlib` assumes:
+the base bundle (`[lib]` → `dist/prakash.cyr`) is the *narrow* math-only one and
+the profile (`[lib.ai]`) is the *wide* one, whereas the generator treats the base
+as widest and prunes profiles. Left alone it therefore over-reports for the core
+bundle (handing it the sandhi/TLS stack it never touches) and under-reports for
+the ai bundle. prakash regenerates both from the manifest with
+**`scripts/sync-deps-sidecar.sh`** — core = declared stdlib minus the AI-only
+folds (`net http tls async random fdlopen dynlib chrono sandhi`), ai = the full
+declared list. CI enforces both the sync and a core-bundle-is-TLS-free scan.
+
 ## Dependencies
 
 | Dependency | Kind | Purpose |
 |-----------|------|---------|
-| `hisab` | git dep (tag 2.6.8) | Complex + FFT (`num_fft`/`num_ifft`) for `wave_pattern` |
+| `hisab` | git dep (tag 2.11.1) | Complex + FFT (`num_fft`/`num_ifft`) for `wave_pattern` |
 | `ganita` | stdlib | Transcendentals (acos/asin/atan2/pow/sinh/…) + linear algebra |
 | `math` | stdlib | Comparisons, clamp/lerp/min/max, `F64_PI` etc., aarch64 polyfills |
 | `bayan` | stdlib | JSON (`serialize` module) |

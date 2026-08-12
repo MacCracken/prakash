@@ -6,7 +6,7 @@
 # feature. Consumers opt in explicitly (stdlib: bayan, sandhi + companions).
 #
 # String fields are cstrings; Option<String> api_key = cstr or 0 (None).
-# JSON via bayan: build with str_from() keys/values, parse with parse_str
+# JSON via bayan: build with str_from() keys/values, parse with parse_buf
 # (str_data,str_len) — the built Str is not NUL-terminated.
 
 #derive(accessors)
@@ -81,7 +81,7 @@ fn ai_daimon_config_to_json(config) {
 # JSON (data ptr + byte length) -> DaimonConfig (api_key = 0 when null/absent).
 #must_use
 fn ai_daimon_config_from_json(json, len) {
-    var v = bayan_json_v_parse_str(json, len);
+    var v = bayan_json_v_parse_buf(json, len);
     var endpoint = str_data(bayan_json_v_str(bayan_json_v_obj_get(v, "endpoint")));
     var ak_v = bayan_json_v_obj_get(v, "api_key");
     var api_key = 0;
@@ -103,7 +103,7 @@ fn ai_hoosh_config_to_json(config) {
 # JSON (data ptr + byte length) -> HooshConfig.
 #must_use
 fn ai_hoosh_config_from_json(json, len) {
-    var v = bayan_json_v_parse_str(json, len);
+    var v = bayan_json_v_parse_buf(json, len);
     return ai_hoosh_config_new(str_data(bayan_json_v_str(bayan_json_v_obj_get(v, "endpoint"))));
 }
 
@@ -142,7 +142,7 @@ fn ai_register_agent(client, err_out) {
         store64(err_out, PK_ERR_INVALID_PARAMETER);
         return "unknown";
     }
-    var data = bayan_json_v_parse_str(sandhi_http_body(resp), sandhi_http_body_len(resp));
+    var data = bayan_json_v_parse_buf(sandhi_http_body(resp), sandhi_http_body_len(resp));
     if (data == 0) {
         # invalid registration response (parse failure) -> error, matches Rust
         store64(err_out, PK_ERR_INVALID_PARAMETER);

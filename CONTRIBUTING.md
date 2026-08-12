@@ -36,9 +36,13 @@ done
 # Vet the build entry
 cyrius vet src/main.cyr
 
-# Bundles must match lib/ (regenerate + commit if they drift)
+# Bundles must match lib/ (regenerate + commit if they drift).
+# The sidecar sync is REQUIRED after distlib: `cyrius distlib` gets the
+# dist/*.deps sidecars backwards for prakash's inverted two-bundle layout
+# (base = narrow math-only, profile = wide + TLS). See the script header.
 cyrius distlib && cyrius distlib ai
-git diff --quiet dist/prakash.cyr dist/prakash-ai.cyr || echo "bundles stale — commit them"
+./scripts/sync-deps-sidecar.sh
+git diff --quiet dist/ || echo "dist/ stale — commit it"
 
 # Tests + benchmarks
 for f in tests/*.tcyr; do cyrius test "$f"; done
@@ -52,7 +56,8 @@ cyrius bench tests/prakash.bcyr
 3. **Write tests** — new features require tests (a `.tcyr` suite); bug fixes
    require a regression test.
 4. **Regenerate bundles** — if you touch a `[lib]`/`[lib.ai]` module, run
-   `cyrius distlib && cyrius distlib ai` and commit the updated `dist/*.cyr`.
+   `cyrius distlib && cyrius distlib ai && ./scripts/sync-deps-sidecar.sh` and
+   commit the updated `dist/` (both `*.cyr` bundles **and** the `*.deps` sidecars).
 5. **Run the local CI gate** (above) — lint, fmt, tests, and bench must be green.
 6. **Open a PR** against `main` with a clear description of the change.
 

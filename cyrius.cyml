@@ -5,7 +5,7 @@ description = "prakash — optics and light simulation (ray optics, wave optics,
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/prakash"
 language = "cyrius"
-cyrius = "6.4.10"
+cyrius = "6.5.20"
 
 [build]
 src = "src/main.cyr"
@@ -117,9 +117,12 @@ stdlib = [
 ]
 
 # hisab (higher mathematics) — Complex + FFT (num_fft/num_ifft) for wave/pattern.
-# 2.6.8 = collision-hardening patch (FLOAT_RENDER_BUF stack-array -> alloc; ERR_* ->
-# HSB_ERR_) so hisab co-compiles with the sandhi/TLS stack pulled by [lib.ai].
+# prakash's surface is exactly those two entry points; the rest of hisab's 34
+# modules ride along in the bundle unused. 2.6.8 was the collision-hardening
+# patch (FLOAT_RENDER_BUF stack-array -> alloc; ERR_* -> HSB_ERR_) that let hisab
+# co-compile with the sandhi/TLS stack pulled by [lib.ai]; both properties still
+# hold in 2.11.1, which also pins sakshi 2.4.10 to match the 6.5.20 stdlib.
 [deps.hisab]
 git = "https://github.com/MacCracken/hisab.git"
-tag = "2.6.8"
+tag = "2.11.1"
 modules = ["dist/hisab.cyr"]

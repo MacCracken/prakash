@@ -1,5 +1,82 @@
 # Changelog
 
+## [2.0.1] - 2026-08-12 — Toolchain and dependency refresh
+
+Maintenance release: Cyrius `6.4.10` → **`6.5.20`**, hisab `2.6.8` → **`2.11.1`**,
+sakshi `2.4.2` → **`2.4.10`**. No optics behaviour changes — all **5251 test
+assertions across 26 suites** pass unchanged, and both bundles differ from 2.0.0
+only by the version stamp and one dependency-driven rename.
+
+### Fixed
+- **serialize / ai** — `bayan_json_v_parse_str(buf, len)` was renamed upstream to
+  **`bayan_json_v_parse_buf(buf, len)`** (bayan 1.3.0); the old name no longer
+  exists, which broke the `serialize` and `ai` suites with `undefined function`.
+  Updated all 10 call sites (7 in `src/serialize.cyr`, 3 in `src/ai.cyr`).
+  Semantics are identical — the rename was forced by Cyrius's `X_str` overload
+  dispatch, which silently rewrote `bayan_json_v_parse(someStr)` into a 1-arg
+  call to the 2-arg `_str` function. prakash always called the explicit
+  `(buf, len)` form, so it never hit that mis-dispatch; this is a pure rename.
+- **`dist/*.deps` sidecars were wrong in both directions**, which would have
+  broken the two-bundle contract for consumers. `cyrius deps` validates a
+  consumer's `[deps] stdlib` against these files and hard-errors on anything
+  missing, so they are part of the published contract, not documentation.
+  Cyrius 6.5.10 made the **base** bundle's sidecar `[deps] stdlib` ∪ include-scan
+  while **profile** bundles keep a pruned inference — a rule that assumes the
+  base bundle is the widest. prakash is inverted (`[lib]` is the narrow math-only
+  core; `[lib.ai]` is the wide one), so:
+  - `dist/prakash.deps` **over-reported** — it inherited the whole
+    sandhi/net/TLS stack that `[deps] stdlib` must declare for `src/ai.cyr`,
+    despite the core bundle referencing **none** of it (verified by symbol scan).
+    A math-only consumer would have been forced to compile TLS — exactly what the
+    split exists to prevent, and contrary to the README's "math-only (no TLS)".
+  - `dist/prakash-ai.deps` **under-reported** — the pruned inference emitted only
+    `syscalls io`, omitting sandhi and its stack, which switches off the very
+    check meant to catch a consumer that forgot them.
+
+  prakash now owns both sidecars via **`scripts/sync-deps-sidecar.sh`**
+  (core = declared stdlib − the AI-only folds; ai = declared stdlib in full),
+  following the precedent setu set for the same upstream issue. CI runs it after
+  `distlib` and fails on drift, plus a new **core-bundle-is-TLS-free** gate that
+  independently validates the AI-only fold list. Sidecars: core 18 folds, ai 27.
+  `.gitignore` no longer lists `dist/*.deps` — they were ignored *and* tracked,
+  an incoherent state; they are deliberately tracked.
+
+### Changed
+- **toolchain** — Cyrius `6.5.20`. `lib/` re-vendored via `cyrius lib sync --full`
+  (99 → 102 files; adds `async_win.cyr`, `thread_macos.cyr`, `unicode/`), and
+  `cyrius.lock` regenerated (99 → 108 locked deps, all verifying).
+- **hisab** `2.6.8` → `2.11.1`. prakash's surface is unchanged — `num_fft` /
+  `num_ifft`, both still returning `HSB_ERR_NONE` (0). The 2.6.8
+  collision-hardening properties this port depends on still hold. Scanned for
+  global collisions against the larger bundle (509 prakash fns / 31 globals vs
+  912 / 220 in hisab): **none**, in all four name cross-products — which matters
+  because Cyrius globals are last-one-wins with no diagnostic.
+- **sakshi** `2.4.2` → `2.4.10`, matching what the 6.5.20 stdlib bundles; this
+  clears the `./lib/ shadows version-pinned …` warning.
+- **`scripts/bench-history.sh`** — the generated `benchmarks.md` header now warns
+  that the Δ column spans the 6.5.20 harness change and is not like-for-like.
+
+### Performance
+- **No prakash code changed, but every benchmark reports a much lower number.**
+  Cyrius 6.5.20's harness measures its own timer floor (~1.32–1.35 µs) and
+  subtracts it from every sample; previously that fixed cost was included in each
+  reading. Scalar benches therefore drop ~90% (e.g. `pbr/fresnel_schlick`
+  1.341 µs → 17 ns) **without getting faster**. Verified by reconstruction: the
+  old overhead derived from the near-zero-cost rows is ~1,320 ns, and applying it
+  to `atmosphere/sky_color_rgb` predicts 967 ns against 965 ns measured.
+  To compare any pre-6.5.20 row, subtract ~1.32 µs from it first.
+- **The real Rust-vs-Cyrius gap is now measurable: 3.2×–19.7×, median ~7.2×** —
+  not the 60×–1,300× the old instrument implied.
+  `docs/benchmarks-rust-v-cyrius.md` is rewritten against true op cost. The
+  compute-bound FFT row, which the floor never touched, is unmoved (~3× → 2.8×),
+  which cross-checks the correction.
+- ⚠ **`serialize/rgb_to_json` regressed ~2×** (floor-corrected ~1,520 ns → ~3,400 ns),
+  reproduced across two runs. Cause is upstream: bayan 1.4.1 rebuilt the
+  serializer so each append routes through an allocator variant with per-append
+  failure propagation (`_jb_append_string` → `_jb_append_string_a(default_alloc(), …)`).
+  prakash's `rgb_to_json` body is unchanged. Math paths are unaffected; tracked on
+  the roadmap.
+
 ## [2.0.0] - 2026-07-06 — Full port to the Cyrius systems language
 
 prakash is rewritten from Rust to **Cyrius**, the AGNOS systems language. Every

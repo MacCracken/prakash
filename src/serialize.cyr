@@ -4,7 +4,7 @@
 # Ported from the Rust `#[derive(Serialize, Deserialize)]` types that had serde
 # roundtrip tests: Rgb, Medium, SellmeierCoefficients, LensType, Polarization,
 # Prescription, Spd. Uses the bayan recipe — build with str_from() keys/values +
-# v_float_new(bits), parse with parse_str(data,len); *_from_json takes (data ptr,
+# v_float_new(bits), parse with parse_buf(data,len); *_from_json takes (data ptr,
 # byte len) since bayan's build output Str is not NUL-terminated. Floats
 # round-trip through bayan's 6-decimal render (within the tests' tolerances).
 
@@ -22,7 +22,7 @@ fn rgb_to_json(c) {
 
 #must_use
 fn rgb_from_json(json, len) {
-    var v = bayan_json_v_parse_str(json, len);
+    var v = bayan_json_v_parse_buf(json, len);
     return rgb_new(
     bayan_json_v_float(bayan_json_v_obj_get(v, "r")),
     bayan_json_v_float(bayan_json_v_obj_get(v, "g")),
@@ -42,7 +42,7 @@ fn medium_to_json(m) {
 
 #must_use
 fn medium_from_json(json, len) {
-    var v = bayan_json_v_parse_str(json, len);
+    var v = bayan_json_v_parse_buf(json, len);
     return _medium_mk(
     bayan_json_v_float(bayan_json_v_obj_get(v, "n")),
     str_data(bayan_json_v_str(bayan_json_v_obj_get(v, "name"))));
@@ -65,7 +65,7 @@ fn sellmeier_to_json(s) {
 
 #must_use
 fn sellmeier_from_json(json, len) {
-    var v = bayan_json_v_parse_str(json, len);
+    var v = bayan_json_v_parse_buf(json, len);
     return _sellmeier_mk(
     bayan_json_v_float(bayan_json_v_obj_get(v, "b1")),
     bayan_json_v_float(bayan_json_v_obj_get(v, "c1")),
@@ -88,7 +88,7 @@ fn lens_type_to_json(lt) {
 
 #must_use
 fn lens_type_from_json(json, len) {
-    var v = bayan_json_v_parse_str(json, len);
+    var v = bayan_json_v_parse_buf(json, len);
     if (streq(str_data(bayan_json_v_str(v)), "Converging") == 1) {
         return LENS_CONVERGING;
     }
@@ -109,7 +109,7 @@ fn polarization_to_json(p) {
 
 #must_use
 fn polarization_from_json(json, len) {
-    var v = bayan_json_v_parse_str(json, len);
+    var v = bayan_json_v_parse_buf(json, len);
     return polarization_new(
     bayan_json_v_float(bayan_json_v_obj_get(v, "ex")),
     bayan_json_v_float(bayan_json_v_obj_get(v, "ey")),
@@ -146,7 +146,7 @@ fn prescription_to_json(p) {
 
 #must_use
 fn prescription_from_json(json, len) {
-    var v = bayan_json_v_parse_str(json, len);
+    var v = bayan_json_v_parse_buf(json, len);
     var p = prescription_new(str_data(bayan_json_v_str(bayan_json_v_obj_get(v, "name"))));
     Prescription_set_n_initial(p, bayan_json_v_float(bayan_json_v_obj_get(v, "n_initial")));
     var surfaces_v = bayan_json_v_obj_get(v, "surfaces");
@@ -180,7 +180,7 @@ fn spd_to_json(s) {
 
 #must_use
 fn spd_from_json(json, len) {
-    var v = bayan_json_v_parse_str(json, len);
+    var v = bayan_json_v_parse_buf(json, len);
     var vals_v = bayan_json_v_obj_get(v, "values");
     var n = bayan_json_v_arr_len(vals_v);
     var data = alloc(n * 8);

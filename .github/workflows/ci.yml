@@ -38,7 +38,7 @@ jobs:
           echo "CYRIUS_HOME=$HOME/.cyrius" >> $GITHUB_ENV
 
       - name: Resolve dependencies
-        # Clones the hisab git dep (tag 2.6.8) and links lib/hisab.cyr; the
+        # Clones the hisab git dep (tag 2.11.1) and links lib/hisab.cyr; the
         # stdlib subset is committed under lib/, so no `cyrius lib sync` needed.
         run: cyrius deps
 
@@ -98,12 +98,30 @@ jobs:
         run: |
           cyrius distlib
           cyrius distlib ai
-          if ! git diff --quiet dist/prakash.cyr dist/prakash-ai.cyr; then
-            echo "ERROR: a dist bundle is stale. Run 'cyrius distlib && cyrius distlib ai' and commit."
-            git --no-pager diff --stat dist/prakash.cyr dist/prakash-ai.cyr
+          # `cyrius distlib` gets the .deps sidecars backwards for prakash's
+          # inverted layout (base = narrow math-only, profile = wide + TLS), so
+          # we rewrite them from the manifest. See the script header.
+          ./scripts/sync-deps-sidecar.sh
+          if ! git diff --quiet dist/; then
+            echo "ERROR: a dist artifact is stale. Run 'cyrius distlib && cyrius distlib ai"
+            echo "       && ./scripts/sync-deps-sidecar.sh' and commit."
+            git --no-pager diff --stat dist/
             exit 1
           fi
-          echo "dist/prakash.cyr and dist/prakash-ai.cyr match lib/"
+          echo "dist/ bundles and .deps sidecars are in sync"
+
+      - name: Verify core bundle is TLS-free
+        # The two-bundle split's whole promise: dist/prakash.cyr is math-only, so
+        # a consumer that wants optics never compiles TLS. This also validates
+        # the AI_ONLY fold list in scripts/sync-deps-sidecar.sh — if a core
+        # module ever starts using one of those folds, the sidecar would begin
+        # under-reporting, and this fails first.
+        run: |
+          if grep -nE '\bsandhi_|\btls_[a-z]|\bhttp_[a-z]|\btcp_|\bdynlib_|\brand_[a-z]' dist/prakash.cyr; then
+            echo "::error::dist/prakash.cyr references an AI/TLS-only fold — the math-only bundle must not."
+            exit 1
+          fi
+          echo "dist/prakash.cyr is free of sandhi/TLS/net symbols"
 
       - name: Build
         run: |
