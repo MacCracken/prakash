@@ -43,10 +43,6 @@ Suite **5334 → 5361** assertions across 27 suites.
   `lens_type_from_json` still returns `LENS_TYPE_INVALID`), so a caller that only
   checks the return value needs nothing but the extra argument.
 
-  ⚠ Strictly, adding a required parameter is a major-version change under SemVer.
-  It ships as a minor here deliberately: there are no Cyrius consumers yet
-  (soorat, kiran and ranga are still Rust), so the migration cost today is zero.
-
 ### Added
 - **`PK_ERR_PARSE`** (`-9`) — the input bytes are not well-formed JSON, or the
   document is not the type the decoder needs. Distinct from
