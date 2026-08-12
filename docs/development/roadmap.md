@@ -24,6 +24,7 @@ Prakash does NOT own:
 | V2.0.1 | Toolchain refresh | Cyrius 6.4.10 → 6.5.20, hisab 2.6.8 → 2.11.1, sakshi 2.4.2 → 2.4.10. `bayan_json_v_parse_str` → `_parse_buf` rename absorbed. 5251 assertions unchanged. 6.5.20's harness subtracts its timer floor, so the Rust-vs-Cyrius comparison is measurable for the first time (~7× median, was reported as 60×–1,300×). See the [2.0.1] CHANGELOG entry. |
 | V2.0.2 | Audit & hardening | Six-dimension P(-1) sweep with adversarial verification. Fixed 7 public entry points that SIGSEGVed on malformed input, unchecked/overflowing allocations, missing bounds checks on Pattern2D and Mueller accessors, an out-of-bounds read in `spd_at`, silent fabrication on bad JSON, flat-surface JSON corruption, and three math boundaries that diverged from Rust. 5251 → 5334 assertions, 26 → 27 suites. See the [2.0.2] CHANGELOG entry. |
 | **V2.1.0** | **Error channels** | **Every `*_from_json` (9 functions) takes a trailing `err_out` and reports `PK_ERR_PARSE` (bad bytes) / `PK_ERR_INVALID_PARAMETER` (wrong schema) / `PK_ERR_ALLOCATION`, closing the gap 2.0.2 left open. Breaking signature change; migration table in the [2.1.0] CHANGELOG entry. 5361 assertions.** |
+| **V2.1.1** | **Audit cleanup** | **Clears every remaining 2.0.2 audit item: trig out-of-domain (`f64_sin(1e300)` returned 1e300), `expm1` precision loss below 1e-16, the unusable `point_source_new`, and 46 unguarded constructor allocs. Closes all three coverage gaps and adds 8 composite benchmarks (27 → 35) — `interference_pattern` is 7× the slowest previously measured op. 5424 assertions.** |
 
 ### V2.0 exit criteria (met)
 
@@ -46,9 +47,15 @@ The `bridge` module ships primitive-value hooks — no dependency on sibling cra
 
 ## Post-2.0 Backlog
 
-### Consumer integration (as the Rust consumers port)
+### Consumer integration (genuinely waiting on the consumers)
 
 - [ ] soorat / kiran / ranga: consume `dist/prakash.cyr` directly once they move to Cyrius
+
+### Dependency adoption (actionable now — hisab 2.11.1 is already a dep)
+
+Neither waits on a consumer port; `hvec3_*` and the quadrature routines ship in
+the `dist/hisab.cyr` we already pull.
+
 - [ ] hisab geometry bridge: adopt `hisab` `HVec3`/ray types in the tracer (currently local `RayVec3`)
 - [ ] hisab numerical integration: use `hisab` Gauss-Legendre for Huygens-Fresnel / SPD generation
 
@@ -71,8 +78,47 @@ impact rather than guessed at — see `docs/benchmarks-rust-v-cyrius.md`.
       (`pbr/fresnel_schlick` is 16.3× Rust at 17 ns absolute).
 - [ ] **Arena allocation** for struct-returning ops — `atmosphere/sky_color_rgb`
       is the worst scalar row (19.7×) and the only one that allocates.
-- [ ] **SIMD** (blocked on Cyrius) — the FFT/pattern paths are the only genuinely
-      compute-bound ones; `wave/diffraction_pattern_2d_8x8` sits at 2.8×.
+- [ ] **SIMD** — available now, NOT blocked: `lib/simd.cyr` ships 127 functions
+      (`f64v2_*` / `f64v4_*`, incl. `fmadd`/`dot`); it simply is not in prakash's
+      `[deps] stdlib` yet. The compute-bound paths are the ones worth vectorising,
+      now that 2.1.1 measures them: `wave/interference_pattern_16x16` (108 µs),
+      `ray/spot_diagram` (28 µs), `wave/diffraction_pattern_2d_8x8` (15 µs).
+
+### Correctness (from the 2.0.2 audit — ALL FIXED in 2.1.1)
+
+Each was found and verified during the 2.0.2 sweep and deliberately left out of
+that release. They are real and reproduced; none is a guess.
+
+- [x] **`point_source_new` is unusable by its only consumer.** `interference_pattern`
+      indexes a contiguous `PointSource` array (`sources + i*sizeof(PointSource)`),
+      but the only public constructor returns standalone allocations that cannot be
+      indexed that way — `tests/wave_pattern.tcyr` works around it with a local
+      `_mksrc` helper. Needs either `point_source_array_new(n)` + a setter, or an
+      init-into-caller-slot form.
+- [x] **`f64_sin`/`f64_cos` return the argument unchanged for |x| >= 2^63**
+      (x87 `fsin` out-of-range), silently corrupting `interference_intensity` and
+      `single_slit_intensity` at extreme phase. Either range-reduce mod TAU in a
+      prakash helper before the trig call, or document an explicit domain limit.
+- [x] **`planck_radiance` substitutes `exp(x)-1` for Rust's `exp_m1`**, losing the
+      small-x branch below x ~ 1e-16. Known deviation since the port; a proper
+      `expm1` (series for |x| < 0.5) would close it.
+- [x] **~78 `alloc(sizeof(T))` constructor sites do not check for 0.** Only
+      reachable under heap exhaustion (the caller-sized ones were fixed in 2.0.2),
+      but the constructors return an unguarded pointer, so `PK_ERR_ALLOCATION`
+      cannot be reported from them. Decide whether to guard them all or document
+      the limit.
+
+### Coverage (from the 2.0.2 audit — ALL CLOSED in 2.1.1)
+
+- [x] **Benchmark the expensive composites.** `tests/prakash.bcyr` covers 27 ops but
+      misses every heavy one: `spd_to_xyz`, `luminous_flux`, `color_rendering_index`,
+      `spd_blackbody`, `trace_surface`, `trace_sequential`, `spot_diagram`,
+      `interference_pattern`. The audit measured `interference_pattern` at ~37× the
+      slowest currently-benchmarked op, so the suite is not covering the real cost.
+- [x] **`trace_surface` has 5 error branches and 1 is tested** — the four
+      geometry-miss cases the whole tracing stack depends on are unexercised.
+- [x] **`mueller_set`/`mueller_get` had zero direct tests** before 2.0.2 added the
+      bounds cases; a full 16-element set/get roundtrip is still missing.
 
 ### Accuracy & completeness (demand-gated)
 

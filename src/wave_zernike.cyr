@@ -91,10 +91,10 @@ fn zernike_poly(n, m, rho, theta) {
     }
     var angular = F64_ONE;
     if (m > 0) {
-        angular = f64_cos(f64_mul(f64_from(m_abs), theta));
+        angular = _prk_cos(f64_mul(f64_from(m_abs), theta));
     } else {
         if (m < 0) {
-            angular = f64_sin(f64_mul(f64_from(m_abs), theta));
+            angular = _prk_sin(f64_mul(f64_from(m_abs), theta));
         }
     }
     return f64_mul(f64_mul(norm, r), angular);
@@ -180,6 +180,7 @@ struct ZernikeWavefront { coeffs; len; }
 #must_use
 fn zernike_wf_new(coeffs, len) {
     var wf = alloc(sizeof(ZernikeWavefront));
+    if (wf == 0) { return 0; }
     ZernikeWavefront_set_coeffs(wf, coeffs);
     ZernikeWavefront_set_len(wf, len);
     return wf;

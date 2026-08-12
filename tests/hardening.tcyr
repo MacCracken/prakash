@@ -272,4 +272,111 @@ assert(load64(&ec) == PK_ERR_NONE, "a valid variant leaves PK_ERR_NONE");
 # prakash_is_err works on every code the family emits.
 assert(prakash_is_err(PK_ERR_PARSE) == 1, "PK_ERR_PARSE reads as an error");
 
+# ── 8. Coverage gaps closed (2.1.1) ────────
+# trace_surface has five error branches; before 2.1.1 only the aperture case was
+# tested, leaving the four geometry-miss paths the whole tracing stack relies on
+# unexercised.
+test_group("trace_surface: every error branch");
+
+var te = 0;
+var ZZ = f64_from(0);
+
+# (a) plane, ray parallel to it -> |dz| < eps, no intersection
+var plane = surface_plane(f64_from(10), F64_ONE, f64_from(5));
+var parallel = trace_ray_new(ray_vec3(ZZ, ZZ, ZZ), ray_vec3(F64_ONE, ZZ, ZZ), F64_ONE);
+var h_a = trace_surface(parallel, plane, &te);
+assert(h_a == 0, "plane + parallel ray -> no hit");
+assert(te == PK_ERR_INVALID_PARAMETER, "plane + parallel ray -> PK_ERR_INVALID_PARAMETER");
+
+# (b) plane behind the ray -> t < 0
+var behind = trace_ray_new(ray_vec3(ZZ, ZZ, f64_from(20)), ray_vec3(ZZ, ZZ, F64_ONE), F64_ONE);
+var h_b = trace_surface(behind, plane, &te);
+assert(h_b == 0, "plane behind the ray -> no hit");
+assert(te == PK_ERR_INVALID_PARAMETER, "plane behind the ray -> PK_ERR_INVALID_PARAMETER");
+
+# (c) sphere missed entirely -> discriminant < 0
+var sph = surface_sphere(f64_from(5), f64_from(10), F64_ONE, f64_from(5));
+var miss = trace_ray_new(ray_vec3(f64_from(100), ZZ, ZZ), ray_vec3(ZZ, ZZ, F64_ONE), F64_ONE);
+var h_c = trace_surface(miss, sph, &te);
+assert(h_c == 0, "sphere missed -> no hit");
+assert(te == PK_ERR_INVALID_PARAMETER, "sphere missed -> PK_ERR_INVALID_PARAMETER");
+
+# (d) sphere entirely behind -> both roots negative
+var past = trace_ray_new(ray_vec3(ZZ, ZZ, f64_from(100)), ray_vec3(ZZ, ZZ, F64_ONE), F64_ONE);
+var h_d = trace_surface(past, sph, &te);
+assert(h_d == 0, "sphere behind the ray -> no hit");
+assert(te == PK_ERR_INVALID_PARAMETER, "sphere behind the ray -> PK_ERR_INVALID_PARAMETER");
+
+# (e) control: a ray that genuinely hits must still succeed and clear err_out
+store64(&te, PK_ERR_TIR);
+var good_ray = trace_ray_new(ray_vec3(ZZ, ZZ, ZZ), ray_vec3(ZZ, ZZ, F64_ONE), F64_ONE);
+var h_e = trace_surface(good_ray, plane, &te);
+assert(h_e != 0, "a ray that hits still returns a TraceHit (control)");
+assert(te == PK_ERR_NONE, "a successful trace clears a stale error code");
+
+# ── Mueller set/get: full 4x4 roundtrip ────────
+# The accessors had no direct tests before 2.0.2 added the bounds cases; this
+# pins that every valid (i, j) addresses its own distinct slot.
+test_group("mueller set/get roundtrip over all 16 elements");
+
+var mrt = mueller_identity();
+for (var mi = 0; mi < 4; mi = mi + 1) {
+    for (var mj = 0; mj < 4; mj = mj + 1) {
+        var want = f64_from(mi * 4 + mj + 1);
+        assert(mueller_set(mrt, mi, mj, want) == PK_ERR_NONE, "mueller_set accepts a valid index");
+        assert(_h_bits(mueller_get(mrt, mi, mj), want) == 1, "mueller_get reads back what was set");
+    }
+}
+# every slot must still hold its own value (no aliasing between (i,j) pairs)
+var distinct = 1;
+for (var ci = 0; ci < 4; ci = ci + 1) {
+    for (var cj = 0; cj < 4; cj = cj + 1) {
+        if (_h_bits(mueller_get(mrt, ci, cj), f64_from(ci * 4 + cj + 1)) == 0) { distinct = 0; }
+    }
+}
+assert(distinct == 1, "all 16 elements hold distinct values (no slot aliasing)");
+
+# ── PointSource array API (2.1.1) ────────
+# interference_pattern indexes a CONTIGUOUS array; point_source_new returns
+# standalone allocations that cannot be indexed that way, so the suite carried a
+# private _mksrc helper. The library now provides the array form.
+test_group("point_source array API");
+
+var psa = point_source_array_new(3);
+assert(psa != 0, "point_source_array_new(3) allocates");
+assert(point_source_array_new(0) == 0, "point_source_array_new rejects n = 0");
+assert(point_source_array_new(0 - 2) == 0, "point_source_array_new rejects a negative n");
+assert(point_source_set(psa, 0, ZZ, ZZ, F64_ONE, ZZ) == PK_ERR_NONE, "point_source_set writes element 0");
+assert(point_source_set(psa, 2, F64_ONE, ZZ, F64_TWO, ZZ) == PK_ERR_NONE, "point_source_set writes element 2");
+assert(point_source_set(0, 0, ZZ, ZZ, F64_ONE, ZZ) == PK_ERR_INVALID_PARAMETER,
+"point_source_set rejects a null array");
+assert(point_source_set(psa, 0 - 1, ZZ, ZZ, F64_ONE, ZZ) == PK_ERR_INVALID_PARAMETER,
+"point_source_set rejects a negative index");
+# elements are contiguous and independent
+assert(_h_bits(PointSource_amplitude(point_source_at(psa, 0)), F64_ONE) == 1, "element 0 kept its amplitude");
+assert(_h_bits(PointSource_amplitude(point_source_at(psa, 2)), F64_TWO) == 1, "element 2 kept its amplitude");
+assert(point_source_at(psa, 1) == psa + sizeof(PointSource), "elements are contiguous");
+assert(point_source_at(0, 0) == 0, "point_source_at rejects a null array");
+# and the array actually drives interference_pattern
+var ip = interference_pattern(psa, 3, f64_div(F64_ONE, f64_from(2000000)), F64_ONE,
+f64_neg(F64_ONE), F64_ONE, f64_neg(F64_ONE), F64_ONE, 8, 8);
+assert(ip != 0, "interference_pattern consumes a point_source_array_new buffer");
+
+# ── Trig domain guard (2.1.1) ────────
+# x86 fsin/fcos are undefined for |x| >= 2^63 and return the ARGUMENT there, so
+# f64_sin(1e300) was 1e300 — an "intensity" outside [-1, 1].
+test_group("trig reports out-of-domain instead of returning the argument");
+
+var huge = 0x7E37E43C8800759C;                       # 1e300
+assert(_h_bits(_prk_sin(huge), huge) == 0, "sin(1e300) no longer returns the argument");
+assert(f64_le(f64_abs(_prk_sin(huge)), F64_ONE) == 0, "sin(1e300) is NaN, not a bogus in-range value");
+assert(f64_le(f64_abs(_prk_cos(huge)), F64_ONE) == 0, "cos(1e300) is NaN");
+assert(_h_bits(_prk_sin(PINF), PINF) == 0, "sin(+inf) does not return +inf");
+# in-domain values are untouched
+assert(_h_bits(_prk_sin(ZERO), ZERO) == 1, "sin(0) = 0 (control)");
+assert(_h_bits(_prk_cos(ZERO), F64_ONE) == 1, "cos(0) = 1 (control)");
+assert(f64_le(f64_abs(_prk_sin(f64_from(1000000))), F64_ONE) == 1, "sin(1e6) still in range (control)");
+assert(f64_le(f64_abs(_prk_sin(f64_from(4611686018427387904))), F64_ONE) == 1,
+"sin(2^62) still in range (control: just below the limit)");
+
 var r = assert_summary();

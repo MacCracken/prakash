@@ -27,15 +27,15 @@ fn fraunhofer_rect(wavelength, width, height, angle_x, angle_y, i0) {
 # k = TAU*sin(angle)/wl; accumulate E; return |E|^2.
 #must_use
 fn fraunhofer_1d(aperture, pairs, wavelength, angle) {
-    var k_sin = f64_div(f64_mul(F64_TAU, f64_sin(angle)), wavelength);
+    var k_sin = f64_div(f64_mul(F64_TAU, _prk_sin(angle)), wavelength);
     var real = f64_from(0);
     var imag = f64_from(0);
     for (var i = 0; i < pairs; i = i + 1) {
         var x = load64(aperture + i * 16);
         var amplitude = load64(aperture + i * 16 + 8);
         var phase = f64_mul(k_sin, x);
-        real = f64_add(real, f64_mul(amplitude, f64_cos(phase)));
-        imag = f64_add(imag, f64_mul(amplitude, f64_sin(phase)));
+        real = f64_add(real, f64_mul(amplitude, _prk_cos(phase)));
+        imag = f64_add(imag, f64_mul(amplitude, _prk_sin(phase)));
     }
     return f64_add(f64_mul(real, real), f64_mul(imag, imag));
 }
@@ -92,8 +92,8 @@ fn fresnel_integral_c(x) {
         _fresnel_fg(ax, &f, &g);
         # 0.5 + f*sin(pi_x2) - g*cos(pi_x2)
         result = f64_sub(
-        f64_add(F64_HALF, f64_mul(f, f64_sin(pi_x2))),
-        f64_mul(g, f64_cos(pi_x2)));
+        f64_add(F64_HALF, f64_mul(f, _prk_sin(pi_x2))),
+        f64_mul(g, _prk_cos(pi_x2)));
     }
     if (f64_lt(x, f64_from(0)) == 1) {
         return f64_neg(result);
@@ -126,8 +126,8 @@ fn fresnel_integral_s(x) {
         _fresnel_fg(ax, &f, &g);
         # 0.5 - f*cos(pi_x2) - g*sin(pi_x2)
         result = f64_sub(
-        f64_sub(F64_HALF, f64_mul(f, f64_cos(pi_x2))),
-        f64_mul(g, f64_sin(pi_x2)));
+        f64_sub(F64_HALF, f64_mul(f, _prk_cos(pi_x2))),
+        f64_mul(g, _prk_sin(pi_x2)));
     }
     if (f64_lt(x, f64_from(0)) == 1) {
         return f64_neg(result);
@@ -161,8 +161,8 @@ fn fresnel_integral_cs(x, c_out, s_out) {
         var f = 0;
         var g = 0;
         _fresnel_fg(ax, &f, &g);
-        var sin_px2 = f64_sin(pi_x2);
-        var cos_px2 = f64_cos(pi_x2);
+        var sin_px2 = _prk_sin(pi_x2);
+        var cos_px2 = _prk_cos(pi_x2);
         c_val = f64_sub(f64_add(F64_HALF, f64_mul(f, sin_px2)), f64_mul(g, cos_px2));
         s_val = f64_sub(f64_sub(F64_HALF, f64_mul(f, cos_px2)), f64_mul(g, sin_px2));
     }
@@ -208,8 +208,8 @@ fn huygens_fresnel_1d(aperture, pairs, wavelength, z, x_obs) {
         var r = ganita_f64_hypot(z, dx);
         var phase = f64_mul(k, r);
         var weight = f64_div(f64_mul(amplitude, z), f64_mul(r, r));
-        real = f64_add(real, f64_mul(weight, f64_cos(phase)));
-        imag = f64_add(imag, f64_mul(weight, f64_sin(phase)));
+        real = f64_add(real, f64_mul(weight, _prk_cos(phase)));
+        imag = f64_add(imag, f64_mul(weight, _prk_sin(phase)));
     }
     return f64_add(f64_mul(real, real), f64_mul(imag, imag));
 }
@@ -236,8 +236,8 @@ fn coating_reflectance(wavelength, n_incident, n_coating, n_substrate, thickness
     var delta = f64_div(
     f64_mul(f64_mul(F64_TAU, n_coating), thickness),
     wavelength);
-    var sin_d = f64_sin(delta);
-    var cos_d = f64_cos(delta);
+    var sin_d = _prk_sin(delta);
+    var cos_d = _prk_cos(delta);
     var nc2 = f64_mul(n_coating, n_coating);
     var ni_ns = f64_mul(n_incident, n_substrate);
     var a = f64_sub(ni_ns, nc2);
@@ -274,8 +274,8 @@ fn multilayer_reflectance(wavelength, n_incident, n_substrate, layers, num_layer
         var n = load64(layers + i * 16);
         var d = load64(layers + i * 16 + 8);
         var delta = f64_div(f64_mul(f64_mul(F64_TAU, n), d), wavelength);
-        var sin_d = f64_sin(delta);
-        var cos_d = f64_cos(delta);
+        var sin_d = _prk_sin(delta);
+        var cos_d = _prk_cos(delta);
         var n11 = f64_sub(f64_mul(m11_r, cos_d), f64_mul(f64_mul(m12_i, n), sin_d));
         var n12 = f64_add(f64_div(f64_mul(f64_neg(m11_r), sin_d), n), f64_mul(m12_i, cos_d));
         var n21 = f64_sub(f64_mul(m21_i, cos_d), f64_mul(f64_mul(m22_r, n), sin_d));
@@ -337,8 +337,8 @@ fn _diff_tmm_stack(wavelength, ni, ns, layers, num_layers, cos_i, cos_sub, ni_si
         f64_mul(f64_mul(f64_mul(F64_TAU, n), d), cos_l),
         wavelength);
         var eta = _diff_eta(n, cos_l, is_p);
-        var sin_d = f64_sin(delta);
-        var cos_d = f64_cos(delta);
+        var sin_d = _prk_sin(delta);
+        var cos_d = _prk_cos(delta);
         var n11 = f64_sub(f64_mul(m11_r, cos_d), f64_mul(f64_mul(m12_i, eta), sin_d));
         var n12 = f64_add(f64_div(f64_mul(f64_neg(m11_r), sin_d), eta), f64_mul(m12_i, cos_d));
         var n21 = f64_sub(f64_mul(m21_i, cos_d), f64_mul(f64_mul(m22_r, eta), sin_d));
@@ -366,14 +366,16 @@ fn _diff_tmm_stack(wavelength, ni, ns, layers, num_layers, cos_i, cos_sub, ni_si
 #must_use
 fn multilayer_rt(wavelength, angle, n_incident, n_substrate, layers, num_layers) {
     _prk_trace("multilayer_rt");
-    var cos_i = f64_cos(angle);
-    var sin_i = f64_sin(angle);
+    var cos_i = _prk_cos(angle);
+    var sin_i = _prk_sin(angle);
     var ni_sin_i = f64_mul(n_incident, sin_i);
     var cos_sub = _diff_cos_in_medium(n_substrate, ni_sin_i);
     var rt_s = alloc(16);
+    if (rt_s == 0) { return 0; }
     _diff_tmm_stack(wavelength, n_incident, n_substrate, layers, num_layers,
     cos_i, cos_sub, ni_sin_i, 0, rt_s);
     var rt_p = alloc(16);
+    if (rt_p == 0) { return 0; }
     _diff_tmm_stack(wavelength, n_incident, n_substrate, layers, num_layers,
     cos_i, cos_sub, ni_sin_i, 1, rt_p);
     var r_s = load64(rt_s);
@@ -381,6 +383,7 @@ fn multilayer_rt(wavelength, angle, n_incident, n_substrate, layers, num_layers)
     var r_p = load64(rt_p);
     var t_p = load64(rt_p + 8);
     var res = alloc(sizeof(ThinFilmResult));
+    if (res == 0) { return 0; }
     ThinFilmResult_set_r_s(res, r_s);
     ThinFilmResult_set_r_p(res, r_p);
     ThinFilmResult_set_t_s(res, t_s);

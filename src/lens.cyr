@@ -146,6 +146,7 @@ fn lens_cardinal_points(n, r1, r2, thickness, err_out) {
     var bfd = f64_mul(f, f64_sub(F64_ONE, f64_div(f64_mul(phi1, thickness), n)));
     var ffd = f64_mul(f64_neg(f), f64_sub(F64_ONE, f64_div(f64_mul(phi2, thickness), n)));
     var cp = alloc(sizeof(CardinalPoints));
+    if (cp == 0) { return 0; }
     CardinalPoints_set_focal_length(cp, f);
     CardinalPoints_set_ffd(cp, ffd);
     CardinalPoints_set_bfd(cp, bfd);
@@ -171,7 +172,7 @@ fn lens_aperture_from_f_number(focal_length, f_num) {
 # Numerical aperture: NA = n * sin(half_angle).
 #must_use
 fn lens_numerical_aperture(n, half_angle) {
-    return f64_mul(n, f64_sin(half_angle));
+    return f64_mul(n, _prk_sin(half_angle));
 }
 
 # Paraxial NA from f-number: NA = 1 / (2*N).
@@ -266,7 +267,7 @@ fn lens_mtf_through_focus(wavelength, f_num, spatial_freq, defocus_range, n_defo
         if (f64_lt(f64_abs(w20), _lens_eps15()) == 0) {
             var phi = f64_mul(f64_mul(F64_PI, w20), v);
             if (f64_lt(f64_abs(phi), _lens_eps15()) == 0) {
-                attenuation = f64_abs(f64_div(f64_sin(phi), phi));
+                attenuation = f64_abs(f64_div(_prk_sin(phi), phi));
             }
         }
         store64(out + i * 16, defocus);
@@ -324,6 +325,7 @@ fn lens_seidel_coefficients(n, focal_length, q, p) {
     var ce = f64_mul(f64_div(f64_add(f64_mul(f64_from(3), n), F64_ONE), n), p);
     var coma = f64_mul(f64_mul(_lens_pow2(phi), cterm2), f64_add(cd, ce));
     var out = alloc(sizeof(SeidelCoefficients));
+    if (out == 0) { return 0; }
     SeidelCoefficients_set_spherical(out, spherical);
     SeidelCoefficients_set_coma(out, coma);
     SeidelCoefficients_set_astigmatism(out, phi);

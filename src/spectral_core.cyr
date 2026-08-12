@@ -3,9 +3,9 @@
 #
 # Ported from the Rust `spectral/mod.rs`. Extreme-magnitude physical constants
 # (Planck, Boltzmann) are encoded as exact IEEE-754 hex bit patterns; other
-# non-integers are exact ratios. Rust `exp_m1` has no Cyrius stdlib equivalent,
-# so the straightforward exp(x)-1 is used (differs only for |x| << 1, which does
-# not arise in the Planck regimes exercised here).
+# non-integers are exact ratios. `_expm1` reproduces Rust's `f64::exp_m1` via
+# Kahan's identity (2.1.1) — the port previously substituted a bare exp(x)-1,
+# which returned 0 for any |x| below about 1e-16.
 
 fn _r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
 
@@ -37,6 +37,7 @@ struct Rgb { r; g; b; }
 #must_use
 fn rgb_new(r, g, b) {
     var c = alloc(sizeof(Rgb));
+    if (c == 0) { return 0; }
     Rgb_set_r(c, r);
     Rgb_set_g(c, g);
     Rgb_set_b(c, b);
@@ -65,6 +66,7 @@ struct RgbU8 { r; g; b; }
 fn rgb_to_u8(c) {
     var cc = rgb_clamp(c);
     var u = alloc(sizeof(RgbU8));
+    if (u == 0) { return 0; }
     RgbU8_set_r(u, f64_to(f64_add(f64_mul(Rgb_r(cc), f64_from(255)), _r(5, 10))));
     RgbU8_set_g(u, f64_to(f64_add(f64_mul(Rgb_g(cc), f64_from(255)), _r(5, 10))));
     RgbU8_set_b(u, f64_to(f64_add(f64_mul(Rgb_b(cc), f64_from(255)), _r(5, 10))));
@@ -136,8 +138,23 @@ fn wavelength_to_rgb(wavelength_nm, err_out) {
 
 # ── Blackbody radiation ────────
 
-# exp(x) - 1 (Cyrius has no expm1; adequate outside the |x|<<1 cancellation regime).
-fn _expm1(x) { return f64_sub(_prk_exp(x), F64_ONE); }
+# exp(x) - 1, accurate for small x. Rust used `f64::exp_m1`; the port originally
+# substituted a bare `exp(x) - 1`, which loses the entire result to cancellation
+# once x is small enough that exp(x) rounds to a neighbour of 1.0 (below about
+# 1e-16 it returns exactly 0 where the true value is x).
+#
+# Kahan's identity: with u = exp(x), the ratio (u-1)/ln(u) corrects the rounding
+# in both u and u-1, because the SAME u appears in numerator and denominator, so
+# their errors cancel to first order. Exact at u == 1 (return x directly) and
+# guarded at u == 0 (x very negative, where exp underflows and the answer is -1).
+fn _expm1(x) {
+    var u = _prk_exp(x);
+    if (u == F64_ONE) { return x; }
+    if (u == 0) { return f64_neg(F64_ONE); }
+    var um1 = f64_sub(u, F64_ONE);
+    if (um1 == f64_neg(F64_ONE)) { return f64_neg(F64_ONE); }
+    return f64_div(f64_mul(um1, x), f64_ln(u));
+}
 
 # Planck's law: spectral radiance (W*sr^-1*m^-3) at wavelength_m and temperature_k.
 # Uses the Wien approximation for x > 500 to avoid exp overflow; 0 for T <= 0.

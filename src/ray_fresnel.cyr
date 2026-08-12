@@ -50,8 +50,8 @@ fn fresnel_normal(n1, n2) {
 #must_use
 fn fresnel_unpolarized(n1, n2, incident_angle, err_out) {
     store64(err_out, PK_ERR_NONE);
-    var sin_i = f64_sin(incident_angle);
-    var cos_i = f64_cos(incident_angle);
+    var sin_i = _prk_sin(incident_angle);
+    var cos_i = _prk_cos(incident_angle);
     var sin_t = f64_mul(f64_div(n1, n2), sin_i);
     if (f64_gt(f64_abs(sin_t), F64_ONE) == 1) {
         store64(err_out, PK_ERR_TIR);
@@ -79,6 +79,7 @@ struct ComplexMedium { n; k; name; }
 
 fn _cm_mk(n, k, name) {
     var m = alloc(sizeof(ComplexMedium));
+    if (m == 0) { return 0; }
     ComplexMedium_set_n(m, n);
     ComplexMedium_set_k(m, k);
     ComplexMedium_set_name(m, name);
@@ -124,7 +125,7 @@ fn fresnel_normal_complex(n1, medium) {
 #   cos^2(theta_t) = 1 - (n1/n~)^2 sin^2(theta_i).
 # Writes the real/imag parts through cos_re_out/cos_im_out.
 fn _fr_complex_cos_t(n1, mn, mk, incident_angle, cos_re_out, cos_im_out) {
-    var sin_i = f64_sin(incident_angle);
+    var sin_i = _prk_sin(incident_angle);
     var sin2_i = f64_mul(sin_i, sin_i);
     var n2_sq = f64_sub(f64_mul(mn, mn), f64_mul(mk, mk));
     var n2_im = f64_mul(f64_mul(F64_TWO, mn), mk);
@@ -148,7 +149,7 @@ fn _fr_complex_cos_t(n1, mn, mk, incident_angle, cos_re_out, cos_im_out) {
 fn fresnel_s_complex(n1, medium, incident_angle) {
     var mn = ComplexMedium_n(medium);
     var mk = ComplexMedium_k(medium);
-    var cos_i = f64_cos(incident_angle);
+    var cos_i = _prk_cos(incident_angle);
     var cos_t_re = 0;
     var cos_t_im = 0;
     _fr_complex_cos_t(n1, mn, mk, incident_angle, &cos_t_re, &cos_t_im);
@@ -168,7 +169,7 @@ fn fresnel_s_complex(n1, medium, incident_angle) {
 fn fresnel_p_complex(n1, medium, incident_angle) {
     var mn = ComplexMedium_n(medium);
     var mk = ComplexMedium_k(medium);
-    var cos_i = f64_cos(incident_angle);
+    var cos_i = _prk_cos(incident_angle);
     var cos_t_re = 0;
     var cos_t_im = 0;
     _fr_complex_cos_t(n1, mn, mk, incident_angle, &cos_t_re, &cos_t_im);

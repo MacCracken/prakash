@@ -210,7 +210,7 @@ fn pbr_iridescence_fresnel(n_outside, n_film, n_base, thickness, wavelength, cos
     var delta = f64_div(
     f64_mul(f64_mul(f64_mul(F64_TAU, n_film), thickness), cos_film),
     wavelength);
-    var cos_d = f64_cos(delta);
+    var cos_d = _prk_cos(delta);
     var sqrt_rr = f64_sqrt(f64_mul(r01, r12));
     var cos_2d = f64_sub(f64_mul(f64_mul(F64_TWO, cos_d), cos_d), F64_ONE);
     var mix = f64_mul(f64_mul(F64_TWO, sqrt_rr), cos_2d);
@@ -302,8 +302,8 @@ fn pbr_sample_ggx(roughness, xi1, xi2, out) {
     f64_add(F64_ONE, f64_mul(f64_sub(a2, F64_ONE), xi1))));
     var sin_theta = f64_max(f64_sqrt(f64_sub(F64_ONE, f64_mul(cos_theta, cos_theta))), f64_from(0));
     var phi = f64_mul(F64_TAU, xi2);
-    var sin_phi = f64_sin(phi);
-    var cos_phi = f64_cos(phi);
+    var sin_phi = _prk_sin(phi);
+    var cos_phi = _prk_cos(phi);
     store64(out, f64_mul(sin_theta, cos_phi));
     store64(out + 8, f64_mul(sin_theta, sin_phi));
     store64(out + 16, cos_theta);
@@ -323,8 +323,8 @@ fn pbr_sample_ggx_pdf(n_dot_h, h_dot_v, roughness) {
 fn pbr_sample_cosine_hemisphere(xi1, xi2, out) {
     var r = f64_sqrt(xi1);
     var phi = f64_mul(F64_TAU, xi2);
-    var sin_phi = f64_sin(phi);
-    var cos_phi = f64_cos(phi);
+    var sin_phi = _prk_sin(phi);
+    var cos_phi = _prk_cos(phi);
     store64(out, f64_mul(r, cos_phi));
     store64(out + 8, f64_mul(r, sin_phi));
     store64(out + 16, f64_max(f64_sqrt(f64_sub(F64_ONE, xi1)), f64_from(0)));
@@ -388,6 +388,7 @@ fn pbr_integrate_brdf_lut(n_dot_v, roughness, num_samples, out) {
     _prk_trace("integrate_brdf_lut");
     var ndv = f64_clamp(n_dot_v, _pbr_r(1, 1000), F64_ONE);
     var v = alloc(24);
+    if (v == 0) { return 0; }
     store64(v, f64_sqrt(f64_sub(F64_ONE, f64_mul(ndv, ndv))));
     store64(v + 8, f64_from(0));
     store64(v + 16, ndv);
@@ -395,6 +396,7 @@ fn pbr_integrate_brdf_lut(n_dot_v, roughness, num_samples, out) {
     var bias = f64_from(0);
     var inv_samples = f64_div(F64_ONE, f64_from(num_samples));
     var h = alloc(24);
+    if (h == 0) { return 0; }
     for (var i = 0; i < num_samples; i = i + 1) {
         var xi1 = f64_mul(f64_from(i), inv_samples);
         pbr_sample_ggx(roughness, xi1, _pbr_radvdc(i), h);

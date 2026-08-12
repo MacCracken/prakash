@@ -24,7 +24,7 @@ fn _wave_round(x) {
 #must_use
 fn interference_intensity(a1, a2, phase_diff) {
     return f64_add(f64_add(f64_mul(a1, a1), f64_mul(a2, a2)),
-    f64_mul(f64_mul(f64_mul(F64_TWO, a1), a2), f64_cos(phase_diff)));
+    f64_mul(f64_mul(f64_mul(F64_TWO, a1), a2), _prk_cos(phase_diff)));
 }
 
 # 1 if constructive (path difference is ~ an integer multiple of wavelength).
@@ -56,7 +56,7 @@ fn thin_film_reflectance(wavelength_nm, thickness_nm, n_film) {
     var path = f64_mul(f64_mul(F64_TWO, n_film), thickness_nm);
     var phase = f64_add(f64_div(f64_mul(F64_TAU, path), wavelength_nm), F64_PI);
     var half = f64_div(phase, F64_TWO);
-    var s = f64_sin(half);
+    var s = _prk_sin(half);
     return f64_mul(s, s);
 }
 
@@ -65,26 +65,26 @@ fn thin_film_reflectance(wavelength_nm, thickness_nm, n_film) {
 # Single-slit diffraction: I0 * (sin(beta)/beta)^2, beta = pi*a*sin(theta)/lambda.
 #must_use
 fn single_slit_intensity(wavelength, slit_width, angle, i0) {
-    var beta = f64_div(f64_mul(f64_mul(F64_PI, slit_width), f64_sin(angle)), wavelength);
+    var beta = f64_div(f64_mul(f64_mul(F64_PI, slit_width), _prk_sin(angle)), wavelength);
     if (f64_lt(f64_abs(beta), _wave_eps10()) == 1) {
         return i0;
     }
-    var sinc = f64_div(f64_sin(beta), beta);
+    var sinc = f64_div(_prk_sin(beta), beta);
     return f64_mul(f64_mul(i0, sinc), sinc);
 }
 
 # Double-slit diffraction: single-slit envelope * two-slit interference * 4.
 #must_use
 fn double_slit_intensity(wavelength, slit_width, slit_spacing, angle, i0) {
-    var sin_angle = f64_sin(angle);
+    var sin_angle = _prk_sin(angle);
     var beta = f64_div(f64_mul(f64_mul(F64_PI, slit_width), sin_angle), wavelength);
     var envelope = F64_ONE;
     if (f64_lt(f64_abs(beta), _wave_eps10()) == 0) {
-        var sinc = f64_div(f64_sin(beta), beta);
+        var sinc = f64_div(_prk_sin(beta), beta);
         envelope = f64_mul(sinc, sinc);
     }
     var delta = f64_div(f64_mul(f64_mul(F64_PI, slit_spacing), sin_angle), wavelength);
-    var cos_delta = f64_cos(delta);
+    var cos_delta = _prk_cos(delta);
     var interference = f64_mul(cos_delta, cos_delta);
     return f64_mul(f64_mul(f64_mul(i0, envelope), interference), f64_from(4));
 }
@@ -117,6 +117,7 @@ struct Polarization { ex; ey; phase; }
 #must_use
 fn polarization_new(ex, ey, phase) {
     var p = alloc(sizeof(Polarization));
+    if (p == 0) { return 0; }
     Polarization_set_ex(p, ex);
     Polarization_set_ey(p, ey);
     Polarization_set_phase(p, phase);
@@ -142,7 +143,7 @@ fn polarization_through_polarizer(p, polarizer_angle) {
     var ex = Polarization_ex(p);
     var ey = Polarization_ey(p);
     var pol_angle = ganita_f64_atan2(ey, ex);
-    var c = f64_cos(f64_sub(polarizer_angle, pol_angle));
+    var c = _prk_cos(f64_sub(polarizer_angle, pol_angle));
     return f64_mul(f64_mul(c, c), f64_add(f64_mul(ex, ex), f64_mul(ey, ey)));
 }
 
@@ -161,6 +162,7 @@ struct StokesVector { s0; s1; s2; s3; }
 #must_use
 fn stokes_new(s0, s1, s2, s3) {
     var s = alloc(sizeof(StokesVector));
+    if (s == 0) { return 0; }
     StokesVector_set_s0(s, s0);
     StokesVector_set_s1(s, s1);
     StokesVector_set_s2(s, s2);
@@ -192,8 +194,8 @@ fn polarization_to_stokes(p) {
     return stokes_new(
     f64_add(ex2, ey2),
     f64_sub(ex2, ey2),
-    f64_mul(f64_mul(f64_mul(F64_TWO, ex), ey), f64_cos(phase)),
-    f64_mul(f64_mul(f64_mul(F64_TWO, ex), ey), f64_sin(phase)));
+    f64_mul(f64_mul(f64_mul(F64_TWO, ex), ey), _prk_cos(phase)),
+    f64_mul(f64_mul(f64_mul(F64_TWO, ex), ey), _prk_sin(phase)));
 }
 
 # ── Malus's law ────────
@@ -201,6 +203,6 @@ fn polarization_to_stokes(p) {
 # Intensity after a polarizer at angle theta: I0 * cos^2(theta).
 #must_use
 fn malus_law(intensity, angle) {
-    var c = f64_cos(angle);
+    var c = _prk_cos(angle);
     return f64_mul(intensity, f64_mul(c, c));
 }

@@ -27,6 +27,7 @@ struct RayVec2 { x; y; }
 #must_use
 fn ray_vec3(x, y, z) {
     var v = alloc(sizeof(RayVec3));
+    if (v == 0) { return 0; }
     RayVec3_set_x(v, x);
     RayVec3_set_y(v, y);
     RayVec3_set_z(v, z);
@@ -36,6 +37,7 @@ fn ray_vec3(x, y, z) {
 #must_use
 fn ray_vec2(x, y) {
     var v = alloc(sizeof(RayVec2));
+    if (v == 0) { return 0; }
     RayVec2_set_x(v, x);
     RayVec2_set_y(v, y);
     return v;
@@ -50,6 +52,7 @@ struct Medium { n; name; }
 # Internal unchecked constructor.
 fn _medium_mk(n, name) {
     var m = alloc(sizeof(Medium));
+    if (m == 0) { return 0; }
     Medium_set_n(m, n);
     Medium_set_name(m, name);
     return m;
@@ -108,7 +111,7 @@ fn medium_permittivity(m) {
 fn ray_snell(n1, n2, incident_angle, err_out) {
     _prk_trace("snell");
     store64(err_out, PK_ERR_NONE);
-    var sin_t = f64_mul(f64_div(n1, n2), f64_sin(incident_angle));
+    var sin_t = f64_mul(f64_div(n1, n2), _prk_sin(incident_angle));
     if (f64_gt(f64_abs(sin_t), F64_ONE) == 1) {
         store64(err_out, PK_ERR_TIR);
         return 0;

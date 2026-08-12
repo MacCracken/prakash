@@ -1416,6 +1416,7 @@ struct Xyz { x; y; z; }
 #must_use
 fn xyz_new(x, y, z) {
     var v = alloc(sizeof(Xyz));
+    if (v == 0) { return 0; }
     Xyz_set_x(v, x);
     Xyz_set_y(v, y);
     Xyz_set_z(v, z);
@@ -1433,6 +1434,7 @@ struct XyY { x; y; big_y; }
 
 fn _xyy_new(x, y, big_y) {
     var v = alloc(sizeof(XyY));
+    if (v == 0) { return 0; }
     XyY_set_x(v, x);
     XyY_set_y(v, y);
     XyY_set_big_y(v, big_y);
@@ -1576,6 +1578,7 @@ struct Spd { start_nm; step_nm; values; len; }
 #must_use
 fn spd_new(start_nm, step_nm, values, len) {
     var s = alloc(sizeof(Spd));
+    if (s == 0) { return 0; }
     Spd_set_start_nm(s, start_nm);
     Spd_set_step_nm(s, step_nm);
     Spd_set_values(s, values);
@@ -1675,6 +1678,7 @@ fn spd_to_srgb(s) {
 #must_use
 fn spd_blackbody(temperature_k) {
     var values = alloc(648);
+    if (values == 0) { return 0; }
     var i = 0;
     while (i < 81) {
         var wl_m = f64_mul(f64_from(380 + i * 5), _cie_r(1, 1000000000));
@@ -1699,6 +1703,7 @@ fn illuminant_f11() { return spd_from_static(f64_from(380), f64_from(5), _illum_
 #must_use
 fn illuminant_a() {
     var values = alloc(648);
+    if (values == 0) { return 0; }
     var norm = planck_radiance(_cie_r(56, 100000000), f64_from(2856));
     var i = 0;
     while (i < 81) {

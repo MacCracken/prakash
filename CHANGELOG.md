@@ -1,5 +1,77 @@
 # Changelog
 
+## [2.1.1] - 2026-08-12 — The audit's remaining defects and coverage gaps
+
+Clears every item the 2.0.2 audit reproduced but deferred, plus the three coverage
+gaps it identified. Suite **5361 → 5424** assertions; benchmarks **27 → 35**.
+No signature changes to existing functions.
+
+### Fixed
+- **`f64_sin`/`f64_cos` returned the argument unchanged for |x| >= 2^63.** The x86
+  `fsin`/`fcos` instructions are undefined past that point, so `f64_sin(1e300)`
+  evaluated to `1e300` — an "intensity" far outside [-1, 1] that propagated
+  silently through interference and slit calculations. Measured: correct through
+  2^62, broken at 1e300 and at the infinities. New `_prk_sin` / `_prk_cos` in
+  `error.cyr` return NaN past the limit so the loss is visible; every trig call
+  site in `src/` routes through them and in-domain values are untouched.
+  ⚠ Rust's libm would perform a Payne-Hanek reduction and return a real value —
+  this is a deliberate divergence in favour of not fabricating one. At 2^63 a
+  double's spacing exceeds 2048 against a period of 2π, so the argument no longer
+  identifies a phase.
+- **`planck_radiance` lost all precision for small arguments.** The port
+  substituted a bare `exp(x) - 1` for Rust's `f64::exp_m1`, which returns exactly
+  **0** once x drops below about 1e-16 — the entire result destroyed by
+  cancellation. `_expm1` now uses Kahan's identity `(u-1)·x / ln(u)` with
+  `u = exp(x)`, where the same `u` in numerator and denominator cancels the
+  rounding error. Verified: `expm1(1e-18)` returns 1e-18 (was 0), `expm1(1e-14)`
+  and `expm1(1e-6)` match the series, and `expm1(10)` is unchanged.
+- **`point_source_new` could not build input for its only consumer.**
+  `interference_pattern` indexes a contiguous `PointSource` array
+  (`sources + i*sizeof(PointSource)`), but the constructor returns standalone
+  allocations that are not contiguous — the test suite carried a private `_mksrc`
+  helper to work around it. Added **`point_source_array_new(n)`**,
+  **`point_source_set(arr, i, …)`** and **`point_source_at(arr, i)`**;
+  `point_source_new` remains for a single standalone source and now says so.
+- **46 constructor allocations stored through an unchecked result.** All are
+  fixed-size (`alloc(sizeof(T))` and friends), so only heap exhaustion reaches
+  them — but they returned an unguarded pointer, which meant a caller could not
+  detect the failure at all. Each now returns 0.
+  ⚠ The **10 private lazy-init table getters** in `spectral_cie` /
+  `spectral_photometry` are deliberately left unguarded: their callers index the
+  result immediately (`_cmf_x(t, i)`), so returning 0 would convert a clean
+  segfault into a wild read. Documented rather than changed.
+
+### Added
+- **8 benchmarks for the expensive composites**, which the suite had never
+  measured (27 → 35). The audit was right that this was hiding the real cost:
+
+  | Benchmark | avg |
+  |---|--:|
+  | `wave/interference_pattern_16x16` | 107.9 µs |
+  | `ray/spot_diagram` | 27.9 µs |
+  | `spectral/color_rendering_index` | 11.1 µs |
+  | `spectral/spd_blackbody` | 9.8 µs |
+  | `spectral/luminous_flux` | 3.7 µs |
+  | `spectral/spd_to_xyz` | 1.5 µs |
+  | `ray/trace_sequential` | 932 ns |
+  | `ray/trace_surface` | 327 ns |
+
+  `interference_pattern` alone is **7× the slowest previously-benchmarked
+  operation** (`diffraction_pattern_2d_8x8`, 15.4 µs). `tests/prakash.bcyr` now
+  includes `spectral_photometry` and `ray_simulate`, which it had never compiled.
+
+### Tests
+- **`trace_surface`'s five error branches are now all exercised** — previously
+  only the aperture case was, leaving the four geometry-miss paths the whole
+  tracing stack depends on untested: plane-parallel ray, plane behind the ray,
+  sphere missed (negative discriminant), and sphere entirely behind. Plus a
+  control that a successful trace clears a stale `err_out`.
+- **Mueller accessors: full 16-element set/get roundtrip**, including that every
+  `(i, j)` addresses a distinct slot (no aliasing) — they had no direct tests
+  before 2.0.2 added the bounds cases.
+- New coverage for the `PointSource` array API, the trig domain guard (including
+  a 2^62 control just below the limit), and `expm1` at 1e-18 / 1e-14 / 1e-6.
+
 ## [2.1.0] - 2026-08-12 — Error channels for the deserialization surface
 
 2.0.2 stopped the `*_from_json` family from crashing or fabricating on malformed

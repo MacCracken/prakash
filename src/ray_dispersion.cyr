@@ -24,6 +24,7 @@ struct CauchyCoefficients { b; c; }
 
 fn _cauchy_mk(b, c) {
     var x = alloc(sizeof(CauchyCoefficients));
+    if (x == 0) { return 0; }
     CauchyCoefficients_set_b(x, b);
     CauchyCoefficients_set_c(x, c);
     return x;
@@ -48,6 +49,7 @@ struct SellmeierCoefficients { b1; c1; b2; c2; b3; c3; }
 
 fn _sellmeier_mk(b1, c1, b2, c2, b3, c3) {
     var s = alloc(sizeof(SellmeierCoefficients));
+    if (s == 0) { return 0; }
     SellmeierCoefficients_set_b1(s, b1);
     SellmeierCoefficients_set_c1(s, c1);
     SellmeierCoefficients_set_b2(s, b2);
@@ -140,7 +142,7 @@ fn abbe_number(sellmeier) {
 #must_use
 fn prism_deviation(apex_angle, n, err_out) {
     store64(err_out, PK_ERR_NONE);
-    var sin_half_a = f64_sin(f64_div(apex_angle, F64_TWO));
+    var sin_half_a = _prk_sin(f64_div(apex_angle, F64_TWO));
     var arg = f64_mul(n, sin_half_a);
     if (f64_gt(f64_abs(arg), F64_ONE) == 1) {
         store64(err_out, PK_ERR_TIR);
@@ -177,6 +179,7 @@ fn prism_angular_spread(apex_angle, sellmeier, wavelength_short_um, wavelength_l
         return 0;
     }
     var ps = alloc(sizeof(PrismSpread));
+    if (ps == 0) { return 0; }
     PrismSpread_set_dev_short(ps, dev_short);
     PrismSpread_set_dev_long(ps, dev_long);
     PrismSpread_set_spread(ps, f64_abs(f64_sub(dev_short, dev_long)));
@@ -191,6 +194,7 @@ struct HerzbergerCoefficients { a; b; c; d; e; }
 
 fn _herzberger_mk(a, b, c, d, e) {
     var h = alloc(sizeof(HerzbergerCoefficients));
+    if (h == 0) { return 0; }
     HerzbergerCoefficients_set_a(h, a);
     HerzbergerCoefficients_set_b(h, b);
     HerzbergerCoefficients_set_c(h, c);
@@ -218,6 +222,7 @@ struct SchottCoefficients { a0; a1; a2; a3; a4; a5; }
 
 fn _schott_mk(a0, a1, a2, a3, a4, a5) {
     var s = alloc(sizeof(SchottCoefficients));
+    if (s == 0) { return 0; }
     SchottCoefficients_set_a0(s, a0);
     SchottCoefficients_set_a1(s, a1);
     SchottCoefficients_set_a2(s, a2);
@@ -260,6 +265,7 @@ struct ConradyCoefficients { n0; a; b; }
 
 fn _conrady_mk(n0, a, b) {
     var c = alloc(sizeof(ConradyCoefficients));
+    if (c == 0) { return 0; }
     ConradyCoefficients_set_n0(c, n0);
     ConradyCoefficients_set_a(c, a);
     ConradyCoefficients_set_b(c, b);

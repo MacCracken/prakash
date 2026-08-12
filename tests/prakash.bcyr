@@ -10,7 +10,9 @@ include "src/ray_trace.cyr"
 include "src/ray_dispersion.cyr"
 include "src/ray_fiber.cyr"
 include "src/ray_system.cyr"
+include "src/ray_simulate.cyr"
 include "src/spectral_cie.cyr"
+include "src/spectral_photometry.cyr"
 include "src/wave_core.cyr"
 include "src/wave_airy.cyr"
 include "src/wave_diffraction.cyr"
@@ -34,6 +36,11 @@ fn bench(name, fp, n) {
 
 # ── Pre-allocated args / data (set in main) ────────
 var _err = 0;
+# composites (2.1.1): the expensive paths the suite previously missed
+var _surfaces = 0;
+var _ray0 = 0;
+var _srcs = 0;
+var _plane = 0;
 var _out3 = 0;
 var _bk7 = 0;
 var _d65 = 0;
@@ -112,6 +119,22 @@ fn b_sky_color() { atm_sky_color_rgb(_sunz, _scat, _out3); return 0; }
 # ── Bridge / serialize ────────
 fn b_stellar_rgb() { br_stellar_temperature_to_rgb(_temp, _out3); return 0; }
 fn b_rgb_to_json() { var r = rgb_to_json(_rgb); return 0; }
+# ── composites (2.1.1) ──
+fn b_spd_to_xyz() { var r = spd_to_xyz(_d65); return 0; }
+fn b_spd_blackbody() { var r = spd_blackbody(f64_from(5000)); return 0; }
+fn b_luminous_flux() { var r = luminous_flux(_d65); return 0; }
+fn b_cri() { var r = color_rendering_index(_d65); return 0; }
+fn b_trace_surface() { var r = trace_surface(_ray0, _plane, _err); return 0; }
+fn b_trace_sequential() { var r = trace_sequential(_ray0, _surfaces, _err); return 0; }
+fn b_spot_diagram() {
+    var r = spot_diagram(_surfaces, _bf(5, 1), 3, 6, f64_from(0), f64_from(0), f64_from(50));
+    return 0;
+}
+fn b_interference_pattern() {
+    var r = interference_pattern(_srcs, 3, _wl_m, F64_ONE,
+    f64_neg(F64_ONE), F64_ONE, f64_neg(F64_ONE), F64_ONE, 16, 16);
+    return 0;
+}
 
 fn main() {
     alloc_init();
@@ -158,6 +181,18 @@ fn main() {
     _slit = _bf(1, 1000);
 
     # ── ray ──
+    # composite fixtures
+    _plane = surface_plane(f64_from(10), F64_ONE, f64_from(5));
+    _ray0 = trace_ray_new(ray_vec3(f64_from(0), f64_from(0), f64_from(0)),
+    ray_vec3(f64_from(0), f64_from(0), F64_ONE), F64_ONE);
+    _surfaces = vec_new();
+    vec_push(_surfaces, surface_sphere(f64_from(50), f64_from(10), _bf(15, 10), f64_from(5)));
+    vec_push(_surfaces, surface_sphere(f64_neg(f64_from(50)), f64_from(12), F64_ONE, f64_from(5)));
+    _srcs = point_source_array_new(3);
+    var _s0 = point_source_set(_srcs, 0, f64_neg(_bf(1, 1000)), f64_from(0), F64_ONE, f64_from(0));
+    var _s1 = point_source_set(_srcs, 1, f64_from(0), f64_from(0), F64_ONE, f64_from(0));
+    var _s2 = point_source_set(_srcs, 2, _bf(1, 1000), f64_from(0), F64_ONE, f64_from(0));
+
     bench("ray/fresnel_unpolarized", &b_fresnel_unpolarized, 500000);
     bench("ray/fiber_na", &b_fiber_na, 500000);
     bench("ray/v_number", &b_v_number, 500000);
@@ -191,6 +226,15 @@ fn main() {
     # ── bridge / serialize ──
     bench("bridge/stellar_temperature_to_rgb", &b_stellar_rgb, 100000);
     bench("serialize/rgb_to_json", &b_rgb_to_json, 50000);
+    # ── composites (2.1.1) ──
+    bench("spectral/spd_to_xyz", &b_spd_to_xyz, 20000);
+    bench("spectral/spd_blackbody", &b_spd_blackbody, 20000);
+    bench("spectral/luminous_flux", &b_luminous_flux, 20000);
+    bench("spectral/color_rendering_index", &b_cri, 2000);
+    bench("ray/trace_surface", &b_trace_surface, 200000);
+    bench("ray/trace_sequential", &b_trace_sequential, 100000);
+    bench("ray/spot_diagram", &b_spot_diagram, 5000);
+    bench("wave/interference_pattern_16x16", &b_interference_pattern, 2000);
 
     println("=== done ===");
     return 0;

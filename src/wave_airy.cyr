@@ -45,8 +45,8 @@ fn bessel_j1(x) {
     q = f64_add(_ar(8449199096, 1000000000000000), f64_mul(z2, q)); # 0.8449199096e-5
     q = f64_add(f64_neg(_ar(2002690873, 10000000000000)), f64_mul(z2, q)); # -0.2002690873e-3
     var q1 = f64_add(_ar(4687499995, 100000000000), f64_mul(z2, q)); # 0.04687499995
-    var term1 = f64_mul(f64_cos(theta), p1);
-    var term2 = f64_mul(f64_mul(z, f64_sin(theta)), q1);
+    var term1 = f64_mul(_prk_cos(theta), p1);
+    var term2 = f64_mul(f64_mul(z, _prk_sin(theta)), q1);
     var result = f64_mul(f64_sqrt(f64_div(0x3FE45F306DC9C883, ax)), f64_sub(term1, term2));
     if (f64_lt(x, f64_from(0)) == 1) {
         return f64_neg(result);
@@ -57,7 +57,7 @@ fn bessel_j1(x) {
 # Airy diffraction intensity: I0 * (2*J1(x)/x)^2, x = pi*D*sin(theta)/lambda.
 #must_use
 fn airy_pattern(wavelength, aperture_diameter, angle, i0) {
-    var x = f64_div(f64_mul(f64_mul(F64_PI, aperture_diameter), f64_sin(angle)), wavelength);
+    var x = f64_div(f64_mul(f64_mul(F64_PI, aperture_diameter), _prk_sin(angle)), wavelength);
     if (f64_lt(f64_abs(x), _ar(1, 10000000000)) == 1) {
         return i0;
     }

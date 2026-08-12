@@ -81,6 +81,7 @@ fn mueller_set(m, i, j, v) {
 # Build a Mueller matrix from 16 row-major elements.
 fn _mm(m00, m01, m02, m03, m10, m11, m12, m13, m20, m21, m22, m23, m30, m31, m32, m33) {
     var m = alloc(128);
+    if (m == 0) { return 0; }
     store64(m + 0, m00);
     store64(m + 8, m01);
     store64(m + 16, m02);
@@ -131,8 +132,8 @@ fn mueller_polarizer_vertical() {
 #must_use
 fn mueller_polarizer(angle) {
     var two_a = f64_mul(F64_TWO, angle);
-    var s2 = f64_sin(two_a);
-    var c2 = f64_cos(two_a);
+    var s2 = _prk_sin(two_a);
+    var c2 = _prk_cos(two_a);
     var cs = f64_mul(c2, s2);
     return _mm(
     F64_HALF, f64_mul(F64_HALF, c2), f64_mul(F64_HALF, s2), f64_from(0),
@@ -162,8 +163,8 @@ fn mueller_half_wave_horizontal() {
 # General linear retarder, fast axis horizontal, retardance delta.
 #must_use
 fn mueller_retarder(retardance) {
-    var c = f64_cos(retardance);
-    var s = f64_sin(retardance);
+    var c = _prk_cos(retardance);
+    var s = _prk_sin(retardance);
     return _mm(
     F64_ONE, f64_from(0), f64_from(0), f64_from(0),
     f64_from(0), F64_ONE, f64_from(0), f64_from(0),
@@ -175,8 +176,8 @@ fn mueller_retarder(retardance) {
 #must_use
 fn mueller_rotation(angle) {
     var two_a = f64_mul(F64_TWO, angle);
-    var s2 = f64_sin(two_a);
-    var c2 = f64_cos(two_a);
+    var s2 = _prk_sin(two_a);
+    var c2 = _prk_cos(two_a);
     return _mm(
     F64_ONE, f64_from(0), f64_from(0), f64_from(0),
     f64_from(0), c2, s2, f64_from(0),
@@ -211,6 +212,7 @@ fn mueller_apply(m, s) {
 #must_use
 fn mueller_multiply(a, b) {
     var r = alloc(128);
+    if (r == 0) { return 0; }
     var i = 0;
     while (i < 4) {
         var j = 0;
@@ -248,6 +250,7 @@ struct BirefringentMaterial { n_o; n_e; name; }
 
 fn _biref_mk(n_o, n_e, name) {
     var b = alloc(sizeof(BirefringentMaterial));
+    if (b == 0) { return 0; }
     BirefringentMaterial_set_n_o(b, n_o);
     BirefringentMaterial_set_n_e(b, n_e);
     BirefringentMaterial_set_name(b, name);

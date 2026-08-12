@@ -238,6 +238,48 @@ fn diffraction_pattern_circular(grid_size, radius) {
 #derive(accessors)
 struct PointSource { x; y; amplitude; phase; }
 
+# Allocate a contiguous array of `n` zeroed PointSources, laid out exactly as
+# `interference_pattern` reads them (element i at `arr + i*sizeof(PointSource)`).
+# Returns 0 if `n` is non-positive or the allocation fails.
+#
+# `point_source_new` allocates ONE source and returns its own pointer, so a
+# sequence of those calls is not contiguous and cannot be indexed by
+# `interference_pattern` — use this plus `point_source_set` to build its input.
+#must_use
+fn point_source_array_new(n) {
+    if (_pat_dims_bad(n, 1, sizeof(PointSource)) == 1) { return 0; }
+    var arr = alloc(n * sizeof(PointSource));
+    if (arr == 0) { return 0; }
+    for (var i = 0; i < n * 4; i = i + 1) {
+        store64(arr + i * 8, f64_from(0));
+    }
+    return arr;
+}
+
+# Write element `i` of a PointSource array. Returns PK_ERR_NONE, or
+# PK_ERR_INVALID_PARAMETER for a null array or a negative index.
+fn point_source_set(arr, i, x, y, amplitude, phase) {
+    if (arr == 0) { return PK_ERR_INVALID_PARAMETER; }
+    if (i < 0) { return PK_ERR_INVALID_PARAMETER; }
+    var s = arr + i * sizeof(PointSource);
+    PointSource_set_x(s, x);
+    PointSource_set_y(s, y);
+    PointSource_set_amplitude(s, amplitude);
+    PointSource_set_phase(s, phase);
+    return PK_ERR_NONE;
+}
+
+# Element `i` of a PointSource array (a pointer into the array, not a copy).
+# Returns 0 for a null array or a negative index.
+#must_use
+fn point_source_at(arr, i) {
+    if (arr == 0) { return 0; }
+    if (i < 0) { return 0; }
+    return arr + i * sizeof(PointSource);
+}
+
+# A single standalone PointSource. NOT indexable as an array — see
+# `point_source_array_new` for building `interference_pattern` input.
 #must_use
 fn point_source_new(x, y, amplitude, phase) {
     var s = alloc(sizeof(PointSource));
@@ -281,8 +323,8 @@ fn interference_pattern(sources, num_sources, wavelength, distance, gx0, gx1, gy
                 f64_mul(distance, distance)));
                 var phase = f64_add(f64_mul(k, r), PointSource_phase(src));
                 var amp = f64_div(PointSource_amplitude(src), r);
-                e_re = f64_add(e_re, f64_mul(amp, f64_cos(phase)));
-                e_im = f64_add(e_im, f64_mul(amp, f64_sin(phase)));
+                e_re = f64_add(e_re, f64_mul(amp, _prk_cos(phase)));
+                e_im = f64_add(e_im, f64_mul(amp, _prk_sin(phase)));
             }
             pattern2d_set(pattern, col, row, f64_add(f64_mul(e_re, e_re), f64_mul(e_im, e_im)));
         }
@@ -421,8 +463,8 @@ fn psf_from_wavefront(pupil, wavefront_error, width, height, wavelength) {
             var pp = load64(pupil + idx * 8);
             if (f64_gt(pp, f64_from(0)) == 1) {
                 var phase = f64_mul(k, load64(wavefront_error + idx * 8));
-                store64(grid + (row * nw + col) * 16, f64_mul(pp, f64_cos(phase)));
-                store64(grid + (row * nw + col) * 16 + 8, f64_mul(pp, f64_sin(phase)));
+                store64(grid + (row * nw + col) * 16, f64_mul(pp, _prk_cos(phase)));
+                store64(grid + (row * nw + col) * 16 + 8, f64_mul(pp, _prk_sin(phase)));
             }
         }
     }

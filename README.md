@@ -94,7 +94,7 @@ prakash (Cyrius)
 
 ```sh
 cyrius deps                 # resolve the hisab git dep
-for f in tests/*.tcyr; do cyrius test "$f"; done   # 5361 assertions, 27 suites
+for f in tests/*.tcyr; do cyrius test "$f"; done   # 5424 assertions, 27 suites
 cyrius distlib              # regenerate dist/prakash.cyr
 cyrius distlib ai           # regenerate dist/prakash-ai.cyr
 cyrius bench tests/prakash.bcyr                     # 27 benchmarks

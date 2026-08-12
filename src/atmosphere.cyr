@@ -122,7 +122,7 @@ fn atm_mie_phase_cornette_shanks(cos_theta, g) {
 #must_use
 fn atm_air_mass(zenith_angle) {
     var zenith_deg = f64_min(_atm_to_degrees(zenith_angle), f64_from(90));
-    var cos_z = f64_cos(zenith_angle);
+    var cos_z = _prk_cos(zenith_angle);
     var correction = f64_mul(_atm_r(50572, 100000),
     _prk_pow(f64_sub(_atm_r(9607995, 100000), zenith_deg), f64_neg(_atm_r(16364, 10000))));
     return f64_div(F64_ONE, f64_add(cos_z, correction));
@@ -154,7 +154,7 @@ fn atm_atmospheric_transmittance(wavelength_m, zenith_angle) {
 # Single-scatter sky radiance (relative) at one wavelength.
 #must_use
 fn atm_sky_radiance_single_scatter(wavelength_m, sun_zenith, scattering_angle) {
-    var cos_scatter = f64_cos(scattering_angle);
+    var cos_scatter = _prk_cos(scattering_angle);
     var beta_r = atm_rayleigh_scattering_coefficient(wavelength_m);
     var beta_m = atm_mie_scattering_coefficient(wavelength_m);
     var radiance_r = f64_mul(beta_r, atm_phase_rayleigh(cos_scatter));
@@ -188,7 +188,7 @@ fn atm_sunlight_color(sun_zenith, out) {
 fn atm_sunset_gradient(sun_zenith, view_elevation, angular_distance_to_sun, out) {
     _prk_trace("sunset_gradient");
     var view_zenith = f64_clamp(f64_sub(F64_PI_2, view_elevation), f64_from(0), F64_PI_2);
-    var cos_scatter = f64_cos(angular_distance_to_sun);
+    var cos_scatter = _prk_cos(angular_distance_to_sun);
     var phase_r = atm_phase_rayleigh(cos_scatter);
     var phase_m = atm_mie_phase_cornette_shanks(cos_scatter, _atm_mie_g());
     var sun_air_mass = atm_air_mass(sun_zenith);
@@ -212,7 +212,7 @@ fn atm_sunset_gradient(sun_zenith, view_elevation, angular_distance_to_sun, out)
 #must_use
 fn atm_scattering_angle(sun_zenith, view_zenith, azimuth_diff) {
     var cos_gamma = f64_add(
-    f64_mul(f64_cos(sun_zenith), f64_cos(view_zenith)),
-    f64_mul(f64_mul(f64_sin(sun_zenith), f64_sin(view_zenith)), f64_cos(azimuth_diff)));
+    f64_mul(_prk_cos(sun_zenith), _prk_cos(view_zenith)),
+    f64_mul(f64_mul(_prk_sin(sun_zenith), _prk_sin(view_zenith)), _prk_cos(azimuth_diff)));
     return ganita_f64_acos(f64_clamp(cos_gamma, f64_neg(F64_ONE), F64_ONE));
 }

@@ -33,6 +33,7 @@ struct TraceSegment {
 
 fn _seg_new(origin, direction, n, path_length, optical_path, energy, depth, event_tag, reflectance, surface_idx) {
     var s = alloc(sizeof(TraceSegment));
+    if (s == 0) { return 0; }
     TraceSegment_set_origin(s, origin);
     TraceSegment_set_direction(s, direction);
     TraceSegment_set_n(s, n);
@@ -53,6 +54,7 @@ struct TraceConfig { max_depth; min_energy; }
 #must_use
 fn trace_config_new(max_depth, min_energy) {
     var c = alloc(sizeof(TraceConfig));
+    if (c == 0) { return 0; }
     TraceConfig_set_max_depth(c, max_depth);
     TraceConfig_set_min_energy(c, min_energy);
     return c;
@@ -76,6 +78,7 @@ fn trace_recursive(ray, surfaces, config) {
     var interactions = 0;
     _trace_recursive_inner(ray, surfaces, config, F64_ONE, 0, segments, &interactions);
     var tree = alloc(sizeof(TraceTree));
+    if (tree == 0) { return 0; }
     TraceTree_set_segments(tree, segments);
     TraceTree_set_interactions(tree, interactions);
     return tree;
@@ -158,6 +161,7 @@ struct FanRay { ray; aperture_height; }
 
 fn _fan_ray(tr, aperture_height) {
     var fr = alloc(sizeof(FanRay));
+    if (fr == 0) { return 0; }
     FanRay_set_ray(fr, tr);
     FanRay_set_aperture_height(fr, aperture_height);
     return fr;
@@ -175,8 +179,8 @@ fn _fan_t(i, num_rays) {
 fn ray_fan_meridional(aperture_radius, num_rays, field_angle, start_z) {
     _prk_trace("ray_fan_meridional");
     var rays = vec_new();
-    var sin_f = f64_sin(field_angle);
-    var cos_f = f64_cos(field_angle);
+    var sin_f = _prk_sin(field_angle);
+    var cos_f = _prk_cos(field_angle);
     var i = 0;
     while (i < num_rays) {
         var t = _fan_t(i, num_rays);
@@ -193,8 +197,8 @@ fn ray_fan_meridional(aperture_radius, num_rays, field_angle, start_z) {
 fn ray_fan_sagittal(aperture_radius, num_rays, field_angle, start_z) {
     _prk_trace("ray_fan_sagittal");
     var rays = vec_new();
-    var sin_f = f64_sin(field_angle);
-    var cos_f = f64_cos(field_angle);
+    var sin_f = _prk_sin(field_angle);
+    var cos_f = _prk_cos(field_angle);
     var i = 0;
     while (i < num_rays) {
         var t = _fan_t(i, num_rays);
@@ -211,8 +215,8 @@ fn ray_fan_sagittal(aperture_radius, num_rays, field_angle, start_z) {
 fn ray_bundle(aperture_radius, num_rings, num_arms, field_angle, start_z) {
     _prk_trace("ray_bundle");
     var rays = vec_new();
-    var sin_f = f64_sin(field_angle);
-    var cos_f = f64_cos(field_angle);
+    var sin_f = _prk_sin(field_angle);
+    var cos_f = _prk_cos(field_angle);
     vec_push(rays, _fan_ray(
     trace_ray_new(ray_vec3(f64_from(0), f64_from(0), start_z),
     ray_vec3(f64_from(0), sin_f, cos_f), F64_ONE), f64_from(0)));
@@ -225,8 +229,8 @@ fn ray_bundle(aperture_radius, num_rings, num_arms, field_angle, start_z) {
         while (arm < num_arms) {
             # Match Rust's order: ((2*PI) * arm) / num_arms.
             var phi = f64_div(f64_mul(f64_mul(F64_TWO, F64_PI), f64_from(arm)), f64_from(num_arms));
-            var x = f64_mul(r, f64_cos(phi));
-            var y = f64_mul(r, f64_sin(phi));
+            var x = f64_mul(r, _prk_cos(phi));
+            var y = f64_mul(r, _prk_sin(phi));
             vec_push(rays, _fan_ray(
             trace_ray_new(ray_vec3(x, y, start_z),
             ray_vec3(f64_from(0), sin_f, cos_f), F64_ONE), t));
@@ -285,6 +289,7 @@ fn spot_diagram(surfaces, aperture_radius, num_rings, num_arms, field_angle, sta
                     var img_pt = ray_vec3(img_x, img_y, image_z);
                     opl = f64_add(opl, f64_mul(prev_n, _sim_dist(prev_pos, img_pt)));
                     var sp = alloc(sizeof(SpotPoint));
+                    if (sp == 0) { return 0; }
                     SpotPoint_set_x(sp, img_x);
                     SpotPoint_set_y(sp, img_y);
                     SpotPoint_set_optical_path(sp, opl);
@@ -428,6 +433,7 @@ fn opd_fan(fan, surfaces, image_z) {
         var opl = optical_path_length(FanRay_ray(fr), surfaces, image_z, &e);
         if (prakash_is_err(e) == 0) {
             var op = alloc(sizeof(OpdPoint));
+            if (op == 0) { return 0; }
             OpdPoint_set_height(op, FanRay_aperture_height(fr));
             OpdPoint_set_opd(op, f64_sub(opl, opl_chief));
             vec_push(result, op);

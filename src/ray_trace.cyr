@@ -21,6 +21,7 @@ struct OpticalSurface { shape_tag; radius; z_position; n_after; aperture_radius;
 #must_use
 fn surface_sphere(radius, z_position, n_after, aperture_radius) {
     var s = alloc(sizeof(OpticalSurface));
+    if (s == 0) { return 0; }
     OpticalSurface_set_shape_tag(s, SURF_SPHERE);
     OpticalSurface_set_radius(s, radius);
     OpticalSurface_set_z_position(s, z_position);
@@ -32,6 +33,7 @@ fn surface_sphere(radius, z_position, n_after, aperture_radius) {
 #must_use
 fn surface_plane(z_position, n_after, aperture_radius) {
     var s = alloc(sizeof(OpticalSurface));
+    if (s == 0) { return 0; }
     OpticalSurface_set_shape_tag(s, SURF_PLANE);
     OpticalSurface_set_radius(s, f64_from(0));
     OpticalSurface_set_z_position(s, z_position);
@@ -48,6 +50,7 @@ struct TraceRay { pos; dir; n; }
 #must_use
 fn trace_ray_new(pos, dir, n) {
     var r = alloc(sizeof(TraceRay));
+    if (r == 0) { return 0; }
     TraceRay_set_pos(r, pos);
     TraceRay_set_dir(r, dir);
     TraceRay_set_n(r, n);
@@ -172,6 +175,7 @@ fn trace_surface(ray, surface, err_out) {
     var hit_point = ray_vec3(hit_x, hit_y, hit_z);
     var ray_after = trace_ray_new(hit_point, refr_dir, OpticalSurface_n_after(surface));
     var hit = alloc(sizeof(TraceHit));
+    if (hit == 0) { return 0; }
     TraceHit_set_hit_point(hit, hit_point);
     TraceHit_set_normal(hit, normal);
     TraceHit_set_ray_after(hit, ray_after);
@@ -253,6 +257,7 @@ fn trace_sequential_polarized(initial_ray, surfaces, err_out) {
             rp_over_rs = f64_div(rp, rs);
         }
         var pth = alloc(sizeof(PolarizedTraceHit));
+        if (pth == 0) { return 0; }
         PolarizedTraceHit_set_hit(pth, hit);
         PolarizedTraceHit_set_rp_over_rs(pth, rp_over_rs);
         PolarizedTraceHit_set_transmittance_s(pth, cum_ts);

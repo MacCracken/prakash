@@ -27,6 +27,7 @@ struct ParaxialRay { y; nu; }
 #must_use
 fn paraxial_ray_new(y, nu) {
     var r = alloc(sizeof(ParaxialRay));
+    if (r == 0) { return 0; }
     ParaxialRay_set_y(r, y);
     ParaxialRay_set_nu(r, nu);
     return r;
@@ -66,6 +67,7 @@ struct ParaxSurf { power; reduced_t; }
 #must_use
 fn paraxsurf_new(power, reduced_t) {
     var p = alloc(sizeof(ParaxSurf));
+    if (p == 0) { return 0; }
     ParaxSurf_set_power(p, power);
     ParaxSurf_set_reduced_t(p, reduced_t);
     return p;
@@ -106,6 +108,7 @@ struct Prescription { name; surfaces; n_initial; }
 #must_use
 fn prescription_new(name) {
     var p = alloc(sizeof(Prescription));
+    if (p == 0) { return 0; }
     Prescription_set_name(p, name);
     Prescription_set_surfaces(p, vec_new());
     Prescription_set_n_initial(p, F64_ONE);
@@ -123,6 +126,7 @@ fn prescription_with_initial_medium(p, n) {
 #must_use
 fn prescription_add_surface(p, radius, thickness, n_after, aperture_radius) {
     var ps = alloc(sizeof(PrescriptionSurface));
+    if (ps == 0) { return 0; }
     PrescriptionSurface_set_radius(ps, radius);
     PrescriptionSurface_set_thickness(ps, thickness);
     PrescriptionSurface_set_n_after(ps, n_after);
@@ -275,6 +279,7 @@ fn find_system_properties(prescription, err_out) {
     }
 
     var props = alloc(sizeof(SystemProperties));
+    if (props == 0) { return 0; }
     SystemProperties_set_focal_length(props, efl);
     SystemProperties_set_bfd(props, bfd);
     SystemProperties_set_ffd(props, ffd);
