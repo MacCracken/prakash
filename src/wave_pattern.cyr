@@ -1,5 +1,5 @@
 # wave_pattern.cyr -- 2D diffraction / interference / SPD strip / PSF patterns
-# Usage: include "lib/wave_pattern.cyr"  (requires hisab for num_fft/num_ifft)
+# Usage: include "lib/wave_pattern.cyr"  (requires hisab for num_fft)
 #
 # Ported from the Rust `wave/pattern.rs`. Uses hisab's FFT (num_fft) on packed
 # complex buffers: element i has re at byte i*16, im at i*16+8 (matching hisab
@@ -7,8 +7,12 @@
 
 fn _pat_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
 
-# Next power of two (>= n); npot(0) = 1.
+# Next power of two >= n, clamped. Returns 0 for n <= 0 or for an n large
+# enough that the doubling would overflow — callers treat 0 as "unusable size"
+# and bail, rather than looping into a negative p.
 fn _pat_npot(n) {
+    if (n <= 0) { return 0; }
+    if (n > 1073741824) { return 0; }
     var p = 1;
     while (p < n) {
         p = p * 2;
@@ -28,12 +32,33 @@ fn _pat_norm_sq(grid, idx) {
 #derive(accessors)
 struct Pattern2D { data; width; height; }
 
-# New zero-filled pattern (width x height, row-major).
+# 1 if a `width` x `height` buffer of `elem_bytes`-sized cells cannot be
+# allocated: non-positive dimensions, a multiplication that overflows i64, or a
+# request past what `alloc` will serve. `alloc` returns 0 above ALLOC_MAX
+# (0x80000000 = 2 GiB) and on heap exhaustion, so the size has to be screened
+# BEFORE the product is formed — `width * height * elem_bytes` can wrap to a
+# small positive number, which would allocate a tiny buffer and then be written
+# far past its end.
+#must_use
+fn _pat_dims_bad(width, height, elem_bytes) {
+    if (width <= 0) { return 1; }
+    if (height <= 0) { return 1; }
+    var total = width * height;
+    if (total / width != height) { return 1; }
+    if (total > 2147483648 / elem_bytes) { return 1; }
+    return 0;
+}
+
+# New zero-filled pattern (width x height, row-major). Returns 0 if the
+# dimensions are unusable or the allocation fails.
 #must_use
 fn pattern2d_new(width, height) {
+    if (_pat_dims_bad(width, height, 8) == 1) { return 0; }
     var p = alloc(sizeof(Pattern2D));
+    if (p == 0) { return 0; }
     var total = width * height;
     var data = alloc(total * 8);
+    if (data == 0) { return 0; }
     for (var i = 0; i < total; i = i + 1) {
         store64(data + i * 8, f64_from(0));
     }
@@ -43,12 +68,27 @@ fn pattern2d_new(width, height) {
     return p;
 }
 
+# Intensity at (col, row). Returns 0.0 for a null pattern or an out-of-range
+# index rather than reading outside the buffer.
 #must_use
 fn pattern2d_get(p, col, row) {
+    if (p == 0) { return f64_from(0); }
+    if (col < 0) { return f64_from(0); }
+    if (row < 0) { return f64_from(0); }
+    if (col >= Pattern2D_width(p)) { return f64_from(0); }
+    if (row >= Pattern2D_height(p)) { return f64_from(0); }
     return load64(Pattern2D_data(p) + (row * Pattern2D_width(p) + col) * 8);
 }
 
+# Store an intensity at (col, row). Returns PK_ERR_NONE on success, or
+# PK_ERR_INVALID_PARAMETER if the pattern is null or the index is out of range
+# (previously it wrote past the buffer).
 fn pattern2d_set(p, col, row, value) {
+    if (p == 0) { return PK_ERR_INVALID_PARAMETER; }
+    if (col < 0) { return PK_ERR_INVALID_PARAMETER; }
+    if (row < 0) { return PK_ERR_INVALID_PARAMETER; }
+    if (col >= Pattern2D_width(p)) { return PK_ERR_INVALID_PARAMETER; }
+    if (row >= Pattern2D_height(p)) { return PK_ERR_INVALID_PARAMETER; }
     store64(Pattern2D_data(p) + (row * Pattern2D_width(p) + col) * 8, value);
     return 0;
 }
@@ -71,10 +111,12 @@ fn pattern2d_max_intensity(p) {
 # Normalize to [0,1] relative to the maximum; clone unchanged if max < 1e-30.
 #must_use
 fn pattern2d_normalized(p) {
+    if (p == 0) { return 0; }
     var maxv = pattern2d_max_intensity(p);
     var width = Pattern2D_width(p);
     var height = Pattern2D_height(p);
     var out = pattern2d_new(width, height);
+    if (out == 0) { return 0; }
     var total = width * height;
     var data = Pattern2D_data(p);
     var odata = Pattern2D_data(out);
@@ -93,11 +135,14 @@ fn pattern2d_normalized(p) {
 
 # ── 2D FFT plumbing (row FFTs then column FFTs, hisab num_fft) ────────
 
+# Returns PK_ERR_NONE on success, PK_ERR_ALLOCATION if the column scratch
+# buffer cannot be allocated.
 fn _pat_fft2d(grid, nw, nh) {
     for (var row = 0; row < nh; row = row + 1) {
         num_fft(grid + row * nw * 16, nw);
     }
     var col_buf = alloc(nh * 16);
+    if (col_buf == 0) { return PK_ERR_ALLOCATION; }
     for (var col = 0; col < nw; col = col + 1) {
         for (var rr = 0; rr < nh; rr = rr + 1) {
             store64(col_buf + rr * 16, load64(grid + (rr * nw + col) * 16));
@@ -115,6 +160,7 @@ fn _pat_fft2d(grid, nw, nh) {
 # |E|^2 with fftshift (DC to center) into a fresh Pattern2D.
 fn _pat_fftshift_to_pattern(grid, nw, nh) {
     var pattern = pattern2d_new(nw, nh);
+    if (pattern == 0) { return 0; }
     for (var row = 0; row < nh; row = row + 1) {
         for (var col = 0; col < nw; col = col + 1) {
             var sr = (row + nh / 2) % nh;
@@ -129,12 +175,20 @@ fn _pat_fftshift_to_pattern(grid, nw, nh) {
 
 # 2D Fraunhofer diffraction from an arbitrary aperture (row-major f64 grid,
 # 0=opaque..1=clear). Dimensions padded to the next power of 2. Returns |E|^2.
+# Returns 0 if the padded dimensions are unusable or the complex grid cannot be
+# allocated. Note the power-of-two padding: a width of 8193 pads to 16384, so
+# the 16-byte-per-cell grid is 4 GiB and `alloc` refuses it.
 #must_use
 fn diffraction_pattern_2d(aperture, width, height) {
     _prk_trace("diffraction_pattern_2d");
+    if (aperture == 0) { return 0; }
     var nw = _pat_npot(width);
     var nh = _pat_npot(height);
+    if (nw == 0) { return 0; }
+    if (nh == 0) { return 0; }
+    if (_pat_dims_bad(nw, nh, 16) == 1) { return 0; }
     var grid = alloc(nw * nh * 16);
+    if (grid == 0) { return 0; }
     var total = nw * nh;
     for (var z = 0; z < total; z = z + 1) {
         store64(grid + z * 16, f64_from(0));
@@ -146,7 +200,7 @@ fn diffraction_pattern_2d(aperture, width, height) {
             store64(grid + (row * nw + col) * 16 + 8, f64_from(0));
         }
     }
-    _pat_fft2d(grid, nw, nh);
+    if (_pat_fft2d(grid, nw, nh) != 0) { return 0; }
     return _pat_fftshift_to_pattern(grid, nw, nh);
 }
 
@@ -155,10 +209,16 @@ fn diffraction_pattern_2d(aperture, width, height) {
 fn diffraction_pattern_circular(grid_size, radius) {
     _prk_trace("diffraction_pattern_circular");
     var n = _pat_npot(grid_size);
+    if (n == 0) { return 0; }
+    if (_pat_dims_bad(n, n, 8) == 1) { return 0; }
+    # The FFT grid this feeds is 16 bytes per cell, so screen that budget too —
+    # an n*n*8 aperture can succeed while the n*n*16 grid cannot.
+    if (_pat_dims_bad(n, n, 16) == 1) { return 0; }
     var cx = f64_div(f64_from(n), F64_TWO);
     var cy = f64_div(f64_from(n), F64_TWO);
     var r2 = f64_mul(radius, radius);
     var aperture = alloc(n * n * 8);
+    if (aperture == 0) { return 0; }
     for (var row = 0; row < n; row = row + 1) {
         for (var col = 0; col < n; col = col + 1) {
             var dx = f64_sub(f64_from(col), cx);
@@ -181,6 +241,7 @@ struct PointSource { x; y; amplitude; phase; }
 #must_use
 fn point_source_new(x, y, amplitude, phase) {
     var s = alloc(sizeof(PointSource));
+    if (s == 0) { return 0; }
     PointSource_set_x(s, x);
     PointSource_set_y(s, y);
     PointSource_set_amplitude(s, amplitude);
@@ -204,6 +265,7 @@ fn interference_pattern(sources, num_sources, wavelength, distance, gx0, gx1, gy
         dy = f64_div(f64_sub(gy1, gy0), f64_sub(f64_from(ny), F64_ONE));
     }
     var pattern = pattern2d_new(nx, ny);
+    if (pattern == 0) { return 0; }
     for (var row = 0; row < ny; row = row + 1) {
         var obs_y = f64_add(gy0, f64_mul(f64_from(row), dy));
         for (var col = 0; col < nx; col = col + 1) {
@@ -287,8 +349,11 @@ fn _pat_wl_to_rgb(nm, out) {
 #must_use
 fn spectrum_strip(num_samples) {
     _prk_trace("spectrum_strip");
+    if (_pat_dims_bad(num_samples, 1, sizeof(StripColor)) == 1) { return 0; }
     var colors = alloc(num_samples * sizeof(StripColor));
+    if (colors == 0) { return 0; }
     var rgb = alloc(24);
+    if (rgb == 0) { return 0; }
     for (var i = 0; i < num_samples; i = i + 1) {
         var denom = f64_sub(f64_from(num_samples), F64_ONE);
         if (f64_lt(denom, F64_ONE) == 1) {
@@ -308,8 +373,11 @@ fn spectrum_strip(num_samples) {
 #must_use
 fn spectrum_strip_range(start_nm, end_nm, num_samples) {
     _prk_trace("spectrum_strip_range");
+    if (_pat_dims_bad(num_samples, 1, sizeof(StripColor)) == 1) { return 0; }
     var colors = alloc(num_samples * sizeof(StripColor));
+    if (colors == 0) { return 0; }
     var rgb = alloc(24);
+    if (rgb == 0) { return 0; }
     for (var i = 0; i < num_samples; i = i + 1) {
         var denom = f64_sub(f64_from(num_samples), F64_ONE);
         if (f64_lt(denom, F64_ONE) == 1) {
@@ -332,10 +400,16 @@ fn spectrum_strip_range(start_nm, end_nm, num_samples) {
 #must_use
 fn psf_from_wavefront(pupil, wavefront_error, width, height, wavelength) {
     _prk_trace("psf_from_wavefront");
+    if (pupil == 0) { return 0; }
+    if (wavefront_error == 0) { return 0; }
     var nw = _pat_npot(width);
     var nh = _pat_npot(height);
+    if (nw == 0) { return 0; }
+    if (nh == 0) { return 0; }
+    if (_pat_dims_bad(nw, nh, 16) == 1) { return 0; }
     var k = f64_div(F64_TAU, wavelength);
     var grid = alloc(nw * nh * 16);
+    if (grid == 0) { return 0; }
     var total = nw * nh;
     for (var z = 0; z < total; z = z + 1) {
         store64(grid + z * 16, f64_from(0));
@@ -352,7 +426,7 @@ fn psf_from_wavefront(pupil, wavefront_error, width, height, wavelength) {
             }
         }
     }
-    _pat_fft2d(grid, nw, nh);
+    if (_pat_fft2d(grid, nw, nh) != 0) { return 0; }
     return _pat_fftshift_to_pattern(grid, nw, nh);
 }
 

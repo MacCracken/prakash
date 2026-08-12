@@ -11,7 +11,6 @@ fn _atm_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
 fn _atm_eps15() { return f64_div(F64_ONE, f64_from(1000000000000000)); }
 
 # Physical constants.
-fn _atm_n_air() { return _atm_r(1000293, 1000000); }        # 1.000293
 fn _atm_n_s() { return 0x4534B66D1EB52A20; }                # 2.504e25 molecules/m^3
 fn _atm_beta_m() { return _atm_r(21, 1000000); }            # 21e-6 1/m (Mie sea level)
 fn _atm_scale_h_rayleigh() { return f64_from(8500); }       # meters
@@ -73,7 +72,7 @@ fn atm_rayleigh_scattering_coefficient(wavelength_m) {
 #must_use
 fn atm_rayleigh_scattering_at_altitude(wavelength_m, altitude_m) {
     return f64_mul(atm_rayleigh_scattering_coefficient(wavelength_m),
-    f64_exp(f64_div(f64_neg(altitude_m), _atm_scale_h_rayleigh())));
+    _prk_exp(f64_div(f64_neg(altitude_m), _atm_scale_h_rayleigh())));
 }
 
 # Rayleigh phase function: 3*(1 + cos^2) / (16*pi).
@@ -96,7 +95,7 @@ fn atm_mie_scattering_coefficient(wavelength_m) {
 #must_use
 fn atm_mie_scattering_at_altitude(wavelength_m, altitude_m) {
     return f64_mul(atm_mie_scattering_coefficient(wavelength_m),
-    f64_exp(f64_div(f64_neg(altitude_m), _atm_scale_h_mie())));
+    _prk_exp(f64_div(f64_neg(altitude_m), _atm_scale_h_mie())));
 }
 
 # Cornette-Shanks Mie phase:
@@ -125,7 +124,7 @@ fn atm_air_mass(zenith_angle) {
     var zenith_deg = f64_min(_atm_to_degrees(zenith_angle), f64_from(90));
     var cos_z = f64_cos(zenith_angle);
     var correction = f64_mul(_atm_r(50572, 100000),
-    ganita_f64_pow(f64_sub(_atm_r(9607995, 100000), zenith_deg), f64_neg(_atm_r(16364, 10000))));
+    _prk_pow(f64_sub(_atm_r(9607995, 100000), zenith_deg), f64_neg(_atm_r(16364, 10000))));
     return f64_div(F64_ONE, f64_add(cos_z, correction));
 }
 
@@ -147,7 +146,7 @@ fn atm_atmospheric_transmittance(wavelength_m, zenith_angle) {
     var m = atm_air_mass(zenith_angle);
     var tau_r = atm_optical_depth_rayleigh(wavelength_m);
     var tau_m = atm_optical_depth_mie();
-    return f64_exp(f64_mul(f64_neg(f64_add(tau_r, tau_m)), m));
+    return _prk_exp(f64_mul(f64_neg(f64_add(tau_r, tau_m)), m));
 }
 
 # ── Sky color ────────
@@ -198,8 +197,8 @@ fn atm_sunset_gradient(sun_zenith, view_elevation, angular_distance_to_sun, out)
     for (var i = 0; i < 3; i = i + 1) {
         var beta_r = atm_rayleigh_scattering_coefficient(_atm_rgb_wl(i));
         var total_tau = f64_add(f64_mul(beta_r, _atm_scale_h_rayleigh()), tau_m);
-        var sun_transmittance = f64_exp(f64_mul(f64_neg(total_tau), sun_air_mass));
-        var view_transmittance = f64_exp(f64_mul(f64_neg(total_tau), view_air_mass));
+        var sun_transmittance = _prk_exp(f64_mul(f64_neg(total_tau), sun_air_mass));
+        var view_transmittance = _prk_exp(f64_mul(f64_neg(total_tau), view_air_mass));
         var scatter = f64_mul(
         f64_add(f64_mul(beta_r, phase_r), f64_mul(_atm_beta_m(), phase_m)),
         sun_transmittance);

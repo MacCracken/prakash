@@ -11,7 +11,7 @@ Consumed by [soorat](https://github.com/MacCracken/soorat) (PBR shading), [kiran
 | Module | Files | Description |
 |--------|-------|-------------|
 | **ray** | ray_core, ray_fresnel, ray_trace, ray_simulate, ray_system, ray_dispersion, ray_fiber | Geometric optics: Snell, Fresnel (real + complex refractive index), reflection (2D/3D), critical/Brewster angle, Beer-Lambert, TIR, 12 materials. Dispersion (Sellmeier/Cauchy/Herzberger/Schott/Conrady), chromatic aberration, fiber optics. Sequential + recursive ray tracer with polarization, ray fans, spot diagrams, OPD, paraxial system builder, cardinal points |
-| **spectral** | spectral_core, spectral_cie, spectral_photometry | Wavelength↔RGB, Planck (numerically stable), Wien, color-temperature→RGB, photon energy. CIE 1931/1964/2015 observers, XYZ, SPD integration, illuminants (A/D50/D65/E/F2/F11), CRI, photometry (V(λ), luminous flux/efficacy) |
+| **spectral** | spectral_core, spectral_cie, spectral_photometry | Wavelength↔RGB, Planck (numerically stable), Wien, color-temperature→RGB, photon energy. CIE 1931/1964/2015 observers, XYZ, SPD integration, illuminants (A/D50/D65/F2/F11), CRI, photometry (V(λ), luminous flux/efficacy) |
 | **wave** | wave_core, wave_polarization, wave_coherence, wave_airy, wave_fabry_perot, wave_diffraction, wave_zernike, wave_pattern | Interference, single/double-slit + grating diffraction, thin-film reflectance, Malus, Jones/Stokes/Mueller, coherence, Airy/Bessel, Fabry-Pérot, Fraunhofer/Fresnel/Huygens diffraction, AR coatings + TMM, Zernike wavefronts, 2D FFT patterns, PSF |
 | **lens** | lens | Thin/thick lens, lensmaker, mirrors, f-number/NA, FOV, MTF (mono/poly/through-focus), Seidel aberrations, Petzval, depth of field, multi-element systems |
 | **pbr** | pbr_core, pbr_advanced | Cook-Torrance, GGX/Beckmann NDF, Smith geometry, Fresnel-Schlick, Lambert; anisotropy, sheen, clearcoat, SSS, iridescence, volumetric scattering, importance sampling, split-sum IBL |
@@ -83,7 +83,7 @@ var transmitted = malus_law(F64_ONE, F64_PI_4);
 
 ```
 prakash (Cyrius)
-  ├── hisab   (git dep, tag 2.11.1) — Complex + FFT (num_fft/num_ifft) for wave/pattern
+  ├── hisab   (git dep, tag 2.11.1) — FFT (num_fft) for wave_pattern
   ├── ganita  (stdlib) — transcendentals + linear algebra
   ├── bayan   (stdlib) — JSON (serialize module)
   ├── sakshi  (stdlib) — logging (trace diagnostics)
@@ -94,7 +94,7 @@ prakash (Cyrius)
 
 ```sh
 cyrius deps                 # resolve the hisab git dep
-for f in tests/*.tcyr; do cyrius test "$f"; done   # 5251 assertions, 26 suites
+for f in tests/*.tcyr; do cyrius test "$f"; done   # 5334 assertions, 27 suites
 cyrius distlib              # regenerate dist/prakash.cyr
 cyrius distlib ai           # regenerate dist/prakash-ai.cyr
 cyrius bench tests/prakash.bcyr                     # 27 benchmarks

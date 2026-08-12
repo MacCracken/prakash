@@ -10,10 +10,15 @@
 fn _r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
 
 # ── Physical constants ────────
+#must_use
 fn spec_visible_min_nm() { return f64_from(380); }
+#must_use
 fn spec_visible_max_nm() { return f64_from(780); }
+#must_use
 fn spec_speed_of_light() { return f64_from(299792458); }        # m/s
+#must_use
 fn spec_planck_h() { return 0x390B860BDE023111; }               # 6.62607015e-34 J*s
+#must_use
 fn spec_boltzmann_k() { return 0x3B30B0E6D55E647C; }            # 1.380649e-23 J/K
 
 # First/second radiation constants (2*h*c*c ; h*c/k), left-associative like Rust.
@@ -132,7 +137,7 @@ fn wavelength_to_rgb(wavelength_nm, err_out) {
 # ── Blackbody radiation ────────
 
 # exp(x) - 1 (Cyrius has no expm1; adequate outside the |x|<<1 cancellation regime).
-fn _expm1(x) { return f64_sub(f64_exp(x), F64_ONE); }
+fn _expm1(x) { return f64_sub(_prk_exp(x), F64_ONE); }
 
 # Planck's law: spectral radiance (W*sr^-1*m^-3) at wavelength_m and temperature_k.
 # Uses the Wien approximation for x > 500 to avoid exp overflow; 0 for T <= 0.
@@ -147,7 +152,7 @@ fn planck_radiance(wavelength_m, temperature_k) {
     var wl4 = f64_mul(wl2, wl2);
     var lambda5 = f64_mul(wavelength_m, wl4);
     if (f64_gt(x, f64_from(500)) == 1) {
-        return f64_div(_planck_c1(), f64_mul(lambda5, f64_exp(x)));
+        return f64_div(_planck_c1(), f64_mul(lambda5, _prk_exp(x)));
     }
     return f64_div(_planck_c1(), f64_mul(lambda5, _expm1(x)));
 }
@@ -165,11 +170,15 @@ fn color_temperature_to_rgb(kelvin) {
     var temp = f64_clamp(f64_div(kelvin, f64_from(100)), f64_from(10), f64_from(400));
 
     var r = F64_ONE;
-    if (f64_gt(temp, f64_from(66)) == 1) {
+    # Negate `temp <= 66` rather than testing `temp > 66`: the two agree for
+    # every finite input, but on a NaN both comparisons are false, and Rust's
+    # `if temp <= 66.0 { 1.0 } else { ... }` takes the ELSE branch there.
+    # bridge.cyr's copy of this fit already negates; this keeps them identical.
+    if (f64_le(temp, f64_from(66)) == 0) {
         var xr = f64_sub(temp, f64_from(60));
         r = f64_clamp(
         f64_div(f64_mul(_r(329698727446, 1000000000),
-        ganita_f64_pow(xr, f64_neg(_r(1332047592, 10000000000)))), f64_from(255)),
+        _prk_pow(xr, f64_neg(_r(1332047592, 10000000000)))), f64_from(255)),
         f64_from(0), F64_ONE);
     }
 
@@ -182,7 +191,7 @@ fn color_temperature_to_rgb(kelvin) {
         var xg = f64_sub(temp, f64_from(60));
         g = f64_clamp(
         f64_div(f64_mul(_r(2881221695283, 10000000000),
-        ganita_f64_pow(xg, f64_neg(_r(7551484937, 100000000000)))), f64_from(255)),
+        _prk_pow(xg, f64_neg(_r(7551484937, 100000000000)))), f64_from(255)),
         f64_from(0), F64_ONE);
     }
 

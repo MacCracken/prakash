@@ -16,11 +16,12 @@ source retained under `rust-old/`.
 | `pbr` | pbr_core, pbr_advanced | 865 | (free functions) | PBR shading: Cook-Torrance, GGX, sheen, clearcoat, SSS, iridescence, volumetric, importance sampling, split-sum IBL |
 | `atmosphere` | atmosphere.cyr | 313 | (free functions + constants) | Rayleigh/Mie scattering, King correction, sky color, air mass, optical depth, sunset model |
 | `bridge` | bridge.cyr | 28 | (free functions) | Primitive-value cross-crate hooks (bijli/tara/badal) — no dependency on sibling crates |
-| `serialize` | serialize.cyr | 24 | (free functions) | JSON roundtrips (bayan) for the seven serde-tested types |
-| `ai` | ai.cyr | 12 | `DaimonClient`, `DaimonConfig`, `HooshConfig` | AI-assisted optics queries via sandhi HTTP POST — **not in the core bundle** |
+| `serialize` | serialize.cyr | 24 | (free functions) | JSON roundtrips (bayan) for the seven serde-tested types; floats are bit-exact (Grisu2) since bayan 1.2.1 |
+| `ai` | ai.cyr | 24 | `DaimonClient`, `DaimonConfig`, `HooshConfig` | AI-assisted optics queries via sandhi HTTP POST — **not in the core bundle** |
 
-**Total**: 25 science modules + error, **5251 test assertions across 26 suites**,
-27 benchmarks.
+**Total**: 25 science modules + error, **5334 test assertions across 27 suites**,
+27 benchmarks. (`tests/hardening.tcyr` is the cross-module regression suite for the
+2.0.2 audit repairs — see that CHANGELOG entry.)
 
 ## Design Principles
 
@@ -85,25 +86,31 @@ the 8 wave → pbr_core, pbr_advanced → lens → atmosphere → bridge → ser
 
 ### The `dist/*.deps` sidecars
 
-Each bundle ships a `.deps` sidecar naming the stdlib folds a consumer must have
-in scope; `cyrius deps` **validates** a consumer's `[deps] stdlib` against it and
-hard-errors on anything missing, so it is a contract rather than documentation.
+Each bundle ships a `.deps` sidecar naming the stdlib folds that bundle needs in
+scope. It is published metadata describing the artifact — **not** an enforced
+contract: measured against cyrius 6.5.20, a consumer that declares fewer folds
+than the sidecar lists still resolves cleanly (`cyrius deps` exits 0), a bogus
+fold name in the sidecar raises no error, and in the git-dep flow the vendored
+set is driven by prakash's own `cyrius.cyml`, not by the sidecar.
 
-prakash's bundle layout is **inverted** relative to what `cyrius distlib` assumes:
-the base bundle (`[lib]` → `dist/prakash.cyr`) is the *narrow* math-only one and
-the profile (`[lib.ai]`) is the *wide* one, whereas the generator treats the base
-as widest and prunes profiles. Left alone it therefore over-reports for the core
-bundle (handing it the sandhi/TLS stack it never touches) and under-reports for
-the ai bundle. prakash regenerates both from the manifest with
-**`scripts/sync-deps-sidecar.sh`** — core = declared stdlib minus the AI-only
-folds (`net http tls async random fdlopen dynlib chrono sandhi`), ai = the full
-declared list. CI enforces both the sync and a core-bundle-is-TLS-free scan.
+Even so it should state the truth, and by default it does not. prakash's bundle
+layout is **inverted** relative to what `cyrius distlib` assumes: the base bundle
+(`[lib]` → `dist/prakash.cyr`) is the *narrow* math-only one and the profile
+(`[lib.ai]`) is the *wide* one, whereas since 6.5.10 the generator emits
+`[deps] stdlib` ∪ include-scan for the base and a pruned inference for profiles —
+i.e. it assumes the base is widest. Left alone, the core sidecar therefore
+advertises the sandhi/TLS stack the math-only bundle never touches, and the ai
+sidecar lists only `syscalls io`. **`scripts/sync-deps-sidecar.sh`** regenerates
+both from the manifest — core = declared stdlib minus the AI-only folds
+(`net http tls async random fdlopen dynlib chrono sandhi`), ai = the full declared
+list. CI enforces the sync plus a core-bundle-is-TLS-free symbol scan, which is
+the check that actually has teeth.
 
 ## Dependencies
 
 | Dependency | Kind | Purpose |
 |-----------|------|---------|
-| `hisab` | git dep (tag 2.11.1) | Complex + FFT (`num_fft`/`num_ifft`) for `wave_pattern` |
+| `hisab` | git dep (tag 2.11.1) | FFT (`num_fft`) for `wave_pattern` (the suite also exercises `num_ifft`) |
 | `ganita` | stdlib | Transcendentals (acos/asin/atan2/pow/sinh/…) + linear algebra |
 | `math` | stdlib | Comparisons, clamp/lerp/min/max, `F64_PI` etc., aarch64 polyfills |
 | `bayan` | stdlib | JSON (`serialize` module) |

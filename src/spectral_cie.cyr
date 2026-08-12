@@ -1514,7 +1514,7 @@ fn linear_to_srgb_gamma(c) {
         return f64_mul(_cie_r(1292, 100), c);
     }
     return f64_sub(
-    f64_mul(_cie_r(1055, 1000), ganita_f64_pow(c, f64_div(F64_ONE, _cie_r(24, 10)))),
+    f64_mul(_cie_r(1055, 1000), _prk_pow(c, f64_div(F64_ONE, _cie_r(24, 10)))),
     _cie_r(55, 1000));
 }
 
@@ -1524,7 +1524,7 @@ fn srgb_gamma_to_linear(c) {
     if (f64_le(c, _cie_r(4045, 100000)) == 1) {
         return f64_div(c, _cie_r(1292, 100));
     }
-    return ganita_f64_pow(f64_div(f64_add(c, _cie_r(55, 1000)), _cie_r(1055, 1000)), _cie_r(24, 10));
+    return _prk_pow(f64_div(f64_add(c, _cie_r(55, 1000)), _cie_r(1055, 1000)), _cie_r(24, 10));
 }
 
 # ── CCT ────────
@@ -1597,12 +1597,19 @@ fn spd_end_nm(s) {
 # Interpolate the SPD at a wavelength (0 outside range).
 #must_use
 fn spd_at(s, wavelength_nm) {
+    # An empty SPD has no value to interpolate. Without this, a zero step makes
+    # idx_f = 0/0 = NaN and the `idx >= len - 1` branch reads _spd_val(vals, -1)
+    # — a load from 8 bytes before the buffer. (The Rust original indexed a Vec
+    # and panicked here rather than reading out of bounds.)
+    if (Spd_len(s) <= 0) { return f64_from(0); }
     if (f64_lt(wavelength_nm, Spd_start_nm(s)) == 1) { return f64_from(0); }
     if (f64_gt(wavelength_nm, spd_end_nm(s)) == 1) { return f64_from(0); }
     var idx_f = f64_div(f64_sub(wavelength_nm, Spd_start_nm(s)), Spd_step_nm(s));
     var idx = f64_to(idx_f);
     var vals = Spd_values(s);
     var len = Spd_len(s);
+    # A NaN or negative idx (zero/negative step) must not index backwards.
+    if (idx < 0) { idx = 0; }
     if (idx >= len - 1) {
         return _spd_val(vals, len - 1);
     }

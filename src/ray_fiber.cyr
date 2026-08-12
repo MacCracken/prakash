@@ -57,7 +57,7 @@ fn mode_field_diameter(core_radius, v) {
     var v2 = f64_mul(v, v);
     var v6 = f64_mul(v2, f64_mul(v2, v2));
     var inv_v6 = f64_div(F64_ONE, v6);
-    var term_pm15 = f64_mul(_fib_r(1619, 1000), ganita_f64_pow(v, f64_neg(_fib_r(15, 10))));
+    var term_pm15 = f64_mul(_fib_r(1619, 1000), _prk_pow(v, f64_neg(_fib_r(15, 10))));
     var term_pm6 = f64_mul(_fib_r(2879, 1000), inv_v6);
     var factor = f64_add(f64_add(_fib_r(65, 100), term_pm15), term_pm6);
     return f64_mul(f64_mul(F64_TWO, core_radius), factor);

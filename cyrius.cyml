@@ -116,8 +116,9 @@ stdlib = [
     "sakshi",
 ]
 
-# hisab (higher mathematics) — Complex + FFT (num_fft/num_ifft) for wave/pattern.
-# prakash's surface is exactly those two entry points; the rest of hisab's 34
+# hisab (higher mathematics) — FFT (num_fft) for wave_pattern.
+# prakash's library surface is exactly that one entry point (the test suite
+# also exercises num_ifft); the rest of hisab's 34
 # modules ride along in the bundle unused. 2.6.8 was the collision-hardening
 # patch (FLOAT_RENDER_BUF stack-array -> alloc; ERR_* -> HSB_ERR_) that let hisab
 # co-compile with the sandhi/TLS stack pulled by [lib.ai]; both properties still

@@ -73,7 +73,7 @@ fn br_stellar_temperature_to_rgb(temperature_k, out) {
         var xr = f64_sub(t, f64_from(60));
         r = f64_clamp(
         f64_div(f64_mul(_br_r(329698727446, 1000000000),
-        ganita_f64_pow(xr, f64_neg(_br_r(1332047592, 10000000000)))), f64_from(255)),
+        _prk_pow(xr, f64_neg(_br_r(1332047592, 10000000000)))), f64_from(255)),
         f64_from(0), F64_ONE);
     }
     var g = f64_from(0);
@@ -86,7 +86,7 @@ fn br_stellar_temperature_to_rgb(temperature_k, out) {
         var xg = f64_sub(t, f64_from(60));
         g = f64_clamp(
         f64_div(f64_mul(_br_r(2881221695283, 10000000000),
-        ganita_f64_pow(xg, f64_neg(_br_r(7551484937, 100000000000)))), f64_from(255)),
+        _prk_pow(xg, f64_neg(_br_r(7551484937, 100000000000)))), f64_from(255)),
         f64_from(0), F64_ONE);
     }
     var b = F64_ONE;
@@ -162,7 +162,7 @@ fn br_spectral_class_to_temperature(class) {
 # Absolute magnitude -> luminosity relative to the Sun: 10^((M_sun - M)/2.5).
 #must_use
 fn br_absolute_magnitude_to_luminosity(absolute_magnitude) {
-    return ganita_f64_pow(f64_from(10),
+    return _prk_pow(f64_from(10),
     f64_div(f64_sub(_br_r(483, 100), absolute_magnitude), _br_r(25, 10)));
 }
 

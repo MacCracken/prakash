@@ -37,9 +37,10 @@ done
 cyrius vet src/main.cyr
 
 # Bundles must match lib/ (regenerate + commit if they drift).
-# The sidecar sync is REQUIRED after distlib: `cyrius distlib` gets the
-# dist/*.deps sidecars backwards for prakash's inverted two-bundle layout
-# (base = narrow math-only, profile = wide + TLS). See the script header.
+# Sync the .deps sidecars after distlib: `cyrius distlib` gets them backwards
+# for prakash's inverted two-bundle layout (base = narrow math-only, profile =
+# wide + TLS). They are published metadata, not an enforced contract — see the
+# script header for what was actually measured.
 cyrius distlib && cyrius distlib ai
 ./scripts/sync-deps-sidecar.sh
 git diff --quiet dist/ || echo "dist/ stale — commit it"

@@ -1,5 +1,135 @@
 # Changelog
 
+## [2.0.2] - 2026-08-12 — Audit release: crashes, fabricated results, and a corrupted round-trip
+
+A full P(-1) hardening sweep of the 2.0.1 tree across six dimensions — allocation
+safety, error channels, untrusted input, numerical fidelity against `rust-old/`,
+API/doc accuracy, and coverage — with every candidate finding handed to an
+independent skeptic instructed to **refute** it. Two findings were refuted and
+dropped; several had their severity or trigger corrected by the verifier.
+
+No API signature changed, so this is a drop-in upgrade. Suite **5251 → 5334**
+assertions across **26 → 27** suites (new `tests/hardening.tcyr` with 71, plus 12
+added to `tests/ai.tcyr`).
+
+**Every defect below was reproduced against 2.0.1 before it was fixed**, and the
+crash cases were reproduced as an actual `SIGSEGV` (exit 139) from a public entry
+point — not inferred from reading. `tests/hardening.tcyr` re-runs each one.
+
+### Security
+- **Seven public entry points aborted the process on malformed input.**
+  `medium_from_json`, `lens_type_from_json`, `prescription_from_json` (all in
+  `serialize`) and `ai_daimon_config_from_json` / `ai_hoosh_config_from_json`
+  (in `ai`) dereferenced null and SIGSEGVed on JSON that merely lacked a required
+  field or gave it the wrong type — `{}`, `{"endpoint":42}`, `not json` all
+  sufficed. Every bayan accessor returns 0 for a missing or wrong-typed node and
+  `str_data(0)` is `load64(0)`. These are the deserialization paths, i.e. exactly
+  where untrusted bytes arrive. All now validate and fail safely.
+- **Unchecked allocations turned a size request into a process abort.**
+  `alloc` returns 0 past `ALLOC_MAX` (2 GiB) *and on heap exhaustion*, and none
+  of the pattern/zernike allocation sites checked it before storing through the
+  result. The cheapest trigger took two scalar arguments:
+  `psf_diffraction_limited(8193, 100.0)` — the power-of-two padding rounds 8193
+  to 16384, making the 16-byte-per-cell FFT grid 4 GiB. Guarded in
+  `pattern2d_new`, `diffraction_pattern_2d`, `diffraction_pattern_circular`,
+  `psf_from_wavefront`, `_pat_fft2d`, `spectrum_strip`, `spectrum_strip_range`,
+  `zernike_wf_to_grid`, `point_source_new` and the `ai` constructors.
+- **Size computations could overflow before reaching `alloc`.**
+  `pattern2d_new(1, 2305843009213693953)` wrapped `width*height*8` to 8, allocated
+  an 8-byte buffer, and then wrote 2^61 f64s through it. New `_pat_dims_bad`
+  screens non-positive dimensions, multiplication overflow, and the `ALLOC_MAX`
+  budget *before* the product is formed. `_pat_npot` no longer doubles into a
+  negative.
+- **`ai_register_agent` POSTed to a corrupted URL.** `str_cat` returns a `Str`
+  whose buffer has no NUL terminator, but sandhi consumes the URL as a cstring
+  and read off the end. Now terminated via `str_cstr`.
+
+### Fixed
+- **`pattern2d_get`/`pattern2d_set` and `mueller_get`/`mueller_set` did no bounds
+  checking**, so an out-of-range index read or wrote outside the buffer — the
+  Rust original used a checked `[[f64; 4]; 4]` and `Vec`. Reads now return 0.0 and
+  writes are refused with **`PK_ERR_INVALID_PARAMETER`** — a named code, not a
+  bare `-1`, which is already `PK_ERR_TIR` and would have reported "total
+  internal reflection" for an out-of-range matrix index.
+- **`spd_at` read `values[-1]` on a degenerate SPD.** With `len = 0` and
+  `step = 0`, `idx_f` is `0/0 = NaN`, which reached the `idx >= len - 1` branch
+  and loaded 8 bytes before the buffer. (The Rust original indexed a `Vec` and
+  panicked rather than reading out of bounds.)
+- **Malformed JSON silently fabricated a valid-looking result.** `rgb_from_json`
+  on garbage returned `Rgb(0,0,0)` — indistinguishable from a legitimate black —
+  because bayan returns 0 for a missing node and 0 *is* the bit pattern for 0.0.
+  All `*_from_json` now return 0 on failure; `lens_type_from_json` returns the new
+  `LENS_TYPE_INVALID`, since 0 was already `LENS_CONVERGING`.
+- **A flat optical surface was corrupted by a JSON round-trip.** JSON has no
+  infinity literal, so bayan encodes a non-finite f64 as `null`, and the decoder
+  read it back as 0.0 — turning a plano surface (radius `+inf`, *zero* curvature)
+  into a radius-0 surface (*infinite* curvature), the exact physical inverse.
+  A plano-convex lens, one of the most common elements, hit this. `radius` now
+  restores `+inf` from `null`.
+- **Three math boundaries diverged from Rust**, because `ganita_f64_pow` is
+  `exp(n*ln(base))` and the x87 `exp` returns NaN for an infinite argument:
+
+  | expression | 2.0.1 | Rust | 2.0.2 |
+  |---|---|---|---|
+  | `pow(0.0, 2)` | NaN | 0.0 | 0.0 |
+  | `exp(-inf)` | NaN | 0.0 | 0.0 |
+  | `exp(+inf)` | NaN | +inf | +inf |
+
+  New `_prk_pow` / `_prk_exp` shims in `error.cyr` carry Rust's semantics; all
+  call sites route through them and finite arguments are delegated unchanged.
+  The reachable consequences: `pbr_distribution_charlie` returned **NaN at the
+  specular peak** (`n_dot_h = 1`, where `sin_theta` is 0) instead of 0.0, and
+  `atm_atmospheric_transmittance` returned NaN instead of 0.0 at saturation.
+- **`color_temperature_to_rgb`** tested `temp > 66` where Rust tests
+  `temp <= 66` and takes the else branch. Identical for finite input, but on a
+  NaN both comparisons are false and Rust computes while the port returned 1.0.
+  Now negated to match (and to match `bridge.cyr`, which already did).
+
+### Performance
+- **Two hot paths allocated per call into an allocator that never frees.**
+  `zernike_wf_evaluate` took a 16-byte scratch buffer on every call and is called
+  once per grid cell by `zernike_wf_to_grid`, so a grid leaked more memory than it
+  returned; `fresnel_integral_c`/`_s`/`_cs`/`fresnel_edge_intensity` did the same
+  per call. Both now use stack locals via `&`-pointers — no allocation.
+  - `wave/fresnel_integral_c`: 157 ns → **136 ns (−13%)**
+  - `wave/zernike_poly`: 110 ns → 103 ns
+- **The added guards cost nothing measurable.** Despite per-call bounds checks in
+  `pattern2d_set` (invoked once per cell), `wave/diffraction_pattern_2d_8x8` is
+  15.888 µs → 15.400 µs, and every other row is flat or slightly faster. Full
+  27-benchmark run recorded in `bench-history.csv` / `benchmarks.md`.
+
+### Added
+- **`PK_ERR_ALLOCATION`** (`-8`) — an allocation was refused because the request
+  exceeds `ALLOC_MAX`, the size computation overflowed, or the heap is exhausted.
+  Distinct from `PK_ERR_INVALID_PARAMETER`: the arguments were sane, the memory
+  was not there. Every status-returning site added in this release now returns a
+  named `PK_ERR_*` code, per `error.cyr`'s stated convention.
+
+### Changed
+- **`#must_use`** added to ten pure functions that lacked it (`prakash_is_err`,
+  `prakash_is_ok`, the five `spec_*` constants, the three `fraunhofer_*` lines)
+  plus `mueller_get`.
+- **Removed dead code**: `_atm_n_air` had no caller (the Rayleigh prefactor it
+  documents is a compile-time constant).
+
+### Documentation
+- **`docs/architecture/math.md` had three wrong formulas**, each verified against
+  both the implementation and `rust-old/`: the Petzval radius read `R_p = -1/(2Σ)`
+  where the code computes `-1/Σ`; the McCamy CCT denominator was `(y - 0.1858)`
+  where both the code and the published formula use `(0.1858 - y)`; and the
+  double-slit intensity omitted the factor of 4.
+- **README** advertised a CIE illuminant `E` that does not exist (only A, D50,
+  D65, F2, F11 are implemented).
+- **`num_ifft`** was described as part of prakash's hisab surface; the library
+  calls only `num_fft` (the test suite exercises `num_ifft`).
+- ⚠ **Corrected two claims that shipped in the tagged 2.0.1 entry**: that `cyrius
+  deps` hard-errors on a sidecar mismatch, and that the over-reporting sidecar
+  would force math-only consumers to compile TLS. Both came from the upstream
+  issue report rather than measurement, and neither reproduces on cyrius 6.5.20
+  (a consumer declaring fewer folds resolves cleanly; a bogus fold name in the
+  sidecar raises no error). The 2.0.1 entry below carries an amendment note. The
+  sidecar fix stands; its blast radius does not.
+
 ## [2.0.1] - 2026-08-12 — Toolchain and dependency refresh
 
 Maintenance release: Cyrius `6.4.10` → **`6.5.20`**, hisab `2.6.8` → **`2.11.1`**,
@@ -16,30 +146,37 @@ only by the version stamp and one dependency-driven rename.
   dispatch, which silently rewrote `bayan_json_v_parse(someStr)` into a 1-arg
   call to the 2-arg `_str` function. prakash always called the explicit
   `(buf, len)` form, so it never hit that mis-dispatch; this is a pure rename.
-- **`dist/*.deps` sidecars were wrong in both directions**, which would have
-  broken the two-bundle contract for consumers. `cyrius deps` validates a
-  consumer's `[deps] stdlib` against these files and hard-errors on anything
-  missing, so they are part of the published contract, not documentation.
-  Cyrius 6.5.10 made the **base** bundle's sidecar `[deps] stdlib` ∪ include-scan
-  while **profile** bundles keep a pruned inference — a rule that assumes the
-  base bundle is the widest. prakash is inverted (`[lib]` is the narrow math-only
-  core; `[lib.ai]` is the wide one), so:
-  - `dist/prakash.deps` **over-reported** — it inherited the whole
-    sandhi/net/TLS stack that `[deps] stdlib` must declare for `src/ai.cyr`,
-    despite the core bundle referencing **none** of it (verified by symbol scan).
-    A math-only consumer would have been forced to compile TLS — exactly what the
-    split exists to prevent, and contrary to the README's "math-only (no TLS)".
-  - `dist/prakash-ai.deps` **under-reported** — the pruned inference emitted only
-    `syscalls io`, omitting sandhi and its stack, which switches off the very
-    check meant to catch a consumer that forgot them.
+- **`dist/*.deps` sidecars described the wrong bundles.** These files name the
+  stdlib folds each published bundle needs. Cyrius 6.5.10 made the **base**
+  bundle's sidecar `[deps] stdlib` ∪ include-scan while **profile** bundles keep
+  a pruned inference — a rule that assumes the base bundle is the widest.
+  prakash is inverted (`[lib]` is the narrow math-only core; `[lib.ai]` is the
+  wide one), so `dist/prakash.deps` advertised the whole sandhi/net/TLS stack
+  that `[deps] stdlib` must declare for `src/ai.cyr` — despite the core bundle
+  referencing **none** of it (verified by symbol scan) — while
+  `dist/prakash-ai.deps` listed only `syscalls io`, omitting sandhi entirely.
 
-  prakash now owns both sidecars via **`scripts/sync-deps-sidecar.sh`**
-  (core = declared stdlib − the AI-only folds; ai = declared stdlib in full),
-  following the precedent setu set for the same upstream issue. CI runs it after
-  `distlib` and fails on drift, plus a new **core-bundle-is-TLS-free** gate that
-  independently validates the AI-only fold list. Sidecars: core 18 folds, ai 27.
+  prakash now owns both via **`scripts/sync-deps-sidecar.sh`** (core = declared
+  stdlib − the AI-only folds = 18; ai = declared stdlib in full = 27), following
+  the precedent setu set for the same upstream issue. CI runs it after `distlib`
+  and fails on drift, plus a **core-bundle-is-TLS-free** symbol scan.
   `.gitignore` no longer lists `dist/*.deps` — they were ignored *and* tracked,
   an incoherent state; they are deliberately tracked.
+
+  ⚠ **Scope, measured rather than assumed:** the sidecar is published metadata,
+  **not** an enforced contract. Against cyrius 6.5.20, a consumer declaring fewer
+  folds than the sidecar lists still resolves cleanly (exit 0); a bogus fold name
+  in the sidecar raises no error; and the folds vendored into a git-dep consumer
+  are driven by prakash's own `cyrius.cyml`, not by the sidecar. So no consumer
+  was actually forced to compile TLS. The upstream issue report describes a
+  hard-error behaviour that does not reproduce here.
+
+  ⚠ **This paragraph is an amendment.** As tagged, 2.0.1 asserted that `cyrius
+  deps` hard-errors on a sidecar mismatch and that the over-reporting sidecar
+  would force math-only consumers to compile TLS. Both claims were taken from the
+  upstream issue report rather than measured, and both are wrong for cyrius
+  6.5.20; they were corrected while preparing 2.0.2. The sidecar fix itself
+  stands — published metadata should be true — but its blast radius does not.
 
 ### Changed
 - **toolchain** — Cyrius `6.5.20`. `lib/` re-vendored via `cyrius lib sync --full`

@@ -10,8 +10,11 @@ fn _disp_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
 fn _disp_eps15() { return f64_div(F64_ONE, f64_from(1000000000000000)); }
 
 # Fraunhofer reference wavelengths (micrometers).
+#must_use
 fn fraunhofer_d() { return _disp_r(58756, 100000); }   # 0.58756 (He yellow)
+#must_use
 fn fraunhofer_f() { return _disp_r(48613, 100000); }   # 0.48613 (H blue)
+#must_use
 fn fraunhofer_c() { return _disp_r(65627, 100000); }   # 0.65627 (H red)
 
 # ── Cauchy dispersion: n(l) = b + c/l^2 ────────
@@ -266,7 +269,7 @@ fn _conrady_mk(n0, a, b) {
 #must_use
 fn conrady_n_at(coef, wavelength_um) {
     var term_a = f64_div(ConradyCoefficients_a(coef), wavelength_um);
-    var term_b = f64_div(ConradyCoefficients_b(coef), ganita_f64_pow(wavelength_um, _disp_r(7, 2)));
+    var term_b = f64_div(ConradyCoefficients_b(coef), _prk_pow(wavelength_um, _disp_r(7, 2)));
     return f64_add(f64_add(ConradyCoefficients_n0(coef), term_a), term_b);
 }
 

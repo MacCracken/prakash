@@ -50,7 +50,9 @@ R = sin²(δ/2) where δ = 2π(2nt)/λ + π
 I(θ) = I₀ (sin β / β)² where β = πa sin θ / λ
 
 ### Double-Slit Diffraction
-I(θ) = I₀ (sin β / β)² cos²(γ) where γ = πd sin θ / λ
+I(θ) = 4 I₀ (sin β / β)² cos²(γ) where γ = πd sin θ / λ
+
+(the two-slit term peaks at 4I₀, matching the implementation and the Rust original)
 
 ### Diffraction Grating
 d sin θ = mλ
@@ -110,7 +112,7 @@ X = ∫ S(λ) x̄(λ) dλ (similarly Y, Z)
 x = X/(X+Y+Z), y = Y/(X+Y+Z)
 
 ### CCT from Chromaticity (McCamy)
-CCT = 449n³ + 3525n² + 6823.3n + 5520.33 where n = (x - 0.3320)/(y - 0.1858)
+CCT = 449n³ + 3525n² + 6823.3n + 5520.33 where n = (x - 0.3320)/(0.1858 - y)
 
 ### Luminance (Rec. 709)
 Y = 0.2126R + 0.7152G + 0.0722B
@@ -163,7 +165,7 @@ p = (dᵢ - dₒ) / (dᵢ + dₒ)
 Σ 1/(nᵢfᵢ)
 
 ### Petzval Radius
-R_p = -1/(2 Σ)
+R_p = -1/Σ
 
 ### Separated Thin Lenses
 1/f = 1/f₁ + 1/f₂ - d/(f₁f₂)

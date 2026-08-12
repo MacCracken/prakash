@@ -23,19 +23,64 @@ var PK_ERR_INVALID_ANGLE     = (0 - 4);
 var PK_ERR_INVALID_FOCAL     = (0 - 5);
 # Division by zero in an optical calculation.
 var PK_ERR_DIVISION_BY_ZERO  = (0 - 6);
-# A parameter is outside the valid range for the operation.
+# A parameter is outside the valid range for the operation. Also covers an
+# out-of-range buffer index and a null handle passed to an accessor.
 var PK_ERR_INVALID_PARAMETER = (0 - 7);
+# An allocation was refused — the request exceeds ALLOC_MAX (2 GiB), the size
+# computation overflowed, or the heap is exhausted. Distinct from
+# PK_ERR_INVALID_PARAMETER: the arguments were sane, the memory was not there.
+var PK_ERR_ALLOCATION        = (0 - 8);
 
 # 1 if `code` is an error (negative), else 0.
+#must_use
 fn prakash_is_err(code) {
     if (code < 0) { return 1; }
     return 0;
 }
 
 # 1 if `code` is success (PK_ERR_NONE), else 0.
+#must_use
 fn prakash_is_ok(code) {
     if (code == 0) { return 1; }
     return 0;
+}
+
+# ── Rust-semantics math shims ────────
+# The Cyrius math builtins diverge from Rust's f64 methods at the infinite and
+# zero boundaries, because `ganita_f64_pow` is implemented as `exp(n*ln(base))`
+# and the x87 `exp` returns NaN for an infinite argument. Every ported call site
+# that can reach those boundaries goes through these shims so the port keeps
+# matching `rust-old/`. Measured on cyrius 6.5.20, x86_64:
+#
+#   expression              Cyrius builtin   Rust           shim
+#   ganita_f64_pow(0.0, 2)  NaN              0.0            0.0
+#   f64_exp(-inf)           NaN              0.0            0.0
+#   f64_exp(+inf)           NaN              +inf           +inf
+#
+# Finite arguments are delegated unchanged, so no in-range result moves.
+
+# Rust `f64::exp` semantics. Only the infinite arguments are special-cased;
+# NaN in still gives NaN out, matching Rust.
+#must_use
+fn _prk_exp(x) {
+    if (x == 0x7FF0000000000000) { return 0x7FF0000000000000; }
+    if (x == 0xFFF0000000000000) { return 0; }
+    return f64_exp(x);
+}
+
+# Rust `f64::powf` semantics for a non-negative base. `ganita_f64_pow` computes
+# exp(n*ln(base)), so a zero base gives exp(-inf) = NaN where Rust gives
+# 0.0 (positive exponent), 1.0 (zero exponent) or +inf (negative exponent).
+# A negative base is delegated unchanged: Rust's powf is also NaN there for a
+# non-integer exponent, and no prakash call site passes a negative base.
+#must_use
+fn _prk_pow(base, exp) {
+    if (f64_abs(base) == 0) {
+        if (f64_gt(exp, 0) == 1) { return 0; }
+        if (f64_lt(exp, 0) == 1) { return 0x7FF0000000000000; }
+        return F64_ONE;
+    }
+    return ganita_f64_pow(base, exp);
 }
 
 # ── Logging (sakshi) ────────

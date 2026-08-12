@@ -64,7 +64,7 @@ fn pbr_distribution_charlie(n_dot_h, roughness) {
     var ndh = f64_clamp(n_dot_h, f64_from(0), F64_ONE);
     var sin_theta = f64_sqrt(f64_sub(F64_ONE, f64_mul(ndh, ndh)));
     return f64_div(
-    f64_mul(f64_add(F64_TWO, inv_alpha), ganita_f64_pow(sin_theta, inv_alpha)),
+    f64_mul(f64_add(F64_TWO, inv_alpha), _prk_pow(sin_theta, inv_alpha)),
     f64_mul(F64_TWO, F64_PI));
 }
 
@@ -137,8 +137,8 @@ fn pbr_sss_profile_burley(r, d) {
     }
     var inv_8pd = f64_div(F64_ONE, f64_mul(f64_mul(f64_from(8), F64_PI), d));
     var terms = f64_add(
-    f64_exp(f64_div(f64_neg(r), d)),
-    f64_exp(f64_div(f64_neg(r), f64_mul(f64_from(3), d))));
+    _prk_exp(f64_div(f64_neg(r), d)),
+    _prk_exp(f64_div(f64_neg(r), f64_mul(f64_from(3), d))));
     return f64_div(f64_mul(inv_8pd, terms), r);
 }
 
@@ -146,7 +146,7 @@ fn pbr_sss_profile_burley(r, d) {
 #must_use
 fn pbr_sss_profile_gaussian(r, sigma) {
     var s2 = f64_mul(sigma, sigma);
-    var num = f64_exp(f64_div(f64_mul(f64_neg(r), r), f64_mul(F64_TWO, s2)));
+    var num = _prk_exp(f64_div(f64_mul(f64_neg(r), r), f64_mul(F64_TWO, s2)));
     return f64_div(num, f64_mul(f64_mul(F64_TWO, F64_PI), s2));
 }
 
@@ -173,7 +173,7 @@ fn pbr_subsurface_diffuse(n_dot_l, n_dot_v, roughness) {
 # Thin-slab diffuse transmittance (Borshukov): e^(-extinction*thickness).
 #must_use
 fn pbr_sss_transmittance(thickness, extinction) {
-    return f64_exp(f64_mul(f64_neg(extinction), thickness));
+    return _prk_exp(f64_mul(f64_neg(extinction), thickness));
 }
 
 # ── Iridescence ────────
@@ -270,7 +270,7 @@ fn pbr_extinction_coefficient(absorption, scattering) {
 # Beer-Lambert volume transmittance: e^(-sigma_t * distance).
 #must_use
 fn pbr_volume_transmittance(sigma_t, distance) {
-    return f64_exp(f64_mul(f64_neg(sigma_t), distance));
+    return _prk_exp(f64_mul(f64_neg(sigma_t), distance));
 }
 
 # Single-scattering albedo: scattering / (absorption + scattering).

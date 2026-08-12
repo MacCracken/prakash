@@ -1,0 +1,208 @@
+# hardening.tcyr — regression tests for the 2.0.2 audit repairs.
+#
+# Every assertion here corresponds to a defect that was REPRODUCED against
+# 2.0.1 before it was fixed. The crash cases each aborted the process with
+# SIGSEGV (exit 139); running this suite to completion is itself part of the
+# assertion, since a regression would kill the process rather than fail a check.
+#
+# Grouped by the defect class the audit found:
+#   1. Rust-semantics math shims  (_prk_pow / _prk_exp boundary behaviour)
+#   2. Unchecked allocations      (caller-sized buffers, overflow, ALLOC_MAX)
+#   3. Missing bounds checks      (Pattern2D and Mueller accessors)
+#   4. Null dereference on malformed JSON (serialize)
+#   5. Silent fabrication         (malformed input yielding a plausible value)
+#   6. Round-trip fidelity        (bit-exact floats; flat surfaces)
+
+include "src/error.cyr"
+include "src/spectral_core.cyr"
+include "src/ray_core.cyr"
+include "src/ray_fresnel.cyr"
+include "src/ray_trace.cyr"
+include "src/ray_dispersion.cyr"
+include "src/ray_system.cyr"
+include "src/spectral_cie.cyr"
+include "src/wave_core.cyr"
+include "src/wave_polarization.cyr"
+include "src/wave_diffraction.cyr"
+include "src/wave_zernike.cyr"
+include "src/wave_pattern.cyr"
+include "src/pbr_core.cyr"
+include "src/pbr_advanced.cyr"
+include "src/lens.cyr"
+include "src/atmosphere.cyr"
+include "src/bridge.cyr"
+include "src/serialize.cyr"
+
+fn _h_near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
+# Compare two raw f64 bit patterns. Wrapping the comparison keeps the operands
+# plain i64 at the `==`, which avoids the compiler's mixed f64/integer warning
+# when one side is a bit-pattern constant.
+fn _h_bits(a, b) { if (a == b) { return 1; } return 0; }
+
+var PINF = 0x7FF0000000000000;
+var NINF = 0xFFF0000000000000;
+var ZERO = 0;
+
+alloc_init();
+
+# ── 1. Rust-semantics math shims ────────
+# ganita_f64_pow is exp(n*ln(base)) and the x87 exp returns NaN for an infinite
+# argument, so both diverged from Rust at these boundaries.
+test_group("math shims match Rust at the boundaries");
+
+assert(_h_bits(_prk_pow(ZERO, F64_TWO), ZERO) == 1, "pow(0, 2) = 0.0 (was NaN)");
+assert(_h_bits(_prk_pow(ZERO, f64_from(0)), F64_ONE) == 1, "pow(0, 0) = 1.0");
+assert(_h_bits(_prk_pow(ZERO, f64_neg(F64_TWO)), PINF) == 1, "pow(0, -2) = +inf");
+assert(_h_bits(_prk_exp(NINF), ZERO) == 1, "exp(-inf) = 0.0 (was NaN)");
+assert(_h_bits(_prk_exp(PINF), PINF) == 1, "exp(+inf) = +inf (was NaN)");
+assert(_h_bits(_prk_exp(f64_from(0)), F64_ONE) == 1, "exp(0) = 1.0 (control: finite path unchanged)");
+var _p23 = _prk_pow(F64_TWO, f64_from(3));
+assert(_h_near(_p23, f64_from(8), f64_div(F64_ONE, f64_from(1000000000))),
+"pow(2, 3) ~= 8 (control: finite path unchanged)");
+
+# The reachable consequences of the two shims.
+assert(_h_bits(pbr_distribution_charlie(F64_ONE, F64_HALF), ZERO) == 1,
+"charlie sheen at the specular peak (n_dot_h = 1) is 0.0, not NaN");
+assert(_h_bits(atm_atmospheric_transmittance(f64_from(0), f64_from(0)), ZERO) == 1,
+"infinite optical depth gives transmittance 0.0, not NaN");
+
+# ── 2. Unchecked allocations ────────
+# `alloc` returns 0 past ALLOC_MAX (2 GiB) and on heap exhaustion; every one of
+# these stored through the result without checking it.
+test_group("oversized and degenerate allocations fail safely");
+
+assert(psf_diffraction_limited(8193, f64_from(100)) == 0,
+"psf_diffraction_limited(8193) returns 0 (npot pads to 16384 -> a 4 GiB grid)");
+assert(diffraction_pattern_circular(16385, f64_from(10)) == 0,
+"diffraction_pattern_circular past the cap returns 0");
+assert(pattern2d_new(20000, 20000) == 0, "pattern2d_new(20000, 20000) returns 0");
+assert(pattern2d_new(1, 2305843009213693953) == 0,
+"pattern2d_new with a size that overflows i64 returns 0 (was heap corruption)");
+assert(pattern2d_new(0, 8) == 0, "pattern2d_new rejects a zero dimension");
+assert(pattern2d_new(0 - 4, 8) == 0, "pattern2d_new rejects a negative dimension");
+assert(spectrum_strip(0 - 5) == 0, "spectrum_strip rejects a negative sample count");
+assert(zernike_wf_to_grid(zernike_wf_flat(), 0 - 1) == 0, "zernike_wf_to_grid rejects grid_size < 0");
+assert(zernike_wf_to_grid(zernike_wf_flat(), 100000) == 0, "zernike_wf_to_grid rejects an oversized grid");
+assert(_pat_npot(0) == 0, "_pat_npot(0) = 0 rather than looping");
+assert(_pat_npot(0 - 3) == 0, "_pat_npot(negative) = 0");
+assert(_pat_npot(5) == 8, "_pat_npot(5) = 8 (control: normal rounding unchanged)");
+
+# A normal-sized pattern still works.
+var okp = pattern2d_new(4, 4);
+assert(okp != 0, "a 4x4 pattern still allocates (control)");
+
+# ── 3. Missing bounds checks ────────
+test_group("accessors bounds-check instead of running off the buffer");
+
+assert(pattern2d_set(okp, 99, 99, F64_ONE) == PK_ERR_INVALID_PARAMETER,
+"pattern2d_set out of range returns PK_ERR_INVALID_PARAMETER");
+assert(pattern2d_set(okp, 0 - 1, 0, F64_ONE) == PK_ERR_INVALID_PARAMETER,
+"pattern2d_set negative col returns PK_ERR_INVALID_PARAMETER");
+assert(pattern2d_set(okp, 0, 0, F64_ONE) == PK_ERR_NONE, "pattern2d_set in range still succeeds (control)");
+assert(_h_bits(pattern2d_get(okp, 99, 99), ZERO) == 1, "pattern2d_get out of range returns 0.0");
+assert(_h_bits(pattern2d_get(okp, 0, 0), F64_ONE) == 1, "pattern2d_get in range still reads (control)");
+assert(pattern2d_set(0, 0, 0, F64_ONE) == PK_ERR_INVALID_PARAMETER,
+"pattern2d_set on a null pattern returns PK_ERR_INVALID_PARAMETER");
+
+# The refusal code must be a NAMED PK_ERR_ constant, not a bare -1: -1 is
+# already PK_ERR_TIR, so a bare sentinel would report "total internal
+# reflection" for an out-of-range matrix index.
+assert(PK_ERR_INVALID_PARAMETER != PK_ERR_TIR, "the refusal code is not aliased onto PK_ERR_TIR");
+assert(PK_ERR_ALLOCATION != PK_ERR_TIR, "PK_ERR_ALLOCATION is not aliased onto PK_ERR_TIR");
+assert(PK_ERR_ALLOCATION != PK_ERR_INVALID_PARAMETER,
+"PK_ERR_ALLOCATION is distinct from PK_ERR_INVALID_PARAMETER");
+assert(prakash_is_err(PK_ERR_ALLOCATION) == 1, "PK_ERR_ALLOCATION reads as an error");
+assert(prakash_is_err(pattern2d_set(0, 0, 0, F64_ONE)) == 1, "a refused pattern2d_set reads as an error");
+
+var mm = mueller_identity();
+assert(_h_bits(mueller_get(mm, 4, 0), ZERO) == 1, "mueller_get row 4 returns 0.0 (matrix is 4x4)");
+assert(_h_bits(mueller_get(mm, 0, 4), ZERO) == 1, "mueller_get col 4 returns 0.0");
+assert(_h_bits(mueller_get(mm, 0 - 1, 0), ZERO) == 1, "mueller_get negative index returns 0.0");
+assert(mueller_set(mm, 4, 0, F64_ONE) == PK_ERR_INVALID_PARAMETER,
+"mueller_set row 4 refused with PK_ERR_INVALID_PARAMETER");
+assert(mueller_set(mm, 0, 0, F64_ONE) == PK_ERR_NONE, "mueller_set in range still succeeds (control)");
+assert(_h_bits(mueller_get(mm, 0, 0), F64_ONE) == 1, "mueller_get in range still reads (control)");
+
+# ── 4/5. Malformed JSON: no crash, no fabrication ────────
+# Each of these previously either dereferenced null (medium/lens_type/
+# prescription) or silently returned a zero-valued struct (rgb/sellmeier/
+# polarization/spd), because every bayan accessor returns 0 for a missing node
+# and 0 is the bit pattern for 0.0.
+test_group("malformed JSON is rejected, not fabricated");
+
+var junk = "not json at all";
+var partial = "{\"x\":1}";
+var wrongtype = "{\"r\":\"a\",\"g\":1.0,\"b\":1.0}";
+
+assert(rgb_from_json(junk, strlen(junk)) == 0, "rgb_from_json(garbage) = 0 (was black)");
+assert(rgb_from_json(partial, strlen(partial)) == 0, "rgb_from_json(missing keys) = 0");
+assert(rgb_from_json(wrongtype, strlen(wrongtype)) == 0, "rgb_from_json(wrong field type) = 0");
+assert(medium_from_json(junk, strlen(junk)) == 0, "medium_from_json(garbage) = 0 (was SIGSEGV)");
+assert(medium_from_json(partial, strlen(partial)) == 0, "medium_from_json(missing name) = 0 (was SIGSEGV)");
+assert(sellmeier_from_json(junk, strlen(junk)) == 0, "sellmeier_from_json(garbage) = 0");
+assert(sellmeier_from_json(partial, strlen(partial)) == 0, "sellmeier_from_json(missing terms) = 0");
+assert(polarization_from_json(junk, strlen(junk)) == 0, "polarization_from_json(garbage) = 0");
+assert(prescription_from_json(junk, strlen(junk)) == 0, "prescription_from_json(garbage) = 0 (was SIGSEGV)");
+assert(prescription_from_json(partial, strlen(partial)) == 0,
+"prescription_from_json(missing name) = 0 (was SIGSEGV)");
+assert(spd_from_json(junk, strlen(junk)) == 0, "spd_from_json(garbage) = 0");
+assert(spd_from_json(partial, strlen(partial)) == 0, "spd_from_json(missing values) = 0");
+assert(lens_type_from_json(junk, strlen(junk)) == LENS_TYPE_INVALID,
+"lens_type_from_json(garbage) = LENS_TYPE_INVALID (was SIGSEGV)");
+assert(LENS_TYPE_INVALID != LENS_CONVERGING, "LENS_TYPE_INVALID is distinct from LENS_CONVERGING");
+assert(LENS_TYPE_INVALID != LENS_DIVERGING, "LENS_TYPE_INVALID is distinct from LENS_DIVERGING");
+
+# An empty SPD must not read vals[-1]. A zero step makes idx_f = 0/0 = NaN,
+# which reached the `idx >= len - 1` branch and loaded 8 bytes before the buffer.
+var onebuf = alloc(8);
+store64(onebuf, f64_from(7));
+var s_empty = spd_new(f64_from(380), f64_from(5), onebuf, 0);
+assert(_h_bits(spd_at(s_empty, f64_from(500)), ZERO) == 1, "spd_at on an empty SPD = 0.0");
+var s_zerostep = spd_new(f64_from(380), f64_from(0), onebuf, 0);
+assert(_h_bits(spd_at(s_zerostep, f64_from(380)), ZERO) == 1,
+"spd_at on an empty zero-step SPD = 0.0 (was an out-of-bounds read)");
+
+# ── 6. Round-trip fidelity ────────
+# bayan 1.2.1 replaced the 6-decimal encoder with Grisu2, so floats now survive
+# a JSON round-trip bit-exactly. 2.0.0 shipped against the lossy encoder, which
+# also flushed any |x| < 5e-7 to zero.
+test_group("JSON float round-trip is bit-exact");
+
+fn _h_rt(bits, label) {
+    var c = rgb_new(bits, bits, bits);
+    var js = rgb_to_json(c);
+    var back = rgb_from_json(str_data(js), str_len(js));
+    assert(back != 0, "round-trip parsed");
+    assert(Rgb_r(back) == bits, label);
+    return 0;
+}
+
+var _rt1 = _h_rt(0x400921FB54442D18, "pi survives bit-exact");
+var _rt2 = _h_rt(0x3FD5555555555555, "1/3 survives bit-exact");
+var _rt3 = _h_rt(0x3E112E0BE826D695, "1e-9 survives (the 6-decimal encoder flushed it to 0)");
+var _rt4 = _h_rt(0x01A56E1FC2F8F359, "1e-300 survives bit-exact");
+var _rt5 = _h_rt(0x0010000000000000, "DBL_MIN survives bit-exact");
+
+# A flat optical surface has radius = +inf. JSON has no infinity literal, so
+# bayan encodes it as null; without the decode-side restore it came back as 0.0
+# — a ZERO radius, i.e. infinite curvature, the exact physical inverse.
+test_group("a flat surface survives the prescription round-trip");
+
+var plano = prescription_planoconvex(f64_from(50), f64_div(f64_from(15), f64_from(10)),
+f64_from(5), f64_from(10));
+var s_before = vec_get(Prescription_surfaces(plano), 0);
+assert(_h_bits(PrescriptionSurface_radius(s_before), PINF) == 1, "surface 0 is flat before serializing");
+var pjs = prescription_to_json(plano);
+var pback = prescription_from_json(str_data(pjs), str_len(pjs));
+assert(pback != 0, "prescription round-trip parsed");
+var s_after = vec_get(Prescription_surfaces(pback), 0);
+assert(_h_bits(PrescriptionSurface_radius(s_after), PINF) == 1,
+"flat surface is still flat after the round-trip (was 0.0 = infinite curvature)");
+assert(f64_gt(PrescriptionSurface_radius(s_after), f64_from(0)) == 1,
+"flat surface did not become a zero radius");
+# the curved surface must be untouched
+var c_after = vec_get(Prescription_surfaces(pback), 1);
+assert(_h_bits(PrescriptionSurface_radius(c_after), f64_neg(f64_from(25))) == 1,
+"the curved surface round-trips unchanged (control)");
+
+var r = assert_summary();

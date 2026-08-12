@@ -54,9 +54,29 @@ fn stokes_orientation_angle(s) {
 
 # ── Mueller matrices (4x4, row-major flat 16-f64 buffer) ────────
 
-# Element accessors: (i, j) at offset (i*4 + j)*8.
-fn mueller_get(m, i, j) { return load64(m + (i * 4 + j) * 8); }
-fn mueller_set(m, i, j, v) { store64(m + (i * 4 + j) * 8, v); return 0; }
+# Element accessors: (i, j) at offset (i*4 + j)*8. The buffer is exactly 128
+# bytes (4x4 f64), so an index past 3 would read or write outside it — the Rust
+# original used a checked [[f64; 4]; 4]. Out-of-range reads return 0.0 and
+# out-of-range writes are refused with PK_ERR_INVALID_PARAMETER.
+#must_use
+fn mueller_get(m, i, j) {
+    if (m == 0) { return f64_from(0); }
+    if (i < 0) { return f64_from(0); }
+    if (j < 0) { return f64_from(0); }
+    if (i > 3) { return f64_from(0); }
+    if (j > 3) { return f64_from(0); }
+    return load64(m + (i * 4 + j) * 8);
+}
+
+fn mueller_set(m, i, j, v) {
+    if (m == 0) { return PK_ERR_INVALID_PARAMETER; }
+    if (i < 0) { return PK_ERR_INVALID_PARAMETER; }
+    if (j < 0) { return PK_ERR_INVALID_PARAMETER; }
+    if (i > 3) { return PK_ERR_INVALID_PARAMETER; }
+    if (j > 3) { return PK_ERR_INVALID_PARAMETER; }
+    store64(m + (i * 4 + j) * 8, v);
+    return 0;
+}
 
 # Build a Mueller matrix from 16 row-major elements.
 fn _mm(m00, m01, m02, m03, m10, m11, m12, m13, m20, m21, m22, m23, m30, m31, m32, m33) {

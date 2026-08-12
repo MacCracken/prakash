@@ -8,6 +8,13 @@
 # String fields are cstrings; Option<String> api_key = cstr or 0 (None).
 # JSON via bayan: build with str_from() keys/values, parse with parse_buf
 # (str_data,str_len) — the built Str is not NUL-terminated.
+#
+# FAILURE CONVENTION (2.0.2): the constructors and `*_from_json` return 0 when
+# they cannot produce a value — a failed allocation, unparseable JSON, or a
+# required field that is absent or not a string. Callers MUST check for 0.
+# Before 2.0.2 these paths dereferenced null and aborted the process; every
+# bayan accessor returns 0 for a missing or wrong-typed node, and `str_data(0)`
+# is `load64(0)`.
 
 #derive(accessors)
 struct DaimonConfig { endpoint; api_key; }
@@ -23,9 +30,23 @@ struct DaimonClient { config; }
 #must_use
 fn ai_daimon_config_new(endpoint, api_key) {
     var c = alloc(sizeof(DaimonConfig));
+    if (c == 0) { return 0; }
     DaimonConfig_set_endpoint(c, endpoint);
     DaimonConfig_set_api_key(c, api_key);
     return c;
+}
+
+# Read a required string field out of a parsed JSON object. Returns a cstring,
+# or 0 when `v` is not an object, the key is absent, or the value is not a
+# string. Guards the whole chain that used to end in `str_data(0)`.
+#must_use
+fn _ai_json_str_field(v, key) {
+    if (v == 0) { return 0; }
+    var node = bayan_json_v_obj_get(v, key);
+    if (bayan_json_v_is_str(node) == 0) { return 0; }
+    var s = bayan_json_v_str(node);
+    if (s == 0) { return 0; }
+    return str_data(s);
 }
 
 # Default daimon config: endpoint http://localhost:8090, no api key.
@@ -39,6 +60,7 @@ fn ai_daimon_config_default() {
 #must_use
 fn ai_hoosh_config_new(endpoint) {
     var c = alloc(sizeof(HooshConfig));
+    if (c == 0) { return 0; }
     HooshConfig_set_endpoint(c, endpoint);
     return c;
 }
@@ -57,6 +79,10 @@ fn ai_hoosh_config_default() {
 fn ai_daimon_client_new(config, err_out) {
     store64(err_out, PK_ERR_NONE);
     var cl = alloc(sizeof(DaimonClient));
+    if (cl == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
     DaimonClient_set_config(cl, config);
     return cl;
 }
@@ -79,10 +105,12 @@ fn ai_daimon_config_to_json(config) {
 }
 
 # JSON (data ptr + byte length) -> DaimonConfig (api_key = 0 when null/absent).
+# Returns 0 if the input does not parse, or has no string "endpoint".
 #must_use
 fn ai_daimon_config_from_json(json, len) {
     var v = bayan_json_v_parse_buf(json, len);
-    var endpoint = str_data(bayan_json_v_str(bayan_json_v_obj_get(v, "endpoint")));
+    var endpoint = _ai_json_str_field(v, "endpoint");
+    if (endpoint == 0) { return 0; }
     var ak_v = bayan_json_v_obj_get(v, "api_key");
     var api_key = 0;
     if (bayan_json_v_is_str(ak_v) == 1) {
@@ -101,10 +129,13 @@ fn ai_hoosh_config_to_json(config) {
 }
 
 # JSON (data ptr + byte length) -> HooshConfig.
+# Returns 0 if the input does not parse, or has no string "endpoint".
 #must_use
 fn ai_hoosh_config_from_json(json, len) {
     var v = bayan_json_v_parse_buf(json, len);
-    return ai_hoosh_config_new(str_data(bayan_json_v_str(bayan_json_v_obj_get(v, "endpoint"))));
+    var endpoint = _ai_json_str_field(v, "endpoint");
+    if (endpoint == 0) { return 0; }
+    return ai_hoosh_config_new(endpoint);
 }
 
 # ── Agent registration (sandhi HTTP POST) ────────
@@ -130,13 +161,25 @@ fn ai_register_agent(client, err_out) {
     bayan_json_v_arr_push(caps, bayan_json_v_str_new(str_from("wave_optics")));
     bayan_json_v_obj_set(body, str_from("capabilities"), caps);
     var body_str = bayan_json_v_build(body);
-    # URL: endpoint + "/v1/agents/register"
-    var url = str_cat(str_from(DaimonConfig_endpoint(config)), str_from("/v1/agents/register"));
+    # URL: endpoint + "/v1/agents/register". `str_cat` returns a Str whose buffer
+    # is exactly la+lb bytes with NO terminator, but sandhi consumes the URL as a
+    # cstring (sandhi_url_parse_a runs off the end), so it must be terminated
+    # explicitly — `str_cstr` copies into a len+1 buffer and stores the NUL.
+    var url_s = str_cat(str_from(DaimonConfig_endpoint(config)), str_from("/v1/agents/register"));
+    if (url_s == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return "unknown";
+    }
+    var url = str_cstr(url_s);
+    if (url == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return "unknown";
+    }
     var headers = sandhi_headers_new();
     sandhi_headers_set(headers, "content-type", "application/json");
     var opts = sandhi_http_options_new();
     sandhi_http_options_total_ms(opts, 30000);
-    var resp = sandhi_http_post_opts(str_data(url), headers, str_data(body_str),
+    var resp = sandhi_http_post_opts(url, headers, str_data(body_str),
     str_len(body_str), opts);
     if (sandhi_http_err_kind(resp) != SANDHI_OK) {
         store64(err_out, PK_ERR_INVALID_PARAMETER);

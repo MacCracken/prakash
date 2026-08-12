@@ -57,4 +57,31 @@ var hjs = ai_hoosh_config_to_json(h);
 var hback = ai_hoosh_config_from_json(str_data(hjs), str_len(hjs));
 assert(streq(HooshConfig_endpoint(hback), "http://localhost:8088") == 1, "hoosh roundtrip endpoint");
 
+# ── malformed input (2.0.2 hardening) ────────
+# Each of these aborted the process with SIGSEGV in 2.0.1: `endpoint` resolved
+# to 0 through bayan's guarded accessors and `str_data(0)` is `load64(0)`.
+# Reaching assert_summary() below is itself part of the assertion.
+test_group("ai config: malformed JSON is rejected, not dereferenced");
+
+var m_empty = "{}";
+var m_nokey = "{\"api_key\":\"k\"}";
+var m_wrongtype = "{\"endpoint\":42}";
+var m_null = "{\"endpoint\":null}";
+var m_notobj = "[1,2]";
+var m_junk = "not json";
+
+assert(ai_daimon_config_from_json(m_empty, strlen(m_empty)) == 0, "daimon: {} -> 0");
+assert(ai_daimon_config_from_json(m_nokey, strlen(m_nokey)) == 0, "daimon: no endpoint key -> 0");
+assert(ai_daimon_config_from_json(m_wrongtype, strlen(m_wrongtype)) == 0, "daimon: endpoint not a string -> 0");
+assert(ai_daimon_config_from_json(m_null, strlen(m_null)) == 0, "daimon: endpoint null -> 0");
+assert(ai_daimon_config_from_json(m_notobj, strlen(m_notobj)) == 0, "daimon: non-object document -> 0");
+assert(ai_daimon_config_from_json(m_junk, strlen(m_junk)) == 0, "daimon: unparseable -> 0");
+
+assert(ai_hoosh_config_from_json(m_empty, strlen(m_empty)) == 0, "hoosh: {} -> 0");
+assert(ai_hoosh_config_from_json(m_nokey, strlen(m_nokey)) == 0, "hoosh: no endpoint key -> 0");
+assert(ai_hoosh_config_from_json(m_wrongtype, strlen(m_wrongtype)) == 0, "hoosh: endpoint not a string -> 0");
+assert(ai_hoosh_config_from_json(m_null, strlen(m_null)) == 0, "hoosh: endpoint null -> 0");
+assert(ai_hoosh_config_from_json(m_notobj, strlen(m_notobj)) == 0, "hoosh: non-object document -> 0");
+assert(ai_hoosh_config_from_json(m_junk, strlen(m_junk)) == 0, "hoosh: unparseable -> 0");
+
 var r = assert_summary();

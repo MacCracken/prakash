@@ -54,7 +54,7 @@ fn pbr_distribution_beckmann(n_dot_h, roughness) {
     var ndh = f64_clamp(n_dot_h, f64_from(0), F64_ONE);
     var cos2 = f64_mul(ndh, ndh);
     var tan2 = f64_div(f64_sub(F64_ONE, cos2), f64_add(cos2, _pbr_eps15()));
-    var exp_term = f64_exp(f64_div(f64_neg(tan2), f64_mul(a, a)));
+    var exp_term = _prk_exp(f64_div(f64_neg(tan2), f64_mul(a, a)));
     var denom = f64_add(
     f64_mul(f64_mul(f64_mul(f64_mul(F64_PI, a), a), cos2), cos2),
     _pbr_eps15());

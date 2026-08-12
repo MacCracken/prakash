@@ -4,10 +4,15 @@
 # WHY THIS EXISTS
 # ---------------
 # `cyrius distlib` writes a `dist/<lib>.deps` sidecar listing the stdlib folds a
-# consumer must have in scope. `cyrius deps` VALIDATES a consumer's
-# `[deps] stdlib` against it and hard-errors on anything missing — so a wrong
-# sidecar either forces consumers to declare folds they don't need, or silently
-# switches off the check that would have caught a real omission.
+# bundle needs in scope. It is published metadata describing the artifact.
+#
+# MEASURED SCOPE (cyrius 6.5.20, do not overstate this): the sidecar is NOT an
+# enforced contract. A consumer declaring fewer folds than it lists still
+# resolves cleanly (exit 0), a bogus fold name in it raises no error, and in the
+# git-dep flow the vendored set comes from prakash's own cyrius.cyml. The
+# upstream issue below reports a hard-error behaviour that does NOT reproduce
+# here. We correct the sidecar because a published file should be true, not
+# because a build breaks without it.
 #
 # Since cyrius 6.5.10 the generator emits, for the BASE bundle, the declared
 # `[deps] stdlib` unioned with an include-scan; PROFILE bundles keep a pruned
@@ -20,8 +25,9 @@
 # so the generator gets both backwards for us:
 #   - dist/prakash.deps OVER-reports  — it inherits the whole sandhi/TLS stack
 #     from `[deps] stdlib` (which must list it, because src/ai.cyr needs it),
-#     even though the core bundle references none of it. That would force a
-#     math-only consumer to compile TLS, defeating the two-bundle split.
+#     even though the core bundle references none of it. That misdescribes the
+#     math-only bundle to anyone reading it (and to any future tooling that
+#     does treat it as authoritative).
 #   - dist/prakash-ai.deps UNDER-reports — the pruned inference yields only
 #     `syscalls io`, omitting sandhi and its transitive stack.
 #

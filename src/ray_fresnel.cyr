@@ -196,7 +196,7 @@ fn fresnel_unpolarized_complex(n1, medium, incident_angle) {
 # Beer-Lambert law: I = intensity * exp(-alpha * distance).
 #must_use
 fn beer_lambert(intensity, alpha, distance) {
-    return f64_mul(intensity, f64_exp(f64_neg(f64_mul(alpha, distance))));
+    return f64_mul(intensity, _prk_exp(f64_neg(f64_mul(alpha, distance))));
 }
 
 # ── 3D Snell's law (refracted direction + Fresnel reflectance) ────────

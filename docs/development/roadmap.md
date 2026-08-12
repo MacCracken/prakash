@@ -22,6 +22,7 @@ Prakash does NOT own:
 | V1.2 | Bridge (Rust) | Removed `bijli-backend`; primitive-value cross-crate bridges (bijli/tara/badal) |
 | **V2.0** | **Cyrius port** | **Full Rust→Cyrius rewrite. All 25 science modules ported and adversarially verified; two distlib bundles (math-only + AI); sakshi logging; bayan serialization; benchmark suite + CSV history. 5251 test assertions, 27 benchmarks. See the [2.0.0] CHANGELOG entry.** |
 | V2.0.1 | Toolchain refresh | Cyrius 6.4.10 → 6.5.20, hisab 2.6.8 → 2.11.1, sakshi 2.4.2 → 2.4.10. `bayan_json_v_parse_str` → `_parse_buf` rename absorbed. 5251 assertions unchanged. 6.5.20's harness subtracts its timer floor, so the Rust-vs-Cyrius comparison is measurable for the first time (~7× median, was reported as 60×–1,300×). See the [2.0.1] CHANGELOG entry. |
+| V2.0.2 | Audit & hardening | Six-dimension P(-1) sweep with adversarial verification. Fixed 7 public entry points that SIGSEGVed on malformed input, unchecked/overflowing allocations, missing bounds checks on Pattern2D and Mueller accessors, an out-of-bounds read in `spd_at`, silent fabrication on bad JSON, flat-surface JSON corruption, and three math boundaries that diverged from Rust. 5251 → 5334 assertions, 26 → 27 suites. See the [2.0.2] CHANGELOG entry. |
 
 ### V2.0 exit criteria (met)
 
@@ -55,10 +56,15 @@ The `bridge` module ships primitive-value hooks — no dependency on sibling cra
 Now that the bench harness reports true op cost, these are ranked by measured
 impact rather than guessed at — see `docs/benchmarks-rust-v-cyrius.md`.
 
-- [ ] **`serialize/rgb_to_json` ~2× regression** (floor-corrected ~1,520 ns → ~3,400 ns)
-      from bayan 1.4.1's per-append allocator indirection. Try the `_a` variants
-      (`bayan_json_v_obj_set_a` / `_build_a`) with an arena instead of
-      `default_alloc()` per append; re-check against bayan upstream.
+- [ ] **`serialize/rgb_to_json` ~2×** (floor-corrected ~1,520 ns → ~3,400 ns).
+      ⚠ **Not a regression to undo.** Measured decomposition: 85% of the cost is
+      `bayan_json_v_build` and ~720 ns of that is *per float*, because bayan 1.2.1
+      replaced a 6-decimal renderer with round-trip-correct Grisu2. That bought
+      bit-exact f64 round-trips and fixed a real data-loss bug (the old encoder
+      flushed any |x| < 5e-7 to zero). The remaining lever is the 14% spent on
+      object construction — the `_a` allocator variants
+      (`bayan_json_v_obj_set_a` / `_build_a`) can take an arena instead of
+      `default_alloc()` per append. Do not "fix" the float path.
 - [ ] **Inline expansion** of the tiny `f64_*` wrappers and `_pbr_*`/`_lens_*`
       helpers — per-call overhead is now the dominant term on the cheap ops
       (`pbr/fresnel_schlick` is 16.3× Rust at 17 ns absolute).

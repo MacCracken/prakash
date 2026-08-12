@@ -200,13 +200,15 @@ fn zernike_wf_evaluate(wf, rho, theta) {
     var coeffs = ZernikeWavefront_coeffs(wf);
     var len = ZernikeWavefront_len(wf);
     var w = f64_from(0);
-    var nm = alloc(16);
+    # Stack locals, not `alloc(16)`: this runs once per grid cell from
+    # zernike_wf_to_grid, and the bump allocator never frees, so a per-call
+    # scratch buffer leaked 16 bytes per sample — more than the grid itself.
+    var n = 0;
+    var m = 0;
     for (var idx = 0; idx < len; idx = idx + 1) {
         var coeff = load64(coeffs + idx * 8);
         if (f64_lt(f64_abs(coeff), _zern_eps15()) == 0) {
-            zernike_noll_to_nm(idx + 1, nm, nm + 8);
-            var n = load64(nm);
-            var m = load64(nm + 8);
+            zernike_noll_to_nm(idx + 1, &n, &m);
             w = f64_add(w, f64_mul(coeff, zernike_poly(n, m, rho, theta)));
         }
     }
@@ -217,8 +219,13 @@ fn zernike_wf_evaluate(wf, rho, theta) {
 # outside the unit disk are 0. Returns a freshly allocated f64 buffer.
 #must_use
 fn zernike_wf_to_grid(wf, grid_size) {
+    # `alloc` returns 0 past ALLOC_MAX (2 GiB) and on heap exhaustion; grid_size
+    # is caller-supplied, so screen it before storing through the result.
+    if (grid_size <= 0) { return 0; }
+    if (grid_size > 16384) { return 0; }
     var total = grid_size * grid_size;
     var grid = alloc(total * 8);
+    if (grid == 0) { return 0; }
     for (var z = 0; z < total; z = z + 1) {
         store64(grid + z * 8, f64_from(0));
     }
@@ -286,7 +293,7 @@ fn zernike_wf_peak_to_valley(wf, samples) {
 fn zernike_wf_strehl_ratio(wf, wavelength) {
     var sigma = f64_div(zernike_wf_rms_error(wf), wavelength);
     var x = f64_mul(f64_mul(F64_TWO, F64_PI), sigma);
-    return f64_exp(f64_neg(f64_mul(x, x)));
+    return _prk_exp(f64_neg(f64_mul(x, x)));
 }
 
 # ── Named aberrations ────────

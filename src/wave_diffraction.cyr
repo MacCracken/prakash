@@ -85,10 +85,11 @@ fn fresnel_integral_c(x) {
         result = f64_mul(ax, inner);
     } else {
         var pi_x2 = f64_mul(f64_mul(F64_PI_2, ax), ax);
-        var fg = alloc(16);
-        _fresnel_fg(ax, fg, fg + 8);
-        var f = load64(fg);
-        var g = load64(fg + 8);
+        # Stack locals, not `alloc(16)`: these are hot scalar entry points and
+        # the bump allocator never frees, so a per-call scratch buffer leaked.
+        var f = 0;
+        var g = 0;
+        _fresnel_fg(ax, &f, &g);
         # 0.5 + f*sin(pi_x2) - g*cos(pi_x2)
         result = f64_sub(
         f64_add(F64_HALF, f64_mul(f, f64_sin(pi_x2))),
@@ -118,10 +119,11 @@ fn fresnel_integral_s(x) {
         inner);
     } else {
         var pi_x2 = f64_mul(f64_mul(F64_PI_2, ax), ax);
-        var fg = alloc(16);
-        _fresnel_fg(ax, fg, fg + 8);
-        var f = load64(fg);
-        var g = load64(fg + 8);
+        # Stack locals, not `alloc(16)`: these are hot scalar entry points and
+        # the bump allocator never frees, so a per-call scratch buffer leaked.
+        var f = 0;
+        var g = 0;
+        _fresnel_fg(ax, &f, &g);
         # 0.5 - f*cos(pi_x2) - g*sin(pi_x2)
         result = f64_sub(
         f64_sub(F64_HALF, f64_mul(f, f64_cos(pi_x2))),
@@ -154,10 +156,11 @@ fn fresnel_integral_cs(x, c_out, s_out) {
         s_inner);
     } else {
         var pi_x2 = f64_mul(f64_mul(F64_PI_2, ax), ax);
-        var fg = alloc(16);
-        _fresnel_fg(ax, fg, fg + 8);
-        var f = load64(fg);
-        var g = load64(fg + 8);
+        # Stack locals, not `alloc(16)`: these are hot scalar entry points and
+        # the bump allocator never frees, so a per-call scratch buffer leaked.
+        var f = 0;
+        var g = 0;
+        _fresnel_fg(ax, &f, &g);
         var sin_px2 = f64_sin(pi_x2);
         var cos_px2 = f64_cos(pi_x2);
         c_val = f64_sub(f64_add(F64_HALF, f64_mul(f, sin_px2)), f64_mul(g, cos_px2));
@@ -176,10 +179,12 @@ fn fresnel_integral_cs(x, c_out, s_out) {
 # Fresnel straight-edge intensity: I/I0 = [(C(u)+0.5)^2 + (S(u)+0.5)^2] / 2.
 #must_use
 fn fresnel_edge_intensity(u) {
-    var cs = alloc(16);
-    fresnel_integral_cs(u, cs, cs + 8);
-    var c = f64_add(load64(cs), F64_HALF);
-    var s = f64_add(load64(cs + 8), F64_HALF);
+    # Stack locals, not `alloc(16)` — see fresnel_integral_c.
+    var cv = 0;
+    var sv = 0;
+    fresnel_integral_cs(u, &cv, &sv);
+    var c = f64_add(cv, F64_HALF);
+    var s = f64_add(sv, F64_HALF);
     return f64_div(f64_add(f64_mul(c, c), f64_mul(s, s)), F64_TWO);
 }
 

@@ -5,8 +5,87 @@
 # roundtrip tests: Rgb, Medium, SellmeierCoefficients, LensType, Polarization,
 # Prescription, Spd. Uses the bayan recipe — build with str_from() keys/values +
 # v_float_new(bits), parse with parse_buf(data,len); *_from_json takes (data ptr,
-# byte len) since bayan's build output Str is not NUL-terminated. Floats
-# round-trip through bayan's 6-decimal render (within the tests' tolerances).
+# byte len) since bayan's build output Str is not NUL-terminated.
+#
+# FLOAT FIDELITY: since bayan 1.2.1 the encoder is Grisu2 round-trip-correct, so
+# f64 values survive a to_json/from_json cycle BIT-EXACTLY. (Before that it
+# rendered 6 decimals, which silently flushed any |x| < 5e-7 to zero — prakash
+# 2.0.0 shipped against that encoder.)
+#
+# FAILURE CONVENTION (2.0.2): every `*_from_json` returns 0 when the input does
+# not parse, is not an object, or lacks a required field of the right type.
+# Callers MUST check for 0. `lens_type_from_json` returns LENS_TYPE_INVALID
+# instead, since 0 is already LENS_CONVERGING. Before 2.0.2 these paths either
+# dereferenced null and aborted the process (`str_data(0)` is `load64(0)`) or
+# silently fabricated a zero-valued struct, because every bayan accessor returns
+# 0 for a missing or wrong-typed node and 0 is the bit pattern for 0.0.
+
+# Returned by lens_type_from_json when the input is not a known lens type.
+# Distinct from LENS_CONVERGING (0) and LENS_DIVERGING (1).
+var LENS_TYPE_INVALID = (0 - 1);
+
+# ── decode helpers ────────
+
+# Parse `json`/`len` and require a JSON object. Returns the value or 0.
+#must_use
+fn _ser_obj(json, len) {
+    var v = bayan_json_v_parse_buf(json, len);
+    if (v == 0) { return 0; }
+    if (bayan_json_v_is_obj(v) == 0) { return 0; }
+    return v;
+}
+
+# Read a required numeric field. JSON integers are accepted as well as floats
+# (bayan tags `1` as JTAG_INT and `1.0` as JTAG_FLOAT; both are valid f64 input).
+# On a missing or wrong-typed field, zeroes `ok_out` and returns 0.
+#must_use
+fn _ser_num(v, key, ok_out) {
+    var node = bayan_json_v_obj_get(v, key);
+    if (node == 0) {
+        store64(ok_out, 0);
+        return 0;
+    }
+    if (bayan_json_v_is_float(node) == 1) { return bayan_json_v_float(node); }
+    if (bayan_json_v_is_int(node) == 1) { return bayan_json_v_float(node); }
+    store64(ok_out, 0);
+    return 0;
+}
+
+# Read a required numeric field that may legitimately be non-finite. JSON has no
+# infinity literal, so bayan encodes a non-finite f64 as `null`; this restores
+# +inf for it. Used for an optical surface radius, where `null` means a FLAT
+# surface (radius = infinity, i.e. zero curvature). Without this, a plano
+# surface decoded as 0.0 — a zero radius, i.e. INFINITE curvature, the exact
+# physical inverse.
+#must_use
+fn _ser_num_or_inf(v, key, ok_out) {
+    var node = bayan_json_v_obj_get(v, key);
+    if (node == 0) {
+        store64(ok_out, 0);
+        return 0;
+    }
+    if (bayan_json_v_is_null(node) == 1) { return 0x7FF0000000000000; }
+    if (bayan_json_v_is_float(node) == 1) { return bayan_json_v_float(node); }
+    if (bayan_json_v_is_int(node) == 1) { return bayan_json_v_float(node); }
+    store64(ok_out, 0);
+    return 0;
+}
+
+# Read a required string field. Returns a cstring, or 0 (also zeroing `ok_out`).
+#must_use
+fn _ser_str(v, key, ok_out) {
+    var node = bayan_json_v_obj_get(v, key);
+    if (bayan_json_v_is_str(node) == 0) {
+        store64(ok_out, 0);
+        return 0;
+    }
+    var s = bayan_json_v_str(node);
+    if (s == 0) {
+        store64(ok_out, 0);
+        return 0;
+    }
+    return str_data(s);
+}
 
 # ── Rgb (spectral) ────────
 
@@ -20,13 +99,17 @@ fn rgb_to_json(c) {
     return bayan_json_v_build(o);
 }
 
+# JSON -> Rgb, or 0 if r/g/b are not all present and numeric.
 #must_use
 fn rgb_from_json(json, len) {
-    var v = bayan_json_v_parse_buf(json, len);
-    return rgb_new(
-    bayan_json_v_float(bayan_json_v_obj_get(v, "r")),
-    bayan_json_v_float(bayan_json_v_obj_get(v, "g")),
-    bayan_json_v_float(bayan_json_v_obj_get(v, "b")));
+    var v = _ser_obj(json, len);
+    if (v == 0) { return 0; }
+    var ok = 1;
+    var r = _ser_num(v, "r", &ok);
+    var g = _ser_num(v, "g", &ok);
+    var b = _ser_num(v, "b", &ok);
+    if (ok == 0) { return 0; }
+    return rgb_new(r, g, b);
 }
 
 # ── Medium (ray) ────────
@@ -40,12 +123,16 @@ fn medium_to_json(m) {
     return bayan_json_v_build(o);
 }
 
+# JSON -> Medium, or 0 if "n" is not numeric or "name" is not a string.
 #must_use
 fn medium_from_json(json, len) {
-    var v = bayan_json_v_parse_buf(json, len);
-    return _medium_mk(
-    bayan_json_v_float(bayan_json_v_obj_get(v, "n")),
-    str_data(bayan_json_v_str(bayan_json_v_obj_get(v, "name"))));
+    var v = _ser_obj(json, len);
+    if (v == 0) { return 0; }
+    var ok = 1;
+    var n = _ser_num(v, "n", &ok);
+    var name = _ser_str(v, "name", &ok);
+    if (ok == 0) { return 0; }
+    return _medium_mk(n, name);
 }
 
 # ── SellmeierCoefficients (ray) ────────
@@ -63,16 +150,20 @@ fn sellmeier_to_json(s) {
     return bayan_json_v_build(o);
 }
 
+# JSON -> SellmeierCoefficients, or 0 if any of the six terms is missing.
 #must_use
 fn sellmeier_from_json(json, len) {
-    var v = bayan_json_v_parse_buf(json, len);
-    return _sellmeier_mk(
-    bayan_json_v_float(bayan_json_v_obj_get(v, "b1")),
-    bayan_json_v_float(bayan_json_v_obj_get(v, "c1")),
-    bayan_json_v_float(bayan_json_v_obj_get(v, "b2")),
-    bayan_json_v_float(bayan_json_v_obj_get(v, "c2")),
-    bayan_json_v_float(bayan_json_v_obj_get(v, "b3")),
-    bayan_json_v_float(bayan_json_v_obj_get(v, "c3")));
+    var v = _ser_obj(json, len);
+    if (v == 0) { return 0; }
+    var ok = 1;
+    var b1 = _ser_num(v, "b1", &ok);
+    var c1 = _ser_num(v, "c1", &ok);
+    var b2 = _ser_num(v, "b2", &ok);
+    var c2 = _ser_num(v, "c2", &ok);
+    var b3 = _ser_num(v, "b3", &ok);
+    var c3 = _ser_num(v, "c3", &ok);
+    if (ok == 0) { return 0; }
+    return _sellmeier_mk(b1, c1, b2, c2, b3, c3);
 }
 
 # ── LensType (lens) ────────
@@ -86,13 +177,19 @@ fn lens_type_to_json(lt) {
     return bayan_json_v_build(bayan_json_v_str_new(str_from("Diverging")));
 }
 
+# JSON -> LensType, or LENS_TYPE_INVALID for anything that is not one of the two
+# unit-variant strings (0 is already LENS_CONVERGING, so it cannot signal failure).
 #must_use
 fn lens_type_from_json(json, len) {
     var v = bayan_json_v_parse_buf(json, len);
-    if (streq(str_data(bayan_json_v_str(v)), "Converging") == 1) {
-        return LENS_CONVERGING;
-    }
-    return LENS_DIVERGING;
+    if (v == 0) { return LENS_TYPE_INVALID; }
+    if (bayan_json_v_is_str(v) == 0) { return LENS_TYPE_INVALID; }
+    var s = bayan_json_v_str(v);
+    if (s == 0) { return LENS_TYPE_INVALID; }
+    var t = str_data(s);
+    if (streq(t, "Converging") == 1) { return LENS_CONVERGING; }
+    if (streq(t, "Diverging") == 1) { return LENS_DIVERGING; }
+    return LENS_TYPE_INVALID;
 }
 
 # ── Polarization (wave) ────────
@@ -107,19 +204,25 @@ fn polarization_to_json(p) {
     return bayan_json_v_build(o);
 }
 
+# JSON -> Polarization, or 0 if ex/ey/phase are not all present and numeric.
 #must_use
 fn polarization_from_json(json, len) {
-    var v = bayan_json_v_parse_buf(json, len);
-    return polarization_new(
-    bayan_json_v_float(bayan_json_v_obj_get(v, "ex")),
-    bayan_json_v_float(bayan_json_v_obj_get(v, "ey")),
-    bayan_json_v_float(bayan_json_v_obj_get(v, "phase")));
+    var v = _ser_obj(json, len);
+    if (v == 0) { return 0; }
+    var ok = 1;
+    var ex = _ser_num(v, "ex", &ok);
+    var ey = _ser_num(v, "ey", &ok);
+    var phase = _ser_num(v, "phase", &ok);
+    if (ok == 0) { return 0; }
+    return polarization_new(ex, ey, phase);
 }
 
 # ── Prescription (ray/system) ────────
 
 # Prescription -> JSON Str: {"name":..,"surfaces":[{radius,thickness,n_after,
-# aperture_radius}...],"n_initial":..}.
+# aperture_radius}...],"n_initial":..}. A flat surface has radius = infinity,
+# which JSON cannot express; bayan encodes it as `null` and
+# `prescription_from_json` restores it (see `_ser_num_or_inf`).
 #must_use
 fn prescription_to_json(p) {
     var o = bayan_json_v_obj_new();
@@ -144,19 +247,30 @@ fn prescription_to_json(p) {
     return bayan_json_v_build(o);
 }
 
+# JSON -> Prescription, or 0 if the name, n_initial, surfaces array, or any
+# surface field is missing or of the wrong type.
 #must_use
 fn prescription_from_json(json, len) {
-    var v = bayan_json_v_parse_buf(json, len);
-    var p = prescription_new(str_data(bayan_json_v_str(bayan_json_v_obj_get(v, "name"))));
-    Prescription_set_n_initial(p, bayan_json_v_float(bayan_json_v_obj_get(v, "n_initial")));
+    var v = _ser_obj(json, len);
+    if (v == 0) { return 0; }
+    var ok = 1;
+    var name = _ser_str(v, "name", &ok);
+    var n_initial = _ser_num(v, "n_initial", &ok);
+    if (ok == 0) { return 0; }
     var surfaces_v = bayan_json_v_obj_get(v, "surfaces");
+    if (bayan_json_v_is_arr(surfaces_v) == 0) { return 0; }
+    var p = prescription_new(name);
+    if (p == 0) { return 0; }
+    Prescription_set_n_initial(p, n_initial);
     for (var i = 0; i < bayan_json_v_arr_len(surfaces_v); i = i + 1) {
         var so = bayan_json_v_arr_get(surfaces_v, i);
-        var _added = prescription_add_surface(p,
-        bayan_json_v_float(bayan_json_v_obj_get(so, "radius")),
-        bayan_json_v_float(bayan_json_v_obj_get(so, "thickness")),
-        bayan_json_v_float(bayan_json_v_obj_get(so, "n_after")),
-        bayan_json_v_float(bayan_json_v_obj_get(so, "aperture_radius")));
+        if (bayan_json_v_is_obj(so) == 0) { return 0; }
+        var radius = _ser_num_or_inf(so, "radius", &ok);
+        var thickness = _ser_num(so, "thickness", &ok);
+        var n_after = _ser_num(so, "n_after", &ok);
+        var aperture_radius = _ser_num(so, "aperture_radius", &ok);
+        if (ok == 0) { return 0; }
+        var _added = prescription_add_surface(p, radius, thickness, n_after, aperture_radius);
     }
     return p;
 }
@@ -178,17 +292,30 @@ fn spd_to_json(s) {
     return bayan_json_v_build(o);
 }
 
+# JSON -> Spd, or 0 if start_nm/step_nm are not numeric, "values" is not an
+# array, an element is not numeric, or the sample buffer cannot be allocated.
 #must_use
 fn spd_from_json(json, len) {
-    var v = bayan_json_v_parse_buf(json, len);
+    var v = _ser_obj(json, len);
+    if (v == 0) { return 0; }
+    var ok = 1;
+    var start_nm = _ser_num(v, "start_nm", &ok);
+    var step_nm = _ser_num(v, "step_nm", &ok);
+    if (ok == 0) { return 0; }
     var vals_v = bayan_json_v_obj_get(v, "values");
+    if (bayan_json_v_is_arr(vals_v) == 0) { return 0; }
     var n = bayan_json_v_arr_len(vals_v);
+    if (n <= 0) { return 0; }
+    # `alloc` returns 0 past ALLOC_MAX or on heap exhaustion; `n` comes from the
+    # input, so this must be checked before the fill loop stores through it.
     var data = alloc(n * 8);
+    if (data == 0) { return 0; }
     for (var i = 0; i < n; i = i + 1) {
-        store64(data + i * 8, bayan_json_v_float(bayan_json_v_arr_get(vals_v, i)));
+        var e = bayan_json_v_arr_get(vals_v, i);
+        if (bayan_json_v_is_float(e) == 0) {
+            if (bayan_json_v_is_int(e) == 0) { return 0; }
+        }
+        store64(data + i * 8, bayan_json_v_float(e));
     }
-    return spd_new(
-    bayan_json_v_float(bayan_json_v_obj_get(v, "start_nm")),
-    bayan_json_v_float(bayan_json_v_obj_get(v, "step_nm")),
-    data, n);
+    return spd_new(start_nm, step_nm, data, n);
 }
