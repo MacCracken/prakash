@@ -19,7 +19,10 @@ fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
 fn _near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
 fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
 
-var TOL = f64_div(F64_ONE, f64_from(100000));   # 1e-5 (bayan 6-decimal render)
+var TOL = f64_div(F64_ONE, f64_from(100000));   # 1e-5
+# 2.1.0: every *_from_json takes a trailing err_out. Reuse one slot and assert
+# PK_ERR_NONE after each decode, so a silent failure cannot pass as a roundtrip.
+var e = 0;
 
 alloc_init();
 
@@ -28,7 +31,8 @@ test_group("rgb");
 
 var c = rgb_new(_fd(1, 10), _fd(2, 10), _fd(3, 10));
 var cjs = rgb_to_json(c);
-var cback = rgb_from_json(str_data(cjs), str_len(cjs));
+var cback = rgb_from_json(str_data(cjs), str_len(cjs), &e);
+assert_eq(e, PK_ERR_NONE, "rgb decode reports PK_ERR_NONE");
 _assert_near(Rgb_r(cback), _fd(1, 10), TOL, "rgb r roundtrip");
 _assert_near(Rgb_g(cback), _fd(2, 10), TOL, "rgb g roundtrip");
 _assert_near(Rgb_b(cback), _fd(3, 10), TOL, "rgb b roundtrip");
@@ -38,7 +42,8 @@ test_group("medium");
 
 var m = medium_glass();
 var mjs = medium_to_json(m);
-var mback = medium_from_json(str_data(mjs), str_len(mjs));
+var mback = medium_from_json(str_data(mjs), str_len(mjs), &e);
+assert_eq(e, PK_ERR_NONE, "medium decode reports PK_ERR_NONE");
 _assert_near(Medium_n(mback), _fd(152, 100), TOL, "medium n roundtrip = 1.52");
 assert(streq(Medium_name(mback), "glass") == 1, "medium name roundtrip = glass");
 
@@ -47,7 +52,8 @@ test_group("sellmeier");
 
 var s = sellmeier_bk7();
 var sjs = sellmeier_to_json(s);
-var sback = sellmeier_from_json(str_data(sjs), str_len(sjs));
+var sback = sellmeier_from_json(str_data(sjs), str_len(sjs), &e);
+assert_eq(e, PK_ERR_NONE, "sellmeier decode reports PK_ERR_NONE");
 _assert_near(SellmeierCoefficients_b1(sback), SellmeierCoefficients_b1(s), TOL, "sellmeier b1");
 _assert_near(SellmeierCoefficients_c1(sback), SellmeierCoefficients_c1(s), TOL, "sellmeier c1");
 _assert_near(SellmeierCoefficients_b2(sback), SellmeierCoefficients_b2(s), TOL, "sellmeier b2");
@@ -59,9 +65,10 @@ _assert_near(SellmeierCoefficients_c3(sback), SellmeierCoefficients_c3(s), TOL, 
 test_group("lens_type");
 
 var conv_js = lens_type_to_json(LENS_CONVERGING);
-assert_eq(lens_type_from_json(str_data(conv_js), str_len(conv_js)), LENS_CONVERGING, "converging roundtrip");
+assert_eq(lens_type_from_json(str_data(conv_js), str_len(conv_js), &e), LENS_CONVERGING, "converging roundtrip");
 var div_js = lens_type_to_json(LENS_DIVERGING);
-assert_eq(lens_type_from_json(str_data(div_js), str_len(div_js)), LENS_DIVERGING, "diverging roundtrip");
+assert_eq(lens_type_from_json(str_data(div_js), str_len(div_js), &e), LENS_DIVERGING, "diverging roundtrip");
+assert_eq(e, PK_ERR_NONE, "lens_type decode reports PK_ERR_NONE");
 # wire format check: serializes to the bare variant string
 assert(streq(str_data(conv_js), "\"Converging\"") == 1, "converging wire format");
 
@@ -70,7 +77,8 @@ test_group("polarization");
 
 var p = polarization_circular_right();
 var pjs = polarization_to_json(p);
-var pback = polarization_from_json(str_data(pjs), str_len(pjs));
+var pback = polarization_from_json(str_data(pjs), str_len(pjs), &e);
+assert_eq(e, PK_ERR_NONE, "polarization decode reports PK_ERR_NONE");
 _assert_near(Polarization_ex(pback), Polarization_ex(p), TOL, "polarization ex roundtrip");
 _assert_near(Polarization_ey(pback), Polarization_ey(p), TOL, "polarization ey roundtrip");
 _assert_near(Polarization_phase(pback), Polarization_phase(p), TOL, "polarization phase roundtrip");
@@ -82,7 +90,8 @@ var pr = prescription_new("test lens");
 var _s1 = prescription_add_surface(pr, f64_from(50), f64_from(3), _fd(152, 100), _fd(125, 10));
 var _s2 = prescription_add_surface(pr, f64_neg(f64_from(50)), f64_from(0), F64_ONE, _fd(125, 10));
 var prjs = prescription_to_json(pr);
-var prback = prescription_from_json(str_data(prjs), str_len(prjs));
+var prback = prescription_from_json(str_data(prjs), str_len(prjs), &e);
+assert_eq(e, PK_ERR_NONE, "prescription decode reports PK_ERR_NONE");
 assert(streq(Prescription_name(prback), "test lens") == 1, "prescription name roundtrip");
 assert_eq(prescription_len(prback), 2, "prescription surfaces len = 2");
 _assert_near(PrescriptionSurface_radius(vec_get(Prescription_surfaces(prback), 0)), f64_from(50), TOL,
@@ -95,7 +104,8 @@ test_group("spd");
 
 var d65 = illuminant_d65();
 var djs = spd_to_json(d65);
-var dback = spd_from_json(str_data(djs), str_len(djs));
+var dback = spd_from_json(str_data(djs), str_len(djs), &e);
+assert_eq(e, PK_ERR_NONE, "spd decode reports PK_ERR_NONE");
 assert_eq(Spd_len(dback), 81, "spd values len = 81");
 _assert_near(load64(Spd_values(dback)), load64(Spd_values(d65)), TOL, "spd values[0] roundtrip");
 _assert_near(Spd_start_nm(dback), Spd_start_nm(d65), TOL, "spd start_nm roundtrip");

@@ -38,12 +38,16 @@ fn _h_near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
 # plain i64 at the `==`, which avoids the compiler's mixed f64/integer warning
 # when one side is a bit-pattern constant.
 fn _h_bits(a, b) { if (a == b) { return 1; } return 0; }
+fn _h_frac(num, den) { return f64_div(f64_from(num), f64_from(den)); }
 
 var PINF = 0x7FF0000000000000;
 var NINF = 0xFFF0000000000000;
 var ZERO = 0;
 
 alloc_init();
+
+# 2.1.0: *_from_json takes a trailing err_out.
+var e = 0;
 
 # ── 1. Rust-semantics math shims ────────
 # ganita_f64_pow is exp(n*ln(base)) and the x87 exp returns NaN for an infinite
@@ -134,20 +138,20 @@ var junk = "not json at all";
 var partial = "{\"x\":1}";
 var wrongtype = "{\"r\":\"a\",\"g\":1.0,\"b\":1.0}";
 
-assert(rgb_from_json(junk, strlen(junk)) == 0, "rgb_from_json(garbage) = 0 (was black)");
-assert(rgb_from_json(partial, strlen(partial)) == 0, "rgb_from_json(missing keys) = 0");
-assert(rgb_from_json(wrongtype, strlen(wrongtype)) == 0, "rgb_from_json(wrong field type) = 0");
-assert(medium_from_json(junk, strlen(junk)) == 0, "medium_from_json(garbage) = 0 (was SIGSEGV)");
-assert(medium_from_json(partial, strlen(partial)) == 0, "medium_from_json(missing name) = 0 (was SIGSEGV)");
-assert(sellmeier_from_json(junk, strlen(junk)) == 0, "sellmeier_from_json(garbage) = 0");
-assert(sellmeier_from_json(partial, strlen(partial)) == 0, "sellmeier_from_json(missing terms) = 0");
-assert(polarization_from_json(junk, strlen(junk)) == 0, "polarization_from_json(garbage) = 0");
-assert(prescription_from_json(junk, strlen(junk)) == 0, "prescription_from_json(garbage) = 0 (was SIGSEGV)");
-assert(prescription_from_json(partial, strlen(partial)) == 0,
+assert(rgb_from_json(junk, strlen(junk), &e) == 0, "rgb_from_json(garbage) = 0 (was black)");
+assert(rgb_from_json(partial, strlen(partial), &e) == 0, "rgb_from_json(missing keys) = 0");
+assert(rgb_from_json(wrongtype, strlen(wrongtype), &e) == 0, "rgb_from_json(wrong field type) = 0");
+assert(medium_from_json(junk, strlen(junk), &e) == 0, "medium_from_json(garbage) = 0 (was SIGSEGV)");
+assert(medium_from_json(partial, strlen(partial), &e) == 0, "medium_from_json(missing name) = 0 (was SIGSEGV)");
+assert(sellmeier_from_json(junk, strlen(junk), &e) == 0, "sellmeier_from_json(garbage) = 0");
+assert(sellmeier_from_json(partial, strlen(partial), &e) == 0, "sellmeier_from_json(missing terms) = 0");
+assert(polarization_from_json(junk, strlen(junk), &e) == 0, "polarization_from_json(garbage) = 0");
+assert(prescription_from_json(junk, strlen(junk), &e) == 0, "prescription_from_json(garbage) = 0 (was SIGSEGV)");
+assert(prescription_from_json(partial, strlen(partial), &e) == 0,
 "prescription_from_json(missing name) = 0 (was SIGSEGV)");
-assert(spd_from_json(junk, strlen(junk)) == 0, "spd_from_json(garbage) = 0");
-assert(spd_from_json(partial, strlen(partial)) == 0, "spd_from_json(missing values) = 0");
-assert(lens_type_from_json(junk, strlen(junk)) == LENS_TYPE_INVALID,
+assert(spd_from_json(junk, strlen(junk), &e) == 0, "spd_from_json(garbage) = 0");
+assert(spd_from_json(partial, strlen(partial), &e) == 0, "spd_from_json(missing values) = 0");
+assert(lens_type_from_json(junk, strlen(junk), &e) == LENS_TYPE_INVALID,
 "lens_type_from_json(garbage) = LENS_TYPE_INVALID (was SIGSEGV)");
 assert(LENS_TYPE_INVALID != LENS_CONVERGING, "LENS_TYPE_INVALID is distinct from LENS_CONVERGING");
 assert(LENS_TYPE_INVALID != LENS_DIVERGING, "LENS_TYPE_INVALID is distinct from LENS_DIVERGING");
@@ -171,7 +175,7 @@ test_group("JSON float round-trip is bit-exact");
 fn _h_rt(bits, label) {
     var c = rgb_new(bits, bits, bits);
     var js = rgb_to_json(c);
-    var back = rgb_from_json(str_data(js), str_len(js));
+    var back = rgb_from_json(str_data(js), str_len(js), &e);
     assert(back != 0, "round-trip parsed");
     assert(Rgb_r(back) == bits, label);
     return 0;
@@ -193,7 +197,7 @@ f64_from(5), f64_from(10));
 var s_before = vec_get(Prescription_surfaces(plano), 0);
 assert(_h_bits(PrescriptionSurface_radius(s_before), PINF) == 1, "surface 0 is flat before serializing");
 var pjs = prescription_to_json(plano);
-var pback = prescription_from_json(str_data(pjs), str_len(pjs));
+var pback = prescription_from_json(str_data(pjs), str_len(pjs), &e);
 assert(pback != 0, "prescription round-trip parsed");
 var s_after = vec_get(Prescription_surfaces(pback), 0);
 assert(_h_bits(PrescriptionSurface_radius(s_after), PINF) == 1,
@@ -204,5 +208,68 @@ assert(f64_gt(PrescriptionSurface_radius(s_after), f64_from(0)) == 1,
 var c_after = vec_get(Prescription_surfaces(pback), 1);
 assert(_h_bits(PrescriptionSurface_radius(c_after), f64_neg(f64_from(25))) == 1,
 "the curved surface round-trips unchanged (control)");
+
+# ── 7. Error channels (2.1.0) ────────
+# 2.0.2 made these fail safely; 2.1.0 makes them report WHY. The distinction
+# that matters to a caller is bad bytes (PK_ERR_PARSE) vs. a document that
+# parsed but has the wrong shape (PK_ERR_INVALID_PARAMETER).
+test_group("from_json reports why it failed");
+
+var ec = 0;
+
+# Success must leave PK_ERR_NONE, not a stale code from a previous call.
+store64(&ec, PK_ERR_TIR);
+var good = rgb_new(_h_frac(1, 4), _h_frac(1, 2), _h_frac(3, 4));
+var goodjs = rgb_to_json(good);
+var goodback = rgb_from_json(str_data(goodjs), str_len(goodjs), &ec);
+assert(goodback != 0, "a valid document still decodes");
+assert(load64(&ec) == PK_ERR_NONE, "success clears a stale error code");
+
+# Bad bytes -> PK_ERR_PARSE.
+var _b1 = rgb_from_json(junk, strlen(junk), &ec);
+assert(load64(&ec) == PK_ERR_PARSE, "unparseable bytes -> PK_ERR_PARSE");
+var notobj = "[1,2,3]";
+var _b2 = rgb_from_json(notobj, strlen(notobj), &ec);
+assert(load64(&ec) == PK_ERR_PARSE, "an array where an object is required -> PK_ERR_PARSE");
+
+# Parsed, but wrong shape -> PK_ERR_INVALID_PARAMETER.
+var _b3 = rgb_from_json(partial, strlen(partial), &ec);
+assert(load64(&ec) == PK_ERR_INVALID_PARAMETER, "missing field -> PK_ERR_INVALID_PARAMETER");
+var _b4 = rgb_from_json(wrongtype, strlen(wrongtype), &ec);
+assert(load64(&ec) == PK_ERR_INVALID_PARAMETER, "wrong field type -> PK_ERR_INVALID_PARAMETER");
+assert(PK_ERR_PARSE != PK_ERR_INVALID_PARAMETER, "the two failure kinds are distinguishable");
+
+# Every decoder in the family reports, not just rgb.
+var _b5 = medium_from_json(partial, strlen(partial), &ec);
+assert(load64(&ec) == PK_ERR_INVALID_PARAMETER, "medium_from_json reports a missing field");
+var _b6 = sellmeier_from_json(junk, strlen(junk), &ec);
+assert(load64(&ec) == PK_ERR_PARSE, "sellmeier_from_json reports bad bytes");
+var _b7 = polarization_from_json(partial, strlen(partial), &ec);
+assert(load64(&ec) == PK_ERR_INVALID_PARAMETER, "polarization_from_json reports a missing field");
+var _b8 = prescription_from_json(partial, strlen(partial), &ec);
+assert(load64(&ec) == PK_ERR_INVALID_PARAMETER, "prescription_from_json reports a missing field");
+var _b9 = spd_from_json(partial, strlen(partial), &ec);
+assert(load64(&ec) == PK_ERR_INVALID_PARAMETER, "spd_from_json reports a missing field");
+
+# An empty values array is a schema problem, not a parse problem.
+var emptyvals = "{\"start_nm\":380.0,\"step_nm\":5.0,\"values\":[]}";
+var _b10 = spd_from_json(emptyvals, strlen(emptyvals), &ec);
+assert(load64(&ec) == PK_ERR_INVALID_PARAMETER, "spd_from_json rejects an empty values array");
+
+# lens_type keeps its in-band sentinel AND reports through err_out.
+var lt = lens_type_from_json(junk, strlen(junk), &ec);
+assert(lt == LENS_TYPE_INVALID, "lens_type_from_json still returns LENS_TYPE_INVALID");
+assert(load64(&ec) == PK_ERR_PARSE, "lens_type_from_json reports bad bytes");
+var notavariant = "\"Sideways\"";
+var lt2 = lens_type_from_json(notavariant, strlen(notavariant), &ec);
+assert(lt2 == LENS_TYPE_INVALID, "an unknown variant is LENS_TYPE_INVALID");
+assert(load64(&ec) == PK_ERR_INVALID_PARAMETER, "an unknown variant -> PK_ERR_INVALID_PARAMETER");
+var conv = lens_type_to_json(LENS_CONVERGING);
+var lt3 = lens_type_from_json(str_data(conv), str_len(conv), &ec);
+assert(lt3 == LENS_CONVERGING, "a valid variant still decodes (control)");
+assert(load64(&ec) == PK_ERR_NONE, "a valid variant leaves PK_ERR_NONE");
+
+# prakash_is_err works on every code the family emits.
+assert(prakash_is_err(PK_ERR_PARSE) == 1, "PK_ERR_PARSE reads as an error");
 
 var r = assert_summary();

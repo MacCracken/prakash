@@ -9,12 +9,15 @@
 # JSON via bayan: build with str_from() keys/values, parse with parse_buf
 # (str_data,str_len) — the built Str is not NUL-terminated.
 #
-# FAILURE CONVENTION (2.0.2): the constructors and `*_from_json` return 0 when
-# they cannot produce a value — a failed allocation, unparseable JSON, or a
-# required field that is absent or not a string. Callers MUST check for 0.
-# Before 2.0.2 these paths dereferenced null and aborted the process; every
-# bayan accessor returns 0 for a missing or wrong-typed node, and `str_data(0)`
-# is `load64(0)`.
+# FAILURE CONVENTION (2.1.0): `*_from_json` takes a trailing `err_out` pointer
+# per the library-wide convention in error.cyr — PK_ERR_NONE on entry, then
+# PK_ERR_PARSE for bytes that are not well-formed JSON (or not an object),
+# PK_ERR_INVALID_PARAMETER for a document that parsed but has no string
+# "endpoint", or PK_ERR_ALLOCATION if the config cannot be allocated; 0 is
+# returned in every failure case. The constructors still return a bare 0 on a
+# failed allocation. Before 2.0.2 these paths dereferenced null and aborted the
+# process; every bayan accessor returns 0 for a missing or wrong-typed node, and
+# `str_data(0)` is `load64(0)`.
 
 #derive(accessors)
 struct DaimonConfig { endpoint; api_key; }
@@ -37,15 +40,25 @@ fn ai_daimon_config_new(endpoint, api_key) {
 }
 
 # Read a required string field out of a parsed JSON object. Returns a cstring,
-# or 0 when `v` is not an object, the key is absent, or the value is not a
-# string. Guards the whole chain that used to end in `str_data(0)`.
+# or 0 (writing err_out) when `v` is not an object, the key is absent, or the
+# value is not a string. Guards the whole chain that used to end in
+# `str_data(0)`.
 #must_use
-fn _ai_json_str_field(v, key) {
-    if (v == 0) { return 0; }
+fn _ai_json_str_field(v, key, err_out) {
+    if (v == 0) {
+        store64(err_out, PK_ERR_PARSE);
+        return 0;
+    }
     var node = bayan_json_v_obj_get(v, key);
-    if (bayan_json_v_is_str(node) == 0) { return 0; }
+    if (bayan_json_v_is_str(node) == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
     var s = bayan_json_v_str(node);
-    if (s == 0) { return 0; }
+    if (s == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
     return str_data(s);
 }
 
@@ -74,13 +87,14 @@ fn ai_hoosh_config_default() {
 # ── DaimonClient ────────
 
 # Create a daimon client from config (30s timeout is applied per-request in
-# register_agent via sandhi options). Never fails in the Cyrius port.
+# register_agent via sandhi options). Returns 0 with PK_ERR_ALLOCATION if the
+# handle cannot be allocated.
 #must_use
 fn ai_daimon_client_new(config, err_out) {
     store64(err_out, PK_ERR_NONE);
     var cl = alloc(sizeof(DaimonClient));
     if (cl == 0) {
-        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        store64(err_out, PK_ERR_ALLOCATION);
         return 0;
     }
     DaimonClient_set_config(cl, config);
@@ -105,18 +119,22 @@ fn ai_daimon_config_to_json(config) {
 }
 
 # JSON (data ptr + byte length) -> DaimonConfig (api_key = 0 when null/absent).
-# Returns 0 if the input does not parse, or has no string "endpoint".
+# Sets err_out and returns 0 if the input does not parse, or has no string
+# "endpoint". `api_key` is genuinely optional and never sets err_out.
 #must_use
-fn ai_daimon_config_from_json(json, len) {
+fn ai_daimon_config_from_json(json, len, err_out) {
+    store64(err_out, PK_ERR_NONE);
     var v = bayan_json_v_parse_buf(json, len);
-    var endpoint = _ai_json_str_field(v, "endpoint");
-    if (endpoint == 0) { return 0; }
+    var endpoint = _ai_json_str_field(v, "endpoint", err_out);
+    if (prakash_is_err(load64(err_out)) == 1) { return 0; }
     var ak_v = bayan_json_v_obj_get(v, "api_key");
     var api_key = 0;
     if (bayan_json_v_is_str(ak_v) == 1) {
         api_key = str_data(bayan_json_v_str(ak_v));
     }
-    return ai_daimon_config_new(endpoint, api_key);
+    var c = ai_daimon_config_new(endpoint, api_key);
+    if (c == 0) { store64(err_out, PK_ERR_ALLOCATION); }
+    return c;
 }
 
 # HooshConfig -> JSON Str: {"endpoint":"..."}.
@@ -128,14 +146,17 @@ fn ai_hoosh_config_to_json(config) {
     return bayan_json_v_build(obj);
 }
 
-# JSON (data ptr + byte length) -> HooshConfig.
-# Returns 0 if the input does not parse, or has no string "endpoint".
+# JSON (data ptr + byte length) -> HooshConfig. Sets err_out and returns 0 if
+# the input does not parse, or has no string "endpoint".
 #must_use
-fn ai_hoosh_config_from_json(json, len) {
+fn ai_hoosh_config_from_json(json, len, err_out) {
+    store64(err_out, PK_ERR_NONE);
     var v = bayan_json_v_parse_buf(json, len);
-    var endpoint = _ai_json_str_field(v, "endpoint");
-    if (endpoint == 0) { return 0; }
-    return ai_hoosh_config_new(endpoint);
+    var endpoint = _ai_json_str_field(v, "endpoint", err_out);
+    if (prakash_is_err(load64(err_out)) == 1) { return 0; }
+    var c = ai_hoosh_config_new(endpoint);
+    if (c == 0) { store64(err_out, PK_ERR_ALLOCATION); }
+    return c;
 }
 
 # ── Agent registration (sandhi HTTP POST) ────────
@@ -167,12 +188,12 @@ fn ai_register_agent(client, err_out) {
     # explicitly — `str_cstr` copies into a len+1 buffer and stores the NUL.
     var url_s = str_cat(str_from(DaimonConfig_endpoint(config)), str_from("/v1/agents/register"));
     if (url_s == 0) {
-        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        store64(err_out, PK_ERR_ALLOCATION);
         return "unknown";
     }
     var url = str_cstr(url_s);
     if (url == 0) {
-        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        store64(err_out, PK_ERR_ALLOCATION);
         return "unknown";
     }
     var headers = sandhi_headers_new();

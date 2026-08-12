@@ -1,5 +1,75 @@
 # Changelog
 
+## [2.1.0] - 2026-08-12 — Error channels for the deserialization surface
+
+2.0.2 stopped the `*_from_json` family from crashing or fabricating on malformed
+input, but left it unable to say **why** a decode failed — it returned a bare `0`,
+which broke the library's own convention in `error.cyr` ("functions return
+`PK_ERR_NONE` on success or a negative `PK_ERR_*` code on failure"). This release
+closes that gap.
+
+Suite **5334 → 5361** assertions across 27 suites.
+
+### Breaking
+- **Every `*_from_json` takes a trailing `err_out` pointer.** Nine functions:
+
+  | Function | Was | Now |
+  |---|---|---|
+  | `rgb_from_json` | `(json, len)` | `(json, len, err_out)` |
+  | `medium_from_json` | `(json, len)` | `(json, len, err_out)` |
+  | `sellmeier_from_json` | `(json, len)` | `(json, len, err_out)` |
+  | `lens_type_from_json` | `(json, len)` | `(json, len, err_out)` |
+  | `polarization_from_json` | `(json, len)` | `(json, len, err_out)` |
+  | `prescription_from_json` | `(json, len)` | `(json, len, err_out)` |
+  | `spd_from_json` | `(json, len)` | `(json, len, err_out)` |
+  | `ai_daimon_config_from_json` | `(json, len)` | `(json, len, err_out)` |
+  | `ai_hoosh_config_from_json` | `(json, len)` | `(json, len, err_out)` |
+
+  **Migration** — pass the address of a local and test it, exactly as the rest of
+  the library already works:
+
+  ```cyrius
+  # before (2.0.2)
+  var c = rgb_from_json(data, len);
+  if (c == 0) { ... }                  # failed, reason unknown
+
+  # after (2.1.0)
+  var e = 0;
+  var c = rgb_from_json(data, len, &e);
+  if (prakash_is_err(e) == 1) { ... }  # e says which of the three below
+  ```
+
+  The return value is unchanged in every case (`0` on failure;
+  `lens_type_from_json` still returns `LENS_TYPE_INVALID`), so a caller that only
+  checks the return value needs nothing but the extra argument.
+
+  ⚠ Strictly, adding a required parameter is a major-version change under SemVer.
+  It ships as a minor here deliberately: there are no Cyrius consumers yet
+  (soorat, kiran and ranga are still Rust), so the migration cost today is zero.
+
+### Added
+- **`PK_ERR_PARSE`** (`-9`) — the input bytes are not well-formed JSON, or the
+  document is not the type the decoder needs. Distinct from
+  `PK_ERR_INVALID_PARAMETER`, which now means the document parsed but a required
+  field is absent or of the wrong type. **Bad bytes vs. wrong schema** is the
+  distinction a caller actually needs, and the suite asserts the two are
+  reported separately.
+- The three codes the family emits: `PK_ERR_PARSE`,
+  `PK_ERR_INVALID_PARAMETER`, and `PK_ERR_ALLOCATION` (for a caller-sized buffer
+  that could not be allocated — `spd_from_json`'s sample array,
+  `prescription_new`, and the `ai` config handles).
+
+### Changed
+- `err_out` doubles as the failure accumulator inside a decoder: each field
+  helper writes its own code and success never writes, so several fields are read
+  in a row and the slot is tested once. Success always clears the slot to
+  `PK_ERR_NONE` on entry, so a stale code from an earlier call cannot be mistaken
+  for a fresh failure — asserted directly.
+- **`ai_daimon_client_new` and `ai_register_agent` now report allocation failures
+  as `PK_ERR_ALLOCATION`** rather than `PK_ERR_INVALID_PARAMETER`; the arguments
+  were fine, the memory was not there. `ai_daimon_client_new`'s "never fails"
+  comment was false as of 2.0.2 and is corrected.
+
 ## [2.0.2] - 2026-08-12 — Audit release: crashes, fabricated results, and a corrupted round-trip
 
 A full P(-1) hardening sweep of the 2.0.1 tree across six dimensions — allocation

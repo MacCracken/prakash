@@ -12,43 +12,63 @@
 # rendered 6 decimals, which silently flushed any |x| < 5e-7 to zero — prakash
 # 2.0.0 shipped against that encoder.)
 #
-# FAILURE CONVENTION (2.0.2): every `*_from_json` returns 0 when the input does
-# not parse, is not an object, or lacks a required field of the right type.
-# Callers MUST check for 0. `lens_type_from_json` returns LENS_TYPE_INVALID
-# instead, since 0 is already LENS_CONVERGING. Before 2.0.2 these paths either
-# dereferenced null and aborted the process (`str_data(0)` is `load64(0)`) or
-# silently fabricated a zero-valued struct, because every bayan accessor returns
-# 0 for a missing or wrong-typed node and 0 is the bit pattern for 0.0.
+# FAILURE CONVENTION (2.1.0): every `*_from_json` takes a trailing `err_out`
+# pointer, per the library-wide convention in error.cyr. It writes PK_ERR_NONE on
+# entry and one of these on failure, returning 0:
+#
+#   PK_ERR_PARSE              the bytes are not well-formed JSON, or the document
+#                             is not the type the decoder needs (bad bytes)
+#   PK_ERR_INVALID_PARAMETER  parsed fine, but a required field is absent or of
+#                             the wrong type (wrong schema)
+#   PK_ERR_ALLOCATION         a caller-sized buffer could not be allocated
+#
+# Callers: `var e = 0; var c = rgb_from_json(p, n, &e); if (prakash_is_err(e))`.
+# `lens_type_from_json` still returns LENS_TYPE_INVALID as its in-band failure
+# value, since 0 is already LENS_CONVERGING.
+#
+# Before 2.0.2 these paths either dereferenced null and aborted the process
+# (`str_data(0)` is `load64(0)`) or silently fabricated a zero-valued struct,
+# because every bayan accessor returns 0 for a missing or wrong-typed node and 0
+# is the bit pattern for 0.0. 2.0.2 made them fail safely; 2.1.0 makes them say
+# why.
 
 # Returned by lens_type_from_json when the input is not a known lens type.
 # Distinct from LENS_CONVERGING (0) and LENS_DIVERGING (1).
 var LENS_TYPE_INVALID = (0 - 1);
 
 # ── decode helpers ────────
+#
+# Each helper writes its own failure code into `err_out` and returns a zero
+# value. Callers read several fields in a row and then test `err_out` ONCE, so
+# `err_out` doubles as the failure accumulator — the first code written is not
+# overwritten by a later success, because success never writes.
 
-# Parse `json`/`len` and require a JSON object. Returns the value or 0.
+# Parse `json`/`len` and require a JSON object. Returns the value, or 0 with
+# PK_ERR_PARSE.
 #must_use
-fn _ser_obj(json, len) {
+fn _ser_obj(json, len, err_out) {
     var v = bayan_json_v_parse_buf(json, len);
-    if (v == 0) { return 0; }
-    if (bayan_json_v_is_obj(v) == 0) { return 0; }
+    if (v == 0) {
+        store64(err_out, PK_ERR_PARSE);
+        return 0;
+    }
+    if (bayan_json_v_is_obj(v) == 0) {
+        store64(err_out, PK_ERR_PARSE);
+        return 0;
+    }
     return v;
 }
 
 # Read a required numeric field. JSON integers are accepted as well as floats
 # (bayan tags `1` as JTAG_INT and `1.0` as JTAG_FLOAT; both are valid f64 input).
-# On a missing or wrong-typed field, zeroes `ok_out` and returns 0.
+# A missing or wrong-typed field writes PK_ERR_INVALID_PARAMETER and returns 0.0.
 #must_use
-fn _ser_num(v, key, ok_out) {
+fn _ser_num(v, key, err_out) {
     var node = bayan_json_v_obj_get(v, key);
-    if (node == 0) {
-        store64(ok_out, 0);
-        return 0;
-    }
     if (bayan_json_v_is_float(node) == 1) { return bayan_json_v_float(node); }
     if (bayan_json_v_is_int(node) == 1) { return bayan_json_v_float(node); }
-    store64(ok_out, 0);
-    return 0;
+    store64(err_out, PK_ERR_INVALID_PARAMETER);
+    return f64_from(0);
 }
 
 # Read a required numeric field that may legitimately be non-finite. JSON has no
@@ -58,30 +78,27 @@ fn _ser_num(v, key, ok_out) {
 # surface decoded as 0.0 — a zero radius, i.e. INFINITE curvature, the exact
 # physical inverse.
 #must_use
-fn _ser_num_or_inf(v, key, ok_out) {
+fn _ser_num_or_inf(v, key, err_out) {
     var node = bayan_json_v_obj_get(v, key);
-    if (node == 0) {
-        store64(ok_out, 0);
-        return 0;
-    }
     if (bayan_json_v_is_null(node) == 1) { return 0x7FF0000000000000; }
     if (bayan_json_v_is_float(node) == 1) { return bayan_json_v_float(node); }
     if (bayan_json_v_is_int(node) == 1) { return bayan_json_v_float(node); }
-    store64(ok_out, 0);
-    return 0;
+    store64(err_out, PK_ERR_INVALID_PARAMETER);
+    return f64_from(0);
 }
 
-# Read a required string field. Returns a cstring, or 0 (also zeroing `ok_out`).
+# Read a required string field. Returns a cstring, or 0 with
+# PK_ERR_INVALID_PARAMETER.
 #must_use
-fn _ser_str(v, key, ok_out) {
+fn _ser_str(v, key, err_out) {
     var node = bayan_json_v_obj_get(v, key);
     if (bayan_json_v_is_str(node) == 0) {
-        store64(ok_out, 0);
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
         return 0;
     }
     var s = bayan_json_v_str(node);
     if (s == 0) {
-        store64(ok_out, 0);
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
         return 0;
     }
     return str_data(s);
@@ -99,16 +116,17 @@ fn rgb_to_json(c) {
     return bayan_json_v_build(o);
 }
 
-# JSON -> Rgb, or 0 if r/g/b are not all present and numeric.
+# JSON -> Rgb. Sets err_out and returns 0 if r/g/b are not all present and
+# numeric.
 #must_use
-fn rgb_from_json(json, len) {
-    var v = _ser_obj(json, len);
+fn rgb_from_json(json, len, err_out) {
+    store64(err_out, PK_ERR_NONE);
+    var v = _ser_obj(json, len, err_out);
     if (v == 0) { return 0; }
-    var ok = 1;
-    var r = _ser_num(v, "r", &ok);
-    var g = _ser_num(v, "g", &ok);
-    var b = _ser_num(v, "b", &ok);
-    if (ok == 0) { return 0; }
+    var r = _ser_num(v, "r", err_out);
+    var g = _ser_num(v, "g", err_out);
+    var b = _ser_num(v, "b", err_out);
+    if (prakash_is_err(load64(err_out)) == 1) { return 0; }
     return rgb_new(r, g, b);
 }
 
@@ -123,15 +141,16 @@ fn medium_to_json(m) {
     return bayan_json_v_build(o);
 }
 
-# JSON -> Medium, or 0 if "n" is not numeric or "name" is not a string.
+# JSON -> Medium. Sets err_out and returns 0 if "n" is not numeric or "name" is
+# not a string.
 #must_use
-fn medium_from_json(json, len) {
-    var v = _ser_obj(json, len);
+fn medium_from_json(json, len, err_out) {
+    store64(err_out, PK_ERR_NONE);
+    var v = _ser_obj(json, len, err_out);
     if (v == 0) { return 0; }
-    var ok = 1;
-    var n = _ser_num(v, "n", &ok);
-    var name = _ser_str(v, "name", &ok);
-    if (ok == 0) { return 0; }
+    var n = _ser_num(v, "n", err_out);
+    var name = _ser_str(v, "name", err_out);
+    if (prakash_is_err(load64(err_out)) == 1) { return 0; }
     return _medium_mk(n, name);
 }
 
@@ -150,19 +169,20 @@ fn sellmeier_to_json(s) {
     return bayan_json_v_build(o);
 }
 
-# JSON -> SellmeierCoefficients, or 0 if any of the six terms is missing.
+# JSON -> SellmeierCoefficients. Sets err_out and returns 0 if any of the six
+# terms is missing or non-numeric.
 #must_use
-fn sellmeier_from_json(json, len) {
-    var v = _ser_obj(json, len);
+fn sellmeier_from_json(json, len, err_out) {
+    store64(err_out, PK_ERR_NONE);
+    var v = _ser_obj(json, len, err_out);
     if (v == 0) { return 0; }
-    var ok = 1;
-    var b1 = _ser_num(v, "b1", &ok);
-    var c1 = _ser_num(v, "c1", &ok);
-    var b2 = _ser_num(v, "b2", &ok);
-    var c2 = _ser_num(v, "c2", &ok);
-    var b3 = _ser_num(v, "b3", &ok);
-    var c3 = _ser_num(v, "c3", &ok);
-    if (ok == 0) { return 0; }
+    var b1 = _ser_num(v, "b1", err_out);
+    var c1 = _ser_num(v, "c1", err_out);
+    var b2 = _ser_num(v, "b2", err_out);
+    var c2 = _ser_num(v, "c2", err_out);
+    var b3 = _ser_num(v, "b3", err_out);
+    var c3 = _ser_num(v, "c3", err_out);
+    if (prakash_is_err(load64(err_out)) == 1) { return 0; }
     return _sellmeier_mk(b1, c1, b2, c2, b3, c3);
 }
 
@@ -177,18 +197,30 @@ fn lens_type_to_json(lt) {
     return bayan_json_v_build(bayan_json_v_str_new(str_from("Diverging")));
 }
 
-# JSON -> LensType, or LENS_TYPE_INVALID for anything that is not one of the two
-# unit-variant strings (0 is already LENS_CONVERGING, so it cannot signal failure).
+# JSON -> LensType. Returns LENS_TYPE_INVALID (and sets err_out) for anything
+# that is not one of the two unit-variant strings — 0 is already LENS_CONVERGING,
+# so the return value alone cannot signal failure.
 #must_use
-fn lens_type_from_json(json, len) {
+fn lens_type_from_json(json, len, err_out) {
+    store64(err_out, PK_ERR_NONE);
     var v = bayan_json_v_parse_buf(json, len);
-    if (v == 0) { return LENS_TYPE_INVALID; }
-    if (bayan_json_v_is_str(v) == 0) { return LENS_TYPE_INVALID; }
+    if (v == 0) {
+        store64(err_out, PK_ERR_PARSE);
+        return LENS_TYPE_INVALID;
+    }
+    if (bayan_json_v_is_str(v) == 0) {
+        store64(err_out, PK_ERR_PARSE);
+        return LENS_TYPE_INVALID;
+    }
     var s = bayan_json_v_str(v);
-    if (s == 0) { return LENS_TYPE_INVALID; }
+    if (s == 0) {
+        store64(err_out, PK_ERR_PARSE);
+        return LENS_TYPE_INVALID;
+    }
     var t = str_data(s);
     if (streq(t, "Converging") == 1) { return LENS_CONVERGING; }
     if (streq(t, "Diverging") == 1) { return LENS_DIVERGING; }
+    store64(err_out, PK_ERR_INVALID_PARAMETER);
     return LENS_TYPE_INVALID;
 }
 
@@ -204,16 +236,17 @@ fn polarization_to_json(p) {
     return bayan_json_v_build(o);
 }
 
-# JSON -> Polarization, or 0 if ex/ey/phase are not all present and numeric.
+# JSON -> Polarization. Sets err_out and returns 0 if ex/ey/phase are not all
+# present and numeric.
 #must_use
-fn polarization_from_json(json, len) {
-    var v = _ser_obj(json, len);
+fn polarization_from_json(json, len, err_out) {
+    store64(err_out, PK_ERR_NONE);
+    var v = _ser_obj(json, len, err_out);
     if (v == 0) { return 0; }
-    var ok = 1;
-    var ex = _ser_num(v, "ex", &ok);
-    var ey = _ser_num(v, "ey", &ok);
-    var phase = _ser_num(v, "phase", &ok);
-    if (ok == 0) { return 0; }
+    var ex = _ser_num(v, "ex", err_out);
+    var ey = _ser_num(v, "ey", err_out);
+    var phase = _ser_num(v, "phase", err_out);
+    if (prakash_is_err(load64(err_out)) == 1) { return 0; }
     return polarization_new(ex, ey, phase);
 }
 
@@ -247,29 +280,38 @@ fn prescription_to_json(p) {
     return bayan_json_v_build(o);
 }
 
-# JSON -> Prescription, or 0 if the name, n_initial, surfaces array, or any
-# surface field is missing or of the wrong type.
+# JSON -> Prescription. Sets err_out and returns 0 if the name, n_initial,
+# surfaces array, or any surface field is missing or of the wrong type.
 #must_use
-fn prescription_from_json(json, len) {
-    var v = _ser_obj(json, len);
+fn prescription_from_json(json, len, err_out) {
+    store64(err_out, PK_ERR_NONE);
+    var v = _ser_obj(json, len, err_out);
     if (v == 0) { return 0; }
-    var ok = 1;
-    var name = _ser_str(v, "name", &ok);
-    var n_initial = _ser_num(v, "n_initial", &ok);
-    if (ok == 0) { return 0; }
+    var name = _ser_str(v, "name", err_out);
+    var n_initial = _ser_num(v, "n_initial", err_out);
+    if (prakash_is_err(load64(err_out)) == 1) { return 0; }
     var surfaces_v = bayan_json_v_obj_get(v, "surfaces");
-    if (bayan_json_v_is_arr(surfaces_v) == 0) { return 0; }
+    if (bayan_json_v_is_arr(surfaces_v) == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
     var p = prescription_new(name);
-    if (p == 0) { return 0; }
+    if (p == 0) {
+        store64(err_out, PK_ERR_ALLOCATION);
+        return 0;
+    }
     Prescription_set_n_initial(p, n_initial);
     for (var i = 0; i < bayan_json_v_arr_len(surfaces_v); i = i + 1) {
         var so = bayan_json_v_arr_get(surfaces_v, i);
-        if (bayan_json_v_is_obj(so) == 0) { return 0; }
-        var radius = _ser_num_or_inf(so, "radius", &ok);
-        var thickness = _ser_num(so, "thickness", &ok);
-        var n_after = _ser_num(so, "n_after", &ok);
-        var aperture_radius = _ser_num(so, "aperture_radius", &ok);
-        if (ok == 0) { return 0; }
+        if (bayan_json_v_is_obj(so) == 0) {
+            store64(err_out, PK_ERR_INVALID_PARAMETER);
+            return 0;
+        }
+        var radius = _ser_num_or_inf(so, "radius", err_out);
+        var thickness = _ser_num(so, "thickness", err_out);
+        var n_after = _ser_num(so, "n_after", err_out);
+        var aperture_radius = _ser_num(so, "aperture_radius", err_out);
+        if (prakash_is_err(load64(err_out)) == 1) { return 0; }
         var _added = prescription_add_surface(p, radius, thickness, n_after, aperture_radius);
     }
     return p;
@@ -292,28 +334,41 @@ fn spd_to_json(s) {
     return bayan_json_v_build(o);
 }
 
-# JSON -> Spd, or 0 if start_nm/step_nm are not numeric, "values" is not an
-# array, an element is not numeric, or the sample buffer cannot be allocated.
+# JSON -> Spd. Sets err_out and returns 0 if start_nm/step_nm are not numeric,
+# "values" is not a non-empty array, an element is not numeric, or the sample
+# buffer cannot be allocated.
 #must_use
-fn spd_from_json(json, len) {
-    var v = _ser_obj(json, len);
+fn spd_from_json(json, len, err_out) {
+    store64(err_out, PK_ERR_NONE);
+    var v = _ser_obj(json, len, err_out);
     if (v == 0) { return 0; }
-    var ok = 1;
-    var start_nm = _ser_num(v, "start_nm", &ok);
-    var step_nm = _ser_num(v, "step_nm", &ok);
-    if (ok == 0) { return 0; }
+    var start_nm = _ser_num(v, "start_nm", err_out);
+    var step_nm = _ser_num(v, "step_nm", err_out);
+    if (prakash_is_err(load64(err_out)) == 1) { return 0; }
     var vals_v = bayan_json_v_obj_get(v, "values");
-    if (bayan_json_v_is_arr(vals_v) == 0) { return 0; }
+    if (bayan_json_v_is_arr(vals_v) == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
     var n = bayan_json_v_arr_len(vals_v);
-    if (n <= 0) { return 0; }
+    if (n <= 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
     # `alloc` returns 0 past ALLOC_MAX or on heap exhaustion; `n` comes from the
     # input, so this must be checked before the fill loop stores through it.
     var data = alloc(n * 8);
-    if (data == 0) { return 0; }
+    if (data == 0) {
+        store64(err_out, PK_ERR_ALLOCATION);
+        return 0;
+    }
     for (var i = 0; i < n; i = i + 1) {
         var e = bayan_json_v_arr_get(vals_v, i);
         if (bayan_json_v_is_float(e) == 0) {
-            if (bayan_json_v_is_int(e) == 0) { return 0; }
+            if (bayan_json_v_is_int(e) == 0) {
+                store64(err_out, PK_ERR_INVALID_PARAMETER);
+                return 0;
+            }
         }
         store64(data + i * 8, bayan_json_v_float(e));
     }

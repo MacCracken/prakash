@@ -16,12 +16,12 @@ source retained under `rust-old/`.
 | `pbr` | pbr_core, pbr_advanced | 865 | (free functions) | PBR shading: Cook-Torrance, GGX, sheen, clearcoat, SSS, iridescence, volumetric, importance sampling, split-sum IBL |
 | `atmosphere` | atmosphere.cyr | 313 | (free functions + constants) | Rayleigh/Mie scattering, King correction, sky color, air mass, optical depth, sunset model |
 | `bridge` | bridge.cyr | 28 | (free functions) | Primitive-value cross-crate hooks (bijli/tara/badal) — no dependency on sibling crates |
-| `serialize` | serialize.cyr | 24 | (free functions) | JSON roundtrips (bayan) for the seven serde-tested types; floats are bit-exact (Grisu2) since bayan 1.2.1 |
+| `serialize` | serialize.cyr | 31 | (free functions) | JSON roundtrips (bayan) for the seven serde-tested types; floats are bit-exact (Grisu2) since bayan 1.2.1; every `*_from_json` reports via `err_out` |
 | `ai` | ai.cyr | 24 | `DaimonClient`, `DaimonConfig`, `HooshConfig` | AI-assisted optics queries via sandhi HTTP POST — **not in the core bundle** |
 
-**Total**: 25 science modules + error, **5334 test assertions across 27 suites**,
+**Total**: 25 science modules + error, **5361 test assertions across 27 suites**,
 27 benchmarks. (`tests/hardening.tcyr` is the cross-module regression suite for the
-2.0.2 audit repairs — see that CHANGELOG entry.)
+2.0.2 audit repairs and the 2.1.0 error channels — see those CHANGELOG entries.)
 
 ## Design Principles
 

@@ -23,6 +23,7 @@ Prakash does NOT own:
 | **V2.0** | **Cyrius port** | **Full Rust→Cyrius rewrite. All 25 science modules ported and adversarially verified; two distlib bundles (math-only + AI); sakshi logging; bayan serialization; benchmark suite + CSV history. 5251 test assertions, 27 benchmarks. See the [2.0.0] CHANGELOG entry.** |
 | V2.0.1 | Toolchain refresh | Cyrius 6.4.10 → 6.5.20, hisab 2.6.8 → 2.11.1, sakshi 2.4.2 → 2.4.10. `bayan_json_v_parse_str` → `_parse_buf` rename absorbed. 5251 assertions unchanged. 6.5.20's harness subtracts its timer floor, so the Rust-vs-Cyrius comparison is measurable for the first time (~7× median, was reported as 60×–1,300×). See the [2.0.1] CHANGELOG entry. |
 | V2.0.2 | Audit & hardening | Six-dimension P(-1) sweep with adversarial verification. Fixed 7 public entry points that SIGSEGVed on malformed input, unchecked/overflowing allocations, missing bounds checks on Pattern2D and Mueller accessors, an out-of-bounds read in `spd_at`, silent fabrication on bad JSON, flat-surface JSON corruption, and three math boundaries that diverged from Rust. 5251 → 5334 assertions, 26 → 27 suites. See the [2.0.2] CHANGELOG entry. |
+| **V2.1.0** | **Error channels** | **Every `*_from_json` (9 functions) takes a trailing `err_out` and reports `PK_ERR_PARSE` (bad bytes) / `PK_ERR_INVALID_PARAMETER` (wrong schema) / `PK_ERR_ALLOCATION`, closing the gap 2.0.2 left open. Breaking signature change; migration table in the [2.1.0] CHANGELOG entry. 5361 assertions.** |
 
 ### V2.0 exit criteria (met)
 

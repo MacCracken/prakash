@@ -30,6 +30,11 @@ var PK_ERR_INVALID_PARAMETER = (0 - 7);
 # computation overflowed, or the heap is exhausted. Distinct from
 # PK_ERR_INVALID_PARAMETER: the arguments were sane, the memory was not there.
 var PK_ERR_ALLOCATION        = (0 - 8);
+# The input bytes are not well-formed JSON, or the document is not of the type
+# the decoder expected (e.g. an array where an object was required). Distinct
+# from PK_ERR_INVALID_PARAMETER, which means the document parsed but a required
+# field was absent or of the wrong type — bad bytes vs. wrong schema.
+var PK_ERR_PARSE             = (0 - 9);
 
 # 1 if `code` is an error (negative), else 0.
 #must_use

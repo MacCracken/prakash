@@ -7,6 +7,9 @@ include "src/ai.cyr"
 
 alloc_init();
 
+# 2.1.0: *_from_json takes a trailing err_out.
+var e = 0;
+
 var ER = alloc(8);
 
 # ── Config defaults ────────
@@ -40,21 +43,21 @@ test_group("serde");
 # daimon: endpoint + api_key
 var d = ai_daimon_config_new("http://example.com", "key123");
 var djs = ai_daimon_config_to_json(d);
-var dback = ai_daimon_config_from_json(str_data(djs), str_len(djs));
+var dback = ai_daimon_config_from_json(str_data(djs), str_len(djs), &e);
 assert(streq(DaimonConfig_endpoint(dback), "http://example.com") == 1, "daimon roundtrip endpoint");
 assert(streq(DaimonConfig_api_key(dback), "key123") == 1, "daimon roundtrip api_key");
 
 # daimon: null api_key (default) roundtrips to None
 var dnull = ai_daimon_config_default();
 var dnjs = ai_daimon_config_to_json(dnull);
-var dnback = ai_daimon_config_from_json(str_data(dnjs), str_len(dnjs));
+var dnback = ai_daimon_config_from_json(str_data(dnjs), str_len(dnjs), &e);
 assert(streq(DaimonConfig_endpoint(dnback), "http://localhost:8090") == 1, "daimon null roundtrip endpoint");
 assert_eq(DaimonConfig_api_key(dnback), 0, "daimon null roundtrip api_key none");
 
 # hoosh: endpoint
 var h = ai_hoosh_config_default();
 var hjs = ai_hoosh_config_to_json(h);
-var hback = ai_hoosh_config_from_json(str_data(hjs), str_len(hjs));
+var hback = ai_hoosh_config_from_json(str_data(hjs), str_len(hjs), &e);
 assert(streq(HooshConfig_endpoint(hback), "http://localhost:8088") == 1, "hoosh roundtrip endpoint");
 
 # ── malformed input (2.0.2 hardening) ────────
@@ -70,18 +73,18 @@ var m_null = "{\"endpoint\":null}";
 var m_notobj = "[1,2]";
 var m_junk = "not json";
 
-assert(ai_daimon_config_from_json(m_empty, strlen(m_empty)) == 0, "daimon: {} -> 0");
-assert(ai_daimon_config_from_json(m_nokey, strlen(m_nokey)) == 0, "daimon: no endpoint key -> 0");
-assert(ai_daimon_config_from_json(m_wrongtype, strlen(m_wrongtype)) == 0, "daimon: endpoint not a string -> 0");
-assert(ai_daimon_config_from_json(m_null, strlen(m_null)) == 0, "daimon: endpoint null -> 0");
-assert(ai_daimon_config_from_json(m_notobj, strlen(m_notobj)) == 0, "daimon: non-object document -> 0");
-assert(ai_daimon_config_from_json(m_junk, strlen(m_junk)) == 0, "daimon: unparseable -> 0");
+assert(ai_daimon_config_from_json(m_empty, strlen(m_empty), &e) == 0, "daimon: {} -> 0");
+assert(ai_daimon_config_from_json(m_nokey, strlen(m_nokey), &e) == 0, "daimon: no endpoint key -> 0");
+assert(ai_daimon_config_from_json(m_wrongtype, strlen(m_wrongtype), &e) == 0, "daimon: endpoint not a string -> 0");
+assert(ai_daimon_config_from_json(m_null, strlen(m_null), &e) == 0, "daimon: endpoint null -> 0");
+assert(ai_daimon_config_from_json(m_notobj, strlen(m_notobj), &e) == 0, "daimon: non-object document -> 0");
+assert(ai_daimon_config_from_json(m_junk, strlen(m_junk), &e) == 0, "daimon: unparseable -> 0");
 
-assert(ai_hoosh_config_from_json(m_empty, strlen(m_empty)) == 0, "hoosh: {} -> 0");
-assert(ai_hoosh_config_from_json(m_nokey, strlen(m_nokey)) == 0, "hoosh: no endpoint key -> 0");
-assert(ai_hoosh_config_from_json(m_wrongtype, strlen(m_wrongtype)) == 0, "hoosh: endpoint not a string -> 0");
-assert(ai_hoosh_config_from_json(m_null, strlen(m_null)) == 0, "hoosh: endpoint null -> 0");
-assert(ai_hoosh_config_from_json(m_notobj, strlen(m_notobj)) == 0, "hoosh: non-object document -> 0");
-assert(ai_hoosh_config_from_json(m_junk, strlen(m_junk)) == 0, "hoosh: unparseable -> 0");
+assert(ai_hoosh_config_from_json(m_empty, strlen(m_empty), &e) == 0, "hoosh: {} -> 0");
+assert(ai_hoosh_config_from_json(m_nokey, strlen(m_nokey), &e) == 0, "hoosh: no endpoint key -> 0");
+assert(ai_hoosh_config_from_json(m_wrongtype, strlen(m_wrongtype), &e) == 0, "hoosh: endpoint not a string -> 0");
+assert(ai_hoosh_config_from_json(m_null, strlen(m_null), &e) == 0, "hoosh: endpoint null -> 0");
+assert(ai_hoosh_config_from_json(m_notobj, strlen(m_notobj), &e) == 0, "hoosh: non-object document -> 0");
+assert(ai_hoosh_config_from_json(m_junk, strlen(m_junk), &e) == 0, "hoosh: unparseable -> 0");
 
 var r = assert_summary();
