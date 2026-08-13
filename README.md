@@ -101,7 +101,13 @@ cyrius bench tests/prakash.bcyr                     # 36 benchmarks
 ./scripts/bench-history.sh  # append to the CSV history + benchmarks.md
 ```
 
-The original Rust implementation is retained in-tree under `rust-old/` as the translation reference. See [docs/benchmarks-rust-v-cyrius.md](docs/benchmarks-rust-v-cyrius.md) for a Rust-vs-Cyrius performance comparison.
+The original Rust implementation is no longer in-tree. It was retained under
+`rust-old/` through 2.2.2 as the translation reference and removed in 2.2.3, once
+the port-completeness review (2.2.1) had confirmed nothing was left behind. It
+remains in git: `git checkout 2.2.2 -- rust-old/`, or tag `1.2.0` for the
+pre-port project at the repo root. See
+[docs/benchmarks-rust-v-cyrius.md](docs/benchmarks-rust-v-cyrius.md) for a
+Rust-vs-Cyrius performance comparison.
 
 ## License
 

@@ -76,7 +76,9 @@ cyrius bench tests/prakash.bcyr
 - **Bit-fidelity to the Rust source** is the porting contract: encode `f64`
   constants as exact ratios (numerator/denominator < 2^53) or IEEE-754 hex bit
   patterns; replicate `powi` as square-and-multiply; preserve left-associative
-  fold order. When in doubt, compare against `rust-old/` and add a test.
+  fold order. When in doubt, compare against the Rust original and add a test.
+  It is no longer in-tree (removed in 2.2.3) — retrieve it with
+  `git checkout 2.2.2 -- rust-old/`, or `git show 1.2.0:src/<file>.rs`.
 
 ## Testing Requirements
 

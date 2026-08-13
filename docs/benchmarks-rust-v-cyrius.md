@@ -2,11 +2,14 @@
 
 > prakash v2.0.1 benchmark comparison.
 >
-> - **Rust**: criterion v0.8, release mode. Latest run from `rust-old/bench-history.csv` (2026-03-26, commit `01684d4`). f64 throughout.
+> - **Rust**: criterion v0.8, release mode. Latest run from `rust-old/bench-history.csv` as of tag 2.2.2 (2026-03-26, commit `01684d4`). f64 throughout.
 > - **Cyrius**: cyrius 6.5.20, `tests/prakash.bcyr`. Run 2026-08-12 (commit `7ec51c8`). f64 (IEEE-754 bits in i64), heap-allocated structs.
 > - **Platform**: x86_64 Linux.
 > - **Pre-SIMD baseline**: Cyrius 6.5.20 emits scalar f64 only — no SIMD (it's on the Cyrius roadmap). Every number here is scalar-vs-scalar (or scalar Cyrius vs Rust's autovectorized/glam paths). The gap is a current-toolchain artifact, not a language ceiling; SIMD closes the vector/FFT-heavy paths.
-> - The full Rust set lives in [`rust-old/benchmarks.md`](../rust-old/benchmarks.md); the Cyrius history in [`../benchmarks.md`](../benchmarks.md).
+> - The Rust numbers below are the record: `rust-old/` was removed in 2.2.3, so
+>   the full Rust set is in git rather than in-tree —
+>   `git show 2.2.2:rust-old/benchmarks.md` (and `rust-old/bench-history.csv` for
+>   the raw data). The Cyrius history is in [`../benchmarks.md`](../benchmarks.md).
 
 ## What changed in this revision
 
@@ -135,7 +138,15 @@ unlike some ports there is no f32→f64 penalty to attribute.
 | Reproducibility | depends on dep versions | bit-identical (pinned toolchain + vendored `lib/`) |
 | Precision | f64 | f64 (bit-faithful to the Rust original — constants match to the ULP) |
 
-## Full Cyrius set (27 benchmarks, 2026-08-12, cyrius 6.5.20)
+## Full Cyrius set (the 27 benchmarks as of 2.0.1, cyrius 6.5.20)
+
+⚠ This page is a **2.0.1-era snapshot**, kept because it is the like-for-like
+Rust comparison and the Rust side can never be re-run now that `rust-old/` is
+out of tree. The Cyrius side has moved since: the suite is 36 benchmarks as of
+2.2.0, and 2.1.1 removed per-call allocations that shifted several rows (e.g.
+`fresnel_integral_c` 157 → 136 ns). For current Cyrius numbers see
+[`../benchmarks.md`](../benchmarks.md); the ratios here remain the best available
+estimate of the language gap.
 
 | Benchmark | Avg (ns) | Min (ns) | Iterations |
 |---|--:|--:|--:|

@@ -2,7 +2,9 @@
 
 prakash is a flat Cyrius library: flat `src/*.cyr` modules with free functions,
 no internal binaries (`src/main.cyr` is a build smoke only). Ported from the Rust
-source retained under `rust-old/`.
+source, which was retained under `rust-old/` through 2.2.2 and removed in 2.2.3
+after the port-completeness review; recover it with
+`git checkout 2.2.2 -- rust-old/`.
 
 ## Module Map
 

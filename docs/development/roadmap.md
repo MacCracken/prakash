@@ -29,6 +29,7 @@ Prakash does NOT own:
 | **V2.2.0** | **SIMD** | **`simd` fold added; `pattern2d_normalized` vectorised with a bulk `f64v_scale` (−26%, bit-identical). Caught that `f64v_scale` overruns by one f64 on an odd count before shipping. Recorded as negative results: typed f64v2/f64v4 wrappers slower than scalar, memcpy/memset 7–8× slower than a loop, and the transcendental-bound hot spots unreachable without vector transcendentals. 5457 assertions, 29 suites, 36 benchmarks.** |
 | **V2.2.1** | **Port completeness** | **Systematic `rust-old/` comparison before deletion: all 282 pub fns / 37 structs / 5 enums accounted for. Ported the 4 examples the port had silently dropped (now an `examples/` tree that CI lints, formats and RUNS against `dist/prakash.cyr`), and closed 3 untested functions. Bench parity (131 uncovered subjects) filed, not bulk-ported. 5467 assertions.** |
 | **V2.2.2** | **P(-1) audit** | **Six-dimension sweep, adversarially verified: 14 confirmed, 4 refuted. Headline: `pattern2d_max_intensity` SIGSEGVed on a null pattern — found by ALL SIX dimensions, and the suite already pinned the null that reached it. Also: 4 functions returned 0 without setting err_out, `_zern_single`'s unguarded alloc, `prescription_from_json` silently truncating a lens, `rgb_to_u8` NaN, and math.md double-counting the clearcoat geometry term. 5485 assertions.** |
+| V2.2.3 | Archive removal | `rust-old/` removed (42 files, 820 KB) now that the 2.2.1 completeness review has cleared it; recoverable from tag 2.2.2 or 1.2.0. Four docs that claimed it was in-tree corrected. No code change — 5485 assertions unchanged. |
 
 ### V2.0 exit criteria (met)
 
@@ -184,8 +185,10 @@ that release. They are real and reproduced; none is a guess.
       added the expensive composites. Bulk-porting them would add noise to
       `bench-history.csv` without changing a decision — do it only if a specific
       regression needs the resolution.
-- [ ] Remove `rust-old/` — **gated on the review above**, not on a version number
-      (it is also preserved in the pre-2.0 git tags).
+- [x] **Remove `rust-old/` — done in 2.2.3**, once the completeness review above
+      had cleared it. 42 files, 820 KB. Recover with
+      `git checkout 2.2.2 -- rust-old/`, or tag `1.2.0` for the pre-port project
+      at the repo root.
 
 ## Consumers
 

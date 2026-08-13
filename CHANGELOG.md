@@ -1,5 +1,50 @@
 # Changelog
 
+## [2.2.3] - 2026-08-12 — Remove the `rust-old/` translation archive
+
+The Rust original is out of tree. It was retained through 2.2.2 as the
+translation reference; the 2.2.1 port-completeness review confirmed nothing was
+left behind (all 282 `pub fn`, 37 structs, 5 enums accounted for; the 4 dropped
+examples ported), so the gate it was waiting on is satisfied.
+
+No code, test, benchmark or API change — the suite is **5485 assertions across 29
+suites**, unchanged, and `rust-old/` was never a build input (no reference in
+`cyrius.cyml`, CI or `scripts/`).
+
+### Removed
+- **`rust-old/`** — 42 files, 820 KB.
+
+  **It is not lost.** Recover the archive as it stood with
+  `git checkout 2.2.2 -- rust-old/`, or take the pre-port project from tag
+  `1.2.0`, where the same 33 `.rs` files sit at the repo root. Individual files:
+  `git show 2.2.2:rust-old/src/lens.rs`, `git show 1.2.0:src/lens.rs`.
+
+### Changed
+- **Four claims that would have become false are corrected**, rather than left to
+  rot: `README.md` and `docs/architecture/overview.md` both said the Rust source
+  was "retained in-tree"; `CONTRIBUTING.md` told contributors to "compare against
+  `rust-old/`" when in doubt about bit-fidelity; and
+  `docs/benchmarks-rust-v-cyrius.md` carried a markdown link to
+  `../rust-old/benchmarks.md` that would have 404'd. Each now names the git
+  incantation that retrieves what it refers to.
+- **`docs/benchmarks-rust-v-cyrius.md` is marked as the 2.0.1-era snapshot it is.**
+  It is kept because it is the only like-for-like Rust comparison and the Rust
+  side can never be re-run now — but the Cyrius side has moved (36 benchmarks
+  since 2.2.0; 2.1.1's allocation removals shifted rows such as
+  `fresnel_integral_c`, 157 → 136 ns). Current numbers live in `benchmarks.md`.
+- `.gitignore` drops the now-dead `rust-old/target/` and `rust-old/Cargo.lock`
+  entries.
+
+### Notes
+- The per-file provenance comments across `src/` and `tests/` ("ported from
+  `rust-old/src/ray/mod.rs`") are deliberately **kept**. They record where each
+  module came from, which is still true and still useful; the paths resolve
+  against tag 2.2.2.
+- Bit-fidelity to the Rust original remains a stated property of the port. What
+  changes is where the reference lives, not whether it exists — and the
+  assertions that encode it (exact-ratio and hex constants, `powi`
+  square-and-multiply, left-associative fold order) are all in the suite.
+
 ## [2.2.2] - 2026-08-12 — P(-1) audit: the crash every dimension found
 
 A full audit/hardening/security sweep of the 2.2.1 tree across six dimensions,

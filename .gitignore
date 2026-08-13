@@ -12,10 +12,9 @@
 # Cyrius toolchain tarball (fetched during CI)
 cyrius-*.tar.gz
 
-# Rust reference archive (rust-old/) — Cargo build outputs, if ever built
+# Cargo.lock — kept ignored; prakash is a Cyrius library with no Cargo build.
+# (The `rust-old/` archive was removed in 2.2.3; see the CHANGELOG.)
 Cargo.lock
-rust-old/target/
-rust-old/Cargo.lock
 
 # Editor / IDE
 *.swp
