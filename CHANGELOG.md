@@ -1,5 +1,198 @@
 # Changelog
 
+## [2.2.2] - 2026-08-12 — P(-1) audit: the crash every dimension found
+
+A full audit/hardening/security sweep of the 2.2.1 tree across six dimensions,
+every candidate handed to an independent skeptic instructed to refute it.
+**14 findings confirmed, 4 refuted.**
+
+Suite **5467 → 5485** assertions.
+
+### Security
+- **`pattern2d_max_intensity` SIGSEGVs on a null pattern — found independently by
+  ALL SIX audit dimensions and reproduced as exit 139.** It was the only
+  `Pattern2D` entry point without a null guard: `pattern2d_get`, `pattern2d_set`
+  and `pattern2d_normalized` all got one in 2.0.2 and this one was missed. Null
+  is not hypothetical here — it is the documented return of `pattern2d_new`,
+  `diffraction_pattern_2d`, `diffraction_pattern_circular`, `psf_from_wavefront`,
+  `psf_diffraction_limited` and `interference_pattern`, and `tests/hardening.tcyr`
+  already asserted those return 0. So the suite pinned the null and then the next
+  natural call killed the process. Now returns 0.0, which is the fold's own
+  identity.
+- **`_zern_single` stored through an unchecked `alloc`** — the one allocation site
+  both the 2.0.2 and 2.1.1 sweeps missed. It backs every named aberration
+  (`zernike_defocus`, `zernike_spherical`, `zernike_coma_x/y`, `zernike_astigmatism_*`).
+
+### Fixed
+- **Allocation failures that returned 0 without reporting it.** Four `err_out`-
+  carrying functions returned the failure sentinel while leaving `err_out` at
+  `PK_ERR_NONE`, so a caller following the documented `if (prakash_is_err(e))`
+  pattern proceeded to dereference null: `trace_surface` (whose own in-library
+  callers then deref it), `find_system_properties`, and the five
+  `*_from_json` decoders on their terminal constructor. All now write
+  `PK_ERR_ALLOCATION`.
+- **`prescription_from_json` silently truncated a lens.** It discarded
+  `prescription_add_surface`'s result, so a failed surface append produced a
+  Prescription with **fewer surfaces than the document** and `PK_ERR_NONE` — a
+  different lens, reported as success.
+- **`rgb_to_u8` returned `INT64_MIN` for a NaN channel** where Rust's `as u8` is a
+  saturating cast returning 0. `f64_clamp` passes NaN through (correctly matching
+  `f64::clamp`), so the NaN had to be caught at the cast. New `_r_sat_u8` also
+  saturates the high end.
+- **`_ai_json_str_field` reported `PK_ERR_INVALID_PARAMETER` for a non-object
+  document**, contradicting its own module contract and the sibling `serialize`
+  family, which report `PK_ERR_PARSE` for bad shape. Bad shape is a parse
+  failure; a missing field is a parameter failure.
+
+### Documentation
+- **`math.md`'s clearcoat formula double-counted the geometry term.** It read
+  `f_coat = D F G / (4(n·v)(n·l))`, but `pbr_clearcoat_geometry` **is**
+  `1/(4(n·v)(n·l))` — the implementation multiplies `D·F·G` and is right.
+- **README's benchmark count** said 27; it is 36.
+- **Corrected a 2.2.1 claim**: that entry said tests were added for "the 3 ported
+  functions that had no test reference". The 2.2.1 sweep compared against
+  `rust-old/` and so never examined Cyrius-only additions — 12 public functions
+  still had no test, bench or example reference. Ten now do (see below); the
+  wording is corrected in place.
+
+### Tests
+- Coverage for the previously unreferenced public functions: `spec_visible_min_nm`,
+  `spec_visible_max_nm`, `photometry_k_m`, `observer_cmf` (distinct table per
+  observer), `cie_2015_10deg_table`, `xyz_d50_white`, `stokes_intensity`,
+  `stokes_diagonal_minus`, `spd_from_static` (asserts it *borrows* the caller's
+  buffer rather than copying), and `prakash_set_log_level`.
+
+### Refuted
+Four claims did not survive verification and were dropped rather than acted on:
+`ai_register_agent`'s unchecked sandhi handles (the failure modes are not
+reachable as claimed), the README Quick Start manifest (built and run — it
+works), and twice, `point_source_set`'s missing upper bound — the array is a
+length-less raw buffer by the same contract as `spectrum_strip`, and
+`interference_pattern` takes the count separately.
+
+## [2.2.1] - 2026-08-12 — Port-completeness review against `rust-old/`
+
+A systematic comparison of the Rust original against the Cyrius port, run
+**before** anything gets deleted. The function-level port is complete; two real
+gaps were found and closed, and one is reported rather than closed.
+
+Suite **5457 → 5467** assertions; **4 examples ported** (a new `examples/` tree).
+
+### Verified complete
+- **All 282 Rust `pub fn` are accounted for.** 274 matched by name or the port's
+  prefix convention; the remaining 8 are word-order renames that resolve:
+  `classify_lens`→`lens_classify`, `radial_polynomial`→`zernike_radial`,
+  `thin_lens_image_distance`→`lens_thin_image_distance`,
+  `thick_lens_focal_length`→`lens_thick_focal_length`,
+  `separated_lenses_focal_length`/`_bfd`→`lens_separated_*`,
+  `cmf_table`→`observer_cmf`, and `init_with_level`→`prakash_set_log_level`
+  (the `tracing_subscriber` setup has no Cyrius analogue; sakshi replaces it).
+- **All 37 `pub struct` and 5 `pub enum` are present.**
+
+### Added
+- **`examples/` — the 4 Rust examples were silently dropped by the port.**
+  Nothing referenced them: not the port plan, not CI, not the docs. Ported and
+  now run by CI:
+  - `basic_optics.cyr` — Snell, Fresnel, wavelength→RGB, Wien, thin lens
+  - `rainbow.cyr` — dispersion through a raindrop; 9000-step minimum-deviation
+    sweep per wavelength. Reproduces the physics: violet 40.29°, red 42.11°
+  - `pbr_materials.cyr` — Fresnel-Schlick, Cook-Torrance dielectric vs metal,
+    clearcoat, thin-film iridescence
+  - `camera_lens.cyr` — a cemented doublet through the whole ray stack:
+    paraxial properties (EFL 49.07 mm), marginal trace, sequential trace with
+    per-surface reflectance, spot diagrams on/off-axis, OPD fan
+
+  They `include "dist/prakash.cyr"` — the exact surface a consumer gets — so CI
+  running them is an **end-to-end check of the published bundle**, not just of
+  `src/`. Lint and fmt now cover `examples/` too.
+- **Tests for the 3 RUST-ORIGIN functions that had no test reference**
+  (the sweep compared against `rust-old/`; Cyrius-only additions were out of its
+  scope and 2.2.2 closes those separately):
+  `spd_end_nm`, `fresnel_integral_cs` (agreement with the separate `C`/`S`
+  entry points across both branches and for negative x), and
+  `pbr_clearcoat_distribution` (GGX lobe peaks at `n_dot_h = 1`, tighter when
+  smoother).
+
+### Notes
+- ⚠ **An example silently redefined a library function.** A helper named `_r` in
+  `rainbow.cyr` collided with `spectral_core`'s own `_r` inside the bundle —
+  Cyrius globals are **last-one-wins with no diagnostic**, so the example
+  overrode the library's helper. Harmless only because both happened to be
+  identical. All example helpers are now prefixed (`_rb_`, `_pm_`, `_cl_`,
+  `_ex_`) and each file says why.
+- ⚠ **Benchmark coverage is the one gap left open**: the Rust suite had 180
+  benchmarks against prakash's 36, and 131 Rust bench subjects have no Cyrius
+  counterpart. Most are trivial scalar micro-benchmarks (`abbe_number`,
+  `brewster_angle`, `critical_angle`, …) and 2.1.1 already added the expensive
+  composites that actually dominate runtime. Filed on the roadmap rather than
+  bulk-ported, because 131 more one-line scalar benches would add noise to
+  `bench-history.csv` without changing a decision.
+
+## [2.2.0] - 2026-08-12 — SIMD, and where it actually applies
+
+Adds the `simd` stdlib fold and applies it to the one loop in prakash that
+genuinely benefits. The larger result is negative and is recorded as such: most
+of prakash's cost is transcendental and branchy, not elementwise-array, and the
+stdlib has no vector transcendentals. Two of the three benchmark hot spots
+cannot be vectorised at all with the available primitives.
+
+Suite **5444 → 5457** assertions across **28 → 29** suites; benchmarks 35 → 36.
+
+### Added
+- **`simd` in `[deps] stdlib`**, and `pattern2d_normalized` now scales its grid
+  with a single bulk `f64v_scale` instead of a per-element loop.
+  Whole function on 64×64: **35.2 µs → 26.0 µs (−26%)**; the scale step itself
+  **9.15 µs → 1.05 µs per 4096 elements (8.7×)**. The remainder is
+  `pattern2d_max_intensity` and `pattern2d_new`'s zero-fill, neither of which has
+  a SIMD form (see below).
+- **`tests/simd.tcyr`** pins the contract that makes the swap safe: the result is
+  **bit-identical** to the scalar loop — 512 mixed-magnitude values, plus ±0, ±inf,
+  `DBL_MIN` and `DBL_MAX`, plus all 256 cells of a real pattern. Bit-fidelity to
+  `rust-old/` is a core property of the port, so a toolchain change that made
+  `f64v_scale` reassociate or fuse must fail a test rather than silently shift
+  published optics results.
+- **`wave/pattern2d_normalized_64x64`** benchmark (35 → 36).
+
+### Fixed
+- ⚠ **`f64v_scale` writes one f64 PAST the requested count when the count is
+  odd** — it processes in pairs and rounds up. Measured for every odd n in 1..12.
+  `pattern2d_normalized` passes `width * height`, which is odd for a 3×5 or 7×7
+  pattern, so the naive call corrupted the 8 bytes after the grid. prakash now
+  vectorises the even prefix and does the final element scalar; the suite pins
+  both the overrun (so a toolchain fix is noticed) and that a 3×5 pattern
+  normalizes correctly.
+
+### Investigated and rejected
+Each measured, not assumed — the same discipline as 2.1.2:
+
+- **The typed `f64v2_*` / `f64v4_*` wrappers are SLOWER than scalar.** Per 4096
+  elements: scalar 9.15 µs, `f64v2` **23.0 µs**, `f64v4` **20.3 µs**. Their ABI
+  plus per-lane extraction costs more than the arithmetic saves. Only the raw
+  `f64v_*` builtins are worth using.
+- **Chunking loses most of the win**: `f64v_scale` called per 4 elements is
+  2.83 µs/4096 against **1.05 µs** for one bulk call. It must span the range.
+- **`memcpy` / `memset` are byte-at-a-time** in `lib/string.cyr` (`store8` in a
+  `while`) — **7–8× SLOWER** than an 8-byte scalar loop (48.8 µs / 47.2 µs vs
+  6.4 µs / 5.9 µs per 4096 f64). An earlier draft of this release used `memcpy`
+  for the clone branch; it was a regression and was reverted.
+- **The remaining hot spots cannot be vectorised** with what the stdlib provides:
+  - `wave/interference_pattern_16x16` (108 µs) and `spectral/spd_blackbody`
+    (9.8 µs) are dominated by per-element `hypot`/`sin`/`cos`/`exp`. There are
+    **no vector transcendentals**.
+  - `ray/spot_diagram` (28 µs) is branchy ray tracing, not an array kernel.
+  - `pattern2d_max_intensity` needs a max reduction — **`f64v_max` does not
+    exist** (nor `f64v_min`, `f64v_fill`, `f64v_sum`, `f64v_copy`).
+  - `_spd_integrate` looks like a dot product, but the CIE CMF table is
+    **interleaved** (x@0, y@8, z@16 per row, stride 24) so `f64v_dot` cannot read
+    it, and a reassociated sum would not be bit-exact against `rust-old/` anyway.
+  - The zero-fill loops have no `f64v_fill`, and `memset` is slower than the loop.
+
+### Notes
+- ⚠ **Toolchain constraint:** `f64v_scale` **segfaults when called from top-level
+  statement scope**; it must be invoked from inside a function. Library code is
+  unaffected (`pattern2d_normalized` is a function), but `.tcyr` suites run at
+  top level, so `tests/simd.tcyr` routes every SIMD call through a helper.
+
 ## [2.1.2] - 2026-08-12 — hisab interop, measured
 
 Settles both hisab adoption items. One shipped as a tested contract; the other

@@ -127,7 +127,9 @@ fn rgb_from_json(json, len, err_out) {
     var g = _ser_num(v, "g", err_out);
     var b = _ser_num(v, "b", err_out);
     if (prakash_is_err(load64(err_out)) == 1) { return 0; }
-    return rgb_new(r, g, b);
+    var built = rgb_new(r, g, b);
+    if (built == 0) { store64(err_out, PK_ERR_ALLOCATION); }
+    return built;
 }
 
 # ── Medium (ray) ────────
@@ -151,7 +153,9 @@ fn medium_from_json(json, len, err_out) {
     var n = _ser_num(v, "n", err_out);
     var name = _ser_str(v, "name", err_out);
     if (prakash_is_err(load64(err_out)) == 1) { return 0; }
-    return _medium_mk(n, name);
+    var built = _medium_mk(n, name);
+    if (built == 0) { store64(err_out, PK_ERR_ALLOCATION); }
+    return built;
 }
 
 # ── SellmeierCoefficients (ray) ────────
@@ -183,7 +187,9 @@ fn sellmeier_from_json(json, len, err_out) {
     var b3 = _ser_num(v, "b3", err_out);
     var c3 = _ser_num(v, "c3", err_out);
     if (prakash_is_err(load64(err_out)) == 1) { return 0; }
-    return _sellmeier_mk(b1, c1, b2, c2, b3, c3);
+    var built = _sellmeier_mk(b1, c1, b2, c2, b3, c3);
+    if (built == 0) { store64(err_out, PK_ERR_ALLOCATION); }
+    return built;
 }
 
 # ── LensType (lens) ────────
@@ -247,7 +253,9 @@ fn polarization_from_json(json, len, err_out) {
     var ey = _ser_num(v, "ey", err_out);
     var phase = _ser_num(v, "phase", err_out);
     if (prakash_is_err(load64(err_out)) == 1) { return 0; }
-    return polarization_new(ex, ey, phase);
+    var built = polarization_new(ex, ey, phase);
+    if (built == 0) { store64(err_out, PK_ERR_ALLOCATION); }
+    return built;
 }
 
 # ── Prescription (ray/system) ────────
@@ -312,7 +320,12 @@ fn prescription_from_json(json, len, err_out) {
         var n_after = _ser_num(so, "n_after", err_out);
         var aperture_radius = _ser_num(so, "aperture_radius", err_out);
         if (prakash_is_err(load64(err_out)) == 1) { return 0; }
-        var _added = prescription_add_surface(p, radius, thickness, n_after, aperture_radius);
+        # A dropped surface would return a Prescription with FEWER elements
+        # than the document and PK_ERR_NONE — a silently different lens.
+        if (prescription_add_surface(p, radius, thickness, n_after, aperture_radius) == 0) {
+            store64(err_out, PK_ERR_ALLOCATION);
+            return 0;
+        }
     }
     return p;
 }
@@ -372,5 +385,7 @@ fn spd_from_json(json, len, err_out) {
         }
         store64(data + i * 8, bayan_json_v_float(e));
     }
-    return spd_new(start_nm, step_nm, data, n);
+    var built = spd_new(start_nm, step_nm, data, n);
+    if (built == 0) { store64(err_out, PK_ERR_ALLOCATION); }
+    return built;
 }

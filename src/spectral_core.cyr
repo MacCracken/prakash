@@ -62,14 +62,25 @@ fn rgb_clamp(c) {
 #derive(accessors)
 struct RgbU8 { r; g; b; }
 
+# channel*255 + 0.5 truncated, with Rust `as u8` saturation. f64_clamp lets a
+# NaN through (matching Rust f64::clamp), and f64_to(NaN) is INT64_MIN, so the
+# NaN case must be caught here: Rust's saturating cast yields 0.
+fn _r_sat_u8(ch) {
+    var v = f64_add(f64_mul(ch, f64_from(255)), _r(5, 10));
+    # NaN fails every comparison, so this catches it as well as negatives.
+    if (f64_gt(v, f64_from(0)) == 0) { return 0; }
+    if (f64_gt(v, f64_from(255)) == 1) { return 255; }
+    return f64_to(v);
+}
+
 #must_use
 fn rgb_to_u8(c) {
     var cc = rgb_clamp(c);
     var u = alloc(sizeof(RgbU8));
     if (u == 0) { return 0; }
-    RgbU8_set_r(u, f64_to(f64_add(f64_mul(Rgb_r(cc), f64_from(255)), _r(5, 10))));
-    RgbU8_set_g(u, f64_to(f64_add(f64_mul(Rgb_g(cc), f64_from(255)), _r(5, 10))));
-    RgbU8_set_b(u, f64_to(f64_add(f64_mul(Rgb_b(cc), f64_from(255)), _r(5, 10))));
+    RgbU8_set_r(u, _r_sat_u8(Rgb_r(cc)));
+    RgbU8_set_g(u, _r_sat_u8(Rgb_g(cc)));
+    RgbU8_set_b(u, _r_sat_u8(Rgb_b(cc)));
     return u;
 }
 

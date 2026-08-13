@@ -59,7 +59,7 @@ jobs:
         run: |
           set +e
           fail=0
-          for f in src/*.cyr tests/*.tcyr tests/*.bcyr; do
+          for f in src/*.cyr tests/*.tcyr tests/*.bcyr examples/*.cyr; do
             [ -f "$f" ] || continue
             echo "=== cyrlint: $f ==="
             out=$(cyrius lint "$f" 2>&1)
@@ -78,7 +78,7 @@ jobs:
         # the rc across files so every drifted file is annotated.
         run: |
           fail=0
-          for f in src/*.cyr tests/*.tcyr tests/*.bcyr; do
+          for f in src/*.cyr tests/*.tcyr tests/*.bcyr examples/*.cyr; do
             [ -f "$f" ] || continue
             cyrius fmt "$f" --check >/dev/null 2>&1 || {
               echo "::error file=$f::fmt drift — run 'cyrius fmt $f > tmp && mv tmp $f'"
@@ -138,6 +138,18 @@ jobs:
             [ -f "$f" ] || continue
             echo "::group::test $f"
             cyrius test "$f"
+            echo "::endgroup::"
+          done
+
+      - name: Examples
+        # The examples include dist/prakash.cyr — the exact surface a consumer
+        # gets — so running them is an end-to-end check of the published bundle,
+        # not just of src/. A non-zero exit fails the build.
+        run: |
+          for f in examples/*.cyr; do
+            [ -f "$f" ] || continue
+            echo "::group::example $f"
+            cyrius run "$f"
             echo "::endgroup::"
           done
 

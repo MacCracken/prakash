@@ -1,0 +1,175 @@
+# examples/camera_lens.cyr — ported from rust-old/examples/camera_lens.rs
+#
+# Build & run:  cyrius run examples/camera_lens.cyr
+#
+# Defines a cemented doublet as an optical prescription, then puts the whole
+# ray-optics stack through it: paraxial system properties, a paraxial marginal
+# trace, a full sequential trace with Fresnel reflectance at each surface, spot
+# diagrams on- and off-axis, and an OPD fan.
+#
+# Helpers are prefixed `_cl_` — Cyrius globals are LAST-ONE-WINS with no error,
+# so an unprefixed helper in an example can silently redefine a library one.
+
+include "dist/prakash.cyr"
+
+fn _cl_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn say(s) { print(s, strlen(s)); return 0; }
+fn say_line(s) { say(s); say("\n"); return 0; }
+
+fn say_i(n) {
+    var b = alloc(32);
+    if (b == 0) { return 0; }
+    var k = fmt_int_buf(n, b);
+    print(b, k);
+    return 0;
+}
+
+fn say_f(val, decimals) {
+    var buf = alloc(64);
+    if (buf == 0) { return 0; }
+    var n = fmt_float_buf(val, buf, decimals);
+    print(buf, n);
+    return 0;
+}
+
+fn say_f_pad(val, decimals, width) {
+    var buf = alloc(64);
+    if (buf == 0) { return 0; }
+    var n = fmt_float_buf(val, buf, decimals);
+    for (var p = n; p < width; p = p + 1) { say(" "); }
+    print(buf, n);
+    return 0;
+}
+
+fn main() {
+    alloc_init();
+    var err = alloc(8);
+    if (err == 0) { return 1; }
+
+    say_line("prakash — camera lens simulator");
+    say_line("");
+
+    # ── A cemented doublet: 50mm f/4 ────────
+    #   S1  R=+28.0  t=4.0  n=1.517 (BK7 crown)
+    #   S2  R=-22.0  t=2.0  n=1.648 (SF2 flint, cemented)
+    #   S3  R=-80.0  t=0.0  n=1.0   (back to air)
+    var lens = prescription_new("50mm f/4 doublet");
+    if (lens == 0) { return 1; }
+    var ap = _cl_r(625, 100);
+    var a1 = prescription_add_surface(lens, f64_from(28), f64_from(4), _cl_r(1517, 1000), ap);
+    var a2 = prescription_add_surface(lens, f64_neg(f64_from(22)), F64_TWO, _cl_r(1648, 1000), ap);
+    var a3 = prescription_add_surface(lens, f64_neg(f64_from(80)), f64_from(0), F64_ONE, ap);
+
+    say("Lens: ");
+    say_line(Prescription_name(lens));
+    say("Surfaces: ");
+    say_i(prescription_len(lens));
+    say_line("");
+
+    # ── Paraxial system properties ────────
+    say_line("");
+    var props = find_system_properties(lens, err);
+    if (prakash_is_err(load64(err)) == 1) {
+        say_line("paraxial solve failed");
+        return 1;
+    }
+    say_line("System properties (paraxial):");
+    say("  effective focal length: ");
+    say_f(SystemProperties_focal_length(props), 2);
+    say_line(" mm");
+    say("  back focal distance:    ");
+    say_f(SystemProperties_bfd(props), 2);
+    say_line(" mm");
+    say("  front focal distance:   ");
+    say_f(SystemProperties_ffd(props), 2);
+    say_line(" mm");
+    say("  optical power:          ");
+    say_f(SystemProperties_power(props), 4);
+    say_line(" per mm");
+
+    # ── Paraxial marginal ray ────────
+    say_line("");
+    say_line("Paraxial marginal ray (y = 6.25mm):");
+    var psurf = prescription_to_paraxial_surfaces(lens);
+    var marginal = paraxial_marginal(ap);
+    var states = paraxial_trace(marginal, psurf);
+    for (var i = 0; i < vec_len(states); i = i + 1) {
+        var st = vec_get(states, i);
+        say("  surface ");
+        say_i(i);
+        say(": y=");
+        say_f_pad(ParaxialRay_y(st), 4, 9);
+        say(" mm, nu=");
+        say_f_pad(ParaxialRay_nu(st), 6, 10);
+        say_line("");
+    }
+
+    # ── Full sequential trace ────────
+    say_line("");
+    say_line("Full ray trace (height 3mm, on-axis):");
+    var tsurf = prescription_to_trace_surfaces(lens);
+    var image_z = f64_add(SystemProperties_bfd(props), f64_from(6));
+    var ray = trace_ray_new(
+    ray_vec3(f64_from(0), f64_from(3), f64_neg(f64_from(100))),
+    ray_vec3(f64_from(0), f64_from(0), F64_ONE), F64_ONE);
+    var hits = trace_sequential(ray, tsurf, err);
+    if (prakash_is_err(load64(err)) == 1) {
+        say_line("  ray vignetted");
+    } else {
+        for (var h = 0; h < vec_len(hits); h = h + 1) {
+            var hit = vec_get(hits, h);
+            var hp = TraceHit_hit_point(hit);
+            say("  surface ");
+            say_i(h);
+            say(": hit=(");
+            say_f(RayVec3_x(hp), 3);
+            say(", ");
+            say_f(RayVec3_y(hp), 3);
+            say(", ");
+            say_f(RayVec3_z(hp), 3);
+            say("), R=");
+            say_f(TraceHit_reflectance(hit), 4);
+            say_line("");
+        }
+    }
+
+    # ── Spot diagrams, on- and off-axis ────────
+    say_line("");
+    say_line("Spot diagrams (3 rings x 8 arms, aperture 5mm):");
+    var fields = alloc(3 * 8);
+    if (fields == 0) { return 1; }
+    store64(fields + 0, f64_from(0));
+    store64(fields + 8, f64_from(5));
+    store64(fields + 16, f64_from(10));
+    for (var fi = 0; fi < 3; fi = fi + 1) {
+        var fdeg = load64(fields + fi * 8);
+        var spots = spot_diagram(tsurf, f64_from(5), 3, 8, ray_deg_to_rad(fdeg),
+        f64_neg(f64_from(100)), image_z);
+        say("  ");
+        say_f_pad(fdeg, 0, 4);
+        say(" deg off-axis: ");
+        say_i(vec_len(spots));
+        say(" rays landed, RMS radius = ");
+        say_f(spot_rms_radius(spots), 4);
+        say_line(" mm");
+    }
+
+    # ── OPD fan ────────
+    say_line("");
+    say_line("OPD fan (meridional, on-axis):");
+    var fan = ray_fan_meridional(f64_from(5), 11, f64_from(0), f64_neg(f64_from(100)));
+    var opd = opd_fan(fan, tsurf, image_z);
+    for (var o = 0; o < vec_len(opd); o = o + 1) {
+        var pt = vec_get(opd, o);
+        say("  h=");
+        say_f_pad(OpdPoint_height(pt), 2, 6);
+        say(" mm  OPD=");
+        say_f_pad(OpdPoint_opd(pt), 6, 11);
+        say_line(" mm");
+    }
+
+    return 0;
+}
+
+var rc = main();
+syscall(60, rc);

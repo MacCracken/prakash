@@ -21,6 +21,7 @@ include "src/ray_trace.cyr"
 include "src/ray_dispersion.cyr"
 include "src/ray_system.cyr"
 include "src/spectral_cie.cyr"
+include "src/spectral_photometry.cyr"
 include "src/wave_core.cyr"
 include "src/wave_polarization.cyr"
 include "src/wave_diffraction.cyr"
@@ -378,5 +379,93 @@ assert(_h_bits(_prk_cos(ZERO), F64_ONE) == 1, "cos(0) = 1 (control)");
 assert(f64_le(f64_abs(_prk_sin(f64_from(1000000))), F64_ONE) == 1, "sin(1e6) still in range (control)");
 assert(f64_le(f64_abs(_prk_sin(f64_from(4611686018427387904))), F64_ONE) == 1,
 "sin(2^62) still in range (control: just below the limit)");
+
+# ── 9. Port-completeness gaps (2.2.1) ────────
+# The rust-old comparison found three ported functions with no test reference.
+test_group("functions the port left untested");
+
+# spd_end_nm: start + step*(len-1)
+var evals = alloc(4 * 8);
+store64(evals + 0, f64_from(1));
+store64(evals + 8, F64_TWO);
+store64(evals + 16, f64_from(3));
+store64(evals + 24, f64_from(4));
+var espd = spd_new(f64_from(400), f64_from(10), evals, 4);
+assert(_h_bits(spd_end_nm(espd), f64_from(430)) == 1, "spd_end_nm = start + step*(len-1) = 430");
+var one = spd_new(f64_from(500), f64_from(5), evals, 1);
+assert(_h_bits(spd_end_nm(one), f64_from(500)) == 1, "spd_end_nm of a 1-sample SPD is the start");
+
+# fresnel_integral_cs: must agree with the separate C and S entry points
+var cv2 = 0;
+var sv2 = 0;
+fresnel_integral_cs(f64_div(F64_ONE, F64_TWO), &cv2, &sv2);
+assert(_h_bits(cv2, fresnel_integral_c(f64_div(F64_ONE, F64_TWO))) == 1,
+"fresnel_integral_cs C matches fresnel_integral_c (small-x branch)");
+assert(_h_bits(sv2, fresnel_integral_s(f64_div(F64_ONE, F64_TWO))) == 1,
+"fresnel_integral_cs S matches fresnel_integral_s (small-x branch)");
+fresnel_integral_cs(f64_from(2), &cv2, &sv2);
+assert(_h_bits(cv2, fresnel_integral_c(f64_from(2))) == 1,
+"fresnel_integral_cs C matches at x=2 (asymptotic branch)");
+assert(_h_bits(sv2, fresnel_integral_s(f64_from(2))) == 1,
+"fresnel_integral_cs S matches at x=2 (asymptotic branch)");
+fresnel_integral_cs(f64_neg(F64_ONE), &cv2, &sv2);
+assert(_h_bits(cv2, fresnel_integral_c(f64_neg(F64_ONE))) == 1,
+"fresnel_integral_cs is odd in x, like fresnel_integral_c");
+
+# pbr_clearcoat_distribution: a GGX lobe, so it peaks at n_dot_h = 1
+var cd_peak = pbr_clearcoat_distribution(F64_ONE, _h_frac(1, 10));
+var cd_off = pbr_clearcoat_distribution(_h_frac(5, 10), _h_frac(1, 10));
+assert(f64_gt(cd_peak, cd_off) == 1, "clearcoat distribution peaks at n_dot_h = 1");
+assert(f64_gt(cd_peak, f64_from(0)) == 1, "clearcoat distribution is positive at the peak");
+var cd_rough = pbr_clearcoat_distribution(F64_ONE, F64_ONE);
+assert(f64_gt(cd_peak, cd_rough) == 1, "a smoother coat has a tighter, taller lobe");
+
+# ── 10. Public functions with no reference anywhere (2.2.2 audit) ────────
+# The 2.2.1 sweep compared against rust-old/ and so never looked at Cyrius-only
+# additions. These 10 had no test, bench or example reference at all.
+test_group("previously unreferenced public functions");
+
+assert(_h_bits(spec_visible_min_nm(), f64_from(380)) == 1, "spec_visible_min_nm = 380");
+assert(_h_bits(spec_visible_max_nm(), f64_from(780)) == 1, "spec_visible_max_nm = 780");
+assert(_h_bits(photometry_k_m(), f64_from(683)) == 1, "photometry_k_m = 683 lm/W");
+
+# observer_cmf must hand back a distinct table per observer, and cie_2015_10deg_table
+# must be the one observer_cmf returns for that tag.
+var cmf31 = observer_cmf(OBS_CIE1931);
+var cmf64 = observer_cmf(OBS_CIE1964);
+assert(cmf31 != 0, "observer_cmf(1931) returns a table");
+assert(cmf64 != 0, "observer_cmf(1964) returns a table");
+assert(cmf31 != cmf64, "the two observers are distinct tables");
+assert(observer_cmf(OBS_CIE2015_10DEG) == cie_2015_10deg_table(),
+"observer_cmf(2015-10) is cie_2015_10deg_table()");
+
+# xyz_d50_white: a white point, so all three components positive and Y ~ 1
+var d50 = xyz_d50_white();
+assert(d50 != 0, "xyz_d50_white allocates");
+assert(f64_gt(Xyz_x(d50), f64_from(0)) == 1, "D50 white X > 0");
+assert(f64_lt(f64_abs(f64_sub(Xyz_y(d50), F64_ONE)), _h_frac(1, 1000)) == 1, "D50 white Y ~ 1.0");
+assert(f64_gt(Xyz_z(d50), f64_from(0)) == 1, "D50 white Z > 0");
+
+# stokes_intensity is S0; stokes_diagonal_minus is (I, 0, -I, 0)
+var sdm = stokes_diagonal_minus(F64_TWO);
+assert(_h_bits(stokes_intensity(sdm), F64_TWO) == 1, "stokes_intensity returns S0");
+assert(_h_bits(StokesVector_s2(sdm), f64_neg(F64_TWO)) == 1, "diagonal_minus has S2 = -I");
+assert(_h_bits(StokesVector_s1(sdm), f64_from(0)) == 1, "diagonal_minus has S1 = 0");
+
+# spd_from_static shares the caller's buffer rather than copying
+var stat_vals = alloc(3 * 8);
+store64(stat_vals + 0, F64_ONE);
+store64(stat_vals + 8, F64_TWO);
+store64(stat_vals + 16, f64_from(3));
+var sspd = spd_from_static(f64_from(400), f64_from(10), stat_vals, 3);
+assert(sspd != 0, "spd_from_static builds an Spd");
+assert(Spd_len(sspd) == 3, "spd_from_static keeps the length");
+assert(Spd_values(sspd) == stat_vals, "spd_from_static borrows the caller buffer (no copy)");
+
+# prakash_set_log_level is the sakshi facade; setting it must not disturb results
+var _lvl = prakash_set_log_level(1);
+assert(_h_bits(spec_visible_min_nm(), f64_from(380)) == 1,
+"changing the log level does not perturb computation");
+var _lvl2 = prakash_set_log_level(3);
 
 var r = assert_summary();

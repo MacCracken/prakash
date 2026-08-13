@@ -98,6 +98,7 @@ stdlib = [
     "assert",
     "result",
     "math",
+    "simd",
     "ganita",
     "tagged",
     "fnptr",

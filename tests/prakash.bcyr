@@ -40,6 +40,7 @@ var _err = 0;
 var _surfaces = 0;
 var _ray0 = 0;
 var _srcs = 0;
+var _bigpat = 0;
 var _plane = 0;
 var _out3 = 0;
 var _bk7 = 0;
@@ -130,6 +131,7 @@ fn b_spot_diagram() {
     var r = spot_diagram(_surfaces, _bf(5, 1), 3, 6, f64_from(0), f64_from(0), f64_from(50));
     return 0;
 }
+fn b_pattern_normalized() { var r = pattern2d_normalized(_bigpat); return 0; }
 fn b_interference_pattern() {
     var r = interference_pattern(_srcs, 3, _wl_m, F64_ONE,
     f64_neg(F64_ONE), F64_ONE, f64_neg(F64_ONE), F64_ONE, 16, 16);
@@ -188,6 +190,13 @@ fn main() {
     _surfaces = vec_new();
     vec_push(_surfaces, surface_sphere(f64_from(50), f64_from(10), _bf(15, 10), f64_from(5)));
     vec_push(_surfaces, surface_sphere(f64_neg(f64_from(50)), f64_from(12), F64_ONE, f64_from(5)));
+    # a realistic diffraction-sized pattern (64x64 = 4096 cells)
+    _bigpat = pattern2d_new(64, 64);
+    for (var by = 0; by < 64; by = by + 1) {
+        for (var bx = 0; bx < 64; bx = bx + 1) {
+            var _sv = pattern2d_set(_bigpat, bx, by, f64_from(bx * 64 + by + 1));
+        }
+    }
     _srcs = point_source_array_new(3);
     var _s0 = point_source_set(_srcs, 0, f64_neg(_bf(1, 1000)), f64_from(0), F64_ONE, f64_from(0));
     var _s1 = point_source_set(_srcs, 1, f64_from(0), f64_from(0), F64_ONE, f64_from(0));
@@ -235,6 +244,7 @@ fn main() {
     bench("ray/trace_sequential", &b_trace_sequential, 100000);
     bench("ray/spot_diagram", &b_spot_diagram, 5000);
     bench("wave/interference_pattern_16x16", &b_interference_pattern, 2000);
+    bench("wave/pattern2d_normalized_64x64", &b_pattern_normalized, 20000);
 
     println("=== done ===");
     return 0;

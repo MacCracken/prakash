@@ -1,0 +1,144 @@
+# examples/pbr_materials.cyr — ported from rust-old/examples/pbr_materials.rs
+#
+# Build & run:  cyrius run examples/pbr_materials.cyr
+#
+# Evaluates the physically-based rendering BRDFs at a spread of angles and
+# roughnesses to show how material parameters shape reflection: Fresnel-Schlick
+# grazing-angle rise, Cook-Torrance dielectric vs metal, a clearcoat layer, and
+# thin-film iridescence.
+#
+# Helpers are prefixed `_pm_` — Cyrius globals are LAST-ONE-WINS with no error,
+# so an unprefixed helper in an example can silently redefine a library one.
+
+include "dist/prakash.cyr"
+
+fn _pm_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn say(s) { print(s, strlen(s)); return 0; }
+fn say_line(s) { say(s); say("\n"); return 0; }
+
+fn say_i_pad(n, width) {
+    var b = alloc(32);
+    if (b == 0) { return 0; }
+    var k = fmt_int_buf(n, b);
+    for (var p = k; p < width; p = p + 1) { say(" "); }
+    print(b, k);
+    return 0;
+}
+
+fn say_f_pad(val, decimals, width) {
+    var buf = alloc(64);
+    if (buf == 0) { return 0; }
+    var n = fmt_float_buf(val, buf, decimals);
+    for (var p = n; p < width; p = p + 1) { say(" "); }
+    print(buf, n);
+    return 0;
+}
+
+fn main() {
+    alloc_init();
+    say_line("prakash — PBR material preview");
+
+    # ── Fresnel-Schlick across incidence angles ────────
+    say_line("");
+    say_line("Fresnel-Schlick reflectance (F0 = 0.04, dielectric):");
+    say_line("   angle    reflectance");
+    var f0 = _pm_r(4, 100);
+    var degs = alloc(8 * 8);
+    if (degs == 0) { return 1; }
+    store64(degs + 0, 0);
+    store64(degs + 8, 15);
+    store64(degs + 16, 30);
+    store64(degs + 24, 45);
+    store64(degs + 32, 60);
+    store64(degs + 40, 75);
+    store64(degs + 48, 85);
+    store64(degs + 56, 89);
+    for (var i = 0; i < 8; i = i + 1) {
+        var d = load64(degs + i * 8);
+        var cos_theta = _prk_cos(ray_deg_to_rad(f64_from(d)));
+        say("  ");
+        say_i_pad(d, 6);
+        say(" deg  ");
+        say_f_pad(pbr_fresnel_schlick(f0, cos_theta), 4, 9);
+        say_line("");
+    }
+
+    # ── Cook-Torrance: dielectric vs metal across roughness ────────
+    say_line("");
+    say_line("Cook-Torrance specular (n.h=0.95, h.v=0.9, n.v=0.8, n.l=0.7):");
+    say_line("   roughness   dielectric        metal");
+    var ndh = _pm_r(95, 100);
+    var hdv = _pm_r(9, 10);
+    var ndv = _pm_r(8, 10);
+    var ndl = _pm_r(7, 10);
+    var metal_f0 = _pm_r(95, 100);
+    var roughs = alloc(7 * 8);
+    if (roughs == 0) { return 1; }
+    store64(roughs + 0, _pm_r(5, 100));
+    store64(roughs + 8, _pm_r(1, 10));
+    store64(roughs + 16, _pm_r(2, 10));
+    store64(roughs + 24, _pm_r(4, 10));
+    store64(roughs + 32, _pm_r(6, 10));
+    store64(roughs + 40, _pm_r(8, 10));
+    store64(roughs + 48, F64_ONE);
+    for (var j = 0; j < 7; j = j + 1) {
+        var rg = load64(roughs + j * 8);
+        say("  ");
+        say_f_pad(rg, 2, 9);
+        say("  ");
+        say_f_pad(pbr_cook_torrance(ndh, hdv, ndv, ndl, rg, f0), 6, 11);
+        say("  ");
+        say_f_pad(pbr_cook_torrance(ndh, hdv, ndv, ndl, rg, metal_f0), 6, 11);
+        say_line("");
+    }
+
+    # ── Clearcoat ────────
+    say_line("");
+    say_line("Clearcoat blend (base = 0.5, coat roughness = 0.05):");
+    var base = F64_HALF;
+    var coat = pbr_clearcoat_brdf(ndh, ndv, ndl, hdv, _pm_r(5, 100));
+    say("  coat BRDF: ");
+    say_f_pad(coat, 4, 8);
+    say_line("");
+    var intens = alloc(5 * 8);
+    if (intens == 0) { return 1; }
+    store64(intens + 0, f64_from(0));
+    store64(intens + 8, _pm_r(25, 100));
+    store64(intens + 16, F64_HALF);
+    store64(intens + 24, _pm_r(75, 100));
+    store64(intens + 32, F64_ONE);
+    for (var k = 0; k < 5; k = k + 1) {
+        var ci = load64(intens + k * 8);
+        say("  clearcoat=");
+        say_f_pad(ci, 2, 4);
+        say("  blended=");
+        say_f_pad(pbr_clearcoat_blend(base, coat, ci, hdv), 4, 8);
+        say_line("");
+    }
+
+    # ── Iridescence (thin film) ────────
+    say_line("");
+    say_line("Iridescence (thin film, n_film = 1.3, n_base = 1.5):");
+    say_line("   thickness         R          G          B");
+    var out = alloc(24);
+    if (out == 0) { return 1; }
+    var n_film = _pm_r(13, 10);
+    var n_base = _pm_r(15, 10);
+    for (var t = 100; t <= 600; t = t + 100) {
+        var _ir = pbr_iridescence_rgb(F64_ONE, n_film, n_base, f64_from(t), ndv, out);
+        say("  ");
+        say_i_pad(t, 7);
+        say(" nm  ");
+        say_f_pad(load64(out), 4, 9);
+        say("  ");
+        say_f_pad(load64(out + 8), 4, 9);
+        say("  ");
+        say_f_pad(load64(out + 16), 4, 9);
+        say_line("");
+    }
+
+    return 0;
+}
+
+var rc = main();
+syscall(60, rc);

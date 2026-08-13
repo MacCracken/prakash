@@ -26,6 +26,9 @@ Prakash does NOT own:
 | **V2.1.0** | **Error channels** | **Every `*_from_json` (9 functions) takes a trailing `err_out` and reports `PK_ERR_PARSE` (bad bytes) / `PK_ERR_INVALID_PARAMETER` (wrong schema) / `PK_ERR_ALLOCATION`, closing the gap 2.0.2 left open. Breaking signature change; migration table in the [2.1.0] CHANGELOG entry. 5361 assertions.** |
 | **V2.1.1** | **Audit cleanup** | **Clears every remaining 2.0.2 audit item: trig out-of-domain (`f64_sin(1e300)` returned 1e300), `expm1` precision loss below 1e-16, the unusable `point_source_new`, and 46 unguarded constructor allocs. Closes all three coverage gaps and adds 8 composite benchmarks (27 → 35) — `interference_pattern` is 7× the slowest previously measured op. 5424 assertions.** |
 | **V2.1.2** | **hisab interop** | **`tests/hisab_interop.tcyr` pins the `RayVec3` ↔ `HVec3` layout contract (identical `{x;y;z}`), so all 26 `hvec3_*` ops work on prakash vectors unconverted — incl. `ray_reflect_3d` agreeing with `hvec3_reflect` over 121 cases. Internal `hvec3_dot` adoption measured at 2–11% slower and reverted; hisab quadrature investigated and does not apply. No behaviour change. 5444 assertions, 28 suites.** |
+| **V2.2.0** | **SIMD** | **`simd` fold added; `pattern2d_normalized` vectorised with a bulk `f64v_scale` (−26%, bit-identical). Caught that `f64v_scale` overruns by one f64 on an odd count before shipping. Recorded as negative results: typed f64v2/f64v4 wrappers slower than scalar, memcpy/memset 7–8× slower than a loop, and the transcendental-bound hot spots unreachable without vector transcendentals. 5457 assertions, 29 suites, 36 benchmarks.** |
+| **V2.2.1** | **Port completeness** | **Systematic `rust-old/` comparison before deletion: all 282 pub fns / 37 structs / 5 enums accounted for. Ported the 4 examples the port had silently dropped (now an `examples/` tree that CI lints, formats and RUNS against `dist/prakash.cyr`), and closed 3 untested functions. Bench parity (131 uncovered subjects) filed, not bulk-ported. 5467 assertions.** |
+| **V2.2.2** | **P(-1) audit** | **Six-dimension sweep, adversarially verified: 14 confirmed, 4 refuted. Headline: `pattern2d_max_intensity` SIGSEGVed on a null pattern — found by ALL SIX dimensions, and the suite already pinned the null that reached it. Also: 4 functions returned 0 without setting err_out, `_zern_single`'s unguarded alloc, `prescription_from_json` silently truncating a lens, `rgb_to_u8` NaN, and math.md double-counting the clearcoat geometry term. 5485 assertions.** |
 
 ### V2.0 exit criteria (met)
 
@@ -100,11 +103,20 @@ impact rather than guessed at — see `docs/benchmarks-rust-v-cyrius.md`.
       (`pbr/fresnel_schlick` is 16.3× Rust at 17 ns absolute).
 - [ ] **Arena allocation** for struct-returning ops — `atmosphere/sky_color_rgb`
       is the worst scalar row (19.7×) and the only one that allocates.
-- [ ] **SIMD** — available now, NOT blocked: `lib/simd.cyr` ships 127 functions
-      (`f64v2_*` / `f64v4_*`, incl. `fmadd`/`dot`); it simply is not in prakash's
-      `[deps] stdlib` yet. The compute-bound paths are the ones worth vectorising,
-      now that 2.1.1 measures them: `wave/interference_pattern_16x16` (108 µs),
-      `ray/spot_diagram` (28 µs), `wave/diffraction_pattern_2d_8x8` (15 µs).
+- [x] **SIMD — done in 2.2.0, and the result is mostly negative.** `simd` is now
+      in `[deps] stdlib` and `pattern2d_normalized` uses a bulk `f64v_scale`
+      (−26% on the function; 8.7× on the scale step, bit-identical). That is the
+      ONLY loop in prakash it applies to. Measured findings worth not repeating:
+      the typed `f64v2_*`/`f64v4_*` wrappers are **slower than scalar**; only the
+      raw `f64v_*` builtins help, and only as ONE bulk call; `f64v_scale`
+      **overruns by one element on an odd count**; `memcpy`/`memset` are
+      byte-at-a-time and 7–8× slower than a scalar loop. The remaining hot spots
+      are unreachable: `interference_pattern` (108 µs) and `spd_blackbody` are
+      transcendental-bound and there are **no vector transcendentals**;
+      `spot_diagram` is branchy; `max_intensity` needs an `f64v_max` that does
+      not exist; `_spd_integrate` reads an **interleaved** CMF table (stride 24).
+      → Real speedups on those paths need algorithmic work or vector
+      transcendentals upstream, not this fold.
 
 ### Correctness (from the 2.0.2 audit — ALL FIXED in 2.1.1)
 
@@ -164,9 +176,14 @@ that release. They are real and reproduced; none is a guess.
 
 ### Housekeeping
 
-- [ ] **Port-completeness review against `rust-old/`** — confirm nothing from the
-      Rust original was left on the table (functions, tests, benchmarks, doc
-      content) before anything is deleted.
+- [x] **Port-completeness review against `rust-old/` — done in 2.2.1.** All 282
+      `pub fn`, 37 `pub struct` and 5 `pub enum` accounted for. Closed: the 4
+      dropped examples (now in `examples/`, run by CI) and 3 untested functions.
+- [ ] **Benchmark parity with `rust-old/`** — 180 Rust benches vs 36 here; 131
+      subjects uncovered. Mostly trivial scalar micro-benchmarks; 2.1.1 already
+      added the expensive composites. Bulk-porting them would add noise to
+      `bench-history.csv` without changing a decision — do it only if a specific
+      regression needs the resolution.
 - [ ] Remove `rust-old/` — **gated on the review above**, not on a version number
       (it is also preserved in the pre-2.0 git tags).
 

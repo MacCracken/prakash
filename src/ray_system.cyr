@@ -279,7 +279,10 @@ fn find_system_properties(prescription, err_out) {
     }
 
     var props = alloc(sizeof(SystemProperties));
-    if (props == 0) { return 0; }
+    if (props == 0) {
+        store64(err_out, PK_ERR_ALLOCATION);
+        return 0;
+    }
     SystemProperties_set_focal_length(props, efl);
     SystemProperties_set_bfd(props, bfd);
     SystemProperties_set_ffd(props, ffd);

@@ -49,6 +49,12 @@ fn _ai_json_str_field(v, key, err_out) {
         store64(err_out, PK_ERR_PARSE);
         return 0;
     }
+    # A non-object document is bad SHAPE, not a bad field: the module contract
+    # (and the sibling serialize family, via _ser_obj) reports PK_ERR_PARSE.
+    if (bayan_json_v_is_obj(v) == 0) {
+        store64(err_out, PK_ERR_PARSE);
+        return 0;
+    }
     var node = bayan_json_v_obj_get(v, key);
     if (bayan_json_v_is_str(node) == 0) {
         store64(err_out, PK_ERR_INVALID_PARAMETER);

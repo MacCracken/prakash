@@ -1,0 +1,153 @@
+# examples/rainbow.cyr — ported from rust-old/examples/rainbow.rs
+#
+# Build & run:  cyrius run examples/rainbow.cyr
+#
+# Physically accurate rainbow simulation. Sunlight enters a spherical raindrop,
+# refracts, reflects off the back, and refracts out; the MINIMUM deviation angle
+# is what makes a bow visible, and because water's refractive index varies with
+# wavelength (Sellmeier) each colour minimises at a different angle — which is
+# the rainbow. Red bends least and sits on the outside (~42.4 deg); violet bends
+# most and sits on the inside (~40.5 deg).
+#
+#   delta = 2*(theta_i - theta_r) + (pi - 2*theta_r)
+#   rainbow angle = 180 - delta_min
+
+include "dist/prakash.cyr"
+
+# NOTE: prefixed `_rb_` — a bare `_r` collides with spectral_core's own `_r`
+# inside the bundle, and Cyrius globals are LAST-ONE-WINS with no error, so an
+# example can silently redefine a library helper. Always prefix in an example.
+fn _rb_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+# integers print without a trailing ".0"
+fn say_i(n) {
+    var b = alloc(32);
+    if (b == 0) { return 0; }
+    var k = fmt_int_buf(n, b);
+    print(b, k);
+    return 0;
+}
+fn say(s) { print(s, strlen(s)); return 0; }
+fn say_line(s) { say(s); say("\n"); return 0; }
+
+fn say_f(val, decimals) {
+    var buf = alloc(64);
+    if (buf == 0) { return 0; }
+    var n = fmt_float_buf(val, buf, decimals);
+    print(buf, n);
+    return 0;
+}
+
+# Pad a rendered float to `width` columns so the table lines up.
+fn say_f_pad(val, decimals, width) {
+    var buf = alloc(64);
+    if (buf == 0) { return 0; }
+    var n = fmt_float_buf(val, buf, decimals);
+    for (var p = n; p < width; p = p + 1) { say(" "); }
+    print(buf, n);
+    return 0;
+}
+
+fn say_pad(s, width) {
+    var n = strlen(s);
+    print(s, n);
+    for (var p = n; p < width; p = p + 1) { say(" "); }
+    return 0;
+}
+
+# Minimum deviation angle (radians) for a primary bow at refractive index n,
+# found by scanning incidence angles — the same 9000-step sweep as the Rust.
+fn min_deviation(n) {
+    var min_dev = 0x7FF0000000000000;
+    var step = ray_deg_to_rad(_rb_r(1, 100));
+    for (var i = 0; i < 9000; i = i + 1) {
+        var theta_i = f64_mul(f64_from(i), step);
+        var sin_r = f64_div(_prk_sin(theta_i), n);
+        if (f64_gt(f64_abs(sin_r), F64_ONE) == 0) {
+            var theta_r = ganita_f64_asin(sin_r);
+            # delta = 2*(theta_i - theta_r) + (pi - 2*theta_r)
+            var dev = f64_add(
+            f64_mul(F64_TWO, f64_sub(theta_i, theta_r)),
+            f64_sub(F64_PI, f64_mul(F64_TWO, theta_r)));
+            if (f64_lt(dev, min_dev) == 1) { min_dev = dev; }
+        }
+    }
+    return min_dev;
+}
+
+fn row(name, wl_nm, water) {
+    var wl_um = f64_div(wl_nm, f64_from(1000));
+    var n = sellmeier_n_at(water, wl_um);
+    var angle = f64_sub(f64_from(180), ray_rad_to_deg(min_deviation(n)));
+    say("  ");
+    say_pad(name, 10);
+    say_f_pad(wl_nm, 0, 6);
+    say("   ");
+    say_f_pad(n, 5, 9);
+    say("   ");
+    say_f_pad(angle, 2, 9);
+    say_line(" deg");
+    return 0;
+}
+
+fn main() {
+    alloc_init();
+    say_line("prakash — rainbow simulation");
+    say_line("");
+    say_line("Primary rainbow (single internal reflection):");
+    say_line("  Colour     lambda    n(water)   angle");
+
+    var water = sellmeier_water();
+    var r1 = row("Violet", f64_from(380), water);
+    var r2 = row("Indigo", f64_from(420), water);
+    var r3 = row("Blue", f64_from(450), water);
+    var r4 = row("Cyan", f64_from(490), water);
+    var r5 = row("Green", f64_from(530), water);
+    var r6 = row("Yellow", f64_from(570), water);
+    var r7 = row("Orange", f64_from(600), water);
+    var r8 = row("Red", f64_from(650), water);
+    var r9 = row("Deep Red", f64_from(700), water);
+
+    say_line("");
+    say_line("Red bends least  -> outside of the bow (~42.4 deg)");
+    say_line("Violet bends most -> inside of the bow  (~40.5 deg)");
+
+    # ── Rainbow spectrum as 24-bit colour blocks ────────
+    say_line("");
+    say("Rainbow spectrum: ");
+    var err = alloc(8);
+    if (err == 0) { return 1; }
+    for (var wl = 400; wl <= 700; wl = wl + 10) {
+        var rgb = wavelength_to_rgb(f64_from(wl), err);
+        if (prakash_is_err(load64(err)) == 0) {
+            var u = rgb_to_u8(rgb);
+            say("\x1b[48;2;");
+            say_i(RgbU8_r(u));
+            say(";");
+            say_i(RgbU8_g(u));
+            say(";");
+            say_i(RgbU8_b(u));
+            say("m  \x1b[0m");
+        }
+    }
+    say_line("  (400nm -> 700nm)");
+
+    # ── Dispersion ────────
+    say_line("");
+    say_line("Dispersion analysis:");
+    var n_red = sellmeier_n_at(water, _rb_r(656, 1000));
+    var n_blue = sellmeier_n_at(water, _rb_r(486, 1000));
+    say("  n(red,  656nm) = ");
+    say_f(n_red, 6);
+    say_line("");
+    say("  n(blue, 486nm) = ");
+    say_f(n_blue, 6);
+    say_line("");
+    say("  delta n        = ");
+    say_f(f64_sub(n_blue, n_red), 6);
+    say_line("  (dispersion)");
+
+    return 0;
+}
+
+var rc = main();
+syscall(60, rc);

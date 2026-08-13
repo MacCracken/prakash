@@ -300,7 +300,9 @@ fn zernike_wf_strehl_ratio(wf, wavelength) {
 # ── Named aberrations ────────
 
 fn _zern_single(len, idx, amount) {
+    if (len <= 0) { return 0; }
     var c = alloc(len * 8);
+    if (c == 0) { return 0; }
     for (var i = 0; i < len; i = i + 1) {
         store64(c + i * 8, f64_from(0));
     }

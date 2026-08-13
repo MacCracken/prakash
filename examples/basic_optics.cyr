@@ -1,0 +1,92 @@
+# examples/basic_optics.cyr — ported from rust-old/examples/basic_optics.rs
+#
+# Build & run:  cyrius run examples/basic_optics.cyr
+#
+# Exercises the five entry points a new consumer meets first: Snell refraction,
+# Fresnel reflectance at normal incidence, wavelength -> RGB, Wien's peak, and
+# thin-lens imaging. Every call goes through the real dist bundle surface, so
+# this doubles as an end-to-end smoke test of the library as a consumer sees it.
+
+# A consumer includes the published bundle; this is exactly that surface.
+include "dist/prakash.cyr"
+
+# ── printing helpers ────────
+# Cyrius has no formatted print; fmt_float_buf(val, buf, decimals) renders into
+# a caller buffer and returns the length.
+fn _ex_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn say(s) { print(s, strlen(s)); return 0; }
+
+fn say_f(val, decimals) {
+    var buf = alloc(64);
+    if (buf == 0) { return 0; }
+    var n = fmt_float_buf(val, buf, decimals);
+    print(buf, n);
+    return 0;
+}
+
+fn say_line(s) { say(s); say("\n"); return 0; }
+
+fn main() {
+    alloc_init();
+    var err = alloc(8);
+    if (err == 0) { return 1; }
+
+    say_line("prakash — basic optics");
+    say_line("");
+
+    # ── Snell's law ────────
+    var angle_i = ray_deg_to_rad(f64_from(30));
+    var angle_t = ray_snell(Medium_n(medium_air()), Medium_n(medium_glass()), angle_i, err);
+    if (prakash_is_err(load64(err)) == 1) {
+        say_line("snell failed");
+        return 1;
+    }
+    say("Light entering glass at 30 deg: refracted to ");
+    say_f(ray_rad_to_deg(angle_t), 1);
+    say_line(" deg");
+
+    # ── Fresnel reflectance at normal incidence ────────
+    var r = fresnel_normal(F64_ONE, _ex_r(152, 100));
+    say("Glass reflects ");
+    say_f(f64_mul(r, f64_from(100)), 1);
+    say_line("% at normal incidence");
+
+    # ── Colour of light ────────
+    var rgb = wavelength_to_rgb(f64_from(550), err);
+    if (prakash_is_err(load64(err)) == 1) {
+        say_line("wavelength_to_rgb failed");
+        return 1;
+    }
+    say("550nm light: RGB(");
+    say_f(Rgb_r(rgb), 2);
+    say(", ");
+    say_f(Rgb_g(rgb), 2);
+    say(", ");
+    say_f(Rgb_b(rgb), 2);
+    say_line(")");
+
+    # ── Sun's peak wavelength (Wien) ────────
+    var peak_m = wien_peak(_ex_r(5778, 1));
+    var peak_nm = f64_mul(peak_m, f64_from(1000000000));
+    say("Sun peaks at ");
+    say_f(peak_nm, 0);
+    say_line("nm");
+
+    # ── Camera lens (thin lens) ────────
+    var di = lens_thin_image_distance(f64_from(50), f64_from(2000), err);
+    if (prakash_is_err(load64(err)) == 1) {
+        say_line("thin lens failed");
+        return 1;
+    }
+    var mag = lens_magnification(f64_from(2000), di);
+    say("50mm lens, subject at 2m: image at ");
+    say_f(di, 1);
+    say("mm, mag=");
+    say_f(mag, 3);
+    say_line("");
+
+    return 0;
+}
+
+var rc = main();
+syscall(60, rc);

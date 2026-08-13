@@ -213,7 +213,10 @@ D(h) = 1 / (π αₓ αᵧ ((h x/αₓ)² + (h y/αᵧ)² + (n h)²)²)
 D(h) = (2 + 1/α) sin^(1/α) θ / (2π)
 
 ### Clearcoat (GGX with fixed F0 = 0.04)
-f_coat = D_coat F_coat G_coat / (4(n v)(n l))
+f_coat = D_coat F_coat G_coat,  where G_coat = 1/(4(n v)(n l))
+
+(the 1/(4(n·v)(n·l)) factor lives inside G_coat — writing it again outside would
+double-count it, which the implementation does not do)
 
 ### Subsurface Scattering (Burley Profile)
 R(r) = (e^(-r/d) + e^(-r/3d)) / (8πdr)

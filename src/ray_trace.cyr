@@ -175,7 +175,10 @@ fn trace_surface(ray, surface, err_out) {
     var hit_point = ray_vec3(hit_x, hit_y, hit_z);
     var ray_after = trace_ray_new(hit_point, refr_dir, OpticalSurface_n_after(surface));
     var hit = alloc(sizeof(TraceHit));
-    if (hit == 0) { return 0; }
+    if (hit == 0) {
+        store64(err_out, PK_ERR_ALLOCATION);
+        return 0;
+    }
     TraceHit_set_hit_point(hit, hit_point);
     TraceHit_set_normal(hit, normal);
     TraceHit_set_ray_after(hit, ray_after);

@@ -1,0 +1,162 @@
+# simd.tcyr — pins the SIMD contract prakash relies on (2.2.0).
+#
+# prakash uses exactly one SIMD primitive: a bulk `f64v_scale` over a Pattern2D
+# grid in `pattern2d_normalized`. The swap is only safe because a lane-wise
+# IEEE-754 multiply rounds identically to the scalar one, so NO value moves —
+# which matters because bit-fidelity to `rust-old/` is a core property of the
+# port. These assertions are the tripwire: if a toolchain change ever made
+# f64v_scale reassociate, fuse, or flush, this suite fails rather than silently
+# shifting published optics results.
+#
+# Deliberately NOT used, each for a measured reason (see the CHANGELOG):
+#   f64v2_*/f64v4_* typed wrappers  — SLOWER than scalar (ABI + lane extraction)
+#   f64v_scale in per-4 chunks      — 2.7x worse than one bulk call
+#   f64v_dot on the CIE CMFs        — the table is interleaved (stride 24), and
+#                                     a reassociated sum would not be bit-exact
+#   memcpy / memset                 — byte-at-a-time in lib/string.cyr, 7-8x
+#                                     SLOWER than an 8-byte scalar loop
+#
+# ⚠ TOOLCHAIN CONSTRAINT: `f64v_scale` SEGFAULTS when called from top-level
+# statement scope; it must be invoked from inside a function. Library code is
+# unaffected (pattern2d_normalized is a function), but this suite runs at top
+# level like every other .tcyr, so every SIMD call here goes through a helper.
+
+include "src/error.cyr"
+include "src/wave_core.cyr"
+include "src/wave_pattern.cyr"
+
+fn _bits(a, b) { if (a == b) { return 1; } return 0; }
+# f64v_scale must be called from function scope — see the header note.
+fn _vscale(dst, src, s, n) { f64v_scale(dst, src, s, n); return 0; }
+fn _fd(n, d) { return f64_div(f64_from(n), f64_from(d)); }
+
+var N = 512;
+
+alloc_init();
+
+# ── f64v_scale is bit-identical to a scalar multiply ────────
+test_group("f64v_scale matches the scalar loop bit-for-bit");
+
+var src = alloc(N * 8);
+var simd_out = alloc(N * 8);
+var scalar_out = alloc(N * 8);
+
+# A spread of magnitudes and signs, including values whose product needs
+# rounding — a reassociating or fused implementation would diverge here.
+for (var i = 0; i < N; i = i + 1) {
+    var v = _fd(i * 7 + 1, 3);
+    if (i % 3 == 0) { v = f64_neg(v); }
+    if (i % 5 == 0) { v = f64_div(v, f64_from(1000000000)); }
+    if (i % 7 == 0) { v = f64_mul(v, f64_from(1000000000)); }
+    store64(src + i * 8, v);
+}
+
+var s = _fd(1, 3);
+var _v1 = _vscale(simd_out, src, s, N);
+for (var j = 0; j < N; j = j + 1) {
+    store64(scalar_out + j * 8, f64_mul(load64(src + j * 8), s));
+}
+
+var mismatches = 0;
+for (var k = 0; k < N; k = k + 1) {
+    if (_bits(load64(simd_out + k * 8), load64(scalar_out + k * 8)) == 0) {
+        mismatches = mismatches + 1;
+    }
+}
+assert(mismatches == 0, "512 mixed-magnitude values scale bit-identically");
+
+# ⚠ f64v_scale rounds an ODD count UP and writes one f64 past the end. prakash
+# vectorises only the even prefix because of this; pin the behaviour so a
+# toolchain fix (or regression) is noticed rather than silently relied upon.
+test_group("f64v_scale odd-count overrun is real and contained");
+
+var probe_over = 0;
+for (var n = 1; n <= 12; n = n + 1) {
+    var ps = alloc((n + 4) * 8);
+    var pd = alloc((n + 4) * 8);
+    for (var i = 0; i < n + 4; i = i + 1) {
+        store64(ps + i * 8, f64_from(i + 1));
+        store64(pd + i * 8, 0x7FF8000000000000);
+    }
+    var _v2 = _vscale(pd, ps, F64_TWO, n);
+    for (var k = n; k < n + 4; k = k + 1) {
+        if (load64(pd + k * 8) != 0x7FF8000000000000) { probe_over = probe_over + 1; }
+    }
+}
+assert(probe_over == 6, "exactly the 6 odd counts in 1..12 overrun by one element");
+
+# An odd-celled pattern must NOT be corrupted by prakash's use of it.
+var odd = pattern2d_new(3, 5);
+assert(odd != 0, "3x5 (15 cells, odd) pattern allocates");
+for (var oy = 0; oy < 5; oy = oy + 1) {
+    for (var ox = 0; ox < 3; ox = ox + 1) {
+        var _ow = pattern2d_set(odd, ox, oy, _fd(ox * 5 + oy + 1, 2));
+    }
+}
+var omax = pattern2d_max_intensity(odd);
+var onorm = pattern2d_normalized(odd);
+assert(onorm != 0, "odd-celled pattern normalizes");
+var oinv = f64_div(F64_ONE, omax);
+var obad = 0;
+for (var ny2 = 0; ny2 < 5; ny2 = ny2 + 1) {
+    for (var nx2 = 0; nx2 < 3; nx2 = nx2 + 1) {
+        if (_bits(pattern2d_get(onorm, nx2, ny2),
+        f64_mul(pattern2d_get(odd, nx2, ny2), oinv)) == 0) { obad = obad + 1; }
+    }
+}
+assert(obad == 0, "all 15 cells of the odd pattern are correct (tail handled scalar)");
+assert(_bits(pattern2d_max_intensity(onorm), F64_ONE) == 1, "odd pattern normalizes to max 1.0");
+
+# Boundary values must pass through unchanged too.
+var edge = alloc(6 * 8);
+store64(edge + 0, 0);                          # +0.0
+store64(edge + 8, 0x8000000000000000);         # -0.0
+store64(edge + 16, 0x7FF0000000000000);        # +inf
+store64(edge + 24, 0xFFF0000000000000);        # -inf
+store64(edge + 32, 0x0010000000000000);        # DBL_MIN
+store64(edge + 40, 0x7FEFFFFFFFFFFFFF);        # DBL_MAX
+var edge_simd = alloc(6 * 8);
+var _v3 = _vscale(edge_simd, edge, F64_ONE, 6);
+var edge_bad = 0;
+for (var e = 0; e < 6; e = e + 1) {
+    if (_bits(load64(edge_simd + e * 8), f64_mul(load64(edge + e * 8), F64_ONE)) == 0) {
+        edge_bad = edge_bad + 1;
+    }
+}
+assert(edge_bad == 0, "zeros, infinities and denormal/max boundaries scale bit-identically");
+
+# ── The function that uses it ────────
+test_group("pattern2d_normalized is unchanged by the SIMD swap");
+
+var pat = pattern2d_new(16, 16);
+assert(pat != 0, "test pattern allocates");
+for (var py = 0; py < 16; py = py + 1) {
+    for (var px = 0; px < 16; px = px + 1) {
+        var _w = pattern2d_set(pat, px, py, _fd(px * 16 + py + 1, 7));
+    }
+}
+var maxv = pattern2d_max_intensity(pat);
+var norm = pattern2d_normalized(pat);
+assert(norm != 0, "normalized pattern allocates");
+
+# every cell must equal the scalar computation exactly
+var inv = f64_div(F64_ONE, maxv);
+var cell_bad = 0;
+for (var ny = 0; ny < 16; ny = ny + 1) {
+    for (var nx = 0; nx < 16; nx = nx + 1) {
+        var want = f64_mul(pattern2d_get(pat, nx, ny), inv);
+        if (_bits(pattern2d_get(norm, nx, ny), want) == 0) { cell_bad = cell_bad + 1; }
+    }
+}
+assert(cell_bad == 0, "all 256 cells match the scalar result bit-for-bit");
+assert(_bits(pattern2d_max_intensity(norm), F64_ONE) == 1, "the normalized maximum is exactly 1.0");
+
+# the degenerate branch (max < 1e-30) clones values through untouched
+var tiny = pattern2d_new(4, 4);
+var _t0 = pattern2d_set(tiny, 0, 0, 0x0010000000000000);
+var tnorm = pattern2d_normalized(tiny);
+assert(tnorm != 0, "degenerate pattern normalizes");
+assert(_bits(pattern2d_get(tnorm, 0, 0), 0x0010000000000000) == 1,
+"below the 1e-30 floor the value is cloned exactly, not scaled");
+
+var r = assert_summary();
