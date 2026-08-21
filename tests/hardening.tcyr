@@ -44,6 +44,13 @@ fn _h_frac(num, den) { return f64_div(f64_from(num), f64_from(den)); }
 var PINF = 0x7FF0000000000000;
 var NINF = 0xFFF0000000000000;
 var ZERO = 0;
+# 2.2.5: the pow domain table needs signed zeros, signed NaNs and a NaN
+# carrying a payload, none of which are reachable through the f64 helpers
+# (`f64_neg(f64_from(0))` yields +0 on cyrius), so they are written as bits.
+var NZERO = 0x8000000000000000;
+var NAN   = 0x7FF8000000000000;
+var NNAN  = 0xFFF8000000000000;
+var NANP7 = 0x7FF8000000000007;
 
 alloc_init();
 
@@ -57,23 +64,129 @@ var e = 0;
 # ⚠ THE POW HALF OF THIS COMMENT WENT STALE IN 2.2.4 AND NO ASSERTION NOTICED.
 # It said `ganita_f64_pow` "is exp(n*ln(base))", which is why a zero base
 # returned NaN. ganita 1.1.4 (cyrius 6.5.33) added an explicit domain prologue,
-# so the builtin now answers 0.0 / 1.0 / +inf on its own — measured. Every
-# assertion below still passes because `_prk_pow` produces the same bits either
+# so the builtin now answers 0.0 / 1.0 / +inf on its own — measured. The three
+# assertions below still passed because `_prk_pow` produced the same bits either
 # way; that is exactly why the prose could rot unobserved. The "(was NaN)"
 # annotations are kept as history, but "was" now means "before cyrius 6.5.33",
-# not "without the shim". See the shim block in src/error.cyr for the
-# re-measured table and for why the shim is retained regardless.
+# not "without the shim".
+#
+# ⚠ AND THAT IS WHY 2.2.5 PINS THE WHOLE TABLE, NOT THE CORNER THAT WAS NOTICED.
+# Three assertions covered a 50-row domain, so 24 rows could disagree with Rust
+# unobserved — and did. Every row below was measured on BOTH sides before it was
+# written: prakash on cyrius 6.5.33 / ganita 1.1.4, and Rust as
+# `(base as f64).powf(exp)` on rustc 1.97.1, both printed as raw f64 bits.
+# `_h_bits` compares bit patterns, so these pin NaN sign and payload too.
 test_group("math shims match Rust at the boundaries");
 
-assert(_h_bits(_prk_pow(ZERO, F64_TWO), ZERO) == 1, "pow(0, 2) = 0.0 (was NaN)");
-assert(_h_bits(_prk_pow(ZERO, f64_from(0)), F64_ONE) == 1, "pow(0, 0) = 1.0");
-assert(_h_bits(_prk_pow(ZERO, f64_neg(F64_TWO)), PINF) == 1, "pow(0, -2) = +inf");
 assert(_h_bits(_prk_exp(NINF), ZERO) == 1, "exp(-inf) = 0.0 (was NaN)");
 assert(_h_bits(_prk_exp(PINF), PINF) == 1, "exp(+inf) = +inf (was NaN)");
 assert(_h_bits(_prk_exp(f64_from(0)), F64_ONE) == 1, "exp(0) = 1.0 (control: finite path unchanged)");
+
+# The three original zero-base rows, unchanged by 2.2.5 and kept first.
+assert(_h_bits(_prk_pow(ZERO, F64_TWO), ZERO) == 1, "pow(0, 2) = 0.0 (was NaN)");
+assert(_h_bits(_prk_pow(ZERO, f64_from(0)), F64_ONE) == 1, "pow(0, 0) = 1.0");
+assert(_h_bits(_prk_pow(ZERO, f64_neg(F64_TWO)), PINF) == 1, "pow(0, -2) = +inf");
 var _p23 = _prk_pow(F64_TWO, f64_from(3));
 assert(_h_near(_p23, f64_from(8), f64_div(F64_ONE, f64_from(1000000000))),
   "pow(2, 3) ~= 8 (control: finite path unchanged)");
+
+# ── 1a. pow with a NaN exponent (2.2.5) ────────
+# The two cases 2.2.4 recorded and deferred. Rust returns the exponent's OWN
+# NaN — sign and payload — rather than a canonical one, so these are bit pins.
+assert(_h_bits(_prk_pow(ZERO, NAN), NAN) == 1, "pow(+0, NaN) = NaN (2.2.4: 1.0)");
+assert(_h_bits(_prk_pow(NZERO, NAN), NAN) == 1, "pow(-0, NaN) = NaN (2.2.4: 1.0)");
+assert(_h_bits(_prk_pow(ZERO, NNAN), NNAN) == 1, "pow(+0, -NaN) propagates the sign (2.2.4: 1.0)");
+assert(_h_bits(_prk_pow(F64_TWO, NANP7), NANP7) == 1, "pow(2, NaN) propagates the payload");
+assert(_h_bits(_prk_pow(F64_ONE, NAN), F64_ONE) == 1, "pow(1, NaN) = 1.0 exactly (2.2.4: NaN)");
+assert(_h_bits(_prk_pow(F64_ONE, NNAN), F64_ONE) == 1, "pow(1, -NaN) = 1.0 exactly (2.2.4: NaN)");
+assert(_h_bits(_prk_pow(F64_ONE, NANP7), F64_ONE) == 1, "pow(1, NaN payload) = 1.0, payload discarded");
+assert(_h_bits(_prk_pow(f64_neg(F64_ONE), NAN), NAN) == 1, "pow(-1, NaN) = NaN — only +1 is special");
+# A NaN base. pow(x, 0) is 1 for every x, NaN included, and must outrank it.
+assert(_h_bits(_prk_pow(NAN, f64_from(0)), F64_ONE) == 1, "pow(NaN, 0) = 1.0, not NaN");
+assert(_h_bits(_prk_pow(NANP7, f64_from(0)), F64_ONE) == 1, "pow(NaN payload, 0) = 1.0");
+assert(_h_bits(_prk_pow(NAN, F64_TWO), NAN) == 1, "pow(NaN, 2) = NaN (control)");
+assert(_h_bits(_prk_pow(NNAN, F64_TWO), NNAN) == 1, "pow(-NaN, 2) propagates the base sign (2.2.4: +NaN)");
+
+# ── 1b. pow with an infinite exponent (2.2.5) ────────
+# Not in the 2.2.4 note; found by sweeping the full C99 table. `ganita_f64_pow`
+# reaches `f64_exp` with an infinite argument, which is the very thing `_prk_exp`
+# above exists to repair — so every one of these was NaN through 2.2.4.
+assert(_h_bits(_prk_pow(F64_ONE, PINF), F64_ONE) == 1, "pow(1, +inf) = 1.0 (2.2.4: NaN)");
+assert(_h_bits(_prk_pow(F64_ONE, NINF), F64_ONE) == 1, "pow(1, -inf) = 1.0 (2.2.4: NaN)");
+assert(_h_bits(_prk_pow(f64_neg(F64_ONE), PINF), F64_ONE) == 1, "pow(-1, +inf) = 1.0 (2.2.4: NaN)");
+assert(_h_bits(_prk_pow(f64_neg(F64_ONE), NINF), F64_ONE) == 1, "pow(-1, -inf) = 1.0 (2.2.4: NaN)");
+assert(_h_bits(_prk_pow(F64_TWO, PINF), PINF) == 1, "pow(2, +inf) = +inf (2.2.4: NaN)");
+assert(_h_bits(_prk_pow(F64_TWO, NINF), ZERO) == 1, "pow(2, -inf) = +0 (2.2.4: NaN)");
+assert(_h_bits(_prk_pow(F64_HALF, PINF), ZERO) == 1, "pow(0.5, +inf) = +0 (2.2.4: NaN)");
+assert(_h_bits(_prk_pow(F64_HALF, NINF), PINF) == 1, "pow(0.5, -inf) = +inf (2.2.4: NaN)");
+assert(_h_bits(_prk_pow(f64_neg(F64_TWO), PINF), PINF) == 1, "pow(-2, +inf) = +inf (2.2.4: NaN)");
+assert(_h_bits(_prk_pow(f64_neg(F64_TWO), NINF), ZERO) == 1, "pow(-2, -inf) = +0 (2.2.4: NaN)");
+assert(_h_bits(_prk_pow(ZERO, PINF), ZERO) == 1, "pow(+0, +inf) = +0 (control)");
+assert(_h_bits(_prk_pow(ZERO, NINF), PINF) == 1, "pow(+0, -inf) = +inf (control)");
+
+# ── 1c. pow with an infinite base (2.2.5) ────────
+# Same root cause, same 2.2.4 answer of NaN. The sign survives only through an
+# odd integer exponent, so 3 and 2 are the load-bearing pair on each row.
+assert(_h_bits(_prk_pow(PINF, F64_TWO), PINF) == 1, "pow(+inf, 2) = +inf (2.2.4: NaN)");
+assert(_h_bits(_prk_pow(PINF, f64_neg(F64_TWO)), ZERO) == 1, "pow(+inf, -2) = +0 (2.2.4: NaN)");
+assert(_h_bits(_prk_pow(PINF, f64_from(0)), F64_ONE) == 1, "pow(+inf, 0) = 1.0 (control)");
+assert(_h_bits(_prk_pow(NINF, f64_from(3)), NINF) == 1, "pow(-inf, 3) = -inf — odd exponent keeps the sign");
+assert(_h_bits(_prk_pow(NINF, F64_TWO), PINF) == 1, "pow(-inf, 2) = +inf — even exponent drops it");
+assert(_h_bits(_prk_pow(NINF, f64_neg(f64_from(3))), NZERO) == 1, "pow(-inf, -3) = -0.0");
+assert(_h_bits(_prk_pow(NINF, f64_neg(F64_TWO)), ZERO) == 1, "pow(-inf, -2) = +0.0");
+assert(_h_bits(_prk_pow(NINF, _h_frac(5, 2)), PINF) == 1, "pow(-inf, 2.5) = +inf — 2.5 is not an odd integer");
+assert(_h_bits(_prk_pow(NINF, f64_neg(_h_frac(5, 2))), ZERO) == 1, "pow(-inf, -2.5) = +0.0");
+assert(_h_bits(_prk_pow(PINF, NAN), NAN) == 1, "pow(+inf, NaN) = NaN (control)");
+
+# ── 1d. pow with a negative-zero base (2.2.5) ────────
+# ⚠ ganita's own comment calls a negative zero unreachable "through the f64
+# helper surface" because `f64_neg(f64_from(0))` yields +0. Measured, that is
+# wrong — `f64_mul(-1, 0)` yields 0x8000000000000000 — so the sign is carried
+# here rather than dropped. That constructor is asserted first, since the rows
+# below are only meaningful if a negative zero can actually be built.
+assert(_h_bits(f64_mul(f64_neg(F64_ONE), f64_from(0)), NZERO) == 1,
+  "f64_mul(-1, 0) DOES yield -0.0, so these rows are reachable");
+assert(_h_bits(f64_neg(f64_from(0)), ZERO) == 1,
+  "f64_neg(0) does NOT — the cyrius quirk ganita generalised from");
+assert(_h_bits(_prk_pow(NZERO, f64_from(3)), NZERO) == 1, "pow(-0, 3) = -0.0 (2.2.4: +0.0)");
+assert(_h_bits(_prk_pow(NZERO, F64_TWO), ZERO) == 1, "pow(-0, 2) = +0.0");
+assert(_h_bits(_prk_pow(NZERO, f64_neg(f64_from(3))), NINF) == 1, "pow(-0, -3) = -inf (2.2.4: +inf)");
+assert(_h_bits(_prk_pow(NZERO, f64_neg(F64_TWO)), PINF) == 1, "pow(-0, -2) = +inf");
+assert(_h_bits(_prk_pow(NZERO, _h_frac(5, 2)), ZERO) == 1, "pow(-0, 2.5) = +0.0 — not an odd integer");
+assert(_h_bits(_prk_pow(NZERO, f64_from(0)), F64_ONE) == 1, "pow(-0, 0) = 1.0 (control)");
+assert(_h_bits(_prk_pow(ZERO, f64_from(3)), ZERO) == 1, "pow(+0, 3) = +0.0 (control)");
+
+# ── 1e. the divergences 2.2.5 deliberately does NOT close ────────
+# These are ULP inexactness in the `exp`/`ln` pair and a lost underflow sign,
+# not domain errors; closing them means a correctly-rounded pow. They are pinned
+# to their MEASURED-WRONG values precisely so a toolchain bump cannot move them
+# unobserved — which is the failure mode 2.2.4 documented. If one of these
+# fails, the divergence CLOSED and the note in src/error.cyr needs retiring.
+assert(_h_bits(_prk_pow(F64_TWO, f64_from(3)), 0x401FFFFFFFFFFFFE) == 1,
+  "KNOWN: pow(2, 3) is 1 ULP under Rust's exact 0x4020000000000000");
+assert(_h_bits(_prk_pow(f64_neg(F64_TWO), f64_from(3)), 0xC01FFFFFFFFFFFFE) == 1,
+  "KNOWN: pow(-2, 3) is 1 ULP under Rust's exact 0xC020000000000000");
+assert(_h_bits(_prk_pow(F64_TWO, F64_HALF), 0x3FF6A09E667F3BCC) == 1,
+  "KNOWN: pow(2, 0.5) is 1 ULP under Rust's 0x3FF6A09E667F3BCD");
+assert(_h_bits(_prk_pow(0x8000000000000001, f64_from(3)), ZERO) == 1,
+  "KNOWN: pow(-5e-324, 3) underflows to +0.0 where Rust gives -0.0");
+assert(_h_bits(_prk_pow(f64_neg(F64_TWO), F64_HALF), NNAN) == 1,
+  "control: a non-integral exponent on a negative base is still NaN");
+
+# ── 1f. the one call site the pow repair actually moves ────────
+# `br_absolute_magnitude_to_luminosity` computes 10^((4.83 - M)/2.5), so an
+# infinite magnitude reaches `_prk_pow` with an infinite exponent. It returned
+# NaN through 2.2.4. The other reachable site, `atm_air_mass`, is NOT asserted
+# to move: its pow argument is repaired too, but `_prk_cos(±inf)` is NaN by the
+# trig guard above, so the function still returns NaN overall — verified.
+assert(_h_bits(br_absolute_magnitude_to_luminosity(NINF), PINF) == 1,
+  "luminosity of an infinitely bright magnitude is +inf (2.2.4: NaN)");
+assert(_h_bits(br_absolute_magnitude_to_luminosity(PINF), ZERO) == 1,
+  "luminosity of an infinitely faint magnitude is +0 (2.2.4: NaN)");
+assert(_h_bits(br_absolute_magnitude_to_luminosity(_h_frac(483, 100)), F64_ONE) == 1,
+  "luminosity at M_sun = 4.83 is exactly 1.0 (control: unmoved)");
+assert(_h_bits(atm_air_mass(NINF), NAN) == 1,
+  "air mass at an infinite zenith angle stays NaN — the trig guard, not pow");
 
 # The reachable consequences of the two shims.
 assert(_h_bits(pbr_distribution_charlie(F64_ONE, F64_HALF), ZERO) == 1,

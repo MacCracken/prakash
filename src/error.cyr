@@ -117,44 +117,143 @@ fn _prk_cos(x) {
     return f64_cos(x);
 }
 
-# Rust `f64::powf` semantics for a non-negative base.
+# Rust `f64::powf` semantics across the whole non-finite domain.
 #
-# ⚠ THE REASON THIS SHIM EXISTS WAS RETIRED UPSTREAM IN 2.2.4, AND IT IS KEPT
-# ANYWAY. It was written because `ganita_f64_pow` was literally
-# `exp(exp * ln(base))`, so a zero base gave exp(-inf) = NaN where Rust gives
-# 0.0 / 1.0 / +inf. ganita 1.1.4 (cyrius 6.5.33) added an explicit domain
-# prologue and now returns those three values itself — measured, this host:
-# pow(0,2) = 0x0, pow(0,0) = 0x3FF0000000000000, pow(0,-1) = 0x7FF0000000000000,
-# bit-for-bit what the branch below produces. The branch is therefore redundant
-# for every non-NaN exponent, and is retained deliberately as a pin: a silent
-# revert upstream would otherwise move published optics values with nothing
-# watching for it.
+# Rust's `powf` is IEEE-754 / C99 `pow`. `ganita_f64_pow` is not: its core is
+# `exp(y * ln x)`, and every operand it does not special-case ahead of that core
+# reaches `f64_exp`, which is the x87 `exp` — NaN for an infinite argument. That
+# is the same defect `_prk_exp` above exists to repair, and pow inherits it
+# through the delegate. This shim restores conformance; the C99 F.10.4.4 order
+# is followed literally, because the cases overlap and the order is what
+# disambiguates them (pow(NaN, 0) is 1, not NaN; pow(1, NaN) is 1, not NaN).
 #
-# ⚠ A NEGATIVE BASE NO LONGER FAILS LOUDLY. Until 6.5.33 it was NaN for every
-# exponent. ganita 1.1.4 special-cases an INTEGRAL exponent, taking the
-# magnitude from exp(n*ln|base|) and applying the sign — so it inherits the
-# transcendental round-off and is NOT exact where Rust is:
-#   ganita_f64_pow(-2, 3) = 0xC01FFFFFFFFFFFFE  (-7.99999999999999982)
-#   Rust      (-2f64).powf(3.0) = 0xC020000000000000  (exactly -8)
-# A non-integral exponent is still NaN on both sides (verified control:
-# pow(-2, 0.5) = NaN before and after). No prakash call site passes a negative
-# base today, so nothing moves — but a future one would now silently break
-# bit-fidelity instead of producing a NaN somebody would notice.
+# ⚠ 2.2.5 IS THE BEHAVIOUR CHANGE. Through 2.2.4 this shim handled a zero base
+# and delegated everything else, so 24 of the 50 rows in the C99 special-case
+# table disagreed with Rust. Measured on cyrius 6.5.33 / ganita 1.1.4, raw f64
+# bits, against `(base as f64).powf(exp)` on rustc 1.97.1 — the divergent rows:
 #
-# ⚠ KNOWN LATENT DIVERGENCE, pre-existing and NOT introduced by 2.2.4:
-# `_prk_pow(0.0, NaN)` returns 1.0 (a NaN exponent is neither > 0 nor < 0, so it
-# falls through to the F64_ONE branch). The raw builtin returns 0.0. IEEE-754 /
-# C99 pow — which Rust follows — says NaN for a base other than 1. All three
-# disagree. It is unreachable from prakash today: every call site passes an
-# exponent it computed itself. Fixing it is a behaviour change and belongs in
-# its own release, not in a toolchain bump.
+#   expression        2.2.4 (_prk_pow)      Rust / 2.2.5
+#   pow(±0, NaN)      0x3FF0…  (1.0)        NaN  (the exponent's own NaN)
+#   pow(1, NaN)       NaN                   0x3FF0…  (1.0)
+#   pow(1, ±inf)      NaN                   0x3FF0…  (1.0)
+#   pow(-1, ±inf)     NaN                   0x3FF0…  (1.0)
+#   pow(2, +inf)      NaN                   +inf          pow(2, -inf)  -> +0
+#   pow(0.5, +inf)    NaN                   +0            pow(0.5,-inf) -> +inf
+#   pow(-2, ±inf)     NaN                   +inf / +0
+#   pow(±inf, y)      NaN                   ±inf / ±0 by sign and y's parity
+#   pow(-0, 3)        0x0      (+0.0)       0x8000…  (-0.0)
+#   pow(-0, -3)       +inf                  -inf
+#   pow(-NaN, 2)      0x7FF8…               0xFFF8…  (Rust propagates sign)
+#
+# ⚠ TWO OF THOSE WERE REACHABLE, which is why this is a release and not a note.
+# `br_absolute_magnitude_to_luminosity` computes `10^((4.83 - M)/2.5)`, so an
+# infinite magnitude gives an infinite exponent; `atm_air_mass` computes
+# `(96.07995 - z_deg)^-1.6364`, so an infinite zenith angle gives an infinite
+# base. Both returned NaN where Rust returns a defined value. The other seven
+# `_prk_pow` call sites pass a finite constant exponent and cannot reach here.
+#
+# ⚠ WHAT THIS DOES NOT FIX — the three remaining divergent rows are ULP
+# inexactness in the `exp`/`ln` pair, not domain errors, and are left alone:
+#   pow(2, 3)   = 0x401FFFFFFFFFFFFE  vs Rust 0x4020000000000000 (exactly 8)
+#   pow(-2, 3)  = 0xC01FFFFFFFFFFFFE  vs Rust 0xC020000000000000 (exactly -8)
+#   pow(2, 0.5) = 0x3FF6A09E667F3BCC  vs Rust 0x3FF6A09E667F3BCD (1 ULP)
+# Closing those means a correctly-rounded pow, not a guard. A negative base is
+# therefore finite-but-inexact where Rust is exact (it was NaN before ganita
+# 1.1.4, i.e. it used to fail loudly); no prakash call site passes one.
+#
+# ⚠ AND ONE MORE, found by widening the sweep rather than reported: a negative
+# base that UNDERFLOWS through an odd exponent loses its sign.
+#   pow(-5e-324, 3) = 0x0  vs Rust 0x8000000000000000 (-0.0)
+# Root cause traced, not guessed: ganita takes the magnitude from
+# exp(3*ln(5e-324)), which underflows to +0 (measured), then applies the sign
+# with `f64_neg` — and cyrius's `f64_neg(+0.0)` yields +0.0, not -0.0 (measured).
+# The sign is lost in the delegate's underflow tail, not in the domain guard
+# below, so repairing it means intercepting the inexact negative-base path this
+# release deliberately leaves alone. Also a negative base: unreachable.
+#
+# ⚠ THE ZERO-BASE BRANCH IS REDUNDANT AND KEPT ANYWAY. ganita 1.1.4 answers
+# 0.0 / 1.0 / +inf for a zero base itself, bit-for-bit what this produces. It is
+# retained as a pin: a silent upstream revert would otherwise move published
+# optics values with nothing watching for it. `tests/hardening.tcyr` asserts
+# the whole table above for the same reason.
+var _PRK_INF   = 0x7FF0000000000000;
+var _PRK_NINF  = 0xFFF0000000000000;
+var _PRK_NZERO = 0x8000000000000000;
+var _PRK_ABS   = 0x7FFFFFFFFFFFFFFF;   # clears the sign bit
+var _PRK_TWO53 = 0x4340000000000000;   # 2^53
+
+# 1 if `v` is an odd integer, else 0. `v` is finite and non-zero at every call
+# site below (NaN and the infinities have already returned). This is the parity
+# test C's pow uses to decide whether a negative base or a negative zero keeps
+# its sign. |v| >= 2^53 is even by construction: consecutive doubles are 2 apart
+# at that magnitude, so no odd integer is representable there.
+#must_use
+fn _prk_is_odd_int(v) {
+    var a = f64_abs(v);
+    if (f64_ge(a, _PRK_TWO53) == 1) { return 0; }
+    if (f64_floor(a) == a) {
+        if (f64_to(a) & 1 == 1) { return 1; }
+    }
+    return 0;
+}
+
 #must_use
 fn _prk_pow(base, exp) {
-    if (f64_abs(base) == 0) {
-        if (f64_gt(exp, 0) == 1) { return 0; }
-        if (f64_lt(exp, 0) == 1) { return 0x7FF0000000000000; }
-        return F64_ONE;
+    # pow(x, ±0) = 1 for every x, NaN included. Must stay first.
+    if ((exp & _PRK_ABS) == 0) { return F64_ONE; }
+    # pow(1, y) = 1 for every y, NaN and the infinities included. Must precede
+    # the NaN propagation below, which would otherwise claim pow(1, NaN).
+    if (base == F64_ONE) { return F64_ONE; }
+    # NaN in, that same NaN out — Rust propagates the operand's sign and
+    # payload rather than canonicalising (measured: pow(2, -NaN) = 0xFFF8…,
+    # pow(2, NaN:payload 7) = 0x7FF8000000000007).
+    if ((base & _PRK_ABS) > _PRK_INF) { return base; }
+    if ((exp & _PRK_ABS) > _PRK_INF) { return exp; }
+
+    # Infinite exponent — the result depends only on |base| against 1.
+    if ((exp & _PRK_ABS) == _PRK_INF) {
+        var mag = f64_abs(base);
+        if (mag == F64_ONE) { return F64_ONE; }        # base == -1
+        if (f64_lt(mag, F64_ONE) == 1) {
+            if (exp == _PRK_INF) { return 0; }
+            return _PRK_INF;
+        }
+        if (exp == _PRK_INF) { return _PRK_INF; }
+        return 0;
     }
+
+    # Infinite base — pow(-inf, y) == pow(-0, -y); the sign survives only
+    # through an odd integer exponent.
+    if ((base & _PRK_ABS) == _PRK_INF) {
+        var inf_neg = 0;
+        if (base == _PRK_NINF) {
+            if (_prk_is_odd_int(exp) == 1) { inf_neg = 1; }
+        }
+        if (f64_lt(exp, 0) == 1) {
+            if (inf_neg == 1) { return _PRK_NZERO; }
+            return 0;
+        }
+        if (inf_neg == 1) { return _PRK_NINF; }
+        return _PRK_INF;
+    }
+
+    # Zero base — same parity rule. `f64_neg(f64_from(0))` yields +0 on cyrius,
+    # but `f64_mul(f64_from(-1), f64_from(0))` yields 0x8000000000000000, so a
+    # negative zero IS reachable through the f64 surface and the sign is carried
+    # (ganita's own comment states the opposite; measured, it is wrong).
+    if ((base & _PRK_ABS) == 0) {
+        var zero_neg = 0;
+        if (base == _PRK_NZERO) {
+            if (_prk_is_odd_int(exp) == 1) { zero_neg = 1; }
+        }
+        if (f64_lt(exp, 0) == 1) {
+            if (zero_neg == 1) { return _PRK_NINF; }
+            return _PRK_INF;
+        }
+        if (zero_neg == 1) { return _PRK_NZERO; }
+        return 0;
+    }
+
     return ganita_f64_pow(base, exp);
 }
 

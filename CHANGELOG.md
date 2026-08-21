@@ -1,5 +1,135 @@
 # Changelog
 
+## [2.2.5] - 2026-08-21 — `_prk_pow` conforms to IEEE-754 across the non-finite domain
+
+2.2.4 documented one latent divergence in `_prk_pow` and deferred it as a
+behaviour change. Sweeping the full C99 F.10.4.4 special-case table before
+touching anything found **24 divergent rows, not one** — and the two that were
+known were among the least severe. Suite **5485 → 5537 assertions across 29
+suites** (+52, all pinning this table); **no existing assertion changed value**.
+
+**Every row below was measured on both sides before it was written**: prakash on
+cyrius 6.5.33 / ganita 1.1.4, and Rust as `(base as f64).powf(exp)` on rustc
+1.97.1, both printed as raw f64 bits and diffed mechanically from a shared case
+list. Agreement went **23/50 → 47/50** on that list, and 81/85 on the widened
+one; the survivors are listed under *Notes* and are pinned to their wrong values.
+
+### Fixed
+
+- ⭐ **`_prk_pow` returned NaN for EVERY infinite exponent, and every infinite
+  base.** Not in the 2.2.4 note — found by the sweep. Root cause traced, not
+  guessed: `ganita_f64_pow` computes `exp(y * ln x)` and reaches `f64_exp` with
+  an infinite argument, which is the x87 `exp` — NaN there. **That is the exact
+  defect `_prk_exp` sits three functions above it to repair**, and pow inherited
+  it through the delegate for as long as the shim has existed.
+
+  | expression | 2.2.4 | Rust / 2.2.5 |
+  |---|---|---|
+  | `pow(1, ±inf)` | NaN | `0x3FF0…` (1.0) |
+  | `pow(-1, ±inf)` | NaN | `0x3FF0…` (1.0) |
+  | `pow(2, +inf)` / `pow(2, -inf)` | NaN | `+inf` / `+0` |
+  | `pow(0.5, +inf)` / `pow(0.5, -inf)` | NaN | `+0` / `+inf` |
+  | `pow(-2, +inf)` / `pow(-2, -inf)` | NaN | `+inf` / `+0` |
+  | `pow(+inf, 2)` / `pow(+inf, -2)` | NaN | `+inf` / `+0` |
+  | `pow(-inf, 3)` / `pow(-inf, -3)` | NaN | `-inf` / `-0.0` |
+  | `pow(-inf, 2)` / `pow(-inf, -2)` | NaN | `+inf` / `+0` |
+
+- ⚠ **One of those was REACHABLE from the public surface** — which is why this
+  is a release and not another note. `br_absolute_magnitude_to_luminosity`
+  computes `10^((4.83 - M)/2.5)`, so an infinite magnitude reaches `_prk_pow`
+  with an infinite exponent: it returned **NaN**, and now returns `+inf` (and
+  `+0` for the opposite sign). Measured against the verbatim 2.2.4 body in the
+  same binary. ⚠ **The second candidate does NOT move and is not claimed to**:
+  `atm_air_mass` also passes an infinite value to `_prk_pow`, but `_prk_cos(±inf)`
+  is NaN by the trig guard, so the function still returns NaN overall — verified,
+  and asserted as such rather than assumed. The other seven call sites pass a
+  finite constant exponent and cannot reach any of this.
+- **`_prk_pow(0.0, NaN)` returned 1.0** — the divergence 2.2.4 recorded. A NaN
+  exponent is neither `> 0` nor `< 0`, so it fell through to the `F64_ONE` branch
+  meant for `exp == 0`. Now NaN, per IEEE-754 / C99 (`pow(x, NaN)` is NaN for
+  every base other than exactly 1).
+- **`_prk_pow(1.0, NaN)` returned NaN** — the second case, confirmed empirically
+  before it was touched: it delegated, and ganita computed
+  `exp(NaN * ln(1)) = exp(NaN * 0) = NaN`. C99 says `pow(1, y)` is **1.0 for
+  every y**, NaN and the infinities included. Now 1.0 exactly.
+- **NaN sign and payload are now propagated, matching Rust.** Rust returns the
+  operand's own NaN rather than canonicalising — measured:
+  `pow(2, -NaN) = 0xFFF8…`, `pow(2, NaN:payload 7) = 0x7FF8000000000007`.
+  `pow(-NaN, 2)` returned a **positive** NaN through 2.2.4 and now returns
+  `0xFFF8…`. `pow(NaN, ±0)` remains 1.0 — `pow(x, 0)` outranks NaN propagation,
+  which is why the C99 ordering is followed literally rather than rearranged.
+- **A negative-zero base lost its sign.** `pow(-0, 3)` gave `+0.0` where Rust
+  gives `0x8000000000000000`, and `pow(-0, -3)` gave `+inf` where Rust gives
+  `-inf`. ⚠ **ganita's own comment justifies dropping this by asserting a
+  negative zero is unreachable "through the f64 helper surface" because
+  `f64_neg(f64_from(0))` yields +0. That is measured and it is wrong**:
+  `f64_mul(f64_from(-1), f64_from(0))` yields `0x8000000000000000`. The
+  constructor is asserted in `tests/hardening.tcyr` alongside the rows, so the
+  claim cannot rot again.
+
+### Changed
+
+- **`_prk_pow` now implements the C99 F.10.4.4 order explicitly** — `pow(x, ±0)`,
+  then `pow(1, y)`, then NaN propagation, then infinite exponent, infinite base,
+  zero base, and only then the delegate. The cases overlap, and the order is what
+  disambiguates them. A new private `_prk_is_odd_int` carries the parity test
+  that decides whether a negative base or a negative zero keeps its sign;
+  prakash owns it rather than calling ganita's private `_f64_int_is_odd`.
+- **`tests/hardening.tcyr` pins the whole table, not the corner that was
+  noticed.** Three assertions had been covering a 50-row domain, which is
+  precisely how 24 rows stayed wrong with a green suite. +52 assertions,
+  grouped as NaN exponent / infinite exponent / infinite base / negative zero /
+  known-unfixed / reachable call site.
+
+### Performance
+
+- **No change, and this was measured rather than assumed.** The guard adds ~6
+  integer compares ahead of a delegate that costs ~80 ns, so it should be
+  invisible — and is. A/B of the new `_prk_pow` against the verbatim 2.2.4 body
+  **in the same binary and the same run** (2,000,000 iterations × 3 rounds,
+  base 0.7, exponent 2.4):
+
+  | round | 2.2.4 body | 2.2.5 | |
+  |---|---|---|---|
+  | 1 | 82 ns | 82 ns | |
+  | 2 | 83 ns | 81 ns | |
+  | 3 | 82 ns | 81 ns | |
+
+  ⚠ **The whole-suite A/B is NOT the evidence and is reported as inconclusive.**
+  Across 8 interleaved runs per side it put `spectral/wavelength_to_rgb` at
+  +15.9% — but also `spectral/planck_radiance` at **−39%** and
+  `pbr/henyey_greenstein` at **−81%**, neither of which calls `_prk_pow` at all.
+  This host's run-to-run spread exceeds the effect being looked for, so the
+  same-binary measurement above is what the claim rests on.
+
+### Notes
+
+- **Three divergences are deliberately NOT closed, and are pinned to their
+  measured-wrong values** so a toolchain bump cannot move them unobserved —
+  the exact failure mode 2.2.4 documented. They are ULP inexactness in the
+  `exp`/`ln` pair, not domain errors; closing them means a correctly-rounded
+  pow, not a guard.
+
+  | expression | prakash | Rust |
+  |---|---|---|
+  | `pow(2, 3)` | `0x401FFFFFFFFFFFFE` | `0x4020000000000000` (exactly 8) |
+  | `pow(-2, 3)` | `0xC01FFFFFFFFFFFFE` | `0xC020000000000000` (exactly −8) |
+  | `pow(2, 0.5)` | `0x3FF6A09E667F3BCC` | `0x3FF6A09E667F3BCD` (1 ULP) |
+
+- **A fourth is left open, found by widening the sweep rather than reported.**
+  `pow(-5e-324, 3)` gives `+0.0` where Rust gives `-0.0`. Traced: the magnitude
+  comes from `exp(3*ln(5e-324))`, which **underflows to +0** (measured), and
+  ganita then applies the sign with `f64_neg` — and cyrius's `f64_neg(+0.0)`
+  yields `+0.0`, not `-0.0` (measured). The sign is lost in the delegate's
+  underflow tail, not in the new guard, so repairing it means entering the
+  inexact negative-base path this release leaves alone. A negative base:
+  no prakash call site passes one.
+- **The docs gate still reports 2 undocumented public fns** — `main` in
+  `src/main.cyr` and `mueller_set` in `src/wave_polarization.cyr`. ⚠ Both are
+  **pre-existing and outside this release's diff**, which touches only
+  `src/error.cyr` and `tests/hardening.tcyr`; `cyrius audit` exits 1 on this
+  repo before and after. Recorded rather than folded in silently.
+
 ## [2.2.4] - 2026-08-21 — Toolchain bump: fifteen cyrius releases, and a CI block that could not survive them
 
 Cyrius **6.5.20 → 6.5.33**, hisab **2.11.1 → 2.11.2**, sakshi **2.4.10 → 2.4.11**,
