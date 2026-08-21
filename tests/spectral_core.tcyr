@@ -129,8 +129,8 @@ assert(f64_gt(r_peak, planck_radiance(f64_mul(peak_wl, _fd(5, 10)), f64_from(577
 assert(f64_gt(r_peak, planck_radiance(f64_mul(peak_wl, F64_TWO), f64_from(5778))), "peak > longer");
 
 assert(
-f64_gt(planck_radiance(wl_sun, f64_from(6000)), planck_radiance(wl_sun, f64_from(3000))),
-"hotter more radiance");
+  f64_gt(planck_radiance(wl_sun, f64_from(6000)), planck_radiance(wl_sun, f64_from(3000))),
+  "hotter more radiance");
 
 assert_eq(f64_to(planck_radiance(wl_sun, Z)), 0, "T=0 gives 0");
 assert_eq(f64_to(planck_radiance(wl_sun, f64_neg(f64_from(100)))), 0, "T<0 gives 0");
@@ -148,8 +148,8 @@ assert_eq(_is_finite(r_wien), 1, "wien regime finite");
 assert(f64_ge(r_wien, Z), "wien regime >= 0");
 
 _assert_near(
-f64_mul(wien_peak(f64_from(5778)), f64_from(1000000000)),
-f64_from(502), f64_from(5), "wien sun peak ~502nm");
+  f64_mul(wien_peak(f64_from(5778)), f64_from(1000000000)),
+  f64_from(502), f64_from(5), "wien sun peak ~502nm");
 assert(f64_lt(wien_peak(f64_from(10000)), wien_peak(f64_from(5000))), "hotter shorter peak");
 _assert_near(f64_div(wien_peak(f64_from(3000)), wien_peak(f64_from(6000))), F64_TWO, TOL6, "wien inverse proportional");
 
@@ -184,8 +184,8 @@ _assert_near(frequency_to_wavelength(wavelength_to_frequency(f64_from(550))), f6
 _assert_near(frequency_to_wavelength(wavelength_to_frequency(f64_from(650))), f64_from(650), TOL6, "roundtrip 650");
 _assert_near(frequency_to_wavelength(wavelength_to_frequency(f64_from(780))), f64_from(780), TOL6, "roundtrip 780");
 assert(
-f64_gt(wavelength_to_frequency(f64_from(450)), wavelength_to_frequency(f64_from(700))),
-"shorter wl higher freq");
+  f64_gt(wavelength_to_frequency(f64_from(450)), wavelength_to_frequency(f64_from(700))),
+  "shorter wl higher freq");
 _assert_near(photon_energy_ev(f64_from(550)), _fd(225, 100), _fd(1, 10), "photon energy 550nm ~ 2.25 eV");
 assert(f64_gt(photon_energy(f64_from(450)), photon_energy(f64_from(700))), "blue photon > red");
 assert(f64_gt(photon_energy_ev(f64_from(550)), Z), "photon energy eV positive");

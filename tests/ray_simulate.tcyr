@@ -82,8 +82,8 @@ assert(vec_len(TraceTree_segments(tree_me)) < 20, "min_energy terminates quickly
 
 # off-axis generates at least one reflection segment
 var tree_rf = trace_recursive(
-off_axis_ray(f64_from(5), f64_neg(f64_from(50))), biconvex_lens(),
-trace_config_new(4, _fd(1, 1000)));
+  off_axis_ray(f64_from(5), f64_neg(f64_from(50))), biconvex_lens(),
+  trace_config_new(4, _fd(1, 1000)));
 var segs_rf = TraceTree_segments(tree_rf);
 var has_reflection = 0;
 var irf = 0;
@@ -112,11 +112,11 @@ assert_eq(vec_len(mer), 11, "meridional count 11");
 var mer_first = vec_get(mer, 0);
 var mer_last = vec_get(mer, 10);
 _assert_near(
-f64_add(RayVec3_y(TraceRay_pos(FanRay_ray(mer_first))), RayVec3_y(TraceRay_pos(FanRay_ray(mer_last)))),
-Z, TOL6, "meridional symmetric position");
+  f64_add(RayVec3_y(TraceRay_pos(FanRay_ray(mer_first))), RayVec3_y(TraceRay_pos(FanRay_ray(mer_last)))),
+  Z, TOL6, "meridional symmetric position");
 _assert_near(
-f64_add(FanRay_aperture_height(mer_first), FanRay_aperture_height(mer_last)),
-Z, TOL6, "meridional symmetric aperture");
+  f64_add(FanRay_aperture_height(mer_first), FanRay_aperture_height(mer_last)),
+  Z, TOL6, "meridional symmetric aperture");
 var mer_center = vec_get(mer, 5);
 _assert_near(RayVec3_y(TraceRay_pos(FanRay_ray(mer_center))), Z, TOL6, "meridional center on axis");
 _assert_near(FanRay_aperture_height(mer_center), Z, TOL6, "meridional center aperture 0");
@@ -196,7 +196,7 @@ _assert_near(spot_rms_radius(four), F64_ONE, TOL6, "rms of unit cross = 1.0");
 
 var rms_small = spot_rms_radius(spot_diagram(biconvex_lens(), F64_TWO, 2, 6, Z, f64_neg(f64_from(50)), f64_from(200)));
 var rms_large = spot_rms_radius(
-spot_diagram(biconvex_lens(), f64_from(10), 2, 6, Z, f64_neg(f64_from(50)), f64_from(200)));
+  spot_diagram(biconvex_lens(), f64_from(10), 2, 6, Z, f64_neg(f64_from(50)), f64_from(200)));
 assert(f64_ge(rms_large, rms_small), "larger aperture -> larger spot");
 
 # ── OPD ────────
@@ -210,15 +210,15 @@ assert(f64_gt(opl, f64_from(250)), "opl exceeds geometric distance (glass)");
 
 var ed = 0;
 var opd_cc = optical_path_difference(
-on_axis_ray(f64_neg(f64_from(50))), on_axis_ray(f64_neg(f64_from(50))),
-biconvex_lens(), f64_from(200), &ed);
+  on_axis_ray(f64_neg(f64_from(50))), on_axis_ray(f64_neg(f64_from(50))),
+  biconvex_lens(), f64_from(200), &ed);
 assert_eq(ed, 0, "opd chief ok");
 _assert_near(opd_cc, Z, TOL6, "chief vs chief OPD = 0");
 
 var ed2 = 0;
 var opd_off = optical_path_difference(
-off_axis_ray(f64_from(5), f64_neg(f64_from(50))), on_axis_ray(f64_neg(f64_from(50))),
-biconvex_lens(), f64_from(200), &ed2);
+  off_axis_ray(f64_from(5), f64_neg(f64_from(50))), on_axis_ray(f64_neg(f64_from(50))),
+  biconvex_lens(), f64_from(200), &ed2);
 assert_eq(ed2, 0, "opd off-axis ok");
 assert(f64_gt(f64_abs(opd_off), TOL6), "off-axis OPD nonzero");
 

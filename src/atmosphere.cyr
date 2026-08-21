@@ -40,10 +40,10 @@ fn _atm_rgb_wl(i) {
 fn atm_king_factor(wavelength_m) {
     var lambda_um = f64_mul(wavelength_m, f64_from(1000000));
     var rho_n = f64_add(_atm_r(279, 10000),
-    f64_div(_atm_r(174, 1000000), f64_mul(lambda_um, lambda_um)));
+      f64_div(_atm_r(174, 1000000), f64_mul(lambda_um, lambda_um)));
     return f64_div(
-    f64_add(f64_from(6), f64_mul(f64_from(3), rho_n)),
-    f64_sub(f64_from(6), f64_mul(f64_from(7), rho_n)));
+      f64_add(f64_from(6), f64_mul(f64_from(3), rho_n)),
+      f64_sub(f64_from(6), f64_mul(f64_from(7), rho_n)));
 }
 
 # ── Rayleigh scattering ────────
@@ -52,7 +52,7 @@ fn atm_king_factor(wavelength_m) {
 #must_use
 fn atm_rayleigh_cross_section(wavelength_m) {
     var lambda4 = f64_mul(
-    f64_mul(f64_mul(wavelength_m, wavelength_m), wavelength_m), wavelength_m);
+      f64_mul(f64_mul(wavelength_m, wavelength_m), wavelength_m), wavelength_m);
     return f64_div(_atm_prefactor(), lambda4);
 }
 
@@ -72,15 +72,15 @@ fn atm_rayleigh_scattering_coefficient(wavelength_m) {
 #must_use
 fn atm_rayleigh_scattering_at_altitude(wavelength_m, altitude_m) {
     return f64_mul(atm_rayleigh_scattering_coefficient(wavelength_m),
-    _prk_exp(f64_div(f64_neg(altitude_m), _atm_scale_h_rayleigh())));
+      _prk_exp(f64_div(f64_neg(altitude_m), _atm_scale_h_rayleigh())));
 }
 
 # Rayleigh phase function: 3*(1 + cos^2) / (16*pi).
 #must_use
 fn atm_phase_rayleigh(cos_theta) {
     return f64_div(
-    f64_mul(f64_from(3), f64_add(F64_ONE, f64_mul(cos_theta, cos_theta))),
-    f64_mul(f64_from(16), F64_PI));
+      f64_mul(f64_from(3), f64_add(F64_ONE, f64_mul(cos_theta, cos_theta))),
+      f64_mul(f64_from(16), F64_PI));
 }
 
 # ── Mie scattering ────────
@@ -95,7 +95,7 @@ fn atm_mie_scattering_coefficient(wavelength_m) {
 #must_use
 fn atm_mie_scattering_at_altitude(wavelength_m, altitude_m) {
     return f64_mul(atm_mie_scattering_coefficient(wavelength_m),
-    _prk_exp(f64_div(f64_neg(altitude_m), _atm_scale_h_mie())));
+      _prk_exp(f64_div(f64_neg(altitude_m), _atm_scale_h_mie())));
 }
 
 # Cornette-Shanks Mie phase:
@@ -109,10 +109,10 @@ fn atm_mie_phase_cornette_shanks(cos_theta, g) {
         return f64_from(0);
     }
     return f64_div(
-    f64_mul(
-    f64_mul(f64_div(f64_from(3), f64_mul(f64_from(8), F64_PI)), f64_sub(F64_ONE, g2)),
-    f64_add(F64_ONE, f64_mul(cos_theta, cos_theta))),
-    denom);
+      f64_mul(
+        f64_mul(f64_div(f64_from(3), f64_mul(f64_from(8), F64_PI)), f64_sub(F64_ONE, g2)),
+        f64_add(F64_ONE, f64_mul(cos_theta, cos_theta))),
+      denom);
 }
 
 # ── Air mass & optical depth ────────
@@ -124,7 +124,7 @@ fn atm_air_mass(zenith_angle) {
     var zenith_deg = f64_min(_atm_to_degrees(zenith_angle), f64_from(90));
     var cos_z = _prk_cos(zenith_angle);
     var correction = f64_mul(_atm_r(50572, 100000),
-    _prk_pow(f64_sub(_atm_r(9607995, 100000), zenith_deg), f64_neg(_atm_r(16364, 10000))));
+      _prk_pow(f64_sub(_atm_r(9607995, 100000), zenith_deg), f64_neg(_atm_r(16364, 10000))));
     return f64_div(F64_ONE, f64_add(cos_z, correction));
 }
 
@@ -168,7 +168,7 @@ fn atm_sky_color_rgb(sun_zenith, scattering_angle, out) {
     _prk_trace("sky_color_rgb");
     for (var i = 0; i < 3; i = i + 1) {
         store64(out + i * 8,
-        atm_sky_radiance_single_scatter(_atm_rgb_wl(i), sun_zenith, scattering_angle));
+          atm_sky_radiance_single_scatter(_atm_rgb_wl(i), sun_zenith, scattering_angle));
     }
     return 0;
 }
@@ -200,8 +200,8 @@ fn atm_sunset_gradient(sun_zenith, view_elevation, angular_distance_to_sun, out)
         var sun_transmittance = _prk_exp(f64_mul(f64_neg(total_tau), sun_air_mass));
         var view_transmittance = _prk_exp(f64_mul(f64_neg(total_tau), view_air_mass));
         var scatter = f64_mul(
-        f64_add(f64_mul(beta_r, phase_r), f64_mul(_atm_beta_m(), phase_m)),
-        sun_transmittance);
+          f64_add(f64_mul(beta_r, phase_r), f64_mul(_atm_beta_m(), phase_m)),
+          sun_transmittance);
         store64(out + i * 8, f64_mul(scatter, view_transmittance));
     }
     return 0;
@@ -212,7 +212,7 @@ fn atm_sunset_gradient(sun_zenith, view_elevation, angular_distance_to_sun, out)
 #must_use
 fn atm_scattering_angle(sun_zenith, view_zenith, azimuth_diff) {
     var cos_gamma = f64_add(
-    f64_mul(_prk_cos(sun_zenith), _prk_cos(view_zenith)),
-    f64_mul(f64_mul(_prk_sin(sun_zenith), _prk_sin(view_zenith)), _prk_cos(azimuth_diff)));
+      f64_mul(_prk_cos(sun_zenith), _prk_cos(view_zenith)),
+      f64_mul(f64_mul(_prk_sin(sun_zenith), _prk_sin(view_zenith)), _prk_cos(azimuth_diff)));
     return ganita_f64_acos(f64_clamp(cos_gamma, f64_neg(F64_ONE), F64_ONE));
 }

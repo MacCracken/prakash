@@ -1,7 +1,17 @@
 # serialize test suite — serde roundtrips for the 7 types that had serde_json
 # roundtrip tests in Rust (Rgb, Medium, SellmeierCoefficients, LensType,
-# Polarization, Prescription, Spd). bayan renders floats to 6 decimals, so
-# roundtrips are checked to ~1e-5 (not serde's bit-exact).
+# Polarization, Prescription, Spd). Roundtrips are checked to ~1e-5, not
+# serde's bit-exact.
+#
+# ⚠ THE STATED REASON FOR THAT TOLERANCE IS OBSOLETE. It read "bayan renders
+# floats to 6 decimals", which stopped being true at bayan 1.2.1 — that release
+# replaced the 6-decimal renderer with round-trip-correct Grisu2 and fixed a
+# real data-loss bug (the old encoder flushed any |x| < 5e-7 to zero). The
+# encoder is bit-exact now, so ~1e-5 is a LOOSE tolerance that would not catch a
+# renderer regression, not a tight one forced by the encoder. Verified unchanged
+# by the 2.2.4 bump: the 6.5.20 -> 6.5.33 bayan diff has no hunk in the Grisu2
+# region, so no JSON byte moves. Tightening these to bit-exact is worth doing;
+# it is a test change, not a bump change.
 
 include "src/error.cyr"
 include "src/spectral_core.cyr"
@@ -95,9 +105,9 @@ assert_eq(e, PK_ERR_NONE, "prescription decode reports PK_ERR_NONE");
 assert(streq(Prescription_name(prback), "test lens") == 1, "prescription name roundtrip");
 assert_eq(prescription_len(prback), 2, "prescription surfaces len = 2");
 _assert_near(PrescriptionSurface_radius(vec_get(Prescription_surfaces(prback), 0)), f64_from(50), TOL,
-"prescription surface[0] radius = 50");
+  "prescription surface[0] radius = 50");
 _assert_near(PrescriptionSurface_n_after(vec_get(Prescription_surfaces(prback), 0)), _fd(152, 100), TOL,
-"prescription surface[0] n_after = 1.52");
+  "prescription surface[0] n_after = 1.52");
 
 # ── Spd ────────
 test_group("spd");

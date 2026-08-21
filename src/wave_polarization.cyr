@@ -104,28 +104,28 @@ fn _mm(m00, m01, m02, m03, m10, m11, m12, m13, m20, m21, m22, m23, m30, m31, m32
 #must_use
 fn mueller_identity() {
     return _mm(
-    F64_ONE, f64_from(0), f64_from(0), f64_from(0),
-    f64_from(0), F64_ONE, f64_from(0), f64_from(0),
-    f64_from(0), f64_from(0), F64_ONE, f64_from(0),
-    f64_from(0), f64_from(0), f64_from(0), F64_ONE);
+      F64_ONE, f64_from(0), f64_from(0), f64_from(0),
+      f64_from(0), F64_ONE, f64_from(0), f64_from(0),
+      f64_from(0), f64_from(0), F64_ONE, f64_from(0),
+      f64_from(0), f64_from(0), f64_from(0), F64_ONE);
 }
 
 #must_use
 fn mueller_polarizer_horizontal() {
     return _mm(
-    F64_HALF, F64_HALF, f64_from(0), f64_from(0),
-    F64_HALF, F64_HALF, f64_from(0), f64_from(0),
-    f64_from(0), f64_from(0), f64_from(0), f64_from(0),
-    f64_from(0), f64_from(0), f64_from(0), f64_from(0));
+      F64_HALF, F64_HALF, f64_from(0), f64_from(0),
+      F64_HALF, F64_HALF, f64_from(0), f64_from(0),
+      f64_from(0), f64_from(0), f64_from(0), f64_from(0),
+      f64_from(0), f64_from(0), f64_from(0), f64_from(0));
 }
 
 #must_use
 fn mueller_polarizer_vertical() {
     return _mm(
-    F64_HALF, f64_neg(F64_HALF), f64_from(0), f64_from(0),
-    f64_neg(F64_HALF), F64_HALF, f64_from(0), f64_from(0),
-    f64_from(0), f64_from(0), f64_from(0), f64_from(0),
-    f64_from(0), f64_from(0), f64_from(0), f64_from(0));
+      F64_HALF, f64_neg(F64_HALF), f64_from(0), f64_from(0),
+      f64_neg(F64_HALF), F64_HALF, f64_from(0), f64_from(0),
+      f64_from(0), f64_from(0), f64_from(0), f64_from(0),
+      f64_from(0), f64_from(0), f64_from(0), f64_from(0));
 }
 
 # Linear polarizer at angle theta.
@@ -136,28 +136,28 @@ fn mueller_polarizer(angle) {
     var c2 = _prk_cos(two_a);
     var cs = f64_mul(c2, s2);
     return _mm(
-    F64_HALF, f64_mul(F64_HALF, c2), f64_mul(F64_HALF, s2), f64_from(0),
-    f64_mul(F64_HALF, c2), f64_mul(f64_mul(F64_HALF, c2), c2), f64_mul(F64_HALF, cs), f64_from(0),
-    f64_mul(F64_HALF, s2), f64_mul(F64_HALF, cs), f64_mul(f64_mul(F64_HALF, s2), s2), f64_from(0),
-    f64_from(0), f64_from(0), f64_from(0), f64_from(0));
+      F64_HALF, f64_mul(F64_HALF, c2), f64_mul(F64_HALF, s2), f64_from(0),
+      f64_mul(F64_HALF, c2), f64_mul(f64_mul(F64_HALF, c2), c2), f64_mul(F64_HALF, cs), f64_from(0),
+      f64_mul(F64_HALF, s2), f64_mul(F64_HALF, cs), f64_mul(f64_mul(F64_HALF, s2), s2), f64_from(0),
+      f64_from(0), f64_from(0), f64_from(0), f64_from(0));
 }
 
 #must_use
 fn mueller_quarter_wave_horizontal() {
     return _mm(
-    F64_ONE, f64_from(0), f64_from(0), f64_from(0),
-    f64_from(0), F64_ONE, f64_from(0), f64_from(0),
-    f64_from(0), f64_from(0), f64_from(0), F64_ONE,
-    f64_from(0), f64_from(0), f64_neg(F64_ONE), f64_from(0));
+      F64_ONE, f64_from(0), f64_from(0), f64_from(0),
+      f64_from(0), F64_ONE, f64_from(0), f64_from(0),
+      f64_from(0), f64_from(0), f64_from(0), F64_ONE,
+      f64_from(0), f64_from(0), f64_neg(F64_ONE), f64_from(0));
 }
 
 #must_use
 fn mueller_half_wave_horizontal() {
     return _mm(
-    F64_ONE, f64_from(0), f64_from(0), f64_from(0),
-    f64_from(0), F64_ONE, f64_from(0), f64_from(0),
-    f64_from(0), f64_from(0), f64_neg(F64_ONE), f64_from(0),
-    f64_from(0), f64_from(0), f64_from(0), f64_neg(F64_ONE));
+      F64_ONE, f64_from(0), f64_from(0), f64_from(0),
+      f64_from(0), F64_ONE, f64_from(0), f64_from(0),
+      f64_from(0), f64_from(0), f64_neg(F64_ONE), f64_from(0),
+      f64_from(0), f64_from(0), f64_from(0), f64_neg(F64_ONE));
 }
 
 # General linear retarder, fast axis horizontal, retardance delta.
@@ -166,10 +166,10 @@ fn mueller_retarder(retardance) {
     var c = _prk_cos(retardance);
     var s = _prk_sin(retardance);
     return _mm(
-    F64_ONE, f64_from(0), f64_from(0), f64_from(0),
-    f64_from(0), F64_ONE, f64_from(0), f64_from(0),
-    f64_from(0), f64_from(0), c, s,
-    f64_from(0), f64_from(0), f64_neg(s), c);
+      F64_ONE, f64_from(0), f64_from(0), f64_from(0),
+      f64_from(0), F64_ONE, f64_from(0), f64_from(0),
+      f64_from(0), f64_from(0), c, s,
+      f64_from(0), f64_from(0), f64_neg(s), c);
 }
 
 # Reference-frame rotation by angle.
@@ -179,19 +179,19 @@ fn mueller_rotation(angle) {
     var s2 = _prk_sin(two_a);
     var c2 = _prk_cos(two_a);
     return _mm(
-    F64_ONE, f64_from(0), f64_from(0), f64_from(0),
-    f64_from(0), c2, s2, f64_from(0),
-    f64_from(0), f64_neg(s2), c2, f64_from(0),
-    f64_from(0), f64_from(0), f64_from(0), F64_ONE);
+      F64_ONE, f64_from(0), f64_from(0), f64_from(0),
+      f64_from(0), c2, s2, f64_from(0),
+      f64_from(0), f64_neg(s2), c2, f64_from(0),
+      f64_from(0), f64_from(0), f64_from(0), F64_ONE);
 }
 
 # Row i of m dotted with the 4-vector [v0,v1,v2,v3].
 fn _mm_row_dot(m, i, v0, v1, v2, v3) {
     return f64_add(f64_add(f64_add(
-    f64_mul(mueller_get(m, i, 0), v0),
-    f64_mul(mueller_get(m, i, 1), v1)),
-    f64_mul(mueller_get(m, i, 2), v2)),
-    f64_mul(mueller_get(m, i, 3), v3));
+          f64_mul(mueller_get(m, i, 0), v0),
+          f64_mul(mueller_get(m, i, 1), v1)),
+        f64_mul(mueller_get(m, i, 2), v2)),
+      f64_mul(mueller_get(m, i, 3), v3));
 }
 
 # Apply a Mueller matrix to a Stokes vector.
@@ -202,10 +202,10 @@ fn mueller_apply(m, s) {
     var s2 = StokesVector_s2(s);
     var s3 = StokesVector_s3(s);
     return stokes_new(
-    _mm_row_dot(m, 0, s0, s1, s2, s3),
-    _mm_row_dot(m, 1, s0, s1, s2, s3),
-    _mm_row_dot(m, 2, s0, s1, s2, s3),
-    _mm_row_dot(m, 3, s0, s1, s2, s3));
+      _mm_row_dot(m, 0, s0, s1, s2, s3),
+      _mm_row_dot(m, 1, s0, s1, s2, s3),
+      _mm_row_dot(m, 2, s0, s1, s2, s3),
+      _mm_row_dot(m, 3, s0, s1, s2, s3));
 }
 
 # Multiply two Mueller matrices: a * b (apply b first, then a).
@@ -218,10 +218,10 @@ fn mueller_multiply(a, b) {
         var j = 0;
         while (j < 4) {
             var sum = f64_add(f64_add(f64_add(
-            f64_mul(mueller_get(a, i, 0), mueller_get(b, 0, j)),
-            f64_mul(mueller_get(a, i, 1), mueller_get(b, 1, j))),
-            f64_mul(mueller_get(a, i, 2), mueller_get(b, 2, j))),
-            f64_mul(mueller_get(a, i, 3), mueller_get(b, 3, j)));
+                  f64_mul(mueller_get(a, i, 0), mueller_get(b, 0, j)),
+                  f64_mul(mueller_get(a, i, 1), mueller_get(b, 1, j))),
+                f64_mul(mueller_get(a, i, 2), mueller_get(b, 2, j))),
+              f64_mul(mueller_get(a, i, 3), mueller_get(b, 3, j)));
             mueller_set(r, i, j, sum);
             j = j + 1;
         }

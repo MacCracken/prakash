@@ -49,15 +49,15 @@ fn paraxial_chief(field_angle, n) {
 #must_use
 fn paraxial_refract(ray, power) {
     return paraxial_ray_new(ParaxialRay_y(ray),
-    f64_sub(ParaxialRay_nu(ray), f64_mul(ParaxialRay_y(ray), power)));
+      f64_sub(ParaxialRay_nu(ray), f64_mul(ParaxialRay_y(ray), power)));
 }
 
 # Transfer a paraxial ray across a reduced thickness t/n: y' = y + (t/n)*nu.
 #must_use
 fn paraxial_transfer(ray, reduced_thickness) {
     return paraxial_ray_new(
-    f64_add(ParaxialRay_y(ray), f64_mul(reduced_thickness, ParaxialRay_nu(ray))),
-    ParaxialRay_nu(ray));
+      f64_add(ParaxialRay_y(ray), f64_mul(reduced_thickness, ParaxialRay_nu(ray))),
+      ParaxialRay_nu(ray));
 }
 
 # A (power, reduced_thickness) paraxial surface parameter pair.
@@ -252,7 +252,7 @@ fn find_system_properties(prescription, err_out) {
         var power_reverse = f64_from(0);
         if (_sys_is_inf(PrescriptionSurface_radius(ps)) == 0) {
             power_reverse = f64_div(f64_sub(n_after_reverse, n_before_reverse),
-            f64_neg(PrescriptionSurface_radius(ps)));
+              f64_neg(PrescriptionSurface_radius(ps)));
         }
         var thickness = f64_from(0);
         if (i > 0) {
@@ -325,7 +325,7 @@ fn prescription_doublet(focal_length, n1, v1, n2, v2, aperture, t1, t2) {
     var r4 = _sys_inf();
     if (f64_gt(f64_abs(phi2), _sys_eps15()) == 1) {
         r4 = f64_div(f64_mul(f64_neg(r2), f64_sub(n2, F64_ONE)),
-        f64_add(f64_mul(r2, phi2), f64_sub(n2, F64_ONE)));
+          f64_add(f64_mul(r2, phi2), f64_sub(n2, F64_ONE)));
     }
     var p = prescription_new("achromatic doublet");
     var _p1 = prescription_add_surface(p, r1, t1, n1, aperture);

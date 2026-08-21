@@ -24,7 +24,7 @@ fn _wave_round(x) {
 #must_use
 fn interference_intensity(a1, a2, phase_diff) {
     return f64_add(f64_add(f64_mul(a1, a1), f64_mul(a2, a2)),
-    f64_mul(f64_mul(f64_mul(F64_TWO, a1), a2), _prk_cos(phase_diff)));
+      f64_mul(f64_mul(f64_mul(F64_TWO, a1), a2), _prk_cos(phase_diff)));
 }
 
 # 1 if constructive (path difference is ~ an integer multiple of wavelength).
@@ -151,7 +151,7 @@ fn polarization_through_polarizer(p, polarizer_angle) {
 #must_use
 fn polarization_intensity(p) {
     return f64_add(f64_mul(Polarization_ex(p), Polarization_ex(p)),
-    f64_mul(Polarization_ey(p), Polarization_ey(p)));
+      f64_mul(Polarization_ey(p), Polarization_ey(p)));
 }
 
 # ── Stokes vector (shared with wave_polarization) ────────
@@ -177,9 +177,9 @@ fn stokes_degree_of_polarization(s) {
         return f64_from(0);
     }
     var pol = f64_sqrt(f64_add(f64_add(
-    f64_mul(StokesVector_s1(s), StokesVector_s1(s)),
-    f64_mul(StokesVector_s2(s), StokesVector_s2(s))),
-    f64_mul(StokesVector_s3(s), StokesVector_s3(s))));
+          f64_mul(StokesVector_s1(s), StokesVector_s1(s)),
+          f64_mul(StokesVector_s2(s), StokesVector_s2(s))),
+        f64_mul(StokesVector_s3(s), StokesVector_s3(s))));
     return f64_div(pol, StokesVector_s0(s));
 }
 
@@ -192,10 +192,10 @@ fn polarization_to_stokes(p) {
     var ex2 = f64_mul(ex, ex);
     var ey2 = f64_mul(ey, ey);
     return stokes_new(
-    f64_add(ex2, ey2),
-    f64_sub(ex2, ey2),
-    f64_mul(f64_mul(f64_mul(F64_TWO, ex), ey), _prk_cos(phase)),
-    f64_mul(f64_mul(f64_mul(F64_TWO, ex), ey), _prk_sin(phase)));
+      f64_add(ex2, ey2),
+      f64_sub(ex2, ey2),
+      f64_mul(f64_mul(f64_mul(F64_TWO, ex), ey), _prk_cos(phase)),
+      f64_mul(f64_mul(f64_mul(F64_TWO, ex), ey), _prk_sin(phase)));
 }
 
 # ── Malus's law ────────

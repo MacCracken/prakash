@@ -1,5 +1,190 @@
 # Changelog
 
+## [2.2.4] - 2026-08-21 — Toolchain bump: fifteen cyrius releases, and a CI block that could not survive them
+
+Cyrius **6.5.20 → 6.5.33**, hisab **2.11.1 → 2.11.2**, sakshi **2.4.10 → 2.4.11**,
+and — vendored with the toolchain — sandhi **1.9.9 → 1.9.10** and ganita
+**1.0.4 → 1.1.4**. No feature work.
+
+Suite **5485 assertions across 29 suites, unchanged on both sides of the bump**,
+and that is the point: **not one finding here was surfaced by a failing test.**
+Every one is a claim that was measured once, written down, and then quietly
+stopped being true — the same shape hisab recorded in its own 2.11.2, which
+absorbed this identical toolchain range.
+
+### Security
+
+- **CI installed an unverified binary toolchain, and the step could not fail.**
+  Both workflows fetched the release tarball with a bare `curl -sLO`, untarred
+  it, and ended every copy in `2>/dev/null || true`. This repo ships a
+  `SECURITY.md` and a security job while doing that — on the **release**
+  workflow too, which builds the artifact that ships. Both now pipe the pin into
+  the **upstream installer**, fetched from the pin's own immutable tag, which
+  fails closed on a missing, unverifiable or mismatched `.sha256` (CVE-21) and
+  verifies an **Ed25519 signature** over `SHA256SUMS` where one is published
+  (CVE-13).
+- **sandhi 1.9.10** (vendored) fixes a P1 in which `_sandhi_resp_frame_a`
+  returned `SANDHI_OK` carrying a **NULL body pointer** when the allocator could
+  not fit the body copy, so a caller that correctly checked
+  `sandhi_http_err_kind(r) == SANDHI_OK` then read from address 0.
+  ⚠ **prakash is on that code path** — traced, not assumed:
+  `sandhi_http_post_opts` (used at `src/ai.cyr:209`) delegates to
+  `sandhi_http_post_opts_a(default_alloc(), ...)`, so the arena-flavoured
+  framing runs, backed by the **global** allocator. And `src/ai.cyr:211` does
+  exactly what the bug defeated — checks `err_kind` and then trusts the body
+  pointer. What prakash was **not** in is the regime that made it reachable in
+  practice upstream: a *constrained* arena where `rbuf`'s eager allocation at
+  the full `max_response_bytes` cap starves the body copy. prakash takes the
+  global allocator and sandhi's default 262,144-byte cap, so reaching it needs a
+  genuine global allocation failure. 2.2.3 shipped `lib/sandhi.cyr` at 1.9.9,
+  **without** the guard; 2.2.4 ships it with.
+
+### Fixed
+
+- **CI could not have installed 6.5.33 at all — reproduced, `rc=1`.** The
+  hand-rolled block laid the toolchain out **flat** as `~/.cyrius/{bin,lib}`,
+  but cyrius resolves its stdlib snapshot from `~/.cyrius/versions/<pin>/lib`,
+  so `cyrius deps` fails with *"pins version 6.5.33 but it is not installed
+  at .../versions/6.5.33/lib"*. A new **`Verify toolchain matches the pin`**
+  step now asserts this where it is diagnosable — the original failure surfaced
+  two steps downstream as a path error.
+- ⭐ **CI's own remediation advice would have truncated a contributor's source
+  file to zero bytes.** On format drift the workflow printed
+  `run 'cyrius fmt $f > tmp && mv tmp $f'`. `cyrius fmt` **rewrites in place as
+  of cyrius 6.5.28** (it was stdout-only before), so that redirect captures
+  **0 bytes** — measured — and moves an empty file over the source. The advice
+  now reads `cyrius fmt $f`, and `CONTRIBUTING.md` carries the same warning.
+  The instruction had been wrong since 6.5.28 and nothing executes it in CI, so
+  only a human following it would have found out.
+- **`fmt_float_buf` dropped the carry when a fraction rounded up to a full
+  unit — and corrupted the fraction while doing it.** Measured either side, same
+  source:
+
+  | value | decimals | 6.5.20 | 6.5.33 |
+  |---|---|---|---|
+  | `wien_peak(5778)` = 501.5182 nm | 0 | **501.1** | 502.0 |
+  | 2.96 | 1 | **2.10** | 3.0 |
+  | 0.999 | 2 | **0.100** | 1.00 |
+  | 9.99 | 1 | **9.10** | 10.0 |
+
+  ⚠ **Blast radius is `examples/` only, and that is verified, not asserted:**
+  `fmt_float_buf` appears in all four examples and in **no** file under `src/`
+  or `tests/`. The library surface renders floats through bayan's Grisu2, whose
+  6.5.20 → 6.5.33 diff has no hunk in the encoder — **no JSON byte moves**.
+  `examples/basic_optics.cyr` now prints `Sun peaks at 502.0nm` where it printed
+  `501.1nm`; the true value is 501.5182 nm, so the new output is the correct
+  round and the old one was simply wrong.
+- **The three `bayan.cyr` "assigning non-pointer to typed pointer" warnings are
+  gone** — every prakash compile emitted them; the build is now warning-clean
+  apart from the pre-existing `large static data` notes.
+
+### Changed
+
+- **`lib/` re-vendored from the 6.5.33 snapshot** — 30 files changed and
+  **`async_macos.cyr` added** (new upstream; a partial refresh would have left
+  `async.cyr` with a dangling include). Verified **byte-identical to
+  `~/.cyrius/versions/6.5.33/lib`, file by file**, rather than assumed.
+  ⚠ prakash's `lib/` was checked against **its own declared pin first** and had
+  **zero drift** — hisab found its tree had arrived mid-sync and that comparing
+  old-pin against new-pin would have shown a tidy diff and missed it. prakash
+  was clean; the check is recorded so the next bump repeats it.
+- **`ganita_f64_pow`'s domain moved, and `src/error.cyr`'s measured table was
+  stamped "Measured on cyrius 6.5.20" with a row that had gone false.** ganita
+  1.1.4 special-cases zero base, zero exponent and **negative base with an
+  integral exponent** ahead of the `exp(n*ln(base))` path. Re-measured on this
+  host, raw f64 bits:
+
+  | expression | 6.5.20 | 6.5.33 |
+  |---|---|---|
+  | `pow(0, 2)` | NaN | `0x0` (0.0) |
+  | `pow(0, 0)` | NaN | `0x3FF0000000000000` (1.0) |
+  | `pow(0, -1)` | NaN | `0x7FF0000000000000` (+inf) |
+  | `pow(-2, 3)` | NaN | `0xC01FFFFFFFFFFFFE` (−7.99999999999999982) |
+  | `pow(2, 3)` | `0x401FFFFFFFFFFFFE` | `0x401FFFFFFFFFFFFE` *(control)* |
+  | `pow(-2, 0.5)` | NaN | NaN *(control)* |
+  | `pow(1, 0)` | 1.0 | 1.0 *(control)* |
+
+  **Three controls hold on both sides**, so the flips are real and not an
+  artefact of the probe. **Nothing prakash computes moved**: `_prk_pow` already
+  produced those three zero-base values, which is precisely why 5485 assertions
+  passed either side and the prose could rot unobserved.
+  - **`_prk_pow` is KEPT, and its rationale rewritten** — the stdlib now
+    produces the same bits, so the branch is a deliberate pin against a silent
+    upstream revert, not a repair.
+  - ⚠ **A negative base no longer fails loudly.** With an integral exponent it
+    is now finite but inexact (`pow(-2,3)` vs Rust's exact `-8`), where it used
+    to be a NaN somebody would notice. No prakash call site passes a negative
+    base — verified across all nine `_prk_pow` / `ganita_f64_pow` sites — but a
+    future one would now break bit-fidelity silently.
+  - The same stale reasoning in `tests/hardening.tcyr` is corrected; its
+    `(was NaN)` assertion messages are kept as history, now meaning *"before
+    6.5.33"* rather than *"without the shim"*.
+- **52 of 61 gated files reformatted.** ⚠ **This drift is PRE-EXISTING and is
+  not caused by the bump** — measured with each toolchain's own wrapper against
+  a pristine checkout: 6.5.20 flags **the same 52 files**, and `diff` of the two
+  sorted lists is empty. CI's Format check was already failing. Proven
+  **leading-whitespace-only**: 555 insertions against 555 deletions,
+  `git diff -w` **empty**, and no file changed line count.
+- **`bench-history.csv` gains derived `regime` and `floor_ns` columns, and the
+  trend table now filters on them.** `scripts/bench-history.sh`'s header claimed
+  the harness's per-call overhead "is included ... the min in the raw output is
+  the better absolute proxy" — false since cyrius 6.5.19, which taught the
+  harness to calibrate one clock read and subtract it. The script had been
+  echoing the harness's own `[timer floor ...]` banner while its header denied
+  it. `benchmarks.md` was consequently anchoring every Δ to a pre-floor
+  baseline and printing artefacts like −98.3% as improvements.
+  ⚠ **`regime` is DERIVED** — read from whether the harness printed that banner
+  — so it cannot go stale the way the constant it replaces did. ⚠ **What it
+  cannot do:** it separates "floor subtracted" from "floor not subtracted"; a
+  future instrument change that kept printing the banner would not flip it.
+  This run reports the **81 rows across 3 earlier runs** it excluded rather than
+  quietly dropping them.
+- **Stale version prose corrected** where it had become false rather than
+  historical: `cyrius.cyml`'s `[deps.hisab]` block (which named 2.11.1, sakshi
+  2.4.10 and "the 6.5.20 stdlib" in one sentence), `README.md`'s consumer
+  snippet (which pinned cyrius 6.5.20 and **prakash 2.0.1, four releases
+  behind**), `docs/architecture/overview.md`, and `tests/serialize.tcyr`'s
+  header (which justified its ~1e-5 tolerance with "bayan renders floats to 6
+  decimals" — untrue since bayan 1.2.1 replaced that renderer with round-trip-
+  correct Grisu2; the tolerance is now loose, not forced).
+  Historical narrative — prior CHANGELOG entries, the roadmap's per-release
+  rows, `docs/benchmarks-rust-v-cyrius.md`'s 2.0.1-era numbers — was
+  **deliberately left alone**: a figure stamped "as of X" is a record, not a
+  claim. Where such a doc carried a *toolchain* claim that is now false
+  ("Cyrius emits scalar f64 only — no SIMD"), a correction was added beside it
+  rather than the record being rewritten.
+- **The `.deps` sidecar behaviour was re-measured, and half of what prakash
+  documented had changed.** The core bundle's **over**-reporting reproduces
+  unchanged at 6.5.33. The ai bundle's **under**-reporting does not: through
+  6.5.20 the pruned inference yielded literally `syscalls io`, and it now yields
+  ten folds — still short of the stack sandhi needs, but a different shortfall.
+  `scripts/sync-deps-sidecar.sh` and `overview.md` both corrected.
+
+### Performance
+
+- ⭐ **Binary 12,767,544 → 2,785,712 bytes (−78%)** and static data
+  **10,792,936 → 798,472 bytes (−93%)**, from upstream restructuring of the
+  large stdlib folds. Same source, same build command.
+- ⚠ **No optics performance claim is made in 2.2.4.** 36 benchmarks compared
+  against a pre-bump baseline captured on this host in the same regime: **median
+  +0.9%**, and the single row moving ≥10% is `ray/fiber_na` at 9 ns → 8 ns —
+  one nanosecond of quantisation at the harness resolution limit, not a signal.
+
+### Notes
+
+- **A known latent divergence is now documented rather than fixed.**
+  `_prk_pow(0.0, NaN)` returns 1.0 (a NaN exponent is neither `> 0` nor `< 0`,
+  so it falls through to the `F64_ONE` branch); the raw builtin returns 0.0;
+  IEEE-754 / C99 `pow`, which Rust follows, says NaN. All three disagree. It is
+  **pre-existing, not introduced here**, and unreachable from prakash today —
+  every call site passes an exponent it computed itself. Fixing it is a
+  behaviour change and belongs in its own release, not in a toolchain bump.
+- `cyrius distlib --check` reports `dist/prakash-ai.cyr` STALE for prakash and
+  always will: it regenerates the sidecar (10 folds) and compares against the
+  28-fold override prakash deliberately owns. Bundle **content** is idempotent —
+  verified by hashing across two consecutive generations. CI does not use
+  `--check`; it regenerates, syncs, and diffs, which is correct.
+
 ## [2.2.3] - 2026-08-12 — Remove the `rust-old/` translation archive
 
 The Rust original is out of tree. It was retained through 2.2.2 as the

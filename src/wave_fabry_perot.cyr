@@ -21,8 +21,8 @@ fn fabry_perot_finesse(reflectance) {
 #must_use
 fn fabry_perot_transmittance(wavelength, thickness, n, angle, reflectance) {
     var delta = f64_div(
-    f64_mul(f64_mul(f64_mul(f64_mul(f64_from(4), F64_PI), n), thickness), _prk_cos(angle)),
-    wavelength);
+      f64_mul(f64_mul(f64_mul(f64_mul(f64_from(4), F64_PI), n), thickness), _prk_cos(angle)),
+      wavelength);
     var f_coeff = fabry_perot_finesse_coefficient(reflectance);
     var s = _prk_sin(f64_div(delta, F64_TWO));
     return f64_div(F64_ONE, f64_add(F64_ONE, f64_mul(f_coeff, f64_mul(s, s))));

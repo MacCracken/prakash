@@ -274,13 +274,13 @@ fn prescription_to_json(p) {
         var surf = vec_get(vec, i);
         var so = bayan_json_v_obj_new();
         bayan_json_v_obj_set(so, str_from("radius"),
-        bayan_json_v_float_new(PrescriptionSurface_radius(surf)));
+          bayan_json_v_float_new(PrescriptionSurface_radius(surf)));
         bayan_json_v_obj_set(so, str_from("thickness"),
-        bayan_json_v_float_new(PrescriptionSurface_thickness(surf)));
+          bayan_json_v_float_new(PrescriptionSurface_thickness(surf)));
         bayan_json_v_obj_set(so, str_from("n_after"),
-        bayan_json_v_float_new(PrescriptionSurface_n_after(surf)));
+          bayan_json_v_float_new(PrescriptionSurface_n_after(surf)));
         bayan_json_v_obj_set(so, str_from("aperture_radius"),
-        bayan_json_v_float_new(PrescriptionSurface_aperture_radius(surf)));
+          bayan_json_v_float_new(PrescriptionSurface_aperture_radius(surf)));
         bayan_json_v_arr_push(surfaces, so);
     }
     bayan_json_v_obj_set(o, str_from("surfaces"), surfaces);

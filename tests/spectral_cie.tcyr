@@ -205,8 +205,8 @@ assert(_in_range(color_rendering_index(illuminant_a()), Z, f64_from(100)), "A CR
 assert(_in_range(color_rendering_index(illuminant_f2()), Z, f64_from(100)), "F2 CRI in [0,100]");
 assert(_in_range(color_rendering_index(illuminant_f11()), Z, f64_from(100)), "F11 CRI in [0,100]");
 assert(
-f64_gt(color_rendering_index(illuminant_d65()), color_rendering_index(illuminant_f11())),
-"daylight CRI > fluorescent CRI");
+  f64_gt(color_rendering_index(illuminant_d65()), color_rendering_index(illuminant_f11())),
+  "daylight CRI > fluorescent CRI");
 
 # ── observers ────────
 test_group("observers");

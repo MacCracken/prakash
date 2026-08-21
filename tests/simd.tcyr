@@ -101,7 +101,7 @@ var obad = 0;
 for (var ny2 = 0; ny2 < 5; ny2 = ny2 + 1) {
     for (var nx2 = 0; nx2 < 3; nx2 = nx2 + 1) {
         if (_bits(pattern2d_get(onorm, nx2, ny2),
-        f64_mul(pattern2d_get(odd, nx2, ny2), oinv)) == 0) { obad = obad + 1; }
+            f64_mul(pattern2d_get(odd, nx2, ny2), oinv)) == 0) { obad = obad + 1; }
     }
 }
 assert(obad == 0, "all 15 cells of the odd pattern are correct (tail handled scalar)");
@@ -157,6 +157,6 @@ var _t0 = pattern2d_set(tiny, 0, 0, 0x0010000000000000);
 var tnorm = pattern2d_normalized(tiny);
 assert(tnorm != 0, "degenerate pattern normalizes");
 assert(_bits(pattern2d_get(tnorm, 0, 0), 0x0010000000000000) == 1,
-"below the 1e-30 floor the value is cloned exactly, not scaled");
+  "below the 1e-30 floor the value is cloned exactly, not scaled");
 
 var r = assert_summary();

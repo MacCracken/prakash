@@ -19,11 +19,11 @@ fn pbr_distribution_ggx_aniso(n_dot_h, h_dot_x, h_dot_y, roughness_x, roughness_
     var hx_ax = f64_div(h_dot_x, ax);
     var hy_ay = f64_div(h_dot_y, ay);
     var term = f64_add(
-    f64_add(f64_mul(hx_ax, hx_ax), f64_mul(hy_ay, hy_ay)),
-    f64_mul(ndh, ndh));
+      f64_add(f64_mul(hx_ax, hx_ax), f64_mul(hy_ay, hy_ay)),
+      f64_mul(ndh, ndh));
     var denom = f64_add(
-    f64_mul(f64_mul(f64_mul(f64_mul(F64_PI, ax), ay), term), term),
-    _pbr_eps15());
+      f64_mul(f64_mul(f64_mul(f64_mul(F64_PI, ax), ay), term), term),
+      _pbr_eps15());
     return f64_div(F64_ONE, denom);
 }
 
@@ -47,10 +47,10 @@ fn pbr_geometry_ggx_aniso(n_dot_v, v_dot_x, v_dot_y, roughness_x, roughness_y) {
 # Anisotropic Smith geometry (both directions).
 #must_use
 fn pbr_geometry_smith_aniso(n_dot_v, n_dot_l, v_dot_x, v_dot_y, l_dot_x, l_dot_y,
-roughness_x, roughness_y) {
+  roughness_x, roughness_y) {
     return f64_mul(
-    pbr_geometry_ggx_aniso(n_dot_v, v_dot_x, v_dot_y, roughness_x, roughness_y),
-    pbr_geometry_ggx_aniso(n_dot_l, l_dot_x, l_dot_y, roughness_x, roughness_y));
+      pbr_geometry_ggx_aniso(n_dot_v, v_dot_x, v_dot_y, roughness_x, roughness_y),
+      pbr_geometry_ggx_aniso(n_dot_l, l_dot_x, l_dot_y, roughness_x, roughness_y));
 }
 
 # ── Sheen ────────
@@ -64,8 +64,8 @@ fn pbr_distribution_charlie(n_dot_h, roughness) {
     var ndh = f64_clamp(n_dot_h, f64_from(0), F64_ONE);
     var sin_theta = f64_sqrt(f64_sub(F64_ONE, f64_mul(ndh, ndh)));
     return f64_div(
-    f64_mul(f64_add(F64_TWO, inv_alpha), _prk_pow(sin_theta, inv_alpha)),
-    f64_mul(F64_TWO, F64_PI));
+      f64_mul(f64_add(F64_TWO, inv_alpha), _prk_pow(sin_theta, inv_alpha)),
+      f64_mul(F64_TWO, F64_PI));
 }
 
 # Sheen BRDF (Charlie): D / (4*(ndl + ndv - ndl*ndv)).
@@ -75,7 +75,7 @@ fn pbr_sheen_charlie(n_dot_h, n_dot_l, n_dot_v, roughness) {
     var ndl = f64_clamp(n_dot_l, _pbr_r(1, 1000), F64_ONE);
     var ndv = f64_clamp(n_dot_v, _pbr_r(1, 1000), F64_ONE);
     return f64_div(d,
-    f64_mul(f64_from(4), f64_sub(f64_add(ndl, ndv), f64_mul(ndl, ndv))));
+      f64_mul(f64_from(4), f64_sub(f64_add(ndl, ndv), f64_mul(ndl, ndv))));
 }
 
 # Ashikhmin sheen: intensity * (1 - ct)^5.
@@ -122,8 +122,8 @@ fn pbr_clearcoat_brdf(n_dot_h, n_dot_v, n_dot_l, h_dot_v, clearcoat_roughness) {
 fn pbr_clearcoat_blend(base_brdf, coat_brdf, clearcoat, h_dot_v) {
     var fc = pbr_clearcoat_fresnel(h_dot_v);
     return f64_add(
-    f64_mul(f64_sub(F64_ONE, f64_mul(fc, clearcoat)), base_brdf),
-    f64_mul(clearcoat, coat_brdf));
+      f64_mul(f64_sub(F64_ONE, f64_mul(fc, clearcoat)), base_brdf),
+      f64_mul(clearcoat, coat_brdf));
 }
 
 # ── Subsurface Scattering ────────
@@ -137,8 +137,8 @@ fn pbr_sss_profile_burley(r, d) {
     }
     var inv_8pd = f64_div(F64_ONE, f64_mul(f64_mul(f64_from(8), F64_PI), d));
     var terms = f64_add(
-    _prk_exp(f64_div(f64_neg(r), d)),
-    _prk_exp(f64_div(f64_neg(r), f64_mul(f64_from(3), d))));
+      _prk_exp(f64_div(f64_neg(r), d)),
+      _prk_exp(f64_div(f64_neg(r), f64_mul(f64_from(3), d))));
     return f64_div(f64_mul(inv_8pd, terms), r);
 }
 
@@ -159,13 +159,13 @@ fn pbr_subsurface_diffuse(n_dot_l, n_dot_v, roughness) {
     var fv = _pbr_pow5(f64_sub(F64_ONE, ndv));
     var f_ss90 = f64_mul(roughness, roughness);
     var f_ss = f64_mul(
-    f64_add(F64_ONE, f64_mul(f64_sub(f_ss90, F64_ONE), fl)),
-    f64_add(F64_ONE, f64_mul(f64_sub(f_ss90, F64_ONE), fv)));
+      f64_add(F64_ONE, f64_mul(f64_sub(f_ss90, F64_ONE), fl)),
+      f64_add(F64_ONE, f64_mul(f64_sub(f_ss90, F64_ONE), fv)));
     var inner = f64_add(
-    f64_mul(f_ss, f64_sub(
-    f64_div(F64_ONE, f64_add(f64_add(ndl, ndv), _pbr_eps15())),
-    F64_HALF)),
-    F64_HALF);
+      f64_mul(f_ss, f64_sub(
+          f64_div(F64_ONE, f64_add(f64_add(ndl, ndv), _pbr_eps15())),
+          F64_HALF)),
+      F64_HALF);
     var fss = f64_mul(_pbr_r(125, 100), inner);
     return f64_div(fss, F64_PI);
 }
@@ -208,8 +208,8 @@ fn pbr_iridescence_fresnel(n_outside, n_film, n_base, thickness, wavelength, cos
     var r12 = f64_mul(q12, q12);
     # phase delta = TAU*n_film*thickness*cos_film / wavelength
     var delta = f64_div(
-    f64_mul(f64_mul(f64_mul(F64_TAU, n_film), thickness), cos_film),
-    wavelength);
+      f64_mul(f64_mul(f64_mul(F64_TAU, n_film), thickness), cos_film),
+      wavelength);
     var cos_d = _prk_cos(delta);
     var sqrt_rr = f64_sqrt(f64_mul(r01, r12));
     var cos_2d = f64_sub(f64_mul(f64_mul(F64_TWO, cos_d), cos_d), F64_ONE);
@@ -225,11 +225,11 @@ fn pbr_iridescence_fresnel(n_outside, n_film, n_base, thickness, wavelength, cos
 # Iridescence as RGB (R=650nm, G=550nm, B=450nm) into a 3-f64 out buffer.
 fn pbr_iridescence_rgb(n_outside, n_film, n_base, thickness_nm, cos_theta, out) {
     store64(out,
-    pbr_iridescence_fresnel(n_outside, n_film, n_base, thickness_nm, f64_from(650), cos_theta));
+      pbr_iridescence_fresnel(n_outside, n_film, n_base, thickness_nm, f64_from(650), cos_theta));
     store64(out + 8,
-    pbr_iridescence_fresnel(n_outside, n_film, n_base, thickness_nm, f64_from(550), cos_theta));
+      pbr_iridescence_fresnel(n_outside, n_film, n_base, thickness_nm, f64_from(550), cos_theta));
     store64(out + 16,
-    pbr_iridescence_fresnel(n_outside, n_film, n_base, thickness_nm, f64_from(450), cos_theta));
+      pbr_iridescence_fresnel(n_outside, n_film, n_base, thickness_nm, f64_from(450), cos_theta));
     return 0;
 }
 
@@ -257,8 +257,8 @@ fn pbr_phase_isotropic() {
 #must_use
 fn pbr_phase_rayleigh(cos_theta) {
     return f64_div(
-    f64_mul(f64_from(3), f64_add(F64_ONE, f64_mul(cos_theta, cos_theta))),
-    f64_mul(f64_from(16), F64_PI));
+      f64_mul(f64_from(3), f64_add(F64_ONE, f64_mul(cos_theta, cos_theta))),
+      f64_mul(f64_from(16), F64_PI));
 }
 
 # Extinction: sigma_t = absorption + scattering.
@@ -298,8 +298,8 @@ fn pbr_sample_ggx(roughness, xi1, xi2, out) {
     var a = f64_mul(roughness, roughness);
     var a2 = f64_mul(a, a);
     var cos_theta = f64_sqrt(f64_div(
-    f64_sub(F64_ONE, xi1),
-    f64_add(F64_ONE, f64_mul(f64_sub(a2, F64_ONE), xi1))));
+        f64_sub(F64_ONE, xi1),
+        f64_add(F64_ONE, f64_mul(f64_sub(a2, F64_ONE), xi1))));
     var sin_theta = f64_max(f64_sqrt(f64_sub(F64_ONE, f64_mul(cos_theta, cos_theta))), f64_from(0));
     var phi = f64_mul(F64_TAU, xi2);
     var sin_phi = _prk_sin(phi);
@@ -401,11 +401,11 @@ fn pbr_integrate_brdf_lut(n_dot_v, roughness, num_samples, out) {
         var xi1 = f64_mul(f64_from(i), inv_samples);
         pbr_sample_ggx(roughness, xi1, _pbr_radvdc(i), h);
         var vdh = f64_max(f64_add(
-        f64_add(f64_mul(load64(v), load64(h)), f64_mul(load64(v + 8), load64(h + 8))),
-        f64_mul(load64(v + 16), load64(h + 16))), f64_from(0));
+            f64_add(f64_mul(load64(v), load64(h)), f64_mul(load64(v + 8), load64(h + 8))),
+            f64_mul(load64(v + 16), load64(h + 16))), f64_from(0));
         var n_dot_l = f64_max(
-        f64_sub(f64_mul(f64_mul(F64_TWO, vdh), load64(h + 16)), load64(v + 16)),
-        f64_from(0));
+          f64_sub(f64_mul(f64_mul(F64_TWO, vdh), load64(h + 16)), load64(v + 16)),
+          f64_from(0));
         var n_dot_h = f64_max(load64(h + 16), f64_from(0));
         if (f64_gt(n_dot_l, f64_from(0)) == 1) {
             var g = pbr_geometry_smith(ndv, n_dot_l, roughness);

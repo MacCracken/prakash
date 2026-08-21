@@ -53,9 +53,9 @@ fn rgb_white() { return rgb_new(F64_ONE, F64_ONE, F64_ONE); }
 #must_use
 fn rgb_clamp(c) {
     return rgb_new(
-    f64_clamp(Rgb_r(c), f64_from(0), F64_ONE),
-    f64_clamp(Rgb_g(c), f64_from(0), F64_ONE),
-    f64_clamp(Rgb_b(c), f64_from(0), F64_ONE));
+      f64_clamp(Rgb_r(c), f64_from(0), F64_ONE),
+      f64_clamp(Rgb_g(c), f64_from(0), F64_ONE),
+      f64_clamp(Rgb_b(c), f64_from(0), F64_ONE));
 }
 
 # 8-bit sRGB channels (0-255).
@@ -88,9 +88,9 @@ fn rgb_to_u8(c) {
 #must_use
 fn rgb_luminance(c) {
     return f64_add(f64_add(
-    f64_mul(_r(2126, 10000), Rgb_r(c)),
-    f64_mul(_r(7152, 10000), Rgb_g(c))),
-    f64_mul(_r(722, 10000), Rgb_b(c)));
+        f64_mul(_r(2126, 10000), Rgb_r(c)),
+        f64_mul(_r(7152, 10000), Rgb_g(c))),
+      f64_mul(_r(722, 10000), Rgb_b(c)));
 }
 
 # ── Wavelength -> RGB ────────
@@ -138,10 +138,10 @@ fn wavelength_to_rgb(wavelength_nm, err_out) {
     var factor = F64_ONE;
     if (f64_lt(w, f64_from(420)) == 1) {
         factor = f64_add(_r(3, 10),
-        f64_div(f64_mul(_r(7, 10), f64_sub(w, f64_from(380))), f64_sub(f64_from(420), f64_from(380))));
+          f64_div(f64_mul(_r(7, 10), f64_sub(w, f64_from(380))), f64_sub(f64_from(420), f64_from(380))));
     } elif (f64_gt(w, f64_from(700)) == 1) {
         factor = f64_add(_r(3, 10),
-        f64_div(f64_mul(_r(7, 10), f64_sub(f64_from(780), w)), f64_sub(f64_from(780), f64_from(700))));
+          f64_div(f64_mul(_r(7, 10), f64_sub(f64_from(780), w)), f64_sub(f64_from(780), f64_from(700))));
     }
 
     return rgb_new(f64_mul(r, factor), f64_mul(g, factor), f64_mul(b, factor));
@@ -205,22 +205,22 @@ fn color_temperature_to_rgb(kelvin) {
     if (f64_le(temp, f64_from(66)) == 0) {
         var xr = f64_sub(temp, f64_from(60));
         r = f64_clamp(
-        f64_div(f64_mul(_r(329698727446, 1000000000),
-        _prk_pow(xr, f64_neg(_r(1332047592, 10000000000)))), f64_from(255)),
-        f64_from(0), F64_ONE);
+          f64_div(f64_mul(_r(329698727446, 1000000000),
+              _prk_pow(xr, f64_neg(_r(1332047592, 10000000000)))), f64_from(255)),
+          f64_from(0), F64_ONE);
     }
 
     var g = f64_from(0);
     if (f64_le(temp, f64_from(66)) == 1) {
         g = f64_div(f64_clamp(
-        f64_sub(f64_mul(_r(994708025861, 10000000000), f64_ln(temp)), _r(1611195681661, 10000000000)),
-        f64_from(0), f64_from(255)), f64_from(255));
+            f64_sub(f64_mul(_r(994708025861, 10000000000), f64_ln(temp)), _r(1611195681661, 10000000000)),
+            f64_from(0), f64_from(255)), f64_from(255));
     } else {
         var xg = f64_sub(temp, f64_from(60));
         g = f64_clamp(
-        f64_div(f64_mul(_r(2881221695283, 10000000000),
-        _prk_pow(xg, f64_neg(_r(7551484937, 100000000000)))), f64_from(255)),
-        f64_from(0), F64_ONE);
+          f64_div(f64_mul(_r(2881221695283, 10000000000),
+              _prk_pow(xg, f64_neg(_r(7551484937, 100000000000)))), f64_from(255)),
+          f64_from(0), F64_ONE);
     }
 
     var b = F64_ONE;
@@ -231,8 +231,8 @@ fn color_temperature_to_rgb(kelvin) {
     } else {
         var xb = f64_sub(temp, f64_from(10));
         b = f64_div(f64_clamp(
-        f64_sub(f64_mul(_r(1385177312231, 10000000000), f64_ln(xb)), _r(3050447927307, 10000000000)),
-        f64_from(0), f64_from(255)), f64_from(255));
+            f64_sub(f64_mul(_r(1385177312231, 10000000000), f64_ln(xb)), _r(3050447927307, 10000000000)),
+            f64_from(0), f64_from(255)), f64_from(255));
     }
 
     return rgb_new(r, g, b);

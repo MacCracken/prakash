@@ -5,7 +5,8 @@
 > - **Rust**: criterion v0.8, release mode. Latest run from `rust-old/bench-history.csv` as of tag 2.2.2 (2026-03-26, commit `01684d4`). f64 throughout.
 > - **Cyrius**: cyrius 6.5.20, `tests/prakash.bcyr`. Run 2026-08-12 (commit `7ec51c8`). f64 (IEEE-754 bits in i64), heap-allocated structs.
 > - **Platform**: x86_64 Linux.
-> - **Pre-SIMD baseline**: Cyrius 6.5.20 emits scalar f64 only — no SIMD (it's on the Cyrius roadmap). Every number here is scalar-vs-scalar (or scalar Cyrius vs Rust's autovectorized/glam paths). The gap is a current-toolchain artifact, not a language ceiling; SIMD closes the vector/FFT-heavy paths.
+> - **Pre-SIMD baseline**: every number here is scalar-vs-scalar (or scalar Cyrius vs Rust's autovectorized/glam paths). The gap is a toolchain artifact of this run, not a language ceiling.
+>   - ⚠ **The claim that "Cyrius emits scalar f64 only — no SIMD" was true for this 2.0.1-era run and is not true any more.** Cyrius has a `simd` fold; prakash adopted it in 2.2.0, vectorising `pattern2d_normalized` with a bulk `f64v_scale` (−26%, bit-identical). 6.5.24 further added an AVX2 (`f64v256_*`) path behind a `simd_has_avx2()` gate for the four-lane wrappers. The sentence is kept in its original scope as a record of what this comparison measured; it is not a current statement about the toolchain.
 > - The Rust numbers below are the record: `rust-old/` was removed in 2.2.3, so
 >   the full Rust set is in git rather than in-tree —
 >   `git show 2.2.2:rust-old/benchmarks.md` (and `rust-old/bench-history.csv` for

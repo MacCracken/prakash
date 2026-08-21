@@ -63,8 +63,8 @@ fn zernike_radial(n, m_abs, rho) {
         var denom = d1 * d2 * d3;
         var powval = _zern_powi(rho, n - 2 * s);
         var term = f64_mul(
-        f64_div(f64_mul(sign, f64_from(num)), f64_from(denom)),
-        powval);
+          f64_div(f64_mul(sign, f64_from(num)), f64_from(denom)),
+          powval);
         sum = f64_add(sum, term);
     }
     return sum;

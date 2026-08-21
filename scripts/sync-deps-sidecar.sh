@@ -6,13 +6,13 @@
 # `cyrius distlib` writes a `dist/<lib>.deps` sidecar listing the stdlib folds a
 # bundle needs in scope. It is published metadata describing the artifact.
 #
-# MEASURED SCOPE (cyrius 6.5.20, do not overstate this): the sidecar is NOT an
-# enforced contract. A consumer declaring fewer folds than it lists still
-# resolves cleanly (exit 0), a bogus fold name in it raises no error, and in the
-# git-dep flow the vendored set comes from prakash's own cyrius.cyml. The
-# upstream issue below reports a hard-error behaviour that does NOT reproduce
-# here. We correct the sidecar because a published file should be true, not
-# because a build breaks without it.
+# MEASURED SCOPE (re-measured at cyrius 6.5.33 for 2.2.4; do not overstate
+# this): the sidecar is NOT an enforced contract. A consumer declaring fewer
+# folds than it lists still resolves cleanly (exit 0), a bogus fold name in it
+# raises no error, and in the git-dep flow the vendored set comes from prakash's
+# own cyrius.cyml. The upstream issue below reports a hard-error behaviour that
+# does NOT reproduce here. We correct the sidecar because a published file
+# should be true, not because a build breaks without it.
 #
 # Since cyrius 6.5.10 the generator emits, for the BASE bundle, the declared
 # `[deps] stdlib` unioned with an include-scan; PROFILE bundles keep a pruned
@@ -28,8 +28,15 @@
 #     even though the core bundle references none of it. That misdescribes the
 #     math-only bundle to anyone reading it (and to any future tooling that
 #     does treat it as authoritative).
-#   - dist/prakash-ai.deps UNDER-reports — the pruned inference yields only
-#     `syscalls io`, omitting sandhi and its transitive stack.
+#   - dist/prakash-ai.deps UNDER-reports — the pruned inference omits most of
+#     what sandhi transitively needs.
+#     ⚠ RE-MEASURED AT 6.5.33: through 6.5.20 this yielded literally
+#     `syscalls io`. It now yields ten folds — `string alloc str vec math ganita
+#     tagged bayan sandhi sakshi` — still missing `net http tls async random
+#     fdlopen dynlib chrono` (the stack sandhi actually needs) as well as
+#     `syscalls io fmt args assert result simd fnptr bench callback`. The
+#     shortfall shrank; it did not close. The core over-reporting above
+#     reproduces unchanged.
 #
 # Upstream issue (fix shipped v6.5.10, prakash's inverted layout not covered):
 #   cyrius docs/development/issues/archived/2026-08-07-distlib-deps-sidecar-under-reports.md

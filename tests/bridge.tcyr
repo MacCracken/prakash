@@ -18,7 +18,7 @@ var RGB = alloc(24);
 test_group("bijli");
 
 _assert_near(br_em_frequency_to_wavelength_nm(f64_from(545000000000000)), f64_from(550), f64_from(5),
-"545THz ~ 550nm");
+  "545THz ~ 550nm");
 var freq = br_wavelength_nm_to_em_frequency(f64_from(550));
 _assert_near(br_em_frequency_to_wavelength_nm(freq), f64_from(550), _fd(1, 100), "wl<->freq roundtrip");
 assert_eq(br_em_frequency_to_wavelength_nm(Z), 0, "em freq 0 -> 0");

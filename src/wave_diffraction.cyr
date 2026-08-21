@@ -44,8 +44,8 @@ fn fraunhofer_1d(aperture, pairs, wavelength, angle) {
 #must_use
 fn fresnel_number(wavelength, aperture_radius, distance) {
     return f64_div(
-    f64_mul(aperture_radius, aperture_radius),
-    f64_mul(wavelength, distance));
+      f64_mul(aperture_radius, aperture_radius),
+      f64_mul(wavelength, distance));
 }
 
 # Auxiliary functions f(x), g(x) for the Fresnel integrals (x >= 1),
@@ -57,15 +57,15 @@ fn _fresnel_fg(x, f_out, g_out) {
     # f = (1 + 0.926*x2) / (2 + 1.792*x2 + 3.104*x4) / x
     var fnum = f64_add(F64_ONE, f64_mul(_diff_r(926, 1000), x2));
     var fden = f64_add(
-    f64_add(F64_TWO, f64_mul(_diff_r(1792, 1000), x2)),
-    f64_mul(_diff_r(3104, 1000), x4));
+      f64_add(F64_TWO, f64_mul(_diff_r(1792, 1000), x2)),
+      f64_mul(_diff_r(3104, 1000), x4));
     store64(f_out, f64_div(f64_div(fnum, fden), x));
     # g = 1 / (2 + 4.142*x2 + 3.492*x4 + 6.670*x2*x4) / x3
     var gden = f64_add(
-    f64_add(
-    f64_add(F64_TWO, f64_mul(_diff_r(4142, 1000), x2)),
-    f64_mul(_diff_r(3492, 1000), x4)),
-    f64_mul(f64_mul(_diff_r(6670, 1000), x2), x4));
+      f64_add(
+        f64_add(F64_TWO, f64_mul(_diff_r(4142, 1000), x2)),
+        f64_mul(_diff_r(3492, 1000), x4)),
+      f64_mul(f64_mul(_diff_r(6670, 1000), x2), x4));
     store64(g_out, f64_div(f64_div(F64_ONE, gden), x3));
 }
 
@@ -80,8 +80,8 @@ fn fresnel_integral_c(x) {
         var t2 = f64_mul(t, t);
         # ax * (1 - t2/20 + t2*t2/1680)
         var inner = f64_add(
-        f64_sub(F64_ONE, f64_div(t2, f64_from(20))),
-        f64_div(f64_mul(t2, t2), f64_from(1680)));
+          f64_sub(F64_ONE, f64_div(t2, f64_from(20))),
+          f64_div(f64_mul(t2, t2), f64_from(1680)));
         result = f64_mul(ax, inner);
     } else {
         var pi_x2 = f64_mul(f64_mul(F64_PI_2, ax), ax);
@@ -92,8 +92,8 @@ fn fresnel_integral_c(x) {
         _fresnel_fg(ax, &f, &g);
         # 0.5 + f*sin(pi_x2) - g*cos(pi_x2)
         result = f64_sub(
-        f64_add(F64_HALF, f64_mul(f, _prk_sin(pi_x2))),
-        f64_mul(g, _prk_cos(pi_x2)));
+          f64_add(F64_HALF, f64_mul(f, _prk_sin(pi_x2))),
+          f64_mul(g, _prk_cos(pi_x2)));
     }
     if (f64_lt(x, f64_from(0)) == 1) {
         return f64_neg(result);
@@ -112,11 +112,11 @@ fn fresnel_integral_s(x) {
         var t2 = f64_mul(t, t);
         # ax * x2 * (PI_2/3) * (1 - t2/42 + t2*t2/3960)
         var inner = f64_add(
-        f64_sub(F64_ONE, f64_div(t2, f64_from(42))),
-        f64_div(f64_mul(t2, t2), f64_from(3960)));
+          f64_sub(F64_ONE, f64_div(t2, f64_from(42))),
+          f64_div(f64_mul(t2, t2), f64_from(3960)));
         result = f64_mul(
-        f64_mul(f64_mul(ax, x2), f64_div(F64_PI_2, f64_from(3))),
-        inner);
+          f64_mul(f64_mul(ax, x2), f64_div(F64_PI_2, f64_from(3))),
+          inner);
     } else {
         var pi_x2 = f64_mul(f64_mul(F64_PI_2, ax), ax);
         # Stack locals, not `alloc(16)`: these are hot scalar entry points and
@@ -126,8 +126,8 @@ fn fresnel_integral_s(x) {
         _fresnel_fg(ax, &f, &g);
         # 0.5 - f*cos(pi_x2) - g*sin(pi_x2)
         result = f64_sub(
-        f64_sub(F64_HALF, f64_mul(f, _prk_cos(pi_x2))),
-        f64_mul(g, _prk_sin(pi_x2)));
+          f64_sub(F64_HALF, f64_mul(f, _prk_cos(pi_x2))),
+          f64_mul(g, _prk_sin(pi_x2)));
     }
     if (f64_lt(x, f64_from(0)) == 1) {
         return f64_neg(result);
@@ -145,15 +145,15 @@ fn fresnel_integral_cs(x, c_out, s_out) {
         var t = f64_mul(F64_PI_2, x2);
         var t2 = f64_mul(t, t);
         var c_inner = f64_add(
-        f64_sub(F64_ONE, f64_div(t2, f64_from(20))),
-        f64_div(f64_mul(t2, t2), f64_from(1680)));
+          f64_sub(F64_ONE, f64_div(t2, f64_from(20))),
+          f64_div(f64_mul(t2, t2), f64_from(1680)));
         c_val = f64_mul(ax, c_inner);
         var s_inner = f64_add(
-        f64_sub(F64_ONE, f64_div(t2, f64_from(42))),
-        f64_div(f64_mul(t2, t2), f64_from(3960)));
+          f64_sub(F64_ONE, f64_div(t2, f64_from(42))),
+          f64_div(f64_mul(t2, t2), f64_from(3960)));
         s_val = f64_mul(
-        f64_mul(f64_mul(ax, x2), f64_div(F64_PI_2, f64_from(3))),
-        s_inner);
+          f64_mul(f64_mul(ax, x2), f64_div(F64_PI_2, f64_from(3))),
+          s_inner);
     } else {
         var pi_x2 = f64_mul(f64_mul(F64_PI_2, ax), ax);
         # Stack locals, not `alloc(16)`: these are hot scalar entry points and
@@ -234,8 +234,8 @@ fn ar_quarter_wave_thickness(wavelength, n_coating) {
 #must_use
 fn coating_reflectance(wavelength, n_incident, n_coating, n_substrate, thickness) {
     var delta = f64_div(
-    f64_mul(f64_mul(F64_TAU, n_coating), thickness),
-    wavelength);
+      f64_mul(f64_mul(F64_TAU, n_coating), thickness),
+      wavelength);
     var sin_d = _prk_sin(delta);
     var cos_d = _prk_cos(delta);
     var nc2 = f64_mul(n_coating, n_coating);
@@ -245,8 +245,8 @@ fn coating_reflectance(wavelength, n_incident, n_coating, n_substrate, thickness
     var c = f64_mul(n_coating, f64_add(n_incident, n_substrate));
     var num = f64_mul(f64_mul(f64_mul(a, a), sin_d), sin_d);
     var den = f64_add(
-    f64_mul(f64_mul(f64_mul(b, b), sin_d), sin_d),
-    f64_mul(f64_mul(f64_mul(c, c), cos_d), cos_d));
+      f64_mul(f64_mul(f64_mul(b, b), sin_d), sin_d),
+      f64_mul(f64_mul(f64_mul(c, c), cos_d), cos_d));
     return f64_div(num, den);
 }
 
@@ -292,8 +292,8 @@ fn multilayer_reflectance(wavelength, n_incident, n_substrate, layers, num_layer
     var den_r = f64_add(f64_mul(ni, m11_r), f64_mul(ns, m22_r));
     var den_i = f64_add(f64_mul(f64_mul(ni, ns), m12_i), m21_i);
     return f64_div(
-    f64_add(f64_mul(num_r, num_r), f64_mul(num_i, num_i)),
-    f64_add(f64_mul(den_r, den_r), f64_mul(den_i, den_i)));
+      f64_add(f64_mul(num_r, num_r), f64_mul(num_i, num_i)),
+      f64_add(f64_mul(den_r, den_r), f64_mul(den_i, den_i)));
 }
 
 # ── Full Transfer Matrix Method (oblique incidence, s/p split) ────────
@@ -334,8 +334,8 @@ fn _diff_tmm_stack(wavelength, ni, ns, layers, num_layers, cos_i, cos_sub, ni_si
         var d = load64(layers + i * 16 + 8);
         var cos_l = _diff_cos_in_medium(n, ni_sin_i);
         var delta = f64_div(
-        f64_mul(f64_mul(f64_mul(F64_TAU, n), d), cos_l),
-        wavelength);
+          f64_mul(f64_mul(f64_mul(F64_TAU, n), d), cos_l),
+          wavelength);
         var eta = _diff_eta(n, cos_l, is_p);
         var sin_d = _prk_sin(delta);
         var cos_d = _prk_cos(delta);
@@ -355,8 +355,8 @@ fn _diff_tmm_stack(wavelength, ni, ns, layers, num_layers, cos_i, cos_sub, ni_si
     var den_r = f64_add(f64_mul(eta_i, m11_r), f64_mul(eta_s, m22_r));
     var den_i = f64_add(f64_mul(f64_mul(eta_i, eta_s), m12_i), m21_i);
     var r = f64_div(
-    f64_add(f64_mul(num_r, num_r), f64_mul(num_i, num_i)),
-    f64_add(f64_mul(den_r, den_r), f64_mul(den_i, den_i)));
+      f64_add(f64_mul(num_r, num_r), f64_mul(num_i, num_i)),
+      f64_add(f64_mul(den_r, den_r), f64_mul(den_i, den_i)));
     store64(rt_out, r);
     store64(rt_out + 8, f64_sub(F64_ONE, r));
 }
@@ -373,11 +373,11 @@ fn multilayer_rt(wavelength, angle, n_incident, n_substrate, layers, num_layers)
     var rt_s = alloc(16);
     if (rt_s == 0) { return 0; }
     _diff_tmm_stack(wavelength, n_incident, n_substrate, layers, num_layers,
-    cos_i, cos_sub, ni_sin_i, 0, rt_s);
+      cos_i, cos_sub, ni_sin_i, 0, rt_s);
     var rt_p = alloc(16);
     if (rt_p == 0) { return 0; }
     _diff_tmm_stack(wavelength, n_incident, n_substrate, layers, num_layers,
-    cos_i, cos_sub, ni_sin_i, 1, rt_p);
+      cos_i, cos_sub, ni_sin_i, 1, rt_p);
     var r_s = load64(rt_s);
     var t_s = load64(rt_s + 8);
     var r_p = load64(rt_p);

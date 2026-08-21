@@ -27,11 +27,11 @@ assert(f64_lt(lens_thin_image_distance(f64_from(50), f64_from(30), ER), Z), "vir
 var _e0 = lens_thin_image_distance(f64_from(50), f64_from(50), ER);
 assert_eq(prakash_is_err(load64(ER)), 1, "object at focus is err");
 _assert_near(lens_thin_image_distance(f64_from(50), f64_from(1000000), ER), f64_from(50), _fd(1, 100),
-"far object di~f");
+  "far object di~f");
 assert(f64_lt(lens_thin_image_distance(f64_neg(f64_from(50)), f64_from(100), ER), Z), "diverging virtual");
 var di_eq = lens_thin_image_distance(f64_from(75), f64_from(200), ER);
 _assert_near(f64_div(F64_ONE, f64_from(75)),
-f64_add(f64_div(F64_ONE, f64_from(200)), f64_div(F64_ONE, di_eq)), EPS, "satisfies 1/f=1/do+1/di");
+  f64_add(f64_div(F64_ONE, f64_from(200)), f64_div(F64_ONE, di_eq)), EPS, "satisfies 1/f=1/do+1/di");
 
 # ── Magnification ────────
 test_group("magnification");
@@ -47,13 +47,13 @@ assert(f64_gt(lens_magnification(f64_from(30), f64_neg(f64_from(60))), Z), "virt
 test_group("lensmaker");
 
 _assert_near(lens_lensmaker_focal_length(N15, f64_from(100), f64_neg(f64_from(100)), ER), f64_from(100),
-EPS, "lensmaker f=100");
+  EPS, "lensmaker f=100");
 _assert_near(lens_lensmaker_focal_length(N15, f64_from(100), INF, ER), f64_from(200), EPS,
-"planoconvex f=200");
+  "planoconvex f=200");
 var _e1 = lens_lensmaker_focal_length(N15, INF, INF, ER);
 assert_eq(prakash_is_err(load64(ER)), 1, "flat surfaces err");
 assert(f64_lt(lens_lensmaker_focal_length(N15, f64_neg(f64_from(100)), f64_from(100), ER), Z),
-"biconcave f<0");
+  "biconcave f<0");
 
 # ── Optical power ────────
 test_group("optical_power");
@@ -72,7 +72,7 @@ _assert_near(lens_mirror_focal_length(f64_from(200)), f64_from(100), EPS, "mirro
 assert(f64_gt(lens_mirror_focal_length(f64_from(100)), Z), "concave f>0");
 assert(f64_lt(lens_mirror_focal_length(f64_neg(f64_from(100))), Z), "convex f<0");
 _assert_near(lens_mirror_image_distance(f64_from(100), f64_from(200), ER), f64_from(200), EPS,
-"mirror image real 200");
+  "mirror image real 200");
 var _e3 = lens_mirror_image_distance(f64_from(100), f64_from(100), ER);
 assert_eq(prakash_is_err(load64(ER)), 1, "mirror at focus err");
 
@@ -87,9 +87,9 @@ assert_eq(lens_classify(Z), LENS_DIVERGING, "zero diverging");
 test_group("combined");
 
 _assert_near(lens_combined_focal_length(f64_from(100), f64_from(100), ER), f64_from(50), EPS,
-"combined 100+100 = 50");
+  "combined 100+100 = 50");
 _assert_near(lens_combined_focal_length(f64_from(50), f64_neg(f64_from(100)), ER), f64_from(100), EPS,
-"combined 50-100 = 100");
+  "combined 50-100 = 100");
 var _e4 = lens_combined_focal_length(f64_from(100), f64_neg(f64_from(100)), ER);
 assert_eq(prakash_is_err(load64(ER)), 1, "equal opposite err");
 
@@ -134,7 +134,7 @@ assert(f64_gt(CardinalPoints_focal_length(cp), Z), "cardinal f>0");
 assert(f64_gt(CardinalPoints_bfd(cp), Z), "cardinal bfd>0");
 assert(f64_lt(CardinalPoints_ffd(cp), Z), "cardinal ffd<0");
 assert(f64_lt(f64_abs(f64_sub(f64_abs(CardinalPoints_front_principal(cp)),
-f64_abs(CardinalPoints_back_principal(cp)))), _fd(1, 10)), "symmetric principal planes");
+        f64_abs(CardinalPoints_back_principal(cp)))), _fd(1, 10)), "symmetric principal planes");
 
 # ── F-number / NA ────────
 test_group("f_number_na");
@@ -148,7 +148,7 @@ _assert_near(lens_aperture_from_f_number(f64_from(85), nfr), d357, EPS, "f/apert
 _assert_near(lens_numerical_aperture(F64_ONE, f64_div(F64_PI, f64_from(6))), F64_HALF, EPS, "NA sin30 = 0.5");
 _assert_near(lens_na_from_f_number(F64_TWO), _fd(1, 4), EPS, "NA from f/2 = 0.25");
 assert(f64_gt(lens_numerical_aperture(_fd(1515, 1000), f64_div(F64_PI, f64_from(3))), F64_ONE),
-"oil immersion NA > 1");
+  "oil immersion NA > 1");
 var theta_s = lens_diffraction_limit(_fd(55, 100000), f64_from(10));
 assert(f64_gt(theta_s, Z), "diffraction limit > 0");
 assert(f64_lt(theta_s, _fd(1, 1000)), "diffraction limit small");
@@ -165,7 +165,7 @@ var fov_deg = f64_div(f64_mul(fov50, f64_from(180)), F64_PI);
 _assert_near(fov_deg, _fd(396, 10), F64_ONE, "50mm FF ~ 39.6 deg");
 assert(f64_lt(lens_field_of_view(f64_from(36), f64_from(200)), fov50), "longer lens narrower");
 assert(f64_gt(lens_field_of_view_diagonal(f64_from(36), f64_from(24), f64_from(50)), fov50),
-"diagonal > horizontal");
+  "diagonal > horizontal");
 
 var PR = alloc(8);
 var TF = alloc(4 * 16);
@@ -178,7 +178,7 @@ var MG = alloc(3 * 8);
 test_group("mtf");
 
 _assert_near(lens_mtf_cutoff_frequency(_fd(55, 100000), _fd(28, 10)), f64_from(649), f64_from(5),
-"cutoff ~ 649 cy/mm");
+  "cutoff ~ 649 cy/mm");
 _assert_near(lens_mtf_diffraction_limited(Z, f64_from(1000)), F64_ONE, EPS, "MTF(0) = 1");
 assert(f64_lt(f64_abs(lens_mtf_diffraction_limited(f64_from(1000), f64_from(1000))), EPS), "MTF at cutoff = 0");
 assert(f64_lt(f64_abs(lens_mtf_diffraction_limited(f64_from(1500), f64_from(1000))), EPS), "MTF above cutoff = 0");
@@ -199,16 +199,16 @@ store64(WL, _fd(55, 100000));
 store64(WT, F64_ONE);
 var mono_cut = lens_mtf_cutoff_frequency(_fd(55, 100000), _fd(28, 10));
 _assert_near(lens_mtf_polychromatic(WL, 1, WT, 1, _fd(28, 10), f64_from(200)),
-lens_mtf_diffraction_limited(f64_from(200), mono_cut), EPS, "polychromatic single = mono");
+  lens_mtf_diffraction_limited(f64_from(200), mono_cut), EPS, "polychromatic single = mono");
 store64(WL + 8, _fd(45, 100000));
 assert(f64_ge(lens_mtf_polychromatic(WL, 2, WT, 0, _fd(28, 10), f64_from(200)), Z),
-"polychromatic default weights");
+  "polychromatic default weights");
 var tf_def = alloc(2 * 8);
 store64(tf_def, Z);
 store64(tf_def + 8, _fd(1, 100));
 lens_mtf_through_focus(_fd(55, 100000), _fd(28, 10), f64_from(200), tf_def, 2, TF);
 _assert_near(load64(TF + 8), lens_mtf_diffraction_limited(f64_from(200), mono_cut), EPS,
-"through-focus at 0 = mono");
+  "through-focus at 0 = mono");
 assert(f64_le(load64(TF + 24), load64(TF + 8)), "through-focus defocus attenuates");
 
 # ── Seidel aberrations ────────
@@ -216,9 +216,9 @@ test_group("seidel");
 
 assert(f64_lt(f64_abs(lens_shape_factor(f64_from(100), f64_neg(f64_from(100)))), EPS), "equiconvex q=0");
 _assert_near(lens_shape_factor(f64_from(100), f64_from(1000000000000000)), F64_ONE, _fd(1, 100),
-"planoconvex q~1");
+  "planoconvex q~1");
 _assert_near(lens_conjugate_factor(f64_from(10000000000), f64_from(50)), f64_neg(F64_ONE), _fd(1, 1000),
-"object at infinity p~-1");
+  "object at infinity p~-1");
 assert(f64_lt(f64_abs(lens_conjugate_factor(f64_from(100), f64_from(100))), EPS), "symmetric p=0");
 
 var sc_eq = lens_seidel_coefficients(N15, f64_from(100), Z, f64_neg(F64_ONE));
@@ -239,17 +239,17 @@ for (var qi = 0 - 20; qi <= 20; qi = qi + 1) {
 }
 var sc_best = lens_seidel_coefficients(N15, f64_from(100), best_q, f64_neg(F64_ONE));
 assert(f64_le(f64_abs(SeidelCoefficients_spherical(sc_best)),
-f64_abs(SeidelCoefficients_spherical(sc_eq))), "best-form <= equiconvex spherical");
+    f64_abs(SeidelCoefficients_spherical(sc_eq))), "best-form <= equiconvex spherical");
 
 assert(f64_gt(f64_abs(lens_longitudinal_spherical_aberration(f64_from(10), f64_from(100), N15)),
-f64_abs(lens_longitudinal_spherical_aberration(f64_from(5), f64_from(100), N15))),
-"LSA increases with ray height");
+    f64_abs(lens_longitudinal_spherical_aberration(f64_from(5), f64_from(100), N15))),
+  "LSA increases with ray height");
 
 var tca = lens_chromatic_aberration(f64_from(100), f64_from(64));
 assert(f64_gt(tca, Z), "chromatic > 0");
 _assert_near(tca, _fd(15625, 10000), EPS, "TCA = 1.5625");
 assert(f64_lt(lens_chromatic_aberration(f64_from(100), f64_from(64)),
-lens_chromatic_aberration(f64_from(100), f64_from(26))), "crown less TCA than flint");
+    lens_chromatic_aberration(f64_from(100), f64_from(26))), "crown less TCA than flint");
 
 # ── Petzval ────────
 test_group("petzval");
@@ -275,7 +275,7 @@ var f_sep = lens_separated_focal_length(f64_from(100), f64_from(100), Z, ER);
 var f_contact = lens_combined_focal_length(f64_from(100), f64_from(100), ER);
 _assert_near(f_sep, f_contact, EPS, "separated d=0 = combined");
 assert(f64_gt(lens_separated_focal_length(f64_from(50), f64_neg(f64_from(80)), f64_from(30), ER),
-f64_from(50)), "telephoto longer EFL");
+    f64_from(50)), "telephoto longer EFL");
 var bfd_tele = lens_separated_bfd(f64_from(50), f64_neg(f64_from(80)), f64_from(30), ER);
 var f_tele = lens_separated_focal_length(f64_from(50), f64_neg(f64_from(80)), f64_from(30), ER);
 assert(f64_lt(bfd_tele, f_tele), "telephoto BFD < EFL");

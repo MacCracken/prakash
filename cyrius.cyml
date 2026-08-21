@@ -5,7 +5,7 @@ description = "prakash — optics and light simulation (ray optics, wave optics,
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/prakash"
 language = "cyrius"
-cyrius = "6.5.20"
+cyrius = "6.5.33"
 
 [build]
 src = "src/main.cyr"
@@ -119,12 +119,17 @@ stdlib = [
 
 # hisab (higher mathematics) — FFT (num_fft) for wave_pattern.
 # prakash's library surface is exactly that one entry point (the test suite
-# also exercises num_ifft); the rest of hisab's 34
-# modules ride along in the bundle unused. 2.6.8 was the collision-hardening
-# patch (FLOAT_RENDER_BUF stack-array -> alloc; ERR_* -> HSB_ERR_) that let hisab
-# co-compile with the sandhi/TLS stack pulled by [lib.ai]; both properties still
-# hold in 2.11.1, which also pins sakshi 2.4.10 to match the 6.5.20 stdlib.
+# also exercises num_ifft); the rest of hisab's modules ride along in the bundle
+# unused. 2.6.8 was the collision-hardening patch (FLOAT_RENDER_BUF stack-array
+# -> alloc; ERR_* -> HSB_ERR_) that let hisab co-compile with the sandhi/TLS
+# stack pulled by [lib.ai]; both properties still hold in 2.11.2, which pins
+# sakshi 2.4.11 to match the 6.5.33 stdlib.
+#
+# ⚠ 2.11.2 is the release that absorbed this same cyrius 6.5.18 -> 6.5.33 bump
+# upstream, so it carries the ganita 1.1.4 `f64_pow` domain change described in
+# src/error.cyr's shim block. prakash re-measured that change here rather than
+# inheriting the claim — see the 2.2.4 CHANGELOG entry.
 [deps.hisab]
 git = "https://github.com/MacCracken/hisab.git"
-tag = "2.11.1"
+tag = "2.11.2"
 modules = ["dist/hisab.cyr"]

@@ -82,7 +82,7 @@ for (var si = 0; si < 4; si = si + 1) {
 test_group("ndf");
 
 assert(f64_gt(pbr_distribution_ggx(F64_ONE, _fd(1, 100)),
-f64_mul(pbr_distribution_ggx(F64_HALF, _fd(1, 100)), f64_from(100))), "ggx smooth peaky");
+    f64_mul(pbr_distribution_ggx(F64_HALF, _fd(1, 100)), f64_from(100))), "ggx smooth peaky");
 var dpr = pbr_distribution_ggx(F64_ONE, _fd(9, 10));
 var dor = pbr_distribution_ggx(F64_HALF, _fd(9, 10));
 assert(f64_gt(dpr, dor), "ggx rough peak > off");
@@ -114,22 +114,22 @@ store64(r_geo + 32, F64_ONE);
 for (var gi = 0; gi < 5; gi = gi + 1) {
     for (var gj = 0; gj < 5; gj = gj + 1) {
         assert(f64_ge(pbr_distribution_ggx(load64(ndhs + gi * 8), load64(roughs + gj * 8)), Z),
-        "ggx non-negative");
+          "ggx non-negative");
     }
 }
 for (var pk = 0; pk < 5; pk = pk + 1) {
     var rr = load64(r_pk + pk * 8);
     assert(f64_ge(pbr_distribution_ggx(F64_ONE, rr), pbr_distribution_ggx(F64_HALF, rr)),
-    "ggx peaks at ndh=1");
+      "ggx peaks at ndh=1");
 }
 
 assert(f64_gt(pbr_distribution_beckmann(_fd(8, 10), F64_HALF), Z), "beckmann positive");
 assert(f64_gt(pbr_distribution_beckmann(F64_ONE, _fd(3, 10)),
-pbr_distribution_beckmann(_fd(7, 10), _fd(3, 10))), "beckmann peak at normal");
+    pbr_distribution_beckmann(_fd(7, 10), _fd(3, 10))), "beckmann peak at normal");
 for (var bi = 0; bi < 6; bi = bi + 1) {
     for (var bj = 0; bj < 5; bj = bj + 1) {
         assert(f64_ge(pbr_distribution_beckmann(load64(nd_bk + bi * 8), load64(r_pk + bj * 8)), Z),
-        "beckmann non-negative");
+          "beckmann non-negative");
     }
 }
 
@@ -148,13 +148,13 @@ for (var xi = 0; xi < 5; xi = xi + 1) {
 assert(f64_gt(pbr_geometry_smith(F64_ONE, F64_ONE, _fd(1, 10)), _fd(9, 10)), "smith no occlusion");
 assert(f64_lt(pbr_geometry_smith(_fd(1, 100), _fd(1, 100), F64_HALF), _fd(1, 10)), "smith grazing");
 _assert_near(pbr_geometry_smith(_fd(8, 10), _fd(6, 10), _fd(3, 10)),
-pbr_geometry_smith(_fd(6, 10), _fd(8, 10), _fd(3, 10)), EPS, "smith symmetric");
+  pbr_geometry_smith(_fd(6, 10), _fd(8, 10), _fd(3, 10)), EPS, "smith symmetric");
 
 # ── Cook-Torrance ────────
 test_group("cook_torrance");
 
 assert(f64_gt(pbr_cook_torrance(_fd(9, 10), _fd(85, 100), _fd(8, 10), _fd(7, 10), _fd(3, 10), F04), Z),
-"cook-torrance positive");
+  "cook-torrance positive");
 var smooth = pbr_cook_torrance(F64_ONE, _fd(9, 10), _fd(8, 10), _fd(7, 10), _fd(1, 10), F04);
 var rough = pbr_cook_torrance(F64_ONE, _fd(9, 10), _fd(8, 10), _fd(7, 10), _fd(9, 10), F04);
 assert(f64_gt(smooth, rough), "smooth higher peak");

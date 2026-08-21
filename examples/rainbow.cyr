@@ -66,8 +66,8 @@ fn min_deviation(n) {
             var theta_r = ganita_f64_asin(sin_r);
             # delta = 2*(theta_i - theta_r) + (pi - 2*theta_r)
             var dev = f64_add(
-            f64_mul(F64_TWO, f64_sub(theta_i, theta_r)),
-            f64_sub(F64_PI, f64_mul(F64_TWO, theta_r)));
+              f64_mul(F64_TWO, f64_sub(theta_i, theta_r)),
+              f64_sub(F64_PI, f64_mul(F64_TWO, theta_r)));
             if (f64_lt(dev, min_dev) == 1) { min_dev = dev; }
         }
     }

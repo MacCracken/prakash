@@ -172,8 +172,8 @@ _assert_near(RayVec2_y(r2n), F64_ONE, TOL6, "reflect2d normal y=1");
 
 # reflect_3d: [0,-1,0] about [0,1,0] -> [0,1,0]
 var r3 = ray_reflect_3d(
-ray_vec3(f64_from(0), f64_neg(F64_ONE), f64_from(0)),
-ray_vec3(f64_from(0), F64_ONE, f64_from(0)));
+  ray_vec3(f64_from(0), f64_neg(F64_ONE), f64_from(0)),
+  ray_vec3(f64_from(0), F64_ONE, f64_from(0)));
 _assert_near(RayVec3_x(r3), f64_from(0), TOL6, "reflect3d x=0");
 _assert_near(RayVec3_y(r3), F64_ONE, TOL6, "reflect3d y=1");
 _assert_near(RayVec3_z(r3), f64_from(0), TOL6, "reflect3d z=0");
@@ -182,11 +182,11 @@ _assert_near(RayVec3_z(r3), f64_from(0), TOL6, "reflect3d z=0");
 var dm = ray_vec3(_fd(577, 1000), f64_neg(_fd(577, 1000)), _fd(577, 1000));
 var rm = ray_reflect_3d(dm, ray_vec3(f64_from(0), F64_ONE, f64_from(0)));
 var mag_in = f64_sqrt(f64_add(
-f64_add(f64_mul(RayVec3_x(dm), RayVec3_x(dm)), f64_mul(RayVec3_y(dm), RayVec3_y(dm))),
-f64_mul(RayVec3_z(dm), RayVec3_z(dm))));
+    f64_add(f64_mul(RayVec3_x(dm), RayVec3_x(dm)), f64_mul(RayVec3_y(dm), RayVec3_y(dm))),
+    f64_mul(RayVec3_z(dm), RayVec3_z(dm))));
 var mag_out = f64_sqrt(f64_add(
-f64_add(f64_mul(RayVec3_x(rm), RayVec3_x(rm)), f64_mul(RayVec3_y(rm), RayVec3_y(rm))),
-f64_mul(RayVec3_z(rm), RayVec3_z(rm))));
+    f64_add(f64_mul(RayVec3_x(rm), RayVec3_x(rm)), f64_mul(RayVec3_y(rm), RayVec3_y(rm))),
+    f64_mul(RayVec3_z(rm), RayVec3_z(rm))));
 _assert_near(mag_in, mag_out, TOL_01, "reflect3d preserves magnitude");
 
 # reflect_3d diagonal: s=1/sqrt2, [s,-s,0] about [0,1,0] -> [s,s,0]
@@ -202,8 +202,8 @@ test_group("refract_3d");
 # normal incidence: straight down, no bending, still -z, unit length
 var e_r = 0;
 var rn = ray_refract_3d(
-ray_vec3(f64_from(0), f64_from(0), f64_neg(F64_ONE)),
-ray_vec3(f64_from(0), f64_from(0), F64_ONE), F64_ONE, _fd(15, 10), &e_r);
+  ray_vec3(f64_from(0), f64_from(0), f64_neg(F64_ONE)),
+  ray_vec3(f64_from(0), f64_from(0), F64_ONE), F64_ONE, _fd(15, 10), &e_r);
 assert_eq(e_r, 0, "refract normal ok");
 _assert_near(RayVec3_x(rn), f64_from(0), TOL6, "refract normal x=0");
 _assert_near(RayVec3_y(rn), f64_from(0), TOL6, "refract normal y=0");
@@ -213,8 +213,8 @@ assert(f64_lt(RayVec3_z(rn), f64_from(0)), "refract normal still -z");
 var e_b = 0;
 var sb = f64_div(F64_ONE, f64_sqrt(F64_TWO));
 var rb = ray_refract_3d(
-ray_vec3(sb, f64_from(0), f64_neg(sb)),
-ray_vec3(f64_from(0), f64_from(0), F64_ONE), F64_ONE, _fd(15, 10), &e_b);
+  ray_vec3(sb, f64_from(0), f64_neg(sb)),
+  ray_vec3(f64_from(0), f64_from(0), F64_ONE), F64_ONE, _fd(15, 10), &e_b);
 assert_eq(e_b, 0, "refract bend ok");
 var angle_tb = ganita_f64_acos(f64_neg(RayVec3_z(rb)));
 assert(f64_lt(angle_tb, F64_PI_4), "refract bends toward normal (<45deg)");
@@ -222,8 +222,8 @@ assert(f64_lt(angle_tb, F64_PI_4), "refract bends toward normal (<45deg)");
 # TIR: glass->air at steep angle. [0.8,0,-0.6] is already unit length
 var e_t = 0;
 var _rt = ray_refract_3d(
-ray_vec3(_fd(8, 10), f64_from(0), f64_neg(_fd(6, 10))),
-ray_vec3(f64_from(0), f64_from(0), F64_ONE), _fd(15, 10), F64_ONE, &e_t);
+  ray_vec3(_fd(8, 10), f64_from(0), f64_neg(_fd(6, 10))),
+  ray_vec3(f64_from(0), f64_from(0), F64_ONE), _fd(15, 10), F64_ONE, &e_t);
 assert_eq(e_t, PK_ERR_TIR, "refract glass-air TIR");
 
 # Snell's law holds: n1 sin(i) == n2 sin(t)

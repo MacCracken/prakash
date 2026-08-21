@@ -354,8 +354,8 @@ fn interference_pattern(sources, num_sources, wavelength, distance, gx0, gx1, gy
                 var sx = f64_sub(obs_x, PointSource_x(src));
                 var sy = f64_sub(obs_y, PointSource_y(src));
                 var r = f64_sqrt(f64_add(
-                f64_add(f64_mul(sx, sx), f64_mul(sy, sy)),
-                f64_mul(distance, distance)));
+                    f64_add(f64_mul(sx, sx), f64_mul(sy, sy)),
+                    f64_mul(distance, distance)));
                 var phase = f64_add(f64_mul(k, r), PointSource_phase(src));
                 var amp = f64_div(PointSource_amplitude(src), r);
                 e_re = f64_add(e_re, f64_mul(amp, _prk_cos(phase)));
@@ -411,10 +411,10 @@ fn _pat_wl_to_rgb(nm, out) {
     var factor = F64_ONE;
     if (f64_lt(nm, f64_from(420)) == 1) {
         factor = f64_add(_pat_r(3, 10),
-        f64_div(f64_mul(_pat_r(7, 10), f64_sub(nm, f64_from(380))), f64_from(40)));
+          f64_div(f64_mul(_pat_r(7, 10), f64_sub(nm, f64_from(380))), f64_from(40)));
     } elif (f64_gt(nm, f64_from(700)) == 1) {
         factor = f64_add(_pat_r(3, 10),
-        f64_div(f64_mul(_pat_r(7, 10), f64_sub(f64_from(780), nm)), f64_from(80)));
+          f64_div(f64_mul(_pat_r(7, 10), f64_sub(f64_from(780), nm)), f64_from(80)));
     }
     store64(out, f64_mul(rr, factor));
     store64(out + 8, f64_mul(gg, factor));

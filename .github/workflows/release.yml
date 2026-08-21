@@ -39,18 +39,50 @@ jobs:
           echo "Version verified: $TAG (cyrius.cyml pulls from VERSION via \${file:VERSION})"
 
       - name: Install Cyrius toolchain
+        # Piped through the UPSTREAM installer, fetched from the pin's own
+        # IMMUTABLE tag, rather than unpacking the release tarball by hand.
+        # The hand-rolled block this replaces had three defects; only the first
+        # was visible, and it is a hard failure from 6.5.33 onward:
+        #
+        #   1. LAYOUT. cyrius resolves its stdlib snapshot from
+        #      ~/.cyrius/versions/<pin>/lib. The old block laid the tarball out
+        #      FLAT as ~/.cyrius/{bin,lib}, so `cyrius deps` fails with
+        #      "pins version <pin> but it is not installed at
+        #      .../versions/<pin>/lib". Reproduced against 6.5.33.
+        #   2. NO INTEGRITY CHECK. It was a bare `curl -sLO` on a release
+        #      tarball, untarred. The installer fails closed on a missing,
+        #      unverifiable or mismatched .sha256 (CVE-21) and verifies an
+        #      Ed25519 signature over SHA256SUMS where one is published
+        #      (CVE-13). This repo ships a SECURITY.md and a security job and
+        #      was installing an unverified binary toolchain.
+        #   3. THE STEP COULD NOT FAIL. Every copy ended in
+        #      `2>/dev/null || true`, so an empty bin/ or a missing lib/
+        #      "installed successfully" and surfaced later as an unrelated
+        #      error. A step that cannot fail is not a step.
+        #
+        # The pin in cyrius.cyml stays the single source of truth — no version
+        # is hardcoded in this YAML.
         run: |
-          CYRIUS_VERSION="${CYRIUS_VERSION:-$(grep -oP '(?<=^cyrius = ")[^"]+' cyrius.cyml)}"
-          echo "Installing Cyrius $CYRIUS_VERSION"
-          curl -sLO "https://github.com/MacCracken/cyrius/releases/download/$CYRIUS_VERSION/cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
-          tar xzf "cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
-          CYRIUS_DIR="cyrius-$CYRIUS_VERSION-x86_64-linux"
-          mkdir -p "$HOME/.cyrius/bin" "$HOME/.cyrius/lib"
-          cp "$CYRIUS_DIR/bin/"* "$HOME/.cyrius/bin/" 2>/dev/null || true
-          cp -r "$CYRIUS_DIR/lib/"* "$HOME/.cyrius/lib/" 2>/dev/null || true
-          chmod +x "$HOME/.cyrius/bin/"* 2>/dev/null || true
+          set -euo pipefail
+          CYRIUS_VERSION="$(grep -oP '(?<=^cyrius = ")[^"]+' cyrius.cyml)"
+          [ -n "$CYRIUS_VERSION" ] || { echo "::error::no cyrius pin in cyrius.cyml"; exit 1; }
+          echo "Installing Cyrius $CYRIUS_VERSION (pin from cyrius.cyml)"
+          curl -sSfL "https://raw.githubusercontent.com/MacCracken/cyrius/$CYRIUS_VERSION/scripts/install.sh" \
+            | CYRIUS_VERSION="$CYRIUS_VERSION" sh
           echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
           echo "CYRIUS_HOME=$HOME/.cyrius" >> $GITHUB_ENV
+
+      - name: Verify toolchain matches the pin
+        # The layout failure above surfaced two steps downstream as a path error
+        # from `cyrius deps`. Assert it where it is diagnosable instead.
+        run: |
+          set -euo pipefail
+          PIN="$(grep -oP '(?<=^cyrius = ")[^"]+' cyrius.cyml)"
+          GOT="$(cyrius version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+          [ "$GOT" = "$PIN" ] || { echo "::error::cyrius is $GOT but cyrius.cyml pins $PIN"; exit 1; }
+          [ -d "$HOME/.cyrius/versions/$PIN/lib" ] || {
+            echo "::error::no stdlib snapshot at ~/.cyrius/versions/$PIN/lib"; exit 1; }
+          echo "toolchain $GOT matches pin; snapshot has $(ls "$HOME/.cyrius/versions/$PIN/lib" | wc -l) files"
 
       - name: Resolve deps
         run: cyrius deps

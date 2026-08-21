@@ -30,7 +30,7 @@ test_group("transmittance");
 # resonance: d = lambda/2, normal incidence, T ~ 1
 var d_res = f64_div(WL, F64_TWO);
 _assert_near(
-fabry_perot_transmittance(WL, d_res, F64_ONE, Z, _fd(9, 10)), F64_ONE, TOL3, "transmittance at resonance ~ 1");
+  fabry_perot_transmittance(WL, d_res, F64_ONE, Z, _fd(9, 10)), F64_ONE, TOL3, "transmittance at resonance ~ 1");
 
 # transmittance always in [0, 1+eps]
 var one_eps = f64_add(F64_ONE, TOL6);
@@ -52,17 +52,17 @@ test_group("fsr");
 _assert_near(fabry_perot_fsr(MM, F64_ONE), f64_from(149900000000), f64_from(1000000000), "FSR ~ 1.499e11 Hz");
 # lambda=550, d=1e6, n=1: 550^2/(2e6) ~ 0.15125
 _assert_near(
-fabry_perot_fsr_wavelength(f64_from(550), f64_from(1000000), F64_ONE), _fd(15125, 100000), _fd(1, 100),
-"FSR wavelength ~ 0.15nm");
+  fabry_perot_fsr_wavelength(f64_from(550), f64_from(1000000), F64_ONE), _fd(15125, 100000), _fd(1, 100),
+  "FSR wavelength ~ 0.15nm");
 assert(
-f64_gt(fabry_perot_fsr(_fd(5, 10000), F64_ONE), fabry_perot_fsr(_fd(2, 1000), F64_ONE)),
-"thicker cavity narrower FSR");
+  f64_gt(fabry_perot_fsr(_fd(5, 10000), F64_ONE), fabry_perot_fsr(_fd(2, 1000), F64_ONE)),
+  "thicker cavity narrower FSR");
 
 # ── resolving power ────────
 test_group("resolving_power");
 
 assert(f64_gt(fabry_perot_resolving_power(WL, MM, F64_ONE, _fd(95, 100)), f64_from(100000)), "resolving power > 1e5");
 assert(f64_gt(fabry_perot_resolving_power(WL, MM, F64_ONE, _fd(95, 100)),
-fabry_perot_resolving_power(WL, MM, F64_ONE, _fd(5, 10))), "resolving power increases with R");
+    fabry_perot_resolving_power(WL, MM, F64_ONE, _fd(5, 10))), "resolving power increases with R");
 
 var r = assert_summary();

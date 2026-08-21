@@ -62,45 +62,45 @@ fn _sellmeier_mk(b1, c1, b2, c2, b3, c3) {
 #must_use
 fn sellmeier_bk7() {
     return _sellmeier_mk(
-    _disp_r(103961212, 100000000), _disp_r(600069867, 100000000000),
-    _disp_r(231792344, 1000000000), _disp_r(200179144, 10000000000),
-    _disp_r(101046945, 100000000), _disp_r(103560653, 1000000));
+      _disp_r(103961212, 100000000), _disp_r(600069867, 100000000000),
+      _disp_r(231792344, 1000000000), _disp_r(200179144, 10000000000),
+      _disp_r(101046945, 100000000), _disp_r(103560653, 1000000));
 }
 #must_use
 fn sellmeier_sf11() {
     return _sellmeier_mk(
-    _disp_r(173759626, 100000000), _disp_r(131887070, 10000000000),
-    _disp_r(313747346, 1000000000), _disp_r(623068142, 10000000000),
-    _disp_r(189878101, 100000000), _disp_r(15523629, 100000));
+      _disp_r(173759626, 100000000), _disp_r(131887070, 10000000000),
+      _disp_r(313747346, 1000000000), _disp_r(623068142, 10000000000),
+      _disp_r(189878101, 100000000), _disp_r(15523629, 100000));
 }
 #must_use
 fn sellmeier_fused_silica() {
     return _sellmeier_mk(
-    _disp_r(6961663, 10000000), _disp_r(46791482, 10000000000),
-    _disp_r(4079426, 10000000), _disp_r(13512063, 1000000000),
-    _disp_r(8974794, 10000000), _disp_r(979340025, 10000000));
+      _disp_r(6961663, 10000000), _disp_r(46791482, 10000000000),
+      _disp_r(4079426, 10000000), _disp_r(13512063, 1000000000),
+      _disp_r(8974794, 10000000), _disp_r(979340025, 10000000));
 }
 #must_use
 fn sellmeier_sapphire() {
     return _sellmeier_mk(
-    _disp_r(14313493, 10000000), _disp_r(527925, 100000000),
-    _disp_r(65054713, 100000000), _disp_r(1421826, 100000000),
-    _disp_r(53414822, 10000000), _disp_r(32501783, 100000));
+      _disp_r(14313493, 10000000), _disp_r(527925, 100000000),
+      _disp_r(65054713, 100000000), _disp_r(1421826, 100000000),
+      _disp_r(53414822, 10000000), _disp_r(32501783, 100000));
 }
 #must_use
 fn sellmeier_water() {
     return _sellmeier_mk(
-    _disp_r(56701972, 100000000), _disp_r(508550, 100000000),
-    _disp_r(17262926, 100000000), _disp_r(1818000, 100000000),
-    _disp_r(2062460, 100000000), _disp_r(2625000, 100000000));
+      _disp_r(56701972, 100000000), _disp_r(508550, 100000000),
+      _disp_r(17262926, 100000000), _disp_r(1818000, 100000000),
+      _disp_r(2062460, 100000000), _disp_r(2625000, 100000000));
 }
 #must_use
 fn sellmeier_diamond() {
     # two-term fit: b3 = 0, c3 = 1.0
     return _sellmeier_mk(
-    _disp_r(43358, 10000), _disp_r(106, 10000),
-    _disp_r(3060, 10000), _disp_r(175, 10000),
-    f64_from(0), F64_ONE);
+      _disp_r(43358, 10000), _disp_r(106, 10000),
+      _disp_r(3060, 10000), _disp_r(175, 10000),
+      f64_from(0), F64_ONE);
 }
 
 # One Sellmeier term with a resonance-pole guard: b*l2/(l2-c), or 0 near the pole.
@@ -235,9 +235,9 @@ fn _schott_mk(a0, a1, a2, a3, a4, a5) {
 #must_use
 fn schott_bk7() {
     return _schott_mk(
-    _disp_r(22718929, 10000000), f64_neg(_disp_r(10108077, 1000000000)),
-    _disp_r(10592509, 1000000000), _disp_r(200816, 1000000000),
-    f64_neg(_disp_r(76472538, 10000000000000)), _disp_r(49240991, 100000000000000));
+      _disp_r(22718929, 10000000), f64_neg(_disp_r(10108077, 1000000000)),
+      _disp_r(10592509, 1000000000), _disp_r(200816, 1000000000),
+      f64_neg(_disp_r(76472538, 10000000000000)), _disp_r(49240991, 100000000000000));
 }
 
 #must_use
@@ -249,10 +249,10 @@ fn schott_n_at(coef, wavelength_um) {
     var t4 = f64_mul(f64_mul(f64_mul(SchottCoefficients_a4(coef), li), li), li);
     var t5 = f64_mul(f64_mul(f64_mul(f64_mul(SchottCoefficients_a5(coef), li), li), li), li);
     var n2 = f64_add(f64_add(f64_add(f64_add(f64_add(
-    SchottCoefficients_a0(coef),
-    f64_mul(SchottCoefficients_a1(coef), l2)),
-    f64_mul(SchottCoefficients_a2(coef), li)),
-    t3), t4), t5);
+              SchottCoefficients_a0(coef),
+              f64_mul(SchottCoefficients_a1(coef), l2)),
+            f64_mul(SchottCoefficients_a2(coef), li)),
+          t3), t4), t5);
     if (f64_gt(n2, f64_from(0)) == 1) {
         return f64_sqrt(n2);
     }

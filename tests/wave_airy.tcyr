@@ -46,21 +46,21 @@ assert(f64_lt(f64_abs(bessel_j1(f64_from(20))), F64_ONE), "J1(20) bounded");
 
 # polynomial/asymptotic branches meet at x=8
 assert(f64_lt(f64_abs(f64_sub(bessel_j1(_fd(7999, 1000)), bessel_j1(_fd(8001, 1000)))), TOL3),
-"J1 continuous at x=8 boundary");
+  "J1 continuous at x=8 boundary");
 
 # ── Airy pattern ────────
 test_group("airy");
 
 _assert_near(airy_pattern(WL, DIAM, Z, F64_ONE), F64_ONE, TOL6, "airy central max = 1");
 assert(f64_lt(airy_pattern(WL, DIAM, _fd(1, 100000), F64_ONE), airy_pattern(WL, DIAM, Z, F64_ONE)),
-"airy decreases off axis");
+  "airy decreases off axis");
 
 var theta_zero = airy_first_zero(WL, DIAM);
 assert(f64_lt(airy_pattern(WL, DIAM, theta_zero, F64_ONE), TOL3), "airy first zero ~ 0");
 
 for (var ai = 0; ai < 100; ai = ai + 1) {
     assert(f64_ge(airy_pattern(WL, DIAM, f64_mul(f64_from(ai), _fd(1, 100000)), F64_ONE), Z),
-    "airy non-negative");
+      "airy non-negative");
 }
 
 var a1 = airy_pattern(WL, DIAM, _fd(1, 100000), F64_ONE);
@@ -73,6 +73,6 @@ test_group("rayleigh");
 # 1.22 * 550e-9 / 0.1 = 6.71e-6 rad
 _assert_near(rayleigh_criterion(WL, _fd(1, 10)), _fd(671, 100000000), _fd(1, 10000000), "rayleigh ~ 6.71e-6");
 assert(f64_gt(rayleigh_criterion(WL, _fd(5, 100)), rayleigh_criterion(WL, _fd(20, 100))),
-"larger aperture better resolution");
+  "larger aperture better resolution");
 
 var r = assert_summary();

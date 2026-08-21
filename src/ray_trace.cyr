@@ -115,8 +115,8 @@ fn trace_surface(ray, surface, err_out) {
         var ocz = f64_sub(pz, cz);
         var half_b = f64_add(f64_add(f64_mul(ocx, dx), f64_mul(ocy, dy)), f64_mul(ocz, dz));
         var cc = f64_sub(
-        f64_add(f64_add(f64_mul(ocx, ocx), f64_mul(ocy, ocy)), f64_mul(ocz, ocz)),
-        f64_mul(radius, radius));
+          f64_add(f64_add(f64_mul(ocx, ocx), f64_mul(ocy, ocy)), f64_mul(ocz, ocz)),
+          f64_mul(radius, radius));
         var disc = f64_sub(f64_mul(half_b, half_b), cc);
         if (f64_lt(disc, f64_from(0)) == 1) {
             store64(err_out, PK_ERR_INVALID_PARAMETER);
@@ -241,13 +241,13 @@ fn trace_sequential_polarized(initial_ray, surfaces, err_out) {
         var nrm = TraceHit_normal(hit);
         var cdir = TraceRay_dir(current);
         var dot_i = f64_add(
-        f64_add(f64_mul(RayVec3_x(cdir), RayVec3_x(nrm)), f64_mul(RayVec3_y(cdir), RayVec3_y(nrm))),
-        f64_mul(RayVec3_z(cdir), RayVec3_z(nrm)));
+          f64_add(f64_mul(RayVec3_x(cdir), RayVec3_x(nrm)), f64_mul(RayVec3_y(cdir), RayVec3_y(nrm))),
+          f64_mul(RayVec3_z(cdir), RayVec3_z(nrm)));
         var cos_i = f64_neg(f64_abs(dot_i));
         var adir = TraceRay_dir(TraceHit_ray_after(hit));
         var dot_t = f64_add(
-        f64_add(f64_mul(RayVec3_x(adir), RayVec3_x(nrm)), f64_mul(RayVec3_y(adir), RayVec3_y(nrm))),
-        f64_mul(RayVec3_z(adir), RayVec3_z(nrm)));
+          f64_add(f64_mul(RayVec3_x(adir), RayVec3_x(nrm)), f64_mul(RayVec3_y(adir), RayVec3_y(nrm))),
+          f64_mul(RayVec3_z(adir), RayVec3_z(nrm)));
         var cos_t = f64_neg(f64_abs(dot_t));
         var n1 = TraceRay_n(current);
         var n2 = OpticalSurface_n_after(surface);

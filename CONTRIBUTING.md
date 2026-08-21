@@ -12,7 +12,12 @@ git clone https://github.com/MacCracken/prakash.git
 cd prakash
 
 # Install the Cyrius toolchain pinned in cyrius.cyml (the `cyrius = "..."` line).
-# CI fetches it from github.com/MacCracken/cyrius/releases.
+# Use the upstream installer, which verifies the release checksum and signature
+# and lays the toolchain out as ~/.cyrius/versions/<pin>/ — the layout `cyrius
+# deps` resolves its stdlib snapshot from. CI does exactly this.
+CYRIUS_VERSION="$(grep -oP '(?<=^cyrius = ")[^"]+' cyrius.cyml)"
+curl -sSfL "https://raw.githubusercontent.com/MacCracken/cyrius/$CYRIUS_VERSION/scripts/install.sh" \
+  | CYRIUS_VERSION="$CYRIUS_VERSION" sh
 
 # Resolve the hisab git dependency (the stdlib subset is vendored under lib/).
 cyrius deps
@@ -27,10 +32,14 @@ pushing:
 # Dependency hashes must match the committed cyrius.lock
 cyrius deps --verify
 
-# Lint + format (must be clean — 0 warnings, 0 drift)
-for f in src/*.cyr tests/*.tcyr tests/*.bcyr; do
+# Lint + format (must be clean — 0 warnings, 0 drift).
+# NOTE the glob includes examples/ — CI checks those too.
+# ⚠ `cyrius fmt <f>` REWRITES IN PLACE as of cyrius 6.5.28 (it was stdout-only
+# before). To fix drift run `cyrius fmt "$f"` — never `cyrius fmt "$f" > tmp`,
+# which captures zero bytes and truncates the file.
+for f in src/*.cyr tests/*.tcyr tests/*.bcyr examples/*.cyr; do
   cyrius lint "$f"          # fails on a `warn` line
-  cyrius fmt "$f" --check   # fails on format drift
+  cyrius fmt "$f" --check   # fails on format drift (writes nothing in check mode)
 done
 
 # Vet the build entry

@@ -69,7 +69,7 @@ while (bz < 81) {
 store64(blue_vals + 10 * 8, F64_ONE);   # 430nm
 var blue = spd_new(f64_from(380), f64_from(5), blue_vals, 81);
 assert(
-f64_gt(luminous_flux_scotopic(blue), luminous_flux(blue)),
-"scotopic more sensitive to blue than photopic");
+  f64_gt(luminous_flux_scotopic(blue), luminous_flux(blue)),
+  "scotopic more sensitive to blue than photopic");
 
 var r = assert_summary();

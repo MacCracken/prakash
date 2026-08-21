@@ -51,8 +51,18 @@ alloc_init();
 var e = 0;
 
 # ── 1. Rust-semantics math shims ────────
-# ganita_f64_pow is exp(n*ln(base)) and the x87 exp returns NaN for an infinite
-# argument, so both diverged from Rust at these boundaries.
+# The x87 exp returns NaN for an infinite argument, so `f64_exp` diverges from
+# Rust at those boundaries and `_prk_exp` repairs it.
+#
+# ⚠ THE POW HALF OF THIS COMMENT WENT STALE IN 2.2.4 AND NO ASSERTION NOTICED.
+# It said `ganita_f64_pow` "is exp(n*ln(base))", which is why a zero base
+# returned NaN. ganita 1.1.4 (cyrius 6.5.33) added an explicit domain prologue,
+# so the builtin now answers 0.0 / 1.0 / +inf on its own — measured. Every
+# assertion below still passes because `_prk_pow` produces the same bits either
+# way; that is exactly why the prose could rot unobserved. The "(was NaN)"
+# annotations are kept as history, but "was" now means "before cyrius 6.5.33",
+# not "without the shim". See the shim block in src/error.cyr for the
+# re-measured table and for why the shim is retained regardless.
 test_group("math shims match Rust at the boundaries");
 
 assert(_h_bits(_prk_pow(ZERO, F64_TWO), ZERO) == 1, "pow(0, 2) = 0.0 (was NaN)");
@@ -63,13 +73,13 @@ assert(_h_bits(_prk_exp(PINF), PINF) == 1, "exp(+inf) = +inf (was NaN)");
 assert(_h_bits(_prk_exp(f64_from(0)), F64_ONE) == 1, "exp(0) = 1.0 (control: finite path unchanged)");
 var _p23 = _prk_pow(F64_TWO, f64_from(3));
 assert(_h_near(_p23, f64_from(8), f64_div(F64_ONE, f64_from(1000000000))),
-"pow(2, 3) ~= 8 (control: finite path unchanged)");
+  "pow(2, 3) ~= 8 (control: finite path unchanged)");
 
 # The reachable consequences of the two shims.
 assert(_h_bits(pbr_distribution_charlie(F64_ONE, F64_HALF), ZERO) == 1,
-"charlie sheen at the specular peak (n_dot_h = 1) is 0.0, not NaN");
+  "charlie sheen at the specular peak (n_dot_h = 1) is 0.0, not NaN");
 assert(_h_bits(atm_atmospheric_transmittance(f64_from(0), f64_from(0)), ZERO) == 1,
-"infinite optical depth gives transmittance 0.0, not NaN");
+  "infinite optical depth gives transmittance 0.0, not NaN");
 
 # ── 2. Unchecked allocations ────────
 # `alloc` returns 0 past ALLOC_MAX (2 GiB) and on heap exhaustion; every one of
@@ -77,12 +87,12 @@ assert(_h_bits(atm_atmospheric_transmittance(f64_from(0), f64_from(0)), ZERO) ==
 test_group("oversized and degenerate allocations fail safely");
 
 assert(psf_diffraction_limited(8193, f64_from(100)) == 0,
-"psf_diffraction_limited(8193) returns 0 (npot pads to 16384 -> a 4 GiB grid)");
+  "psf_diffraction_limited(8193) returns 0 (npot pads to 16384 -> a 4 GiB grid)");
 assert(diffraction_pattern_circular(16385, f64_from(10)) == 0,
-"diffraction_pattern_circular past the cap returns 0");
+  "diffraction_pattern_circular past the cap returns 0");
 assert(pattern2d_new(20000, 20000) == 0, "pattern2d_new(20000, 20000) returns 0");
 assert(pattern2d_new(1, 2305843009213693953) == 0,
-"pattern2d_new with a size that overflows i64 returns 0 (was heap corruption)");
+  "pattern2d_new with a size that overflows i64 returns 0 (was heap corruption)");
 assert(pattern2d_new(0, 8) == 0, "pattern2d_new rejects a zero dimension");
 assert(pattern2d_new(0 - 4, 8) == 0, "pattern2d_new rejects a negative dimension");
 assert(spectrum_strip(0 - 5) == 0, "spectrum_strip rejects a negative sample count");
@@ -100,14 +110,14 @@ assert(okp != 0, "a 4x4 pattern still allocates (control)");
 test_group("accessors bounds-check instead of running off the buffer");
 
 assert(pattern2d_set(okp, 99, 99, F64_ONE) == PK_ERR_INVALID_PARAMETER,
-"pattern2d_set out of range returns PK_ERR_INVALID_PARAMETER");
+  "pattern2d_set out of range returns PK_ERR_INVALID_PARAMETER");
 assert(pattern2d_set(okp, 0 - 1, 0, F64_ONE) == PK_ERR_INVALID_PARAMETER,
-"pattern2d_set negative col returns PK_ERR_INVALID_PARAMETER");
+  "pattern2d_set negative col returns PK_ERR_INVALID_PARAMETER");
 assert(pattern2d_set(okp, 0, 0, F64_ONE) == PK_ERR_NONE, "pattern2d_set in range still succeeds (control)");
 assert(_h_bits(pattern2d_get(okp, 99, 99), ZERO) == 1, "pattern2d_get out of range returns 0.0");
 assert(_h_bits(pattern2d_get(okp, 0, 0), F64_ONE) == 1, "pattern2d_get in range still reads (control)");
 assert(pattern2d_set(0, 0, 0, F64_ONE) == PK_ERR_INVALID_PARAMETER,
-"pattern2d_set on a null pattern returns PK_ERR_INVALID_PARAMETER");
+  "pattern2d_set on a null pattern returns PK_ERR_INVALID_PARAMETER");
 
 # The refusal code must be a NAMED PK_ERR_ constant, not a bare -1: -1 is
 # already PK_ERR_TIR, so a bare sentinel would report "total internal
@@ -115,7 +125,7 @@ assert(pattern2d_set(0, 0, 0, F64_ONE) == PK_ERR_INVALID_PARAMETER,
 assert(PK_ERR_INVALID_PARAMETER != PK_ERR_TIR, "the refusal code is not aliased onto PK_ERR_TIR");
 assert(PK_ERR_ALLOCATION != PK_ERR_TIR, "PK_ERR_ALLOCATION is not aliased onto PK_ERR_TIR");
 assert(PK_ERR_ALLOCATION != PK_ERR_INVALID_PARAMETER,
-"PK_ERR_ALLOCATION is distinct from PK_ERR_INVALID_PARAMETER");
+  "PK_ERR_ALLOCATION is distinct from PK_ERR_INVALID_PARAMETER");
 assert(prakash_is_err(PK_ERR_ALLOCATION) == 1, "PK_ERR_ALLOCATION reads as an error");
 assert(prakash_is_err(pattern2d_set(0, 0, 0, F64_ONE)) == 1, "a refused pattern2d_set reads as an error");
 
@@ -124,7 +134,7 @@ assert(_h_bits(mueller_get(mm, 4, 0), ZERO) == 1, "mueller_get row 4 returns 0.0
 assert(_h_bits(mueller_get(mm, 0, 4), ZERO) == 1, "mueller_get col 4 returns 0.0");
 assert(_h_bits(mueller_get(mm, 0 - 1, 0), ZERO) == 1, "mueller_get negative index returns 0.0");
 assert(mueller_set(mm, 4, 0, F64_ONE) == PK_ERR_INVALID_PARAMETER,
-"mueller_set row 4 refused with PK_ERR_INVALID_PARAMETER");
+  "mueller_set row 4 refused with PK_ERR_INVALID_PARAMETER");
 assert(mueller_set(mm, 0, 0, F64_ONE) == PK_ERR_NONE, "mueller_set in range still succeeds (control)");
 assert(_h_bits(mueller_get(mm, 0, 0), F64_ONE) == 1, "mueller_get in range still reads (control)");
 
@@ -149,11 +159,11 @@ assert(sellmeier_from_json(partial, strlen(partial), &e) == 0, "sellmeier_from_j
 assert(polarization_from_json(junk, strlen(junk), &e) == 0, "polarization_from_json(garbage) = 0");
 assert(prescription_from_json(junk, strlen(junk), &e) == 0, "prescription_from_json(garbage) = 0 (was SIGSEGV)");
 assert(prescription_from_json(partial, strlen(partial), &e) == 0,
-"prescription_from_json(missing name) = 0 (was SIGSEGV)");
+  "prescription_from_json(missing name) = 0 (was SIGSEGV)");
 assert(spd_from_json(junk, strlen(junk), &e) == 0, "spd_from_json(garbage) = 0");
 assert(spd_from_json(partial, strlen(partial), &e) == 0, "spd_from_json(missing values) = 0");
 assert(lens_type_from_json(junk, strlen(junk), &e) == LENS_TYPE_INVALID,
-"lens_type_from_json(garbage) = LENS_TYPE_INVALID (was SIGSEGV)");
+  "lens_type_from_json(garbage) = LENS_TYPE_INVALID (was SIGSEGV)");
 assert(LENS_TYPE_INVALID != LENS_CONVERGING, "LENS_TYPE_INVALID is distinct from LENS_CONVERGING");
 assert(LENS_TYPE_INVALID != LENS_DIVERGING, "LENS_TYPE_INVALID is distinct from LENS_DIVERGING");
 
@@ -165,7 +175,7 @@ var s_empty = spd_new(f64_from(380), f64_from(5), onebuf, 0);
 assert(_h_bits(spd_at(s_empty, f64_from(500)), ZERO) == 1, "spd_at on an empty SPD = 0.0");
 var s_zerostep = spd_new(f64_from(380), f64_from(0), onebuf, 0);
 assert(_h_bits(spd_at(s_zerostep, f64_from(380)), ZERO) == 1,
-"spd_at on an empty zero-step SPD = 0.0 (was an out-of-bounds read)");
+  "spd_at on an empty zero-step SPD = 0.0 (was an out-of-bounds read)");
 
 # ── 6. Round-trip fidelity ────────
 # bayan 1.2.1 replaced the 6-decimal encoder with Grisu2, so floats now survive
@@ -194,7 +204,7 @@ var _rt5 = _h_rt(0x0010000000000000, "DBL_MIN survives bit-exact");
 test_group("a flat surface survives the prescription round-trip");
 
 var plano = prescription_planoconvex(f64_from(50), f64_div(f64_from(15), f64_from(10)),
-f64_from(5), f64_from(10));
+  f64_from(5), f64_from(10));
 var s_before = vec_get(Prescription_surfaces(plano), 0);
 assert(_h_bits(PrescriptionSurface_radius(s_before), PINF) == 1, "surface 0 is flat before serializing");
 var pjs = prescription_to_json(plano);
@@ -202,13 +212,13 @@ var pback = prescription_from_json(str_data(pjs), str_len(pjs), &e);
 assert(pback != 0, "prescription round-trip parsed");
 var s_after = vec_get(Prescription_surfaces(pback), 0);
 assert(_h_bits(PrescriptionSurface_radius(s_after), PINF) == 1,
-"flat surface is still flat after the round-trip (was 0.0 = infinite curvature)");
+  "flat surface is still flat after the round-trip (was 0.0 = infinite curvature)");
 assert(f64_gt(PrescriptionSurface_radius(s_after), f64_from(0)) == 1,
-"flat surface did not become a zero radius");
+  "flat surface did not become a zero radius");
 # the curved surface must be untouched
 var c_after = vec_get(Prescription_surfaces(pback), 1);
 assert(_h_bits(PrescriptionSurface_radius(c_after), f64_neg(f64_from(25))) == 1,
-"the curved surface round-trips unchanged (control)");
+  "the curved surface round-trips unchanged (control)");
 
 # ── 7. Error channels (2.1.0) ────────
 # 2.0.2 made these fail safely; 2.1.0 makes them report WHY. The distinction
@@ -350,9 +360,9 @@ assert(point_source_array_new(0 - 2) == 0, "point_source_array_new rejects a neg
 assert(point_source_set(psa, 0, ZZ, ZZ, F64_ONE, ZZ) == PK_ERR_NONE, "point_source_set writes element 0");
 assert(point_source_set(psa, 2, F64_ONE, ZZ, F64_TWO, ZZ) == PK_ERR_NONE, "point_source_set writes element 2");
 assert(point_source_set(0, 0, ZZ, ZZ, F64_ONE, ZZ) == PK_ERR_INVALID_PARAMETER,
-"point_source_set rejects a null array");
+  "point_source_set rejects a null array");
 assert(point_source_set(psa, 0 - 1, ZZ, ZZ, F64_ONE, ZZ) == PK_ERR_INVALID_PARAMETER,
-"point_source_set rejects a negative index");
+  "point_source_set rejects a negative index");
 # elements are contiguous and independent
 assert(_h_bits(PointSource_amplitude(point_source_at(psa, 0)), F64_ONE) == 1, "element 0 kept its amplitude");
 assert(_h_bits(PointSource_amplitude(point_source_at(psa, 2)), F64_TWO) == 1, "element 2 kept its amplitude");
@@ -360,7 +370,7 @@ assert(point_source_at(psa, 1) == psa + sizeof(PointSource), "elements are conti
 assert(point_source_at(0, 0) == 0, "point_source_at rejects a null array");
 # and the array actually drives interference_pattern
 var ip = interference_pattern(psa, 3, f64_div(F64_ONE, f64_from(2000000)), F64_ONE,
-f64_neg(F64_ONE), F64_ONE, f64_neg(F64_ONE), F64_ONE, 8, 8);
+  f64_neg(F64_ONE), F64_ONE, f64_neg(F64_ONE), F64_ONE, 8, 8);
 assert(ip != 0, "interference_pattern consumes a point_source_array_new buffer");
 
 # ── Trig domain guard (2.1.1) ────────
@@ -378,7 +388,7 @@ assert(_h_bits(_prk_sin(ZERO), ZERO) == 1, "sin(0) = 0 (control)");
 assert(_h_bits(_prk_cos(ZERO), F64_ONE) == 1, "cos(0) = 1 (control)");
 assert(f64_le(f64_abs(_prk_sin(f64_from(1000000))), F64_ONE) == 1, "sin(1e6) still in range (control)");
 assert(f64_le(f64_abs(_prk_sin(f64_from(4611686018427387904))), F64_ONE) == 1,
-"sin(2^62) still in range (control: just below the limit)");
+  "sin(2^62) still in range (control: just below the limit)");
 
 # ── 9. Port-completeness gaps (2.2.1) ────────
 # The rust-old comparison found three ported functions with no test reference.
@@ -400,17 +410,17 @@ var cv2 = 0;
 var sv2 = 0;
 fresnel_integral_cs(f64_div(F64_ONE, F64_TWO), &cv2, &sv2);
 assert(_h_bits(cv2, fresnel_integral_c(f64_div(F64_ONE, F64_TWO))) == 1,
-"fresnel_integral_cs C matches fresnel_integral_c (small-x branch)");
+  "fresnel_integral_cs C matches fresnel_integral_c (small-x branch)");
 assert(_h_bits(sv2, fresnel_integral_s(f64_div(F64_ONE, F64_TWO))) == 1,
-"fresnel_integral_cs S matches fresnel_integral_s (small-x branch)");
+  "fresnel_integral_cs S matches fresnel_integral_s (small-x branch)");
 fresnel_integral_cs(f64_from(2), &cv2, &sv2);
 assert(_h_bits(cv2, fresnel_integral_c(f64_from(2))) == 1,
-"fresnel_integral_cs C matches at x=2 (asymptotic branch)");
+  "fresnel_integral_cs C matches at x=2 (asymptotic branch)");
 assert(_h_bits(sv2, fresnel_integral_s(f64_from(2))) == 1,
-"fresnel_integral_cs S matches at x=2 (asymptotic branch)");
+  "fresnel_integral_cs S matches at x=2 (asymptotic branch)");
 fresnel_integral_cs(f64_neg(F64_ONE), &cv2, &sv2);
 assert(_h_bits(cv2, fresnel_integral_c(f64_neg(F64_ONE))) == 1,
-"fresnel_integral_cs is odd in x, like fresnel_integral_c");
+  "fresnel_integral_cs is odd in x, like fresnel_integral_c");
 
 # pbr_clearcoat_distribution: a GGX lobe, so it peaks at n_dot_h = 1
 var cd_peak = pbr_clearcoat_distribution(F64_ONE, _h_frac(1, 10));
@@ -437,7 +447,7 @@ assert(cmf31 != 0, "observer_cmf(1931) returns a table");
 assert(cmf64 != 0, "observer_cmf(1964) returns a table");
 assert(cmf31 != cmf64, "the two observers are distinct tables");
 assert(observer_cmf(OBS_CIE2015_10DEG) == cie_2015_10deg_table(),
-"observer_cmf(2015-10) is cie_2015_10deg_table()");
+  "observer_cmf(2015-10) is cie_2015_10deg_table()");
 
 # xyz_d50_white: a white point, so all three components positive and Y ~ 1
 var d50 = xyz_d50_white();
@@ -465,7 +475,7 @@ assert(Spd_values(sspd) == stat_vals, "spd_from_static borrows the caller buffer
 # prakash_set_log_level is the sakshi facade; setting it must not disturb results
 var _lvl = prakash_set_log_level(1);
 assert(_h_bits(spec_visible_min_nm(), f64_from(380)) == 1,
-"changing the log level does not perturb computation");
+  "changing the log level does not perturb computation");
 var _lvl2 = prakash_set_log_level(3);
 
 var r = assert_summary();

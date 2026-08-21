@@ -134,7 +134,7 @@ fn b_spot_diagram() {
 fn b_pattern_normalized() { var r = pattern2d_normalized(_bigpat); return 0; }
 fn b_interference_pattern() {
     var r = interference_pattern(_srcs, 3, _wl_m, F64_ONE,
-    f64_neg(F64_ONE), F64_ONE, f64_neg(F64_ONE), F64_ONE, 16, 16);
+      f64_neg(F64_ONE), F64_ONE, f64_neg(F64_ONE), F64_ONE, 16, 16);
     return 0;
 }
 
@@ -186,7 +186,7 @@ fn main() {
     # composite fixtures
     _plane = surface_plane(f64_from(10), F64_ONE, f64_from(5));
     _ray0 = trace_ray_new(ray_vec3(f64_from(0), f64_from(0), f64_from(0)),
-    ray_vec3(f64_from(0), f64_from(0), F64_ONE), F64_ONE);
+      ray_vec3(f64_from(0), f64_from(0), F64_ONE), F64_ONE);
     _surfaces = vec_new();
     vec_push(_surfaces, surface_sphere(f64_from(50), f64_from(10), _bf(15, 10), f64_from(5)));
     vec_push(_surfaces, surface_sphere(f64_neg(f64_from(50)), f64_from(12), F64_ONE, f64_from(5)));

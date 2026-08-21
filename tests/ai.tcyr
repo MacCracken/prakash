@@ -28,7 +28,7 @@ test_group("client");
 var client = ai_daimon_client_new(ai_daimon_config_default(), ER);
 assert_eq(load64(ER), PK_ERR_NONE, "client_new ok");
 assert(streq(DaimonConfig_endpoint(DaimonClient_config(client)), "http://localhost:8090") == 1,
-"client holds config");
+  "client holds config");
 
 # ── Config with api key ────────
 test_group("config_api_key");

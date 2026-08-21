@@ -24,18 +24,50 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Cyrius toolchain
+        # Piped through the UPSTREAM installer, fetched from the pin's own
+        # IMMUTABLE tag, rather than unpacking the release tarball by hand.
+        # The hand-rolled block this replaces had three defects; only the first
+        # was visible, and it is a hard failure from 6.5.33 onward:
+        #
+        #   1. LAYOUT. cyrius resolves its stdlib snapshot from
+        #      ~/.cyrius/versions/<pin>/lib. The old block laid the tarball out
+        #      FLAT as ~/.cyrius/{bin,lib}, so `cyrius deps` fails with
+        #      "pins version <pin> but it is not installed at
+        #      .../versions/<pin>/lib". Reproduced against 6.5.33.
+        #   2. NO INTEGRITY CHECK. It was a bare `curl -sLO` on a release
+        #      tarball, untarred. The installer fails closed on a missing,
+        #      unverifiable or mismatched .sha256 (CVE-21) and verifies an
+        #      Ed25519 signature over SHA256SUMS where one is published
+        #      (CVE-13). This repo ships a SECURITY.md and a security job and
+        #      was installing an unverified binary toolchain.
+        #   3. THE STEP COULD NOT FAIL. Every copy ended in
+        #      `2>/dev/null || true`, so an empty bin/ or a missing lib/
+        #      "installed successfully" and surfaced later as an unrelated
+        #      error. A step that cannot fail is not a step.
+        #
+        # The pin in cyrius.cyml stays the single source of truth — no version
+        # is hardcoded in this YAML.
         run: |
-          CYRIUS_VERSION="${CYRIUS_VERSION:-$(grep -oP '(?<=^cyrius = ")[^"]+' cyrius.cyml)}"
-          echo "Installing Cyrius $CYRIUS_VERSION"
-          curl -sLO "https://github.com/MacCracken/cyrius/releases/download/$CYRIUS_VERSION/cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
-          tar xzf "cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
-          CYRIUS_DIR="cyrius-$CYRIUS_VERSION-x86_64-linux"
-          mkdir -p "$HOME/.cyrius/bin" "$HOME/.cyrius/lib"
-          cp "$CYRIUS_DIR/bin/"* "$HOME/.cyrius/bin/" 2>/dev/null || true
-          cp -r "$CYRIUS_DIR/lib/"* "$HOME/.cyrius/lib/" 2>/dev/null || true
-          chmod +x "$HOME/.cyrius/bin/"* 2>/dev/null || true
+          set -euo pipefail
+          CYRIUS_VERSION="$(grep -oP '(?<=^cyrius = ")[^"]+' cyrius.cyml)"
+          [ -n "$CYRIUS_VERSION" ] || { echo "::error::no cyrius pin in cyrius.cyml"; exit 1; }
+          echo "Installing Cyrius $CYRIUS_VERSION (pin from cyrius.cyml)"
+          curl -sSfL "https://raw.githubusercontent.com/MacCracken/cyrius/$CYRIUS_VERSION/scripts/install.sh" \
+            | CYRIUS_VERSION="$CYRIUS_VERSION" sh
           echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
           echo "CYRIUS_HOME=$HOME/.cyrius" >> $GITHUB_ENV
+
+      - name: Verify toolchain matches the pin
+        # The layout failure above surfaced two steps downstream as a path error
+        # from `cyrius deps`. Assert it where it is diagnosable instead.
+        run: |
+          set -euo pipefail
+          PIN="$(grep -oP '(?<=^cyrius = ")[^"]+' cyrius.cyml)"
+          GOT="$(cyrius version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+          [ "$GOT" = "$PIN" ] || { echo "::error::cyrius is $GOT but cyrius.cyml pins $PIN"; exit 1; }
+          [ -d "$HOME/.cyrius/versions/$PIN/lib" ] || {
+            echo "::error::no stdlib snapshot at ~/.cyrius/versions/$PIN/lib"; exit 1; }
+          echo "toolchain $GOT matches pin; snapshot has $(ls "$HOME/.cyrius/versions/$PIN/lib" | wc -l) files"
 
       - name: Resolve dependencies
         # Clones the hisab git dep (tag 2.11.1) and links lib/hisab.cyr; the
@@ -76,12 +108,20 @@ jobs:
         # `cyrius fmt <file> --check` signals drift via exit code and writes
         # nothing to stdout in check mode — never diff its stdout. Aggregate
         # the rc across files so every drifted file is annotated.
+        #
+        # ⚠ THE REMEDIATION STRING IS LOAD-BEARING. `cyrius fmt` REWRITES IN
+        # PLACE as of cyrius 6.5.28 (it was stdout-only before). The advice
+        # this step used to print — `cyrius fmt $f > tmp && mv tmp $f` — now
+        # captures ZERO bytes and moves an EMPTY file over the source,
+        # truncating it. Measured at 6.5.33: stdout is 0 bytes and the file is
+        # rewritten in place. Anything shaped like `cyrius fmt f.cyr > f.new`
+        # must not be reintroduced.
         run: |
           fail=0
           for f in src/*.cyr tests/*.tcyr tests/*.bcyr examples/*.cyr; do
             [ -f "$f" ] || continue
             cyrius fmt "$f" --check >/dev/null 2>&1 || {
-              echo "::error file=$f::fmt drift — run 'cyrius fmt $f > tmp && mv tmp $f'"
+              echo "::error file=$f::fmt drift — run 'cyrius fmt $f' (rewrites in place)"
               fail=1
             }
           done

@@ -69,7 +69,7 @@ test_group("diffraction");
 
 _assert_near(single_slit_intensity(WL, SW, Z, F64_ONE), F64_ONE, TOL6, "single slit central max = 1");
 assert(f64_lt(single_slit_intensity(WL, SW, _fd(1, 100), F64_ONE), single_slit_intensity(WL, SW, Z, F64_ONE)),
-"single slit decreases off axis");
+  "single slit decreases off axis");
 var theta_min = ganita_f64_asin(f64_div(WL, SW));
 assert(f64_lt(single_slit_intensity(WL, SW, theta_min, F64_ONE), TOL6), "single slit first minimum ~ 0");
 var ss1 = single_slit_intensity(WL, SW, _fd(1, 100), F64_ONE);
@@ -77,17 +77,17 @@ var ss5 = single_slit_intensity(WL, SW, _fd(1, 100), f64_from(5));
 _assert_near(f64_div(ss5, ss1), f64_from(5), TOL6, "single slit scales with i0");
 for (var am = 0; am < 100; am = am + 1) {
     assert(f64_ge(single_slit_intensity(WL, SW, f64_div(f64_from(am), f64_from(1000)), F64_ONE), Z),
-    "single slit non-negative");
+      "single slit non-negative");
 }
 
 var sww = _fd(1, 10000);   # 0.1e-3
 var ssp = _fd(5, 10000);   # 0.5e-3
 assert(f64_gt(double_slit_intensity(WL, sww, ssp, Z, F64_ONE), Z), "double slit central > 0");
 assert(f64_gt(double_slit_intensity(WL, sww, ssp, Z, F64_ONE), single_slit_intensity(WL, sww, Z, F64_ONE)),
-"double slit > single at center");
+  "double slit > single at center");
 for (var am2 = 0; am2 < 50; am2 = am2 + 1) {
     assert(f64_ge(double_slit_intensity(WL, sww, ssp, f64_div(f64_from(am2), f64_from(1000)), F64_ONE), Z),
-    "double slit non-negative");
+      "double slit non-negative");
 }
 
 # ── grating ────────
@@ -174,7 +174,7 @@ vec_push(states, polarization_new(_fd(8, 10), _fd(6, 10), F64_ONE));
 var si = 0;
 while (si < 5) {
     _assert_near(stokes_degree_of_polarization(polarization_to_stokes(vec_get(states, si))), F64_ONE, TOL_01,
-    "pure state DOP = 1");
+      "pure state DOP = 1");
     si = si + 1;
 }
 

@@ -1456,9 +1456,9 @@ fn xyz_from_xyy(cx, cy, big_y) {
         return xyz_new(f64_from(0), f64_from(0), f64_from(0));
     }
     return xyz_new(
-    f64_mul(f64_div(cx, cy), big_y),
-    big_y,
-    f64_mul(f64_div(f64_sub(f64_sub(F64_ONE, cx), cy), cy), big_y));
+      f64_mul(f64_div(cx, cy), big_y),
+      big_y,
+      f64_mul(f64_div(f64_sub(f64_sub(F64_ONE, cx), cy), cy), big_y));
 }
 
 # Linear sRGB (D65) from XYZ.
@@ -1468,17 +1468,17 @@ fn xyz_to_linear_srgb(xyz) {
     var y = Xyz_y(xyz);
     var z = Xyz_z(xyz);
     var r = f64_sub(f64_sub(
-    f64_mul(_cie_r(32404542, 10000000), x),
-    f64_mul(_cie_r(15371385, 10000000), y)),
-    f64_mul(_cie_r(4985314, 10000000), z));
+        f64_mul(_cie_r(32404542, 10000000), x),
+        f64_mul(_cie_r(15371385, 10000000), y)),
+      f64_mul(_cie_r(4985314, 10000000), z));
     var g = f64_add(f64_add(
-    f64_mul(f64_neg(_cie_r(9692660, 10000000)), x),
-    f64_mul(_cie_r(18760108, 10000000), y)),
-    f64_mul(_cie_r(415560, 10000000), z));
+        f64_mul(f64_neg(_cie_r(9692660, 10000000)), x),
+        f64_mul(_cie_r(18760108, 10000000), y)),
+      f64_mul(_cie_r(415560, 10000000), z));
     var b = f64_add(f64_sub(
-    f64_mul(_cie_r(556434, 10000000), x),
-    f64_mul(_cie_r(2040259, 10000000), y)),
-    f64_mul(_cie_r(10572252, 10000000), z));
+        f64_mul(_cie_r(556434, 10000000), x),
+        f64_mul(_cie_r(2040259, 10000000), y)),
+      f64_mul(_cie_r(10572252, 10000000), z));
     return rgb_new(r, g, b);
 }
 
@@ -1487,9 +1487,9 @@ fn xyz_to_linear_srgb(xyz) {
 fn xyz_to_srgb(xyz) {
     var lin = xyz_to_linear_srgb(xyz);
     return rgb_clamp(rgb_new(
-    linear_to_srgb_gamma(Rgb_r(lin)),
-    linear_to_srgb_gamma(Rgb_g(lin)),
-    linear_to_srgb_gamma(Rgb_b(lin))));
+        linear_to_srgb_gamma(Rgb_r(lin)),
+        linear_to_srgb_gamma(Rgb_g(lin)),
+        linear_to_srgb_gamma(Rgb_b(lin))));
 }
 
 # XYZ from linear sRGB (inverse matrix).
@@ -1499,12 +1499,12 @@ fn linear_srgb_to_xyz(rgb) {
     var g = Rgb_g(rgb);
     var b = Rgb_b(rgb);
     return xyz_new(
-    f64_add(f64_add(f64_mul(_cie_r(4124564, 10000000), r),
-    f64_mul(_cie_r(3575761, 10000000), g)), f64_mul(_cie_r(1804375, 10000000), b)),
-    f64_add(f64_add(f64_mul(_cie_r(2126729, 10000000), r),
-    f64_mul(_cie_r(7151522, 10000000), g)), f64_mul(_cie_r(721750, 10000000), b)),
-    f64_add(f64_add(f64_mul(_cie_r(193339, 10000000), r),
-    f64_mul(_cie_r(1191920, 10000000), g)), f64_mul(_cie_r(9503041, 10000000), b)));
+      f64_add(f64_add(f64_mul(_cie_r(4124564, 10000000), r),
+          f64_mul(_cie_r(3575761, 10000000), g)), f64_mul(_cie_r(1804375, 10000000), b)),
+      f64_add(f64_add(f64_mul(_cie_r(2126729, 10000000), r),
+          f64_mul(_cie_r(7151522, 10000000), g)), f64_mul(_cie_r(721750, 10000000), b)),
+      f64_add(f64_add(f64_mul(_cie_r(193339, 10000000), r),
+          f64_mul(_cie_r(1191920, 10000000), g)), f64_mul(_cie_r(9503041, 10000000), b)));
 }
 
 # ── sRGB gamma ────────
@@ -1516,8 +1516,8 @@ fn linear_to_srgb_gamma(c) {
         return f64_mul(_cie_r(1292, 100), c);
     }
     return f64_sub(
-    f64_mul(_cie_r(1055, 1000), _prk_pow(c, f64_div(F64_ONE, _cie_r(24, 10)))),
-    _cie_r(55, 1000));
+      f64_mul(_cie_r(1055, 1000), _prk_pow(c, f64_div(F64_ONE, _cie_r(24, 10)))),
+      _cie_r(55, 1000));
 }
 
 # sRGB -> linear.
@@ -1536,10 +1536,10 @@ fn srgb_gamma_to_linear(c) {
 fn cct_from_xy(cx, cy) {
     var n = f64_div(f64_sub(cx, _cie_r(3320, 10000)), f64_sub(_cie_r(1858, 10000), cy));
     return f64_add(f64_add(f64_add(
-    f64_mul(f64_mul(f64_mul(f64_from(449), n), n), n),
-    f64_mul(f64_mul(f64_from(3525), n), n)),
-    f64_mul(_cie_r(68233, 10), n)),
-    _cie_r(552033, 100));
+          f64_mul(f64_mul(f64_mul(f64_from(449), n), n), n),
+          f64_mul(f64_mul(f64_from(3525), n), n)),
+        f64_mul(_cie_r(68233, 10), n)),
+      _cie_r(552033, 100));
 }
 
 # ── CMF interpolation ────────
@@ -1564,9 +1564,9 @@ fn cie_cmf_at(wavelength_nm) {
     }
     var frac = f64_sub(idx_f, f64_from(idx));
     return xyz_new(
-    f64_add(_cmf_x(t, idx), f64_mul(frac, f64_sub(_cmf_x(t, idx + 1), _cmf_x(t, idx)))),
-    f64_add(_cmf_y(t, idx), f64_mul(frac, f64_sub(_cmf_y(t, idx + 1), _cmf_y(t, idx)))),
-    f64_add(_cmf_z(t, idx), f64_mul(frac, f64_sub(_cmf_z(t, idx + 1), _cmf_z(t, idx)))));
+      f64_add(_cmf_x(t, idx), f64_mul(frac, f64_sub(_cmf_x(t, idx + 1), _cmf_x(t, idx)))),
+      f64_add(_cmf_y(t, idx), f64_mul(frac, f64_sub(_cmf_y(t, idx + 1), _cmf_y(t, idx)))),
+      f64_add(_cmf_z(t, idx), f64_mul(frac, f64_sub(_cmf_z(t, idx + 1), _cmf_z(t, idx)))));
 }
 
 # ── Spectral power distribution ────────
@@ -1618,7 +1618,7 @@ fn spd_at(s, wavelength_nm) {
     }
     var frac = f64_sub(idx_f, f64_from(idx));
     return f64_add(_spd_val(vals, idx),
-    f64_mul(frac, f64_sub(_spd_val(vals, idx + 1), _spd_val(vals, idx))));
+      f64_mul(frac, f64_sub(_spd_val(vals, idx + 1), _spd_val(vals, idx))));
 }
 
 # Integrate an SPD against a CMF table (81 rows, 5nm), scaled by the 5nm step.
@@ -1671,7 +1671,7 @@ fn spd_to_srgb(s) {
         norm = f64_div(F64_ONE, Xyz_y(xyz));
     }
     return xyz_to_srgb(xyz_new(
-    f64_mul(Xyz_x(xyz), norm), f64_mul(Xyz_y(xyz), norm), f64_mul(Xyz_z(xyz), norm)));
+        f64_mul(Xyz_x(xyz), norm), f64_mul(Xyz_y(xyz), norm), f64_mul(Xyz_z(xyz), norm)));
 }
 
 # Blackbody SPD at temperature_k, 5nm from 380-780nm (81 samples).
@@ -1709,7 +1709,7 @@ fn illuminant_a() {
     while (i < 81) {
         var wl_m = f64_mul(f64_from(380 + i * 5), _cie_r(1, 1000000000));
         store64(values + i * 8,
-        f64_div(f64_mul(f64_from(100), planck_radiance(wl_m, f64_from(2856))), norm));
+          f64_div(f64_mul(f64_from(100), planck_radiance(wl_m, f64_from(2856))), norm));
         i = i + 1;
     }
     return spd_new(f64_from(380), f64_from(5), values, 81);
@@ -1768,6 +1768,6 @@ fn color_rendering_index(test_spd) {
     s = f64_add(s, _cri_band_delta(test_spd, ref_spd, ty, ry, f64_from(690), f64_from(750)));
     var delta_e_avg = f64_div(s, f64_from(8));
     return f64_clamp(
-    f64_sub(f64_from(100), f64_mul(f64_mul(_cie_r(46, 10), delta_e_avg), f64_from(100))),
-    f64_from(0), f64_from(100));
+      f64_sub(f64_from(100), f64_mul(f64_mul(_cie_r(46, 10), delta_e_avg), f64_from(100))),
+      f64_from(0), f64_from(100));
 }

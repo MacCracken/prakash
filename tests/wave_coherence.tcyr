@@ -22,15 +22,15 @@ test_group("coherence");
 
 # HeNe laser: 632.8nm, 0.001nm bandwidth -> l_c = 632.8^2/0.001 = 400435840 nm
 _assert_near(
-coherence_length(_fd(6328, 10), _fd(1, 1000)), f64_from(400435840), F64_ONE, "HeNe coherence length");
+  coherence_length(_fd(6328, 10), _fd(1, 1000)), f64_from(400435840), F64_ONE, "HeNe coherence length");
 
 # white light: 550nm, 300nm -> ~1008 nm, in (500, 2000)
 assert(
-_in_range(coherence_length(f64_from(550), f64_from(300)), f64_from(500), f64_from(2000)), "white light coherence");
+  _in_range(coherence_length(f64_from(550), f64_from(300)), f64_from(500), f64_from(2000)), "white light coherence");
 
 # narrower bandwidth -> longer coherence
 assert(f64_gt(coherence_length(f64_from(550), F64_ONE), coherence_length(f64_from(550), f64_from(10))),
-"narrower bandwidth longer coherence");
+  "narrower bandwidth longer coherence");
 
 # coherence time positive and in (1e-12, 1e-6) s
 var tc = coherence_time(WL550NM, _fd(1, 1000000000));   # bandwidth 1e-9 m
@@ -44,11 +44,11 @@ assert(f64_lt(sca, MM), "spatial coherence angle < 1e-3");
 
 # coherence area increases with distance
 assert(f64_gt(coherence_area(WL550NM, f64_from(10), MM), coherence_area(WL550NM, F64_ONE, MM)),
-"coherence area increases with distance");
+  "coherence area increases with distance");
 
 # path difference = coherence length -> ratio 1
 var lc = coherence_length(f64_from(550), F64_ONE);
 _assert_near(
-coherence_ratio(lc, f64_from(550), F64_ONE), F64_ONE, f64_div(F64_ONE, f64_from(1000000)), "coherence ratio = 1");
+  coherence_ratio(lc, f64_from(550), F64_ONE), F64_ONE, f64_div(F64_ONE, f64_from(1000000)), "coherence ratio = 1");
 
 var r = assert_summary();

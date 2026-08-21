@@ -136,7 +136,7 @@ var wl_i = _fd(5, 10000000);   # 0.5e-6
 var one_src = alloc(1 * sizeof(PointSource));
 _mksrc(one_src, 0, Z, Z, F64_ONE, Z);
 var pi_single = interference_pattern(one_src, 1, wl_i, F64_ONE,
-f64_neg(_fd(1, 1000)), _fd(1, 1000), f64_neg(_fd(1, 1000)), _fd(1, 1000), 16, 16);
+  f64_neg(_fd(1, 1000)), _fd(1, 1000), f64_neg(_fd(1, 1000)), _fd(1, 1000), 16, 16);
 assert_eq(Pattern2D_width(pi_single), 16, "interference width 16");
 assert_eq(Pattern2D_height(pi_single), 16, "interference height 16");
 assert_eq(_all_nonneg(pi_single), 1, "interference single non-negative");
@@ -146,7 +146,7 @@ var two_src = alloc(2 * sizeof(PointSource));
 _mksrc(two_src, 0, f64_neg(_fd(5, 10000)), Z, F64_ONE, Z);
 _mksrc(two_src, 1, _fd(5, 10000), Z, F64_ONE, Z);
 var fr = interference_pattern(two_src, 2, wl_i, F64_ONE,
-f64_neg(_fd(5, 1000)), _fd(5, 1000), Z, Z, 64, 1);
+  f64_neg(_fd(5, 1000)), _fd(5, 1000), Z, Z, 64, 1);
 var fmin = 0x7FF0000000000000;
 var fmax = Z;
 for (var fi = 0; fi < 64; fi = fi + 1) {
@@ -167,7 +167,7 @@ _mksrc(two_co, 1, Z, Z, F64_ONE, Z);
 var p2 = interference_pattern(two_co, 2, wl_i, F64_ONE, Z, Z, Z, Z, 1, 1);
 var p1 = interference_pattern(one_src, 1, wl_i, F64_ONE, Z, Z, Z, Z, 1, 1);
 _assert_near(f64_div(pattern2d_get(p2, 0, 0), pattern2d_get(p1, 0, 0)), f64_from(4), _fd(1, 100),
-"constructive 2 sources = 4x");
+  "constructive 2 sources = 4x");
 
 # three sources non-negative
 var three_src = alloc(3 * sizeof(PointSource));
@@ -175,7 +175,7 @@ _mksrc(three_src, 0, f64_neg(_fd(1, 1000)), Z, F64_ONE, Z);
 _mksrc(three_src, 1, _fd(1, 1000), Z, F64_ONE, Z);
 _mksrc(three_src, 2, Z, _fd(1, 1000), F64_HALF, F64_HALF);
 var pi3 = interference_pattern(three_src, 3, wl_i, F64_ONE,
-f64_neg(_fd(5, 1000)), _fd(5, 1000), f64_neg(_fd(5, 1000)), _fd(5, 1000), 16, 16);
+  f64_neg(_fd(5, 1000)), _fd(5, 1000), f64_neg(_fd(5, 1000)), _fd(5, 1000), 16, 16);
 assert_eq(_all_nonneg(pi3), 1, "three sources non-negative");
 
 # ── spectrum strip ────────
@@ -259,7 +259,7 @@ for (var ar = 0; ar < 32; ar = ar + 1) {
 var psf_perfect = psf_from_wavefront(pupil, wf0, 32, 32, _fd(55, 100000000));
 var psf_aberr = psf_from_wavefront(pupil, wf_ab, 32, 32, _fd(55, 100000000));
 assert(f64_lt(pattern2d_max_intensity(psf_aberr), pattern2d_max_intensity(psf_perfect)),
-"aberrated PSF lower peak");
+  "aberrated PSF lower peak");
 
 # ── Pattern2D ────────
 test_group("pattern2d");

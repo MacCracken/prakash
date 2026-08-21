@@ -92,12 +92,12 @@ test_group("refract_snell_trace");
 
 var er = 0;
 var refracted = ray_refract_3d(
-_n3(_fd(4, 10), _fd(3, 10), f64_neg(_fd(8, 10))),
-ray_vec3(Z, Z, F64_ONE), F64_ONE, N15, &er);
+  _n3(_fd(4, 10), _fd(3, 10), f64_neg(_fd(8, 10))),
+  ray_vec3(Z, Z, F64_ONE), F64_ONE, N15, &er);
 var rl = f64_sqrt(f64_add(f64_add(
-f64_mul(RayVec3_x(refracted), RayVec3_x(refracted)),
-f64_mul(RayVec3_y(refracted), RayVec3_y(refracted))),
-f64_mul(RayVec3_z(refracted), RayVec3_z(refracted))));
+      f64_mul(RayVec3_x(refracted), RayVec3_x(refracted)),
+      f64_mul(RayVec3_y(refracted), RayVec3_y(refracted))),
+    f64_mul(RayVec3_z(refracted), RayVec3_z(refracted))));
 _assert_near(rl, F64_ONE, TOL_02, "refracted direction normalized");
 
 var angle_i = ray_deg_to_rad(f64_from(30));
@@ -106,8 +106,8 @@ var scalar_t = ray_snell(F64_ONE, N15, angle_i, &es);
 var refl_x = 0;
 var e3d = 0;
 var refr3 = ray_snell_3d(
-ray_vec3(f64_sin(angle_i), Z, f64_neg(f64_cos(angle_i))),
-ray_vec3(Z, Z, F64_ONE), F64_ONE, N15, &refl_x, &e3d);
+  ray_vec3(f64_sin(angle_i), Z, f64_neg(f64_cos(angle_i))),
+  ray_vec3(Z, Z, F64_ONE), F64_ONE, N15, &refl_x, &e3d);
 var angle_t_3d = ganita_f64_acos(f64_neg(RayVec3_z(refr3)));
 _assert_near(angle_t_3d, scalar_t, TOL3, "snell_3d matches scalar snell");
 
@@ -169,8 +169,8 @@ assert(f64_gt(PrismSpread_spread(spread_flint), PrismSpread_spread(spread_crown)
 test_group("additional_models");
 
 _assert_near(
-schott_n_at(schott_bk7(), fraunhofer_d()),
-sellmeier_n_at(sellmeier_bk7(), fraunhofer_d()), TOL_002, "Schott BK7 ~ Sellmeier BK7");
+  schott_n_at(schott_bk7(), fraunhofer_d()),
+  sellmeier_n_at(sellmeier_bk7(), fraunhofer_d()), TOL_002, "Schott BK7 ~ Sellmeier BK7");
 assert(_between(schott_n_at(schott_bk7(), _fd(4, 10)), _fd(14, 10), _fd(16, 10)), "Schott BK7 range 0.4");
 assert(_between(schott_n_at(schott_bk7(), _fd(5, 10)), _fd(14, 10), _fd(16, 10)), "Schott BK7 range 0.5");
 assert(_between(schott_n_at(schott_bk7(), _fd(6, 10)), _fd(14, 10), _fd(16, 10)), "Schott BK7 range 0.6");

@@ -40,8 +40,8 @@ test_group("fraunhofer_1d");
 var ap100 = alloc(100 * 16);
 for (var i = 0; i < 100; i = i + 1) {
     var x = f64_add(
-    f64_neg(f64_div(MM, F64_TWO)),
-    f64_div(f64_mul(MM, f64_from(i)), f64_from(99)));
+      f64_neg(f64_div(MM, F64_TWO)),
+      f64_div(f64_mul(MM, f64_from(i)), f64_from(99)));
     store64(ap100 + i * 16, x);
     store64(ap100 + i * 16 + 8, F64_ONE);
 }
@@ -75,9 +75,9 @@ assert(f64_lt(f64_abs(fresnel_integral_s(Z)), EPS), "S(0) = 0");
 _assert_near(fresnel_integral_c(f64_from(10)), F64_HALF, _fd(5, 100), "C(10) ~ 0.5");
 _assert_near(fresnel_integral_s(f64_from(10)), F64_HALF, _fd(5, 100), "S(10) ~ 0.5");
 assert(f64_lt(f64_abs(f64_add(fresnel_integral_c(f64_neg(F64_TWO)), fresnel_integral_c(F64_TWO))),
-_fd(1, 100)), "C odd function");
+    _fd(1, 100)), "C odd function");
 assert(f64_lt(f64_abs(f64_add(fresnel_integral_s(f64_neg(F64_TWO)), fresnel_integral_s(F64_TWO))),
-_fd(1, 100)), "S odd function");
+    _fd(1, 100)), "S odd function");
 _assert_near(fresnel_integral_c(F64_ONE), _fd(7799, 10000), _fd(1, 100), "C(1) ~ 0.7799");
 _assert_near(fresnel_integral_s(F64_ONE), _fd(4383, 10000), _fd(1, 100), "S(1) ~ 0.4383");
 
@@ -120,8 +120,8 @@ var TOL3 = _fd(1, 1000);    # 0.001
 # air->glass: sqrt(1*1.52) ~ 1.233
 _assert_near(ar_ideal_index(F64_ONE, N152), _fd(1233, 1000), TOL3, "ideal index ~ 1.233");
 _assert_near(
-ar_quarter_wave_thickness(f64_from(550), N138),
-f64_div(f64_from(550), f64_mul(f64_from(4), N138)), EPS, "quarter-wave thickness");
+  ar_quarter_wave_thickness(f64_from(550), N138),
+  f64_div(f64_from(550), f64_mul(f64_from(4), N138)), EPS, "quarter-wave thickness");
 
 # ideal V-coat (n2 = sqrt(n1*n3)) -> ~0 reflectance
 var n2_ideal = f64_sqrt(f64_mul(F64_ONE, N152));
@@ -197,12 +197,12 @@ store64(lay_996, N138);
 store64(lay_996 + 8, _fd(996, 10));   # 99.6
 var res_sp = multilayer_rt(f64_from(550), Z, F64_ONE, N152, lay_996, 1);
 assert(f64_lt(f64_abs(f64_sub(ThinFilmResult_r_s(res_sp), ThinFilmResult_r_p(res_sp))), _fd(1, 100)),
-"s=p at normal");
+  "s=p at normal");
 
 # s and p differ at 45 degrees
 var res_ob = multilayer_rt(f64_from(550), F64_PI_4, F64_ONE, N152, lay_996, 1);
 assert(f64_gt(f64_abs(f64_sub(ThinFilmResult_r_s(res_ob), ThinFilmResult_r_p(res_ob))), TOL3),
-"s!=p at oblique");
+  "s!=p at oblique");
 
 # energy conservation R + T ~ 1
 var lay_ec = alloc(32);
@@ -212,9 +212,9 @@ store64(lay_ec + 16, N210);
 store64(lay_ec + 24, _fd(655, 10));   # 65.5
 var res_ec = multilayer_rt(f64_from(550), _fd(3, 10), F64_ONE, N152, lay_ec, 2);
 assert(f64_lt(f64_abs(f64_sub(f64_add(ThinFilmResult_r_s(res_ec), ThinFilmResult_t_s(res_ec)), F64_ONE)),
-_fd(1, 100)), "R_s + T_s ~ 1");
+    _fd(1, 100)), "R_s + T_s ~ 1");
 assert(f64_lt(f64_abs(f64_sub(f64_add(ThinFilmResult_r_p(res_ec), ThinFilmResult_t_p(res_ec)), F64_ONE)),
-_fd(1, 100)), "R_p + T_p ~ 1");
+    _fd(1, 100)), "R_p + T_p ~ 1");
 
 # bare surface at angle: in range, s >= p - 0.01
 var res_bare = multilayer_rt(f64_from(550), _fd(5, 10), F64_ONE, N152, 0, 0);
@@ -223,7 +223,7 @@ assert(f64_le(ThinFilmResult_r_s(res_bare), F64_ONE), "bare R_s <= 1");
 assert(f64_ge(ThinFilmResult_r_p(res_bare), Z), "bare R_p >= 0");
 assert(f64_le(ThinFilmResult_r_p(res_bare), F64_ONE), "bare R_p <= 1");
 assert(f64_ge(ThinFilmResult_r_s(res_bare), f64_sub(ThinFilmResult_r_p(res_bare), _fd(1, 100))),
-"s >= p for dielectric at oblique");
+  "s >= p for dielectric at oblique");
 
 # reflectance in range across incidence angles 0..80 deg
 for (var ad = 0; ad <= 80; ad = ad + 10) {

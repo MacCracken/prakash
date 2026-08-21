@@ -114,7 +114,7 @@ fn ai_daimon_client_new(config, err_out) {
 fn ai_daimon_config_to_json(config) {
     var obj = bayan_json_v_obj_new();
     bayan_json_v_obj_set(obj, str_from("endpoint"),
-    bayan_json_v_str_new(str_from(DaimonConfig_endpoint(config))));
+      bayan_json_v_str_new(str_from(DaimonConfig_endpoint(config))));
     var ak = DaimonConfig_api_key(config);
     if (ak == 0) {
         bayan_json_v_obj_set(obj, str_from("api_key"), bayan_json_v_null());
@@ -148,7 +148,7 @@ fn ai_daimon_config_from_json(json, len, err_out) {
 fn ai_hoosh_config_to_json(config) {
     var obj = bayan_json_v_obj_new();
     bayan_json_v_obj_set(obj, str_from("endpoint"),
-    bayan_json_v_str_new(str_from(HooshConfig_endpoint(config))));
+      bayan_json_v_str_new(str_from(HooshConfig_endpoint(config))));
     return bayan_json_v_build(obj);
 }
 
@@ -207,7 +207,7 @@ fn ai_register_agent(client, err_out) {
     var opts = sandhi_http_options_new();
     sandhi_http_options_total_ms(opts, 30000);
     var resp = sandhi_http_post_opts(url, headers, str_data(body_str),
-    str_len(body_str), opts);
+      str_len(body_str), opts);
     if (sandhi_http_err_kind(resp) != SANDHI_OK) {
         store64(err_out, PK_ERR_INVALID_PARAMETER);
         return "unknown";

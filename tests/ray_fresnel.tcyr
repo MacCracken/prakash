@@ -119,8 +119,8 @@ assert(f64_lt(RayVec3_z(refr_s3), f64_from(0)), "snell_3d still forward (-z)");
 var refl_n = 0;
 var e_n = 0;
 var _rn3 = ray_snell_3d(
-ray_vec3(f64_from(0), f64_from(0), f64_neg(F64_ONE)),
-ray_vec3(f64_from(0), f64_from(0), F64_ONE), F64_ONE, _fd(15, 10), &refl_n, &e_n);
+  ray_vec3(f64_from(0), f64_from(0), f64_neg(F64_ONE)),
+  ray_vec3(f64_from(0), f64_from(0), F64_ONE), F64_ONE, _fd(15, 10), &refl_n, &e_n);
 assert_eq(e_n, 0, "snell_3d normal ok");
 _assert_near(refl_n, fresnel_normal(F64_ONE, _fd(15, 10)), TOL_01, "snell_3d normal ~ fresnel_normal");
 
@@ -148,8 +148,8 @@ _assert_near(ComplexMedium_k(die), f64_from(0), TOL6, "dielectric k=0");
 
 # complex normal for dielectric matches real
 _assert_near(
-fresnel_normal_complex(F64_ONE, die),
-fresnel_normal(F64_ONE, _fd(152, 100)), TOL_001, "complex dielectric ~ real");
+  fresnel_normal_complex(F64_ONE, die),
+  fresnel_normal(F64_ONE, _fd(152, 100)), TOL_001, "complex dielectric ~ real");
 
 # gold ~0.82
 _assert_near(fresnel_normal_complex(F64_ONE, complex_gold_550nm()), _fd(82, 100), TOL_05, "gold ~0.82");
@@ -168,13 +168,13 @@ var ang30 = ray_deg_to_rad(f64_from(30));
 var eu2 = 0;
 var ru_real = fresnel_unpolarized(F64_ONE, _fd(152, 100), ang30, &eu2);
 _assert_near(
-fresnel_unpolarized_complex(F64_ONE, die, ang30), ru_real, TOL_01,
-"complex unpol dielectric ~ real at 30deg");
+  fresnel_unpolarized_complex(F64_ONE, die, ang30), ru_real, TOL_01,
+  "complex unpol dielectric ~ real at 30deg");
 
 # grazing dielectric high reflectance
 assert(
-f64_gt(fresnel_unpolarized_complex(F64_ONE, die, ray_deg_to_rad(f64_from(85))), TOL_HALF),
-"complex grazing > 0.5");
+  f64_gt(fresnel_unpolarized_complex(F64_ONE, die, ray_deg_to_rad(f64_from(85))), TOL_HALF),
+  "complex grazing > 0.5");
 
 # range valid: metals, all angles r_s,r_p in [0, 1.001]
 var au = complex_gold_550nm();

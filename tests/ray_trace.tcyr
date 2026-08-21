@@ -99,8 +99,8 @@ assert_eq(ep, 0, "polarized normal ok");
 assert_eq(vec_len(res_pn), 1, "polarized normal 1 result");
 var pn0 = vec_get(res_pn, 0);
 _assert_near(
-PolarizedTraceHit_transmittance_s(pn0),
-PolarizedTraceHit_transmittance_p(pn0), TOL_01, "s=p at normal incidence");
+  PolarizedTraceHit_transmittance_s(pn0),
+  PolarizedTraceHit_transmittance_p(pn0), TOL_01, "s=p at normal incidence");
 assert(f64_gt(PolarizedTraceHit_transmittance_s(pn0), _fd(9, 10)), "Ts > 0.9 at normal");
 
 # oblique 45deg: s transmits less than p
@@ -113,8 +113,8 @@ var res_ob = trace_sequential_polarized(ray_ob, surfs_ob, &eq);
 assert_eq(eq, 0, "polarized oblique ok");
 var ob0 = vec_get(res_ob, 0);
 assert(
-f64_lt(PolarizedTraceHit_transmittance_s(ob0), PolarizedTraceHit_transmittance_p(ob0)),
-"s transmits less than p at 45deg");
+  f64_lt(PolarizedTraceHit_transmittance_s(ob0), PolarizedTraceHit_transmittance_p(ob0)),
+  "s transmits less than p at 45deg");
 
 # multi-surface: cumulative transmittance multiplies
 var em = 0;
@@ -128,12 +128,12 @@ assert_eq(vec_len(res_ms), 2, "polarized multi 2 results");
 var ms0 = vec_get(res_ms, 0);
 var ms1 = vec_get(res_ms, 1);
 assert(
-f64_lt(PolarizedTraceHit_transmittance_s(ms1), PolarizedTraceHit_transmittance_s(ms0)),
-"Ts decreases after 2nd surface");
+  f64_lt(PolarizedTraceHit_transmittance_s(ms1), PolarizedTraceHit_transmittance_s(ms0)),
+  "Ts decreases after 2nd surface");
 var t2_single = f64_sub(F64_ONE, fresnel_normal(N15, F64_ONE));
 _assert_near(
-PolarizedTraceHit_transmittance_s(ms1),
-f64_mul(PolarizedTraceHit_transmittance_s(ms0), t2_single), TOL_01, "cumulative multiplies");
+  PolarizedTraceHit_transmittance_s(ms1),
+  f64_mul(PolarizedTraceHit_transmittance_s(ms0), t2_single), TOL_01, "cumulative multiplies");
 
 # transmittance in [0,1]
 var er = 0;

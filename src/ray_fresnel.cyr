@@ -227,9 +227,9 @@ fn ray_snell_3d(direction, normal, n1, n2, refl_out, err_out) {
     var cos_t = f64_sqrt(f64_sub(F64_ONE, sin2_t));
     var factor = f64_sub(f64_mul(ratio, cos_i), cos_t);
     var refr = ray_vec3(
-    f64_add(f64_mul(ratio, dx), f64_mul(factor, nx)),
-    f64_add(f64_mul(ratio, dy), f64_mul(factor, ny)),
-    f64_add(f64_mul(ratio, dz), f64_mul(factor, nz)));
+      f64_add(f64_mul(ratio, dx), f64_mul(factor, nx)),
+      f64_add(f64_mul(ratio, dy), f64_mul(factor, ny)),
+      f64_add(f64_mul(ratio, dz), f64_mul(factor, nz)));
     var rs = fresnel_s(n1, n2, cos_i, cos_t);
     var rp = fresnel_p(n1, n2, cos_i, cos_t);
     store64(refl_out, f64_mul(F64_HALF, f64_add(rs, rp)));

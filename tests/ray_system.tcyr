@@ -136,7 +136,7 @@ var e_bfd = 0;
 var props_bfd = find_system_properties(_thick_biconvex(), &e_bfd);
 assert(f64_gt(SystemProperties_bfd(props_bfd), Z), "BFD positive");
 _assert_near(SystemProperties_power(props_bfd),
-f64_div(F64_ONE, SystemProperties_focal_length(props_bfd)), TOL10, "power = 1/EFL");
+  f64_div(F64_ONE, SystemProperties_focal_length(props_bfd)), TOL10, "power = 1/EFL");
 
 var e_empty = 0;
 var _pe = find_system_properties(prescription_new("empty"), &e_empty);
@@ -165,8 +165,8 @@ assert_eq(prescription_len(p_bx), 2, "biconvex len 2");
 assert_eq(streq(Prescription_name(p_bx), "biconvex"), 1, "biconvex name");
 var bx_surfs = Prescription_surfaces(p_bx);
 _assert_near(
-f64_add(PrescriptionSurface_radius(vec_get(bx_surfs, 0)), PrescriptionSurface_radius(vec_get(bx_surfs, 1))),
-Z, TOL10, "biconvex R1 = -R2");
+  f64_add(PrescriptionSurface_radius(vec_get(bx_surfs, 0)), PrescriptionSurface_radius(vec_get(bx_surfs, 1))),
+  Z, TOL10, "biconvex R1 = -R2");
 var e_bx = 0;
 var props_bx = find_system_properties(p_bx, &e_bx);
 _assert_near(SystemProperties_focal_length(props_bx), f64_from(100), TOL5, "biconvex EFL ~100");
@@ -174,10 +174,10 @@ _assert_near(SystemProperties_focal_length(props_bx), f64_from(100), TOL5, "bico
 var p_pc = prescription_planoconvex(f64_from(100), N15, f64_from(25), f64_from(3));
 assert_eq(prescription_len(p_pc), 2, "planoconvex len 2");
 assert_eq(_sys_is_inf(PrescriptionSurface_radius(vec_get(Prescription_surfaces(p_pc), 0))), 1,
-"planoconvex first surface flat");
+  "planoconvex first surface flat");
 
 var p_db = prescription_doublet(f64_from(200), _fd(1517, 1000), f64_from(64),
-_fd(1648, 1000), f64_from(34), f64_from(25), f64_from(4), F64_TWO);
+  _fd(1648, 1000), f64_from(34), f64_from(25), f64_from(4), F64_TWO);
 assert_eq(prescription_len(p_db), 3, "doublet len 3");
 assert_eq(streq(Prescription_name(p_db), "achromatic doublet"), 1, "doublet name");
 
@@ -187,7 +187,7 @@ test_group("paraxial_vs_full");
 var p_cons = _thick_biconvex();
 var px_cons = prescription_to_paraxial_surfaces(p_cons);
 var p_final = vec_get(paraxial_trace(paraxial_marginal(_fd(1, 10)), px_cons),
-vec_len(paraxial_trace(paraxial_marginal(_fd(1, 10)), px_cons)) - 1);
+  vec_len(paraxial_trace(paraxial_marginal(_fd(1, 10)), px_cons)) - 1);
 var trace_cons = prescription_to_trace_surfaces(p_cons);
 var ray_cons = trace_ray_new(ray_vec3(Z, _fd(1, 10), f64_neg(f64_from(100))), ray_vec3(Z, Z, F64_ONE), F64_ONE);
 var e_cons = 0;

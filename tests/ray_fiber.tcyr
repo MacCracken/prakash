@@ -61,8 +61,8 @@ test_group("coupling");
 
 # equal radii -> perfect coupling
 _assert_near(
-coupling_efficiency_gaussian(_fd(5, 1000000), _fd(5, 1000000)),
-F64_ONE, TOL6, "equal radii perfect coupling");
+  coupling_efficiency_gaussian(_fd(5, 1000000), _fd(5, 1000000)),
+  F64_ONE, TOL6, "equal radii perfect coupling");
 
 # mismatched radii -> reduced but > 0.5
 var eta_mm = coupling_efficiency_gaussian(_fd(5, 1000000), _fd(10, 1000000));
@@ -71,7 +71,7 @@ assert(f64_gt(eta_mm, HALF), "mismatch > 0.5");
 
 # symmetric in its arguments
 _assert_near(
-coupling_efficiency_gaussian(_fd(3, 1000000), _fd(5, 1000000)),
-coupling_efficiency_gaussian(_fd(5, 1000000), _fd(3, 1000000)), TOL6, "coupling symmetric");
+  coupling_efficiency_gaussian(_fd(3, 1000000), _fd(5, 1000000)),
+  coupling_efficiency_gaussian(_fd(5, 1000000), _fd(3, 1000000)), TOL6, "coupling symmetric");
 
 var r = assert_summary();

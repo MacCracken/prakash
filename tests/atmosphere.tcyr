@@ -33,26 +33,26 @@ var base = f64_div(f64_from(680), f64_from(440));
 var base2 = f64_mul(base, base);
 var expected4 = f64_mul(base2, base2);
 assert(f64_lt(f64_div(f64_abs(f64_sub(b_ratio, expected4)), expected4), _fd(1, 100)),
-"lambda^-4 dependence");
+  "lambda^-4 dependence");
 var beta550 = atm_rayleigh_scattering_coefficient(WL);
 assert(f64_gt(beta550, Z), "beta positive");
 assert(f64_gt(beta550, _fd(1, 1000000)), "beta > 1e-6");
 assert(f64_lt(beta550, _fd(1, 10000)), "beta < 1e-4");
 assert(f64_gt(atm_rayleigh_scattering_coefficient(BLUE),
-f64_mul(atm_rayleigh_scattering_coefficient(RED), f64_from(4))), "blue scatters more");
+    f64_mul(atm_rayleigh_scattering_coefficient(RED), f64_from(4))), "blue scatters more");
 var beta_sea = atm_rayleigh_scattering_at_altitude(WL, Z);
 var beta_high = atm_rayleigh_scattering_at_altitude(WL, f64_from(8500));
 assert(f64_lt(f64_abs(f64_sub(f64_div(beta_high, beta_sea), INV_E)), _fd(1, 100)),
-"at scale height -> 1/e");
+  "at scale height -> 1/e");
 _assert_near(atm_rayleigh_scattering_at_altitude(WL, Z), atm_rayleigh_scattering_coefficient(WL), EPS,
-"altitude 0 = sea level");
+  "altitude 0 = sea level");
 _assert_near(atm_phase_rayleigh(F64_ONE), atm_phase_rayleigh(f64_neg(F64_ONE)), EPS, "phase symmetric");
 assert(f64_gt(atm_phase_rayleigh(F64_ONE), atm_phase_rayleigh(Z)), "phase min at 90");
 var integ_r = Z;
 for (var ri = 0; ri < 1000; ri = ri + 1) {
     var theta = f64_div(f64_mul(F64_PI, f64_add(f64_from(ri), F64_HALF)), f64_from(1000));
     integ_r = f64_add(integ_r, f64_mul(f64_mul(f64_mul(atm_phase_rayleigh(f64_cos(theta)),
-    f64_sin(theta)), f64_mul(F64_TWO, F64_PI)), f64_div(F64_PI, f64_from(1000))));
+            f64_sin(theta)), f64_mul(F64_TWO, F64_PI)), f64_div(F64_PI, f64_from(1000))));
 }
 _assert_near(integ_r, F64_ONE, _fd(1, 100), "rayleigh phase integrates to 1");
 
@@ -64,8 +64,8 @@ var mie_sea = atm_mie_scattering_at_altitude(WL, Z);
 var mie_high = atm_mie_scattering_at_altitude(WL, f64_from(1200));
 assert(f64_lt(f64_abs(f64_sub(f64_div(mie_high, mie_sea), INV_E)), _fd(1, 100)), "mie scale height 1/e");
 assert(f64_gt(atm_mie_phase_cornette_shanks(F64_ONE, _fd(76, 100)),
-f64_mul(atm_mie_phase_cornette_shanks(f64_neg(F64_ONE), _fd(76, 100)), f64_from(10))),
-"mie forward peak");
+    f64_mul(atm_mie_phase_cornette_shanks(f64_neg(F64_ONE), _fd(76, 100)), f64_from(10))),
+  "mie forward peak");
 var mg4 = alloc(4 * 8);
 store64(mg4, Z);
 store64(mg4 + 8, F64_HALF);
@@ -80,17 +80,17 @@ store64(ct5 + 32, F64_ONE);
 for (var mi = 0; mi < 4; mi = mi + 1) {
     for (var mj = 0; mj < 5; mj = mj + 1) {
         assert(f64_ge(atm_mie_phase_cornette_shanks(load64(ct5 + mj * 8), load64(mg4 + mi * 8)), Z),
-        "mie phase non-negative");
+          "mie phase non-negative");
     }
 }
 assert(f64_gt(atm_mie_phase_cornette_shanks(F64_ONE, Z), atm_mie_phase_cornette_shanks(Z, Z)),
-"mie g=0 forward > 90");
+  "mie g=0 forward > 90");
 var integ_m = Z;
 for (var mi2 = 0; mi2 < 1000; mi2 = mi2 + 1) {
     var thm = f64_div(f64_mul(F64_PI, f64_add(f64_from(mi2), F64_HALF)), f64_from(1000));
     integ_m = f64_add(integ_m, f64_mul(f64_mul(f64_mul(
-    atm_mie_phase_cornette_shanks(f64_cos(thm), _fd(76, 100)),
-    f64_sin(thm)), f64_mul(F64_TWO, F64_PI)), f64_div(F64_PI, f64_from(1000))));
+            atm_mie_phase_cornette_shanks(f64_cos(thm), _fd(76, 100)),
+            f64_sin(thm)), f64_mul(F64_TWO, F64_PI)), f64_div(F64_PI, f64_from(1000))));
 }
 _assert_near(integ_m, F64_ONE, _fd(2, 100), "mie phase integrates to 1");
 
@@ -131,11 +131,11 @@ for (var ti = 0; ti < 4; ti = ti + 1) {
 }
 assert(f64_gt(atm_atmospheric_transmittance(WL, Z), _fd(8, 10)), "zenith transmittance high");
 assert(f64_gt(atm_atmospheric_transmittance(WL, Z), atm_atmospheric_transmittance(WL, _rad(60))),
-"transmittance decreases 0>60");
+  "transmittance decreases 0>60");
 assert(f64_gt(atm_atmospheric_transmittance(WL, _rad(60)), atm_atmospheric_transmittance(WL, _rad(85))),
-"transmittance decreases 60>85");
+  "transmittance decreases 60>85");
 assert(f64_gt(atm_atmospheric_transmittance(RED, _rad(80)), atm_atmospheric_transmittance(BLUE, _rad(80))),
-"red transmits better than blue");
+  "red transmits better than blue");
 
 # ── Sky color ────────
 test_group("sky_color");
@@ -162,7 +162,7 @@ for (var si = 0; si < 4; si = si + 1) {
     }
 }
 assert(f64_gt(atm_sky_radiance_single_scatter(BLUE, _fd(3, 10), F64_PI_2),
-atm_sky_radiance_single_scatter(RED, _fd(3, 10), F64_PI_2)), "blue dominates at 90deg");
+    atm_sky_radiance_single_scatter(RED, _fd(3, 10), F64_PI_2)), "blue dominates at 90deg");
 
 # ── Sunlight color ────────
 test_group("sunlight");
@@ -228,7 +228,7 @@ for (var ai = 0; ai < 4; ai = ai + 1) {
     for (var aj = 0; aj < 4; aj = aj + 1) {
         for (var ak = 0; ak < 4; ak = ak + 1) {
             var gamma = atm_scattering_angle(load64(zang4 + ai * 8), load64(zang4 + aj * 8),
-            load64(az4 + ak * 8));
+              load64(az4 + ak * 8));
             assert(f64_ge(gamma, Z), "scatter angle >= 0");
             assert(f64_le(gamma, pi_eps), "scatter angle <= pi");
         }

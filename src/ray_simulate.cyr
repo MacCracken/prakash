@@ -87,12 +87,12 @@ fn trace_recursive(ray, surfaces, config) {
 fn _trace_recursive_inner(ray, surfaces, config, energy, depth, segments, inter_ptr) {
     if (depth >= TraceConfig_max_depth(config)) {
         vec_push(segments, _seg_new(TraceRay_pos(ray), TraceRay_dir(ray), TraceRay_n(ray),
-        f64_from(0), f64_from(0), energy, depth, EVENT_TERMINATED, f64_from(0), 0));
+            f64_from(0), f64_from(0), energy, depth, EVENT_TERMINATED, f64_from(0), 0));
         return 0;
     }
     if (f64_lt(energy, TraceConfig_min_energy(config)) == 1) {
         vec_push(segments, _seg_new(TraceRay_pos(ray), TraceRay_dir(ray), TraceRay_n(ray),
-        f64_from(0), f64_from(0), energy, depth, EVENT_TERMINATED, f64_from(0), 0));
+            f64_from(0), f64_from(0), energy, depth, EVENT_TERMINATED, f64_from(0), 0));
         return 0;
     }
 
@@ -122,7 +122,7 @@ fn _trace_recursive_inner(ray, surfaces, config, energy, depth, segments, inter_
 
     if (best_idx < 0) {
         vec_push(segments, _seg_new(TraceRay_pos(ray), TraceRay_dir(ray), TraceRay_n(ray),
-        f64_from(0), f64_from(0), energy, depth, EVENT_ESCAPED, f64_from(0), 0));
+            f64_from(0), f64_from(0), energy, depth, EVENT_ESCAPED, f64_from(0), 0));
         return 0;
     }
 
@@ -133,12 +133,12 @@ fn _trace_recursive_inner(ray, surfaces, config, energy, depth, segments, inter_
     var transmittance = f64_sub(F64_ONE, reflectance);
 
     vec_push(segments, _seg_new(TraceRay_pos(ray), TraceRay_dir(ray), TraceRay_n(ray),
-    path_len, optical_path, f64_mul(energy, transmittance), depth, EVENT_REFRACTION, reflectance, best_idx));
+        path_len, optical_path, f64_mul(energy, transmittance), depth, EVENT_REFRACTION, reflectance, best_idx));
 
     var refracted_energy = f64_mul(energy, transmittance);
     if (f64_ge(refracted_energy, TraceConfig_min_energy(config)) == 1) {
         _trace_recursive_inner(TraceHit_ray_after(best_hit), surfaces, config,
-        refracted_energy, depth + 1, segments, inter_ptr);
+          refracted_energy, depth + 1, segments, inter_ptr);
     }
 
     var reflected_energy = f64_mul(energy, reflectance);
@@ -146,9 +146,9 @@ fn _trace_recursive_inner(ray, surfaces, config, energy, depth, segments, inter_
         var reflected_dir = ray_reflect_3d(TraceRay_dir(ray), TraceHit_normal(best_hit));
         var reflected_ray = trace_ray_new(TraceHit_hit_point(best_hit), reflected_dir, TraceRay_n(ray));
         vec_push(segments, _seg_new(TraceHit_hit_point(best_hit), reflected_dir, TraceRay_n(ray),
-        f64_from(0), f64_from(0), reflected_energy, depth, EVENT_REFLECTION, f64_from(0), best_idx));
+            f64_from(0), f64_from(0), reflected_energy, depth, EVENT_REFLECTION, f64_from(0), best_idx));
         _trace_recursive_inner(reflected_ray, surfaces, config,
-        reflected_energy, depth + 1, segments, inter_ptr);
+          reflected_energy, depth + 1, segments, inter_ptr);
     }
     return 0;
 }
@@ -171,7 +171,7 @@ fn _fan_ray(tr, aperture_height) {
 fn _fan_t(i, num_rays) {
     if (num_rays == 1) { return f64_from(0); }
     return f64_add(f64_neg(F64_ONE),
-    f64_div(f64_mul(F64_TWO, f64_from(i)), f64_from(num_rays - 1)));
+      f64_div(f64_mul(F64_TWO, f64_from(i)), f64_from(num_rays - 1)));
 }
 
 # Meridional ray fan (rays spread across y in the y-z plane).
@@ -185,7 +185,7 @@ fn ray_fan_meridional(aperture_radius, num_rays, field_angle, start_z) {
     while (i < num_rays) {
         var t = _fan_t(i, num_rays);
         var tr = trace_ray_new(ray_vec3(f64_from(0), f64_mul(t, aperture_radius), start_z),
-        ray_vec3(f64_from(0), sin_f, cos_f), F64_ONE);
+          ray_vec3(f64_from(0), sin_f, cos_f), F64_ONE);
         vec_push(rays, _fan_ray(tr, t));
         i = i + 1;
     }
@@ -203,7 +203,7 @@ fn ray_fan_sagittal(aperture_radius, num_rays, field_angle, start_z) {
     while (i < num_rays) {
         var t = _fan_t(i, num_rays);
         var tr = trace_ray_new(ray_vec3(f64_mul(t, aperture_radius), f64_from(0), start_z),
-        ray_vec3(sin_f, f64_from(0), cos_f), F64_ONE);
+          ray_vec3(sin_f, f64_from(0), cos_f), F64_ONE);
         vec_push(rays, _fan_ray(tr, t));
         i = i + 1;
     }
@@ -218,8 +218,8 @@ fn ray_bundle(aperture_radius, num_rings, num_arms, field_angle, start_z) {
     var sin_f = _prk_sin(field_angle);
     var cos_f = _prk_cos(field_angle);
     vec_push(rays, _fan_ray(
-    trace_ray_new(ray_vec3(f64_from(0), f64_from(0), start_z),
-    ray_vec3(f64_from(0), sin_f, cos_f), F64_ONE), f64_from(0)));
+        trace_ray_new(ray_vec3(f64_from(0), f64_from(0), start_z),
+          ray_vec3(f64_from(0), sin_f, cos_f), F64_ONE), f64_from(0)));
     var ring = 1;
     while (ring <= num_rings) {
         # Match Rust's left-associative order: (ap * ring) / num_rings.
@@ -232,8 +232,8 @@ fn ray_bundle(aperture_radius, num_rings, num_arms, field_angle, start_z) {
             var x = f64_mul(r, _prk_cos(phi));
             var y = f64_mul(r, _prk_sin(phi));
             vec_push(rays, _fan_ray(
-            trace_ray_new(ray_vec3(x, y, start_z),
-            ray_vec3(f64_from(0), sin_f, cos_f), F64_ONE), t));
+                trace_ray_new(ray_vec3(x, y, start_z),
+                  ray_vec3(f64_from(0), sin_f, cos_f), F64_ONE), t));
             arm = arm + 1;
         }
         ring = ring + 1;
@@ -368,9 +368,9 @@ fn optical_path_length(ray, surfaces, image_z, err_out) {
         var t = f64_div(f64_sub(image_z, RayVec3_z(fpos)), dz);
         if (f64_gt(t, f64_from(0)) == 1) {
             var end = ray_vec3(
-            f64_add(RayVec3_x(fpos), f64_mul(t, RayVec3_x(fdir))),
-            f64_add(RayVec3_y(fpos), f64_mul(t, RayVec3_y(fdir))),
-            image_z);
+              f64_add(RayVec3_x(fpos), f64_mul(t, RayVec3_x(fdir))),
+              f64_add(RayVec3_y(fpos), f64_mul(t, RayVec3_y(fdir))),
+              image_z);
             opl = f64_add(opl, f64_mul(prev_n, _sim_dist(prev_pos, end)));
         }
     }

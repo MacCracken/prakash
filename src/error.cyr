@@ -52,15 +52,29 @@ fn prakash_is_ok(code) {
 
 # ── Rust-semantics math shims ────────
 # The Cyrius math builtins diverge from Rust's f64 methods at the infinite and
-# zero boundaries, because `ganita_f64_pow` is implemented as `exp(n*ln(base))`
-# and the x87 `exp` returns NaN for an infinite argument. Every ported call site
-# that can reach those boundaries goes through these shims so the port keeps
-# matching `rust-old/`. Measured on cyrius 6.5.20, x86_64:
+# zero boundaries. Every ported call site that can reach those boundaries goes
+# through these shims so the port keeps matching the Rust original (retrievable
+# at tag 2.2.2 / 1.2.0 — see CONTRIBUTING.md).
 #
-#   expression              Cyrius builtin   Rust           shim
-#   ganita_f64_pow(0.0, 2)  NaN              0.0            0.0
-#   f64_exp(-inf)           NaN              0.0            0.0
-#   f64_exp(+inf)           NaN              +inf           +inf
+# ⚠ RE-MEASURED FOR cyrius 6.5.33 / ganita 1.1.4 (2.2.4). The previous table
+# here was stamped "Measured on cyrius 6.5.20" and ONE OF ITS ROWS HAD GONE
+# FALSE: ganita 1.1.4 gained an explicit domain prologue, so a zero base no
+# longer falls into exp(n*ln(base)) and no longer returns NaN. No test caught
+# it — all 5485 assertions passed either side of the bump — because the shim
+# masks the builtin at exactly the point the table describes.
+#
+# Measured on cyrius 6.5.33, x86_64 (raw f64 bits, this host):
+#
+#   expression              Cyrius builtin      Rust    shim
+#   ganita_f64_pow(0.0, 2)  0.0  (was NaN)      0.0     0.0
+#   ganita_f64_pow(0.0, 0)  1.0  (was NaN)      1.0     1.0
+#   ganita_f64_pow(0.0,-1)  +inf (was NaN)      +inf    +inf
+#   f64_exp(-inf)           NaN                 0.0     0.0
+#   f64_exp(+inf)           NaN                 +inf    +inf
+#
+# So the three pow rows now agree with Rust WITHOUT the shim; the two f64_exp
+# rows are the ones still doing work (f64_exp is a compiler intrinsic and was
+# untouched by the ganita change — verified, not assumed).
 #
 # Finite arguments are delegated unchanged, so no in-range result moves.
 
@@ -77,7 +91,9 @@ fn _prk_exp(x) {
 # are undefined for |x| >= 2^63 and return the ARGUMENT UNCHANGED there, so
 # `f64_sin(1e300)` yields 1e300 — an "intensity" far outside [-1, 1] that then
 # propagates silently through an interference or slit calculation. Measured on
-# cyrius 6.5.20: correct through 2^62, broken at 1e300 and at the infinities.
+# cyrius 6.5.33 (re-measured for 2.2.4, unchanged from 6.5.20): correct through
+# 2^62, broken at 1e300 — where f64_sin returns the ARGUMENT, 0x7E37E43C8800759C
+# in and 0x7E37E43C8800759C out — and NaN at the infinities.
 #
 # Beyond 2^63 a double's spacing exceeds 2048 while a period is 2*pi, so the
 # argument no longer identifies a phase at all and the result is unrecoverable
@@ -101,11 +117,37 @@ fn _prk_cos(x) {
     return f64_cos(x);
 }
 
-# Rust `f64::powf` semantics for a non-negative base. `ganita_f64_pow` computes
-# exp(n*ln(base)), so a zero base gives exp(-inf) = NaN where Rust gives
-# 0.0 (positive exponent), 1.0 (zero exponent) or +inf (negative exponent).
-# A negative base is delegated unchanged: Rust's powf is also NaN there for a
-# non-integer exponent, and no prakash call site passes a negative base.
+# Rust `f64::powf` semantics for a non-negative base.
+#
+# ⚠ THE REASON THIS SHIM EXISTS WAS RETIRED UPSTREAM IN 2.2.4, AND IT IS KEPT
+# ANYWAY. It was written because `ganita_f64_pow` was literally
+# `exp(exp * ln(base))`, so a zero base gave exp(-inf) = NaN where Rust gives
+# 0.0 / 1.0 / +inf. ganita 1.1.4 (cyrius 6.5.33) added an explicit domain
+# prologue and now returns those three values itself — measured, this host:
+# pow(0,2) = 0x0, pow(0,0) = 0x3FF0000000000000, pow(0,-1) = 0x7FF0000000000000,
+# bit-for-bit what the branch below produces. The branch is therefore redundant
+# for every non-NaN exponent, and is retained deliberately as a pin: a silent
+# revert upstream would otherwise move published optics values with nothing
+# watching for it.
+#
+# ⚠ A NEGATIVE BASE NO LONGER FAILS LOUDLY. Until 6.5.33 it was NaN for every
+# exponent. ganita 1.1.4 special-cases an INTEGRAL exponent, taking the
+# magnitude from exp(n*ln|base|) and applying the sign — so it inherits the
+# transcendental round-off and is NOT exact where Rust is:
+#   ganita_f64_pow(-2, 3) = 0xC01FFFFFFFFFFFFE  (-7.99999999999999982)
+#   Rust      (-2f64).powf(3.0) = 0xC020000000000000  (exactly -8)
+# A non-integral exponent is still NaN on both sides (verified control:
+# pow(-2, 0.5) = NaN before and after). No prakash call site passes a negative
+# base today, so nothing moves — but a future one would now silently break
+# bit-fidelity instead of producing a NaN somebody would notice.
+#
+# ⚠ KNOWN LATENT DIVERGENCE, pre-existing and NOT introduced by 2.2.4:
+# `_prk_pow(0.0, NaN)` returns 1.0 (a NaN exponent is neither > 0 nor < 0, so it
+# falls through to the F64_ONE branch). The raw builtin returns 0.0. IEEE-754 /
+# C99 pow — which Rust follows — says NaN for a base other than 1. All three
+# disagree. It is unreachable from prakash today: every call site passes an
+# exponent it computed itself. Fixing it is a behaviour change and belongs in
+# its own release, not in a toolchain bump.
 #must_use
 fn _prk_pow(base, exp) {
     if (f64_abs(base) == 0) {

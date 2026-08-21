@@ -56,9 +56,9 @@ var b = ray_vec3(f64_from(4), f64_from(5), f64_from(6));
 assert(_bits(hvec3_dot(a, b), f64_from(32)) == 1, "hvec3_dot on prakash vectors = 32");
 # and bit-identical to prakash's own inline form
 var inline_dot = f64_add(f64_add(
-f64_mul(RayVec3_x(a), RayVec3_x(b)),
-f64_mul(RayVec3_y(a), RayVec3_y(b))),
-f64_mul(RayVec3_z(a), RayVec3_z(b)));
+    f64_mul(RayVec3_x(a), RayVec3_x(b)),
+    f64_mul(RayVec3_y(a), RayVec3_y(b))),
+  f64_mul(RayVec3_z(a), RayVec3_z(b)));
 assert(_bits(hvec3_dot(a, b), inline_dot) == 1, "hvec3_dot is bit-identical to the inline dot");
 
 # length of (3,4,0) is exactly 5
@@ -68,7 +68,7 @@ assert(_bits(hvec3_length_sq(c345), f64_from(25)) == 1, "hvec3_length_sq = 25");
 
 # cross(x, y) = z
 var cx = hvec3_cross(ray_vec3(F64_ONE, f64_from(0), f64_from(0)),
-ray_vec3(f64_from(0), F64_ONE, f64_from(0)));
+  ray_vec3(f64_from(0), F64_ONE, f64_from(0)));
 assert(_bits(RayVec3_x(cx), f64_from(0)) == 1, "cross(x,y).x = 0 (read back through prakash accessors)");
 assert(_bits(RayVec3_y(cx), f64_from(0)) == 1, "cross(x,y).y = 0");
 assert(_bits(RayVec3_z(cx), F64_ONE) == 1, "cross(x,y).z = 1");

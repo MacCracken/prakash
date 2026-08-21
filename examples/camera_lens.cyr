@@ -110,8 +110,8 @@ fn main() {
     var tsurf = prescription_to_trace_surfaces(lens);
     var image_z = f64_add(SystemProperties_bfd(props), f64_from(6));
     var ray = trace_ray_new(
-    ray_vec3(f64_from(0), f64_from(3), f64_neg(f64_from(100))),
-    ray_vec3(f64_from(0), f64_from(0), F64_ONE), F64_ONE);
+      ray_vec3(f64_from(0), f64_from(3), f64_neg(f64_from(100))),
+      ray_vec3(f64_from(0), f64_from(0), F64_ONE), F64_ONE);
     var hits = trace_sequential(ray, tsurf, err);
     if (prakash_is_err(load64(err)) == 1) {
         say_line("  ray vignetted");
@@ -144,7 +144,7 @@ fn main() {
     for (var fi = 0; fi < 3; fi = fi + 1) {
         var fdeg = load64(fields + fi * 8);
         var spots = spot_diagram(tsurf, f64_from(5), 3, 8, ray_deg_to_rad(fdeg),
-        f64_neg(f64_from(100)), image_z);
+          f64_neg(f64_from(100)), image_z);
         say("  ");
         say_f_pad(fdeg, 0, 4);
         say(" deg off-axis: ");

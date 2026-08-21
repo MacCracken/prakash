@@ -160,7 +160,7 @@ for (var mi = 0; mi < 11; mi = mi + 1) {
 }
 store64(cm + 10 * 8, rms_m);
 _assert_near(zernike_wf_strehl_ratio(zernike_wf_new(cm, 11), WL), _fd(8, 10), _fd(5, 100),
-"marechal strehl ~ 0.8");
+  "marechal strehl ~ 0.8");
 
 # to_grid
 var grid = zernike_wf_to_grid(zernike_defocus(_fd(1, 10)), 32);
