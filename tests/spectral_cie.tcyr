@@ -291,20 +291,30 @@ _xy_of(illuminant_a(), _xy);
 _assert_near(load64(_xy), _fd(44757, 100000), TOL3, "Illuminant A chromaticity x = 0.44757 (CIE)");
 _assert_near(load64(_xy + 8), _fd(40745, 100000), TOL3, "Illuminant A chromaticity y = 0.40745 (CIE)");
 
-# ⚠ F2 AND F11 ARE PINNED TO THEIR WRONG VALUES ON PURPOSE. Both fail their
-# published chromaticity (F2 by ~0.0034, F11 by 0.081/0.087 — F11's emission
-# lines sit at 440/565/615 nm where CIE F11's are at 436/546/611). The data
-# could not be corrected in 2.2.7 without the CIE datasets: unlike
-# _vlambda_scotopic, which agreed with its reference at 25 of 55 points and so
-# could be repaired with confidence, F11 matches at only 6 — all in the leading
-# low-value run. Pinning the WRONG numbers stops them drifting further
-# unobserved and turns the arrival of real data into a visible test failure.
+# ⚠ F2 AND F11 WERE PINNED TO THEIR WRONG VALUES HERE UNTIL THE REAL DATA
+# LANDED, AND THE PIN DID ITS JOB — all four assertions failed the moment the
+# corrected tables went in, which is exactly what a known-wrong pin is for.
+# F11 previously integrated to (0.46141, 0.46385) against a published
+# (0.38052, 0.37713); its emission lines sat at 440/565/615 nm where CIE F11's
+# are at 436/546/611. 75 of 81 F11 entries and 48 of 81 F2 entries were replaced
+# from CIE 15:2004. These now assert the PUBLISHED values.
 _xy_of(illuminant_f2(), _xy);
-_assert_near(load64(_xy), _fd(37546, 100000), TOL3, "KNOWN-WRONG: F2 x = 0.37546, CIE says 0.37208");
-_assert_near(load64(_xy + 8), _fd(37184, 100000), TOL3, "KNOWN-WRONG: F2 y = 0.37184, CIE says 0.37529");
+_assert_near(load64(_xy), _fd(37208, 100000), TOL3, "F2 chromaticity x = 0.37208 (CIE)");
+_assert_near(load64(_xy + 8), _fd(37529, 100000), TOL3, "F2 chromaticity y = 0.37529 (CIE)");
 _xy_of(illuminant_f11(), _xy);
-_assert_near(load64(_xy), _fd(46141, 100000), TOL3, "KNOWN-WRONG: F11 x = 0.46141, CIE says 0.38052");
-_assert_near(load64(_xy + 8), _fd(46385, 100000), TOL3, "KNOWN-WRONG: F11 y = 0.46385, CIE says 0.37713");
+_assert_near(load64(_xy), _fd(38052, 100000), TOL3, "F11 chromaticity x = 0.38052 (CIE, was 0.46141)");
+_assert_near(load64(_xy + 8), _fd(37713, 100000), TOL3, "F11 chromaticity y = 0.37713 (CIE, was 0.46385)");
+
+# CCT is a SECOND published quantity the corrected SPDs were never fitted to —
+# an independent confirmation that the tables are right, not merely consistent.
+fn _cct_of(spd) {
+    var xyz = spd_to_xyz(spd);
+    var sum = f64_add(f64_add(Xyz_x(xyz), Xyz_y(xyz)), Xyz_z(xyz));
+    return cct_from_xy(f64_div(Xyz_x(xyz), sum), f64_div(Xyz_y(xyz), sum));
+}
+_assert_near(_cct_of(illuminant_f11()), f64_from(4000), f64_from(25), "F11 CCT = 4000K nominal");
+_assert_near(_cct_of(illuminant_f2()), f64_from(4230), f64_from(25), "F2 CCT = 4230K nominal");
+_assert_near(_cct_of(illuminant_d65()), f64_from(6504), f64_from(50), "D65 CCT = 6504K nominal");
 
 # (2) CMF LANDMARK VALUES, direct from the published CIE 1931 table. These are
 # the anchors the whole colour pipeline rests on.
@@ -324,12 +334,44 @@ _assert_near(_cmf(64, 2), Z, TOL6, "z_bar(700nm) = 0 (z is zero above ~650nm)");
 # to the MEASURED values against published Ra, so the gap stays visible.
 _assert_near(spectral_band_similarity(illuminant_d65()), f64_from(100), TOL_01,
   "band similarity of D65 against itself = 100");
-_assert_near(spectral_band_similarity(illuminant_f2()), _fd(982886, 10000), TOL_01,
-  "KNOWN-WRONG: F2 scores 98.29 where published CIE Ra is 64");
-_assert_near(spectral_band_similarity(illuminant_f11()), _fd(920010, 10000), TOL_01,
-  "KNOWN-WRONG: F11 scores 92.00 where published CIE Ra is 83");
-assert(f64_lt(f64_abs(f64_sub(color_rendering_index(illuminant_f2()),
-        spectral_band_similarity(illuminant_f2()))), TOL6),
-  "the deprecated color_rendering_index name still returns the same value");
+# ⚠ 2.2.7: `color_rendering_index` NOW COMPUTES REAL CIE 13.3 Ra. Through 2.2.6
+# it returned an 8-band normalised-energy comparison that scored F2 — a lamp
+# famous for poor colour rendering — at 98.29 against a published Ra of 64.
+# That metric survives, honestly named, as `spectral_band_similarity`, and is
+# pinned separately below to show that correct SPD data never fixed it: with the
+# CIE 15:2004 tables in place it still says 97.20 for F2.
+#
+# The real implementation is validated against PUBLISHED Ra across BOTH
+# reference branches — Planckian below 5000 K, D-series reconstruction above:
+#   F2  CCT 4230  Ra 64.20  published 64   (Planckian)
+#   F11 CCT 4007  Ra 82.85  published 83   (Planckian)
+#   D65 CCT 6504  Ra 100.00 published 100  (D-series)
+#   A   CCT 2856  Ra 99.95  published 100  (Planckian, reference against itself)
+_assert_near(color_rendering_index(illuminant_f2()), f64_from(64), F64_ONE,
+  "CIE 13.3 Ra(F2) = 64 (was 98.29 under the band metric)");
+_assert_near(color_rendering_index(illuminant_f11()), f64_from(83), F64_ONE,
+  "CIE 13.3 Ra(F11) = 83 (was 92.00)");
+_assert_near(color_rendering_index(illuminant_d65()), f64_from(100), TOL_01,
+  "CIE 13.3 Ra(D65) = 100 — reference against itself, D-series branch");
+_assert_near(color_rendering_index(illuminant_a()), f64_from(100), F64_ONE,
+  "CIE 13.3 Ra(A) = 100 — reference against itself, Planckian branch");
+
+# Per-sample R_i is the capability Ra alone hides. F2's R8 = 33 is the
+# well-documented deep-red failure of cool-white fluorescent; a metric that
+# cannot show that is not CRI.
+_assert_near(cri_special(illuminant_f2(), 8), f64_from(33), F64_TWO,
+  "R8(F2) = 33 — the deep-red sample cool-white fluorescent renders worst");
+_assert_near(cri_special(illuminant_f2(), 3), f64_from(90), F64_TWO,
+  "R3(F2) = 90 — and the yellow-green sample it renders best");
+assert(f64_gt(cri_special(illuminant_f2(), 3), cri_special(illuminant_f2(), 8)),
+  "F2 renders TCS03 far better than TCS08");
+for (var _ci = 1; _ci <= 8; _ci = _ci + 1) {
+    assert(f64_le(cri_special(illuminant_d65(), _ci), f64_add(f64_from(100), TOL_01)),
+      "no R_i exceeds 100 for the reference illuminant");
+}
+# Out-of-range sample indices report 0 rather than reading past the tables.
+assert_eq(cri_special(illuminant_f2(), 0), Z, "cri_special rejects sample index 0");
+assert_eq(cri_special(illuminant_f2(), 9), Z, "cri_special rejects sample index 9");
+assert_eq(color_rendering_index(0), Z, "color_rendering_index rejects a null SPD");
 
 var r = assert_summary();

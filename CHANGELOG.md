@@ -1,12 +1,18 @@
 # Changelog
 
-## [2.2.7] - 2026-08-21 — The seven deferred findings: five fixed, two proved unfixable without the CIE datasets
+## [2.2.7] - 2026-08-21 — All seven deferred findings closed, including the two that needed the CIE datasets
 
-2.2.6 recorded seven confirmed findings it would not fix. This closes five of
-them, corrects a sixth defect found while investigating, and — for the two that
-need data this repo does not have — replaces "documented" with "measured,
-quantified, and pinned so it cannot drift". Suite **5615 → 5757 assertions across
-29 suites**, 0 failed. `cyrius audit` still exits 0.
+2.2.6 recorded seven confirmed findings it would not fix. **All seven are closed
+here**, plus a sixth defect found while investigating one of them. Suite
+**5615 → 5775 assertions across 29 suites**, 0 failed. `cyrius audit` exits 0.
+
+⚠ **THE LAST TWO ALMOST DIDN'T GET DONE, AND THE REASON WAS BAD PROCESS, NOT A
+REAL CONSTRAINT.** They were first written up as "needs the CIE datasets, which
+this repo does not have" — without checking the two places the data actually
+was: the deleted Rust archive (which this very release mines for six other
+findings) and the public CIE 15:2004 / 13.3 datasets. Both were reachable. The
+lesson is recorded here because "I don't have the data" is a claim that has to be
+tested before it is written down.
 
 ⚠ **THREE MORE INHERITED DEFECTS.** The transfer-matrix signs, the split-sum fit
 and the split-sum integrator are all character-for-character identical in the
@@ -81,20 +87,63 @@ A bound is not a value.
   ⚠ **655–780 nm was deliberately NOT touched** — those 26 entries are all below
   2.5e-4 and could not be cross-checked to the same standard, so they were left
   alone rather than replaced on weaker evidence.
+- ⭐ **`illuminant_f11` was not CIE F11, and `illuminant_f2` was off too — both
+  replaced from CIE 15:2004.** F11's emission lines sat at 440/565/615 nm where
+  the real ones are at 436/546/611. ⚠ **The port was not at fault**: the deleted
+  Rust archive carries a byte-identical table
+  (`git show 524a7aa^:rust-old/src/spectral/cie.rs`), so the error predates the
+  translation. 75 of 81 F11 entries and 48 of 81 F2 entries corrected.
+
+  | illuminant | before | after | published CIE |
+  |---|---|---|---|
+  | F2 | 0.37546, 0.37184 | 0.37207, 0.37512 | 0.37208, 0.37529 |
+  | F11 | **0.46141, 0.46385** | 0.38054, 0.37691 | 0.38052, 0.37713 |
+  | D65 | 0.31272, 0.32903 | unchanged | 0.31271, 0.32902 |
+  | A | 0.44754, 0.40743 | unchanged | 0.44757, 0.40745 |
+
+  ⚠ **Validated against two published quantities, neither fitted to.** Beyond
+  chromaticity, the correlated colour temperature lands at **4007 K** for F11
+  (nominal 4000) and **4230 K** for F2 (nominal 4230). And the transcription
+  itself was verified **programmatically** — the installed hex bit patterns were
+  parsed back out and diffed against the source dataset: **0 of 81 differ** on
+  both tables. That mattered: three separate hand transcriptions of this data
+  disagreed with each other, one of them silently dropping a repeated value to
+  satisfy a requested count. D65 and A were already correct and are untouched,
+  which is what isolated the fault to these two tables in the first place.
+- ⭐ **`color_rendering_index` now computes real CIE 13.3 Ra.** It used to return
+  an 8-band normalised-energy comparison that scored **F2 at 98.29 against a
+  published Ra of 64** — a lamp famous for poor rendering reported as nearly
+  perfect. ⚠ **Correct SPD data did not fix that**: with the CIE 15:2004 tables
+  in place the old metric still says 97.20. The gap was never the data.
+  The implementation is full CIE 13.3 — eight Test Colour Samples, CIE 1960 UCS,
+  the von Kries `c`/`d` adaptation, CIE 1964 W\*U\*V\*, `R_i = 100 − 4.6·ΔE_i`,
+  `Ra = mean(R1..R8)` — with a Planckian reference below 5000 K and a **D-series
+  reconstruction from the S0/S1/S2 basis** above it. 891 new constants, all
+  parsed programmatically from the CIE datasets rather than transcribed.
+
+  | illuminant | CCT | prakash Ra | published Ra | reference branch |
+  |---|---|---|---|---|
+  | F2 | 4230 | **64.20** | 64 | Planckian |
+  | F11 | 4007 | **82.85** | 83 | Planckian |
+  | D65 | 6504 | **100.00** | 100 | D-series |
+  | A | 2856 | **99.95** | 100 | Planckian |
+
+  New `cri_special(spd, i)` exposes the per-sample R_i that Ra averages away.
+  F2's **R8 = 33.3** reproduces the documented deep-red failure of cool-white
+  fluorescent, against **R3 = 90.3** for yellow-green — a spread no single
+  number shows. The old metric survives, honestly named, as
+  `spectral_band_similarity`, and is pinned separately.
 - **All six `*_to_json` encoders dereferenced a null handle.** The decode side was
   hardened in 2.0.2 and pinned; the encode side never was. Each now returns the
   same 0 sentinel the decoders use.
 
 ### Changed
 
-- **`color_rendering_index` is renamed to `spectral_band_similarity`**, because it
-  is not CIE 13.3 Ra and should not claim to be. It compares normalised energy in
-  eight fixed wavelength bands — no Test Colour Samples, no W\*U\*V\*, no von
-  Kries adaptation. Measured against published Ra: **F2 scores 98.29 where Ra is
-  64**, F11 scores 92.00 where Ra is 83. (D65 and A score ~100 only because any
-  similarity metric scores an illuminant against itself as perfect.) ⚠ **Not a
-  breaking change** — `color_rendering_index` remains as a thin wrapper, marked
-  deprecated, and is a candidate for removal in the next major version.
+- **`spectral_band_similarity` is the honest name for the old metric**, which is
+  no longer pretending to be CRI. ⚠ **`color_rendering_index` keeps its name and
+  changes its meaning** — it now returns real Ra, so callers get 64.20 for F2
+  where they used to get 98.29. That is a behaviour change and it is deliberate:
+  the name was always a promise the code did not keep.
 - **`CLAUDE.md` is now a Cyrius document.** Every quality gate it named was a
   `cargo` command that cannot run in this repo. The P(-1) and Work Loop gates now
   read `cyrius fmt --check` / `lint` / `doc --check` / `vet` / `deny` /
@@ -115,22 +164,9 @@ A bound is not a value.
 
 ### Notes
 
-- ⚠ **TWO FINDINGS ARE NOT FIXED, AND THE REASON IS EVIDENCE, NOT EFFORT.**
-  `illuminant_f11` is **not** CIE F11: its emission lines sit at 440/565/615 nm
-  where F11's are at 436/546/611, and integrated against this repo's own CMFs it
-  gives **(0.46141, 0.46385)** against a published **(0.38052, 0.37713)**. F2 is
-  off by ~0.0034. But the signature that justified the V′(λ) repair is absent —
-  F11 matches a published reference at only **6 of 81** points, all in the
-  leading low-value run. Replacing 75 values on that evidence would risk
-  substituting new errors for the existing ones. **These need the CIE datasets.**
-  - ⚠ **The fault is isolated to the F-series SPDs, not the CMFs** — and that is
-    measured, not assumed: D65 **(0.31272, 0.32903)** and A **(0.44754, 0.40743)**
-    reproduce their published chromaticities to 1e-5 through the same integration
-    path, and the CMF landmarks are exact (`ȳ(555) = 1.000000`,
-    `x̄(600) = 1.062200`, `z̄(445) = 1.782600`, `x̄(380) = 0.001368`).
-  - **F2, F11 and the band-similarity scores are now pinned to their WRONG
-    values**, deliberately, so they cannot drift further unobserved and so the
-    arrival of real data shows up as a visible test failure.
+- **F2 and F11 now reproduce their published chromaticities** — see the *Fixed*
+  entry above. The wrong-value pins written earlier in this release did exactly
+  what they were for: all four failed the instant the corrected tables landed.
 - **The 1458 hand-transcribed spectral constants finally have an external check.**
   `tests/spectral_cie.tcyr` had 1168 assertions and **not one pinned a table
   value against an outside reference** — they asserted non-negativity, [0,1]
