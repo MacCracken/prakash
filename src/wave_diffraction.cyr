@@ -48,25 +48,44 @@ fn fresnel_number(wavelength, aperture_radius, distance) {
       f64_mul(wavelength, distance));
 }
 
-# Auxiliary functions f(x), g(x) for the Fresnel integrals (x >= 1),
-# rational approximation (Boersma 1960). Results written to f_out, g_out.
+# Auxiliary functions f(x), g(x) for the Fresnel integrals (x >= 1).
+# Abramowitz & Stegun 7.3.32/7.3.33, |eps| <= 2e-3:
+#   f(x) = (1 + 0.926x) / (2 + 1.792x + 3.104x^2)
+#   g(x) = 1 / (2 + 4.142x + 3.492x^2 + 6.670x^3)
+# Results written to f_out, g_out.
+#
+# ⚠ 2.2.6 DELIBERATELY DIVERGES FROM THE RUST ORIGINAL HERE. The Rust was
+#   f = (1.0 + 0.926*x2) / (2.0 + 1.792*x2 + 3.104*x4) / x
+#   g = 1.0 / (2.0 + 4.142*x2 + 3.492*x4 + 6.670*x2*x4) / x3
+# (recoverable at `git show 524a7aa^:rust-old/src/wave/diffraction.rs`, lines
+# 122-123) and the port carried it faithfully. TWO errors, compounded: the A&S
+# coefficients are LINEAR in x and were applied to x^2/x^3/x^4, and a spurious
+# trailing /x and /x^3 was added. Measured against published values before the
+# fix — the error grows with x, which is why the suite missed it (it samples
+# only x = 0, 1 and 10, and at 10 both forms converge to the 0.5 asymptote):
+#   x     C(x) before    C(x) after     published
+#   0.5   0.496152       0.492344*      0.492344   (*small-x series, unchanged)
+#   1.0   0.779292       0.779893       0.779893
+#   1.5   0.466432       0.445620       0.445261   (was +4.8%)
+#   2.0   0.499751       0.487115       0.488253   (was +2.4%)
+#   3.0   0.511543       0.606989       0.605721   (was -15.5%)
+# The corrected form sits inside A&S's stated 2e-3 bound at every sample.
 fn _fresnel_fg(x, f_out, g_out) {
     var x2 = f64_mul(x, x);
     var x3 = f64_mul(x2, x);
-    var x4 = f64_mul(x2, x2);
-    # f = (1 + 0.926*x2) / (2 + 1.792*x2 + 3.104*x4) / x
-    var fnum = f64_add(F64_ONE, f64_mul(_diff_r(926, 1000), x2));
+    # f = (1 + 0.926x) / (2 + 1.792x + 3.104x^2)
+    var fnum = f64_add(F64_ONE, f64_mul(_diff_r(926, 1000), x));
     var fden = f64_add(
-      f64_add(F64_TWO, f64_mul(_diff_r(1792, 1000), x2)),
-      f64_mul(_diff_r(3104, 1000), x4));
-    store64(f_out, f64_div(f64_div(fnum, fden), x));
-    # g = 1 / (2 + 4.142*x2 + 3.492*x4 + 6.670*x2*x4) / x3
+      f64_add(F64_TWO, f64_mul(_diff_r(1792, 1000), x)),
+      f64_mul(_diff_r(3104, 1000), x2));
+    store64(f_out, f64_div(fnum, fden));
+    # g = 1 / (2 + 4.142x + 3.492x^2 + 6.670x^3)
     var gden = f64_add(
       f64_add(
-        f64_add(F64_TWO, f64_mul(_diff_r(4142, 1000), x2)),
-        f64_mul(_diff_r(3492, 1000), x4)),
-      f64_mul(f64_mul(_diff_r(6670, 1000), x2), x4));
-    store64(g_out, f64_div(f64_div(F64_ONE, gden), x3));
+        f64_add(F64_TWO, f64_mul(_diff_r(4142, 1000), x)),
+        f64_mul(_diff_r(3492, 1000), x2)),
+      f64_mul(_diff_r(6670, 1000), x3));
+    store64(g_out, f64_div(F64_ONE, gden));
 }
 
 # Fresnel cosine integral C(x) = integral_0^x cos(pi*t^2/2) dt.
@@ -78,10 +97,16 @@ fn fresnel_integral_c(x) {
         var x2 = f64_mul(ax, ax);
         var t = f64_mul(F64_PI_2, x2);
         var t2 = f64_mul(t, t);
-        # ax * (1 - t2/20 + t2*t2/1680)
+        # ax * (1 - t2/10 + t2*t2/216).
+        # ⚠ 2.2.6 DIVERGES FROM THE RUST ORIGINAL: it had /20 and /1680
+        # (rust-old/src/wave/diffraction.rs:83). Both coefficients are wrong.
+        # C(x) = sum (-1)^n (pi/2)^2n x^(4n+1) / ((2n)! (4n+1)); substituting
+        # t = (pi/2)x^2 gives x(1 - t^2/10 + t^4/216). The /20 form is exactly
+        # half the correct x^5 term. Error grew toward the x = 1 branch point:
+        # C(0.9) was 0.828555 against a true 0.764823 (+8.3%).
         var inner = f64_add(
-          f64_sub(F64_ONE, f64_div(t2, f64_from(20))),
-          f64_div(f64_mul(t2, t2), f64_from(1680)));
+          f64_sub(F64_ONE, f64_div(t2, f64_from(10))),
+          f64_div(f64_mul(t2, t2), f64_from(216)));
         result = f64_mul(ax, inner);
     } else {
         var pi_x2 = f64_mul(f64_mul(F64_PI_2, ax), ax);
@@ -110,10 +135,14 @@ fn fresnel_integral_s(x) {
         var x2 = f64_mul(ax, ax);
         var t = f64_mul(F64_PI_2, x2);
         var t2 = f64_mul(t, t);
-        # ax * x2 * (PI_2/3) * (1 - t2/42 + t2*t2/3960)
+        # ax * x2 * (PI_2/3) * (1 - t2/14 + t2*t2/440).
+        # ⚠ 2.2.6 DIVERGES FROM THE RUST ORIGINAL: it had /42 and /3960
+        # (rust-old/src/wave/diffraction.rs). S(x) = sum (-1)^n (pi/2)^(2n+1)
+        # x^(4n+3) / ((2n+1)! (4n+3)) = (pi/2)x^3/3 (1 - t^2/14 + t^4/440);
+        # both Rust coefficients are 3x too large.
         var inner = f64_add(
-          f64_sub(F64_ONE, f64_div(t2, f64_from(42))),
-          f64_div(f64_mul(t2, t2), f64_from(3960)));
+          f64_sub(F64_ONE, f64_div(t2, f64_from(14))),
+          f64_div(f64_mul(t2, t2), f64_from(440)));
         result = f64_mul(
           f64_mul(f64_mul(ax, x2), f64_div(F64_PI_2, f64_from(3))),
           inner);
@@ -145,12 +174,12 @@ fn fresnel_integral_cs(x, c_out, s_out) {
         var t = f64_mul(F64_PI_2, x2);
         var t2 = f64_mul(t, t);
         var c_inner = f64_add(
-          f64_sub(F64_ONE, f64_div(t2, f64_from(20))),
-          f64_div(f64_mul(t2, t2), f64_from(1680)));
+          f64_sub(F64_ONE, f64_div(t2, f64_from(10))),
+          f64_div(f64_mul(t2, t2), f64_from(216)));
         c_val = f64_mul(ax, c_inner);
         var s_inner = f64_add(
-          f64_sub(F64_ONE, f64_div(t2, f64_from(42))),
-          f64_div(f64_mul(t2, t2), f64_from(3960)));
+          f64_sub(F64_ONE, f64_div(t2, f64_from(14))),
+          f64_div(f64_mul(t2, t2), f64_from(440)));
         s_val = f64_mul(
           f64_mul(f64_mul(ax, x2), f64_div(F64_PI_2, f64_from(3))),
           s_inner);

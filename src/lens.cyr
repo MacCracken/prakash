@@ -309,15 +309,55 @@ fn lens_seidel_coefficients(n, focal_length, q, p) {
     var phi = f64_div(F64_ONE, focal_length);
     var nm1 = f64_sub(n, F64_ONE);
     var term2 = f64_div(n, f64_mul(f64_from(4), _lens_pow2(nm1)));
+    # ⚠ 2.2.6 DELIBERATELY DIVERGES FROM THE RUST ORIGINAL. The Rust bracket
+    # (rust-old/src/lens.rs:464-468) had only THREE terms and scaled the p^2 one
+    # inconsistently, so the quadratic in q had a positive discriminant and
+    # crossed zero: third-order spherical came out NEGATIVE for every ordinary
+    # positive singlet. A positive singlet in air is always UNDERCORRECTED — the
+    # coefficient has a minimum but never changes sign — so the old output was
+    # not merely inaccurate, it reported the wrong aberration direction.
+    # Measured minimum over q in [-4, 4] at p = -1:
+    #   n     Rust min    2.2.6 min
+    #   1.5   -7.353      +3.813 (at q = 1.43)
+    #   1.6   -5.267      +3.544
+    #   1.7   -3.694      +3.457 (at q = 1.46)
+    #   1.8   -2.440      +3.444
+    # The bracket is the standard Coddington form
+    #   (n+2)q^2 + 4(n+1)pq + (3n+2)(n-1)p^2 + n^3/(n-1)
+    # divided term-wise by n(n-1) to sit under this function's existing
+    # phi^3 * n/(4(n-1)^2) prefactor. Two changes fall out: the p^2 term loses
+    # its extra (n-1), and the constant n^2/(n-1)^2 — absent entirely — comes
+    # back. Cross-check: the corrected argmin (q = 2(n+1)/(n+2): 1.4286 at
+    # n = 1.5, 1.4595 at n = 1.7) matches the standard form's argmin exactly.
     # A = (n+2)/(n*(n-1)) * q * q
     var sa = f64_mul(f64_mul(f64_div(f64_add(n, F64_TWO), f64_mul(n, nm1)), q), q);
-    # B = (3n+2)*(n-1)/n * p * p
+    # B = (3n+2)/n * p * p
     var sb = f64_mul(
-      f64_mul(f64_div(f64_mul(f64_add(f64_mul(f64_from(3), n), F64_TWO), nm1), n), p), p);
+      f64_mul(f64_div(f64_add(f64_mul(f64_from(3), n), F64_TWO), n), p), p);
     # C = 4*(n+1)/(n*(n-1)) * q * p
     var sc = f64_mul(
       f64_mul(f64_div(f64_mul(f64_from(4), f64_add(n, F64_ONE)), f64_mul(n, nm1)), q), p);
-    var spherical = f64_mul(f64_mul(_lens_pow3(phi), term2), f64_add(f64_add(sa, sb), sc));
+    # D = n^2/(n-1)^2 — the conjugate-independent floor that keeps the
+    # coefficient positive. Its absence is what let the sign flip.
+    # n^2/(n-1)^2, folded as (n/(n-1))^2. ⚠ THE TWO FORMS ARE NOT BIT-EQUAL:
+    # over n = 1.0..4.0 in 0.1 steps they differ in 13 of 30 samples, because
+    # the folded form rounds twice (divide, square) where the literal form
+    # rounds three times (square, square, divide). The folded one is therefore
+    # the marginally more accurate of the two, and the difference is ~1 ULP on a
+    # term that is then summed with three larger ones.
+    # ⚠ COST IS REAL AND IS NOT RECOVERED BY THIS FOLD. Measured same-binary,
+    # 1e6 iterations, full struct-returning function both sides:
+    #   2.2.5 (3-term bracket, wrong sign)   75 ns
+    #   2.2.6 literal n^2/(n-1)^2           107 ns   (+43%)
+    #   2.2.6 folded (this)                 103 ns   (+37%)
+    # The bracket is division-dominated, and correctness needs one more
+    # division. Precomputing 1/(n(n-1)) once and multiplying through would
+    # recover more, but reciprocal-multiply is not divide: it would move every
+    # published Seidel value, which a correctness release should not do.
+    var nr = f64_div(n, nm1);
+    var sd = f64_mul(nr, nr);
+    var spherical = f64_mul(f64_mul(_lens_pow3(phi), term2),
+      f64_add(f64_add(f64_add(sa, sb), sc), sd));
     var cterm2 = f64_div(F64_ONE, f64_mul(F64_TWO, nm1));
     # D = (2*(n+1))/(n*(n-1)) * q
     var cd = f64_mul(f64_div(f64_mul(F64_TWO, f64_add(n, F64_ONE)), f64_mul(n, nm1)), q);

@@ -67,6 +67,32 @@ while (ie < vec_len(segs_ec)) {
 }
 assert(f64_le(total_energy, f64_add(F64_ONE, TOL6)), "energy conserved (<= 1.0)");
 
+# ── 2.2.6: phantom back-cap interactions are gone ────────
+# ⚠ THIS SUITE'S ASSERTION COUNT DROPPED BY 42 IN 2.2.6, AND THAT IS THE FIX.
+# The loops here iterate over TraceTree segments, so a tree with phantom
+# segments ran MORE assertions, not fewer. trace_surface used to intersect the
+# whole sphere rather than the vertex cap, so a ray that had ALREADY EXITED the
+# lens kept re-refracting through the non-existent back caps: the off-axis
+# biconvex trace produced 17 segments / 8 interactions and recursed to depth 7,
+# where the physically correct tree is 8 segments / 3 interactions (one
+# transmitted path, one internal reflection, one front-surface reflection).
+# Energy was "conserved" in both, because each split conserves it — which is
+# exactly why the old assertions could not tell the two trees apart. These pin
+# the tree SHAPE so the phantom cascade cannot come back.
+var _ph = trace_recursive(off_axis_ray(f64_from(10), f64_neg(f64_from(50))),
+  biconvex_lens(), trace_config_default());
+assert_eq(vec_len(TraceTree_segments(_ph)), 8,
+  "off-axis biconvex tree is 8 segments (was 17 with phantom back-cap hits)");
+assert_eq(TraceTree_interactions(_ph), 3, "off-axis biconvex has 3 real interactions (was 8)");
+var _phd = 0;
+var _phi = 0;
+while (_phi < vec_len(TraceTree_segments(_ph))) {
+    var _phs = TraceSegment_depth(vec_get(TraceTree_segments(_ph), _phi));
+    if (_phs > _phd) { _phd = _phs; }
+    _phi = _phi + 1;
+}
+assert(_phd <= 3, "no segment recurses past depth 3 (the phantom cascade reached 7)");
+
 # max_depth respected
 var tree_md = trace_recursive(on_axis_ray(f64_neg(f64_from(50))), biconvex_lens(), trace_config_new(1, f64_from(0)));
 var segs_md = TraceTree_segments(tree_md);

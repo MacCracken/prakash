@@ -35,6 +35,57 @@ assert_eq(e, 0, "plane ok");
 _assert_near(RayVec3_z(TraceHit_hit_point(hit_p)), f64_from(10), TOL6, "plane hit z=10");
 _assert_near(RayVec3_z(TraceRay_dir(TraceHit_ray_after(hit_p))), F64_ONE, TOL_01, "plane no bending");
 
+# ── 2.2.6: the sphere is not the surface ────────
+# trace_surface intersected the WHOLE sphere and took the nearest positive root.
+# The optical surface is only the cap containing the vertex, so a CONCAVE
+# surface reached from outside its own sphere took the back cap — and because
+# the normal is then flipped to face the ray, the transverse component came out
+# with the opposite sign and the concave surface refracted like a CONVEX one,
+# with err_out left at PK_ERR_NONE. Reference hits are the analytic sag:
+# z = R + sqrt(R^2 - y^2) for R < 0, i.e. -50 + sqrt(2500 - 100) = -1.010205.
+test_group("sphere intersection uses the vertex cap, not the back cap");
+
+var _cc_e = 0;
+var _cc_surf = surface_sphere(f64_neg(f64_from(50)), Z, N15, f64_from(25));
+var _cc_far = trace_surface(
+  trace_ray_new(ray_vec3(Z, f64_from(10), f64_neg(f64_from(200))), ray_vec3(Z, Z, F64_ONE), F64_ONE),
+  _cc_surf, &_cc_e);
+assert_eq(_cc_e, 0, "concave from far outside still hits");
+_assert_near(RayVec3_z(TraceHit_hit_point(_cc_far)), f64_neg(_fd(1010205, 1000000)), TOL6,
+  "concave R=-50 from z=-200 hits the VERTEX cap at -1.0102, not the back cap at -98.99");
+assert(f64_gt(RayVec3_y(TraceRay_dir(TraceHit_ray_after(_cc_far))), Z),
+  "concave surface bends the ray AWAY from the axis (was toward it, i.e. convex)");
+
+# Same surface reached from inside its sphere — this path was already correct,
+# so it is the control: both origins must now agree.
+var _cc_e2 = 0;
+var _cc_near = trace_surface(
+  trace_ray_new(ray_vec3(Z, f64_from(10), f64_neg(f64_from(50))), ray_vec3(Z, Z, F64_ONE), F64_ONE),
+  _cc_surf, &_cc_e2);
+assert_eq(_cc_e2, 0, "concave from inside the sphere hits");
+_assert_near(RayVec3_z(TraceHit_hit_point(_cc_near)), RayVec3_z(TraceHit_hit_point(_cc_far)), TOL6,
+  "the hit must not depend on how far back the ray started");
+
+# An ordinary prescription gap larger than 2|R| triggers it too.
+var _cc_e3 = 0;
+var _cc_small = trace_surface(
+  trace_ray_new(ray_vec3(Z, F64_ONE, Z), ray_vec3(Z, Z, F64_ONE), F64_ONE),
+  surface_sphere(f64_neg(f64_from(3)), f64_from(10), N15, f64_from(25)), &_cc_e3);
+assert_eq(_cc_e3, 0, "concave R=-3 at z=10 hits");
+_assert_near(RayVec3_z(TraceHit_hit_point(_cc_small)), _fd(9828427, 1000000), TOL6,
+  "gap 10 > 2|R| = 6 still lands on the vertex cap at 9.8284, not 4.1716");
+
+# Convex control: the vertex cap IS the near cap for R > 0, so nothing moves.
+var _cx_e = 0;
+var _cx = trace_surface(
+  trace_ray_new(ray_vec3(Z, f64_from(10), f64_neg(f64_from(200))), ray_vec3(Z, Z, F64_ONE), F64_ONE),
+  surface_sphere(f64_from(50), Z, N15, f64_from(25)), &_cx_e);
+assert_eq(_cx_e, 0, "convex control hits");
+_assert_near(RayVec3_z(TraceHit_hit_point(_cx)), _fd(1010205, 1000000), TOL6,
+  "convex R=+50 unchanged at +1.0102 (control)");
+assert(f64_lt(RayVec3_y(TraceRay_dir(TraceHit_ray_after(_cx))), Z),
+  "convex still bends the ray TOWARD the axis (control)");
+
 # sphere, on-axis
 var e2 = 0;
 var ray_s = trace_ray_new(ray_vec3(Z, Z, Z), ray_vec3(Z, Z, F64_ONE), F64_ONE);

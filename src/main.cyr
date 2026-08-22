@@ -10,6 +10,10 @@
 include "lib/syscalls.cyr"
 include "lib/io.cyr"
 
+# CLI entry point. Prints the package banner and returns 0; there is nothing to
+# drive from here, because the CLI deliberately does not include the library.
+# Its job is to give `cyrius build src/main.cyr` a target, so CI proves the
+# toolchain can compile and link the package on every platform it gates.
 fn main() {
     println("prakash (cyrius port)");
     return 0;

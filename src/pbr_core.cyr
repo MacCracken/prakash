@@ -9,6 +9,13 @@
 
 fn _pbr_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
 fn _pbr_eps15() { return f64_div(F64_ONE, f64_from(1000000000000000)); }
+
+# Minimum GGX alpha (= roughness^2). Floors roughness at 1e-4, which is below
+# any physical material; every real roughness passes through untouched, and the
+# NDF stays finite (D <= 1/(pi*1e-16) ~ 3.2e15) instead of dividing by zero at
+# roughness exactly 0. See pbr_distribution_ggx for why an ADDITIVE epsilon
+# cannot do this job.
+fn _pbr_alpha_min() { return f64_div(F64_ONE, f64_from(100000000)); }
 fn _pbr_frac_1_pi() { return 0x3FD45F306DC9C883; }
 
 # x^5 via square-and-multiply (matches Rust f64::powi(5)): x * (x*x)^2.
@@ -36,15 +43,34 @@ fn pbr_fresnel_schlick_rgb(f0, cos_theta, out) {
     return 0;
 }
 
-# GGX/Trowbridge-Reitz NDF: D = a^2 / (pi * denom^2 + 1e-15),
-# a = roughness^2, denom = (n.h)^2*(a^2-1) + 1.
+# GGX/Trowbridge-Reitz NDF: D = a^2 / (pi * denom^2), a = roughness^2,
+# denom = (n.h)^2*(a^2-1) + 1.
+#
+# ⚠ 2.2.6 DELIBERATELY DIVERGES FROM THE RUST ORIGINAL HERE. The Rust was
+# `a2 / (PI * denom * denom + 1e-15)` (recoverable at
+# `git show 524a7aa^:rust-old/src/pbr/mod.rs`, line 59) and the port carried it
+# faithfully. That ADDITIVE ABSOLUTE epsilon is the whole defect: at the
+# specular peak denom = a^2 = roughness^4, so the denominator is
+# pi*roughness^8, which falls under 1e-15 at roughness ~ 0.024 — and from there
+# the epsilon, not the physics, sets the answer. Measured before the fix:
+#   roughness   D(n.h=1)        true 1/(pi*a^2)
+#   1.0         0.318310        0.318310      (ok)
+#   0.1         3183.098761     3183.098862   (ok)
+#   0.01        7609427.7       31830988.6    (4.2x LOW)
+#   0.001       999.999997      3.1831e11     (8 orders LOW)
+# The NDF stopped being monotonic in 1/roughness, so a polished surface
+# rendered DARKER than a rough one — the opposite of the physics.
+# The epsilon is removed and `a` is floored instead, which keeps a true GGX
+# lobe. The floor cannot divide by zero: denom is minimised at n.h = 1 where
+# it equals a^2 >= 1e-16, so `pi*denom^2 > 0` for every input.
 #must_use
 fn pbr_distribution_ggx(n_dot_h, roughness) {
     var a = f64_mul(roughness, roughness);
+    if (f64_lt(a, _pbr_alpha_min()) == 1) { a = _pbr_alpha_min(); }
     var a2 = f64_mul(a, a);
     var ndh = f64_clamp(n_dot_h, f64_from(0), F64_ONE);
     var denom = f64_add(f64_mul(f64_mul(ndh, ndh), f64_sub(a2, F64_ONE)), F64_ONE);
-    return f64_div(a2, f64_add(f64_mul(f64_mul(F64_PI, denom), denom), _pbr_eps15()));
+    return f64_div(a2, f64_mul(f64_mul(F64_PI, denom), denom));
 }
 
 # Beckmann NDF: exp(-tan2/a^2) / (pi*a^2*cos2^2 + 1e-15).

@@ -321,11 +321,28 @@ fn prescription_doublet(focal_length, n1, v1, n2, v2, aperture, t1, t2) {
     var phi1 = f64_div(f64_mul(phi, v1), f64_sub(v1, v2));
     var phi2 = f64_sub(phi, phi1);
     var r1 = f64_div(f64_mul(F64_TWO, f64_sub(n1, F64_ONE)), phi1);
-    var r2 = f64_div(f64_sub(n1, F64_ONE), f64_div(phi1, F64_TWO));
+    # 2.2.6: was `(n1-1)/(phi1/2)`, which is ALGEBRAICALLY IDENTICAL to r1, not
+    # its negative — so R1 == R2 bitwise and the crown's thin-lens power
+    # (n1-1)(1/R1 - 1/R2) came out exactly 0. The design wants an EQUICONVEX
+    # crown, R2 = -R1. Proof the negation is the whole fix, and that r4 below
+    # was already correct: r4 solves R4 = R3(n2-1)/((n2-1) - R3*phi2) only under
+    # the substitution R3 = -r2, i.e. it was derived against the negated value.
+    # Measured, doublet(f=200, n1=1.517, v1=64, n2=1.648, v2=34, ap=25, 4, 2):
+    #   as shipped  EFL = 130.527584  (-34.7% from the requested 200)
+    #   R2 negated  EFL = 200.010223  (the residual is the thick-lens term)
+    # tests/ray_system.tcyr asserted only prescription_len == 3 and the name,
+    # never a radius or the focal length, which is why the suite passed.
+    var r2 = f64_neg(r1);
+    # r4 must be expressed in terms of the CEMENTED radius, which is now r2
+    # itself. The standard form is R4 = R3(n2-1) / ((n2-1) - R3*phi2). The old
+    # expression was `-r2(n2-1) / (r2*phi2 + (n2-1))`, which is that same
+    # formula with R3 = -r2 substituted in — i.e. it was already written against
+    # the NEGATED radius, and only produced the right number because r2 carried
+    # the wrong sign. With r2 corrected above, the substitution has to come out.
     var r4 = _sys_inf();
     if (f64_gt(f64_abs(phi2), _sys_eps15()) == 1) {
-        r4 = f64_div(f64_mul(f64_neg(r2), f64_sub(n2, F64_ONE)),
-          f64_add(f64_mul(r2, phi2), f64_sub(n2, F64_ONE)));
+        r4 = f64_div(f64_mul(r2, f64_sub(n2, F64_ONE)),
+          f64_sub(f64_sub(n2, F64_ONE), f64_mul(r2, phi2)));
     }
     var p = prescription_new("achromatic doublet");
     var _p1 = prescription_add_surface(p, r1, t1, n1, aperture);

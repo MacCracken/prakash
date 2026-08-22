@@ -68,6 +68,11 @@ fn mueller_get(m, i, j) {
     return load64(m + (i * 4 + j) * 8);
 }
 
+# Write element (i, j). Returns PK_ERR_NONE on success, or
+# PK_ERR_INVALID_PARAMETER for a null handle or an index outside 0..=3 — the
+# write is refused rather than clamped, so a caller that ignores the code
+# corrupts nothing. Not `#must_use`: this mutates and the return is a status,
+# not a value the caller is expected to consume.
 fn mueller_set(m, i, j, v) {
     if (m == 0) { return PK_ERR_INVALID_PARAMETER; }
     if (i < 0) { return PK_ERR_INVALID_PARAMETER; }
@@ -197,6 +202,13 @@ fn _mm_row_dot(m, i, v0, v1, v2, v3) {
 # Apply a Mueller matrix to a Stokes vector.
 #must_use
 fn mueller_apply(m, s) {
+    # 2.2.6: mueller_get returns 0.0 for a null handle (its documented
+    # out-of-range value), so a null matrix produced the all-zero Stokes vector
+    # — indistinguishable from a real, computed total extinction. Returning 0
+    # makes the failure a sentinel the caller can actually test, matching
+    # mueller_set, which already refuses a null handle.
+    if (m == 0) { return 0; }
+    if (s == 0) { return 0; }
     var s0 = StokesVector_s0(s);
     var s1 = StokesVector_s1(s);
     var s2 = StokesVector_s2(s);
@@ -211,6 +223,10 @@ fn mueller_apply(m, s) {
 # Multiply two Mueller matrices: a * b (apply b first, then a).
 #must_use
 fn mueller_multiply(a, b) {
+    # 2.2.6: same class as mueller_apply — a null operand silently produced an
+    # all-zero (perfect absorber) matrix rather than reporting failure.
+    if (a == 0) { return 0; }
+    if (b == 0) { return 0; }
     var r = alloc(128);
     if (r == 0) { return 0; }
     var i = 0;
@@ -233,10 +249,17 @@ fn mueller_multiply(a, b) {
 # Apply a `vec` of Mueller matrices to a Stokes vector, first to last.
 #must_use
 fn mueller_chain(stokes, elements) {
+    # 2.2.6: propagates the null sentinel from mueller_apply rather than
+    # continuing to chain against a zeroed vector.
+    if (stokes == 0) { return 0; }
+    if (elements == 0) { return 0; }
     var s = stokes;
     var i = 0;
     while (i < vec_len(elements)) {
         s = mueller_apply(vec_get(elements, i), s);
+        # A null element anywhere in the chain now aborts the whole chain
+        # instead of silently continuing against a zeroed vector.
+        if (s == 0) { return 0; }
         i = i + 1;
     }
     return s;

@@ -1,5 +1,200 @@
 # Changelog
 
+## [2.2.6] - 2026-08-21 — A P(-1) review finds six wrong physics formulas, five of them inherited verbatim from the Rust original
+
+`cyrius audit` **exits 0 for the first time**, and that was the small half of this
+release. A nine-dimension P(-1) sweep produced 69 findings; the critical and high
+ones were verified adversarially and by probe before any code moved. Suite
+**5537 → 5615 assertions across 29 suites**, 0 failed.
+
+⚠ **THE HEADLINE IS NOT "THE PORT HAS BUGS".** Five of the six numerical defects
+below were recovered from the deleted Rust original at
+`git show 524a7aa^:rust-old/...` and are **character-for-character identical**
+there. The Cyrius port is faithful; the source was wrong. That makes 2.2.6 the
+**first deliberate numerical divergence from the Rust reference**, and every site
+carries the recovered Rust text and the measurement that condemns it. Bit-fidelity
+to a wrong reference is not a virtue — but it is the project's stated anchor, so
+the divergences are documented rather than quietly applied.
+
+⚠ **EVERY ONE OF THESE PASSED A 5537-ASSERTION SUITE.** Where a test existed at
+all it was sampling the points the bug happens to survive, wrapping the value in
+`f64_abs`, or asserting a length and a name string. That pattern is called out
+per finding, because it is the reusable lesson.
+
+### Fixed
+
+- ⭐ **GGX collapsed for smooth materials — a polished surface rendered DARKER
+  than a rough one.** `pbr_distribution_ggx` used an ADDITIVE ABSOLUTE `1e-15` in
+  the denominator (Rust `rust-old/src/pbr/mod.rs:59`, identical). At the specular
+  peak the denominator is `pi*roughness^8`, which drops below `1e-15` at
+  roughness ≈ 0.024 — from there the epsilon, not the physics, set the answer:
+
+  | roughness | 2.2.5 | true `1/(pi*a^2)` |
+  |---|---|---|
+  | 1.0 | 0.318310 | 0.318310 |
+  | 0.1 | 3183.098761 | 3183.098862 |
+  | 0.01 | 7,609,427.7 | 31,830,988.6 (**4.2x low**) |
+  | 0.001 | 999.999997 | 3.1831e11 (**8 orders low**) |
+
+  The NDF stopped being monotonic in 1/roughness. The epsilon is gone; alpha is
+  floored at 1e-8 instead (roughness 1e-4, below any physical material), which
+  keeps a true GGX lobe and cannot divide by zero — `denom` is minimised at
+  `n.h = 1` where it equals `a^2 >= 1e-16`.
+- ⭐ **The Fresnel integrals were wrong in BOTH branches, by up to 15.5%.**
+  Two independent errors, both inherited (`rust-old/src/wave/diffraction.rs`):
+  - The x >= 1 auxiliary functions applied Abramowitz & Stegun 7.3.32/7.3.33 —
+    whose coefficients are **linear in x** — to `x^2` and `x^4`, and then divided
+    by a spurious extra `x` and `x^3`.
+  - The small-x series used `1 - t^2/20 + t^4/1680` where the expansion of
+    `C(x) = sum (-1)^n (pi/2)^2n x^(4n+1) / ((2n)!(4n+1))` gives
+    `1 - t^2/10 + t^4/216`. The `/20` term is exactly **half** the correct `x^5`
+    coefficient. S(x)'s `/42` and `/3960` are **3x** too large against `/14` and
+    `/440`.
+
+  | x | 2.2.5 C(x) | 2.2.6 | published |
+  |---|---|---|---|
+  | 0.5 | 0.496152 | 0.492344 | 0.492344 |
+  | 0.9 | 0.828555 | 0.765222 | 0.764823 (**was +8.3%**) |
+  | 1.5 | 0.466432 | 0.445620 | 0.445261 (**was +4.8%**) |
+  | 3.0 | 0.511543 | 0.606989 | 0.605721 (**was -15.5%**) |
+  | 5.0 | — | 0.563573 | 0.563631 |
+
+  ⚠ **The suite sampled x = 0, 1 and 10 only** — 0 and 10 are fixed points of any
+  approximation (0 and the 0.5 asymptote), and x = 1 sits exactly on the branch
+  boundary where the two wrong forms agree to 0.08%. Reference values are Simpson
+  quadrature on the defining integrals, cross-checked against published tables;
+  16 new assertions pin both branches at 2e-3, A&S's stated bound.
+- ⭐ **`trace_surface` intersected the whole SPHERE, not the optical surface.** It
+  took the nearest positive root; the surface is only the cap containing the
+  vertex. For a convex surface that is the near cap, so convex was always right —
+  but a **concave surface reached from outside its own sphere took the back cap**,
+  and because the normal is then flipped to face the ray, the transverse
+  component came out with the opposite sign: **the concave surface refracted like
+  a convex one**, with `err_out` left at `PK_ERR_NONE`. Measured, R = -50 at
+  z = 0, axis-parallel ray at y = 10 from z = -200: hit `z = -98.99` with
+  outgoing `dy = -0.067575`, against the correct vertex-cap hit `z = -1.010205`
+  with `dy = +0.067575`.
+
+  ⚠ **This suite's `ray_simulate` assertion count DROPPED BY 42, and that is the
+  fix.** Its loops iterate over `TraceTree` segments, so a tree with phantom
+  segments ran MORE assertions. A ray that had **already exited the lens** kept
+  re-refracting through the non-existent back caps: the off-axis biconvex trace
+  produced **17 segments / 8 interactions, recursing to depth 7**, where the
+  physically correct tree is **8 / 3**. Energy summed to exactly 1.0 in both,
+  which is precisely why the old assertions could not tell them apart. The tree
+  SHAPE is now pinned.
+- ⭐ **`prescription_doublet` shipped 34.7% off its requested focal length.** The
+  cemented radius was `(n1-1)/(phi1/2)` — algebraically **identical** to `r1`, not
+  its negative — so `R1 == R2` bitwise and the crown element had exactly zero
+  power. Measured for f = 200, n1 = 1.517, v1 = 64, n2 = 1.648, v2 = 34:
+  **EFL 130.53 → 200.01** (residual is the thick-lens term). `r4` needed the
+  matching change: it was written as the standard
+  `R4 = R3(n2-1)/((n2-1) - R3*phi2)` with `R3 = -r2` already substituted in, i.e.
+  derived against the negated radius, so it only produced the right number while
+  `r2` carried the wrong sign. ⚠ **The entire doublet coverage was
+  `prescription_len == 3` and a name string** — no radius, no focal length.
+- ⭐ **Third-order spherical aberration came out NEGATIVE — the wrong aberration
+  direction.** `lens_seidel_coefficients`' bracket (Rust `rust-old/src/lens.rs:464`,
+  identical) had only **three** terms and scaled the `p^2` one inconsistently, so
+  the quadratic in q had a positive discriminant and crossed zero. A positive
+  singlet in air is always undercorrected, so the sign is invariant. Minimum over
+  q in [-4, 4] at p = -1, in bracket units:
+
+  | n | 2.2.5 | 2.2.6 |
+  |---|---|---|
+  | 1.5 | **-7.353** | +3.813 (at q = 1.43) |
+  | 1.6 | **-5.267** | +3.544 |
+  | 1.7 | **-3.694** | +3.457 (at q = 1.46) |
+  | 1.8 | **-2.440** | +3.444 |
+
+  The bracket is now the standard Coddington form divided term-wise by `n(n-1)`
+  to sit under the existing prefactor: the `p^2` term loses its extra `(n-1)` and
+  the constant `n^2/(n-1)^2` — absent entirely — comes back. Cross-check: the
+  corrected argmin `q = 2(n+1)/(n+2)` (1.4286 at n = 1.5, 1.4595 at n = 1.7)
+  matches the standard form's argmin exactly. ⚠ **Every existing Seidel assertion
+  wrapped the value in `f64_abs`**, which is exactly how a sign error survives.
+- **`atm_air_mass` went negative past the horizon, turning transmittance into
+  exponential GAIN.** The clamp was applied only to the degree value feeding the
+  Kasten-Young correction term while `cos_z` used the RAW angle; past 90 deg the
+  denominator goes negative. The angle is now clamped once, up front, and both
+  terms use it, so air mass saturates at the horizon value. Measured:
+  `air_mass(95 deg)` and `air_mass(180 deg)` are both 37.9196, and
+  `atm_atmospheric_transmittance` at 95 deg is 0.3846 (was > 1).
+- **`medium_from_json` minted a Medium with a negative refractive index and
+  reported `PK_ERR_NONE`.** It called `_medium_mk` directly, bypassing the
+  `n >= 1.0` invariant `medium_custom` enforces; it now routes through
+  `medium_custom` and reports `PK_ERR_INVALID_INDEX`.
+- **`interference_pattern` dereferenced a null `sources` pointer** — the one grid
+  entry point the 2.0.2 null-guard sweep missed (`diffraction_pattern_2d` and
+  `psf_from_wavefront` both guard theirs). Now returns 0, and rejects
+  `num_sources < 1`.
+- **A null Mueller matrix silently became a perfect absorber.** `mueller_get`
+  returns 0.0 for a null handle, so `mueller_apply` produced the all-zero Stokes
+  vector — indistinguishable from a computed total extinction. `mueller_apply`,
+  `mueller_multiply` and `mueller_chain` now return the 0 sentinel, matching
+  `mueller_set`, which already refused a null handle.
+- **Plane-surface intersection accepted `t == 0`**, so a ray whose origin lies on
+  the plane re-hit it at zero distance and `trace_recursive` re-entered the same
+  surface. Now requires `t > _trace_eps10()`, matching the sphere branch.
+
+### Changed
+
+- **`main` and `mueller_set` are documented**, so `cyrius doc --check` is clean
+  and **`cyrius audit` exits 0** — it had exited 1 on this repo before and after
+  2.2.5. Comment-only: no code line moved.
+- **`docs/architecture/overview.md` and `README.md` corrected** — both advertised
+  5485 assertions, and overview.md also claimed 35 benchmarks against an actual 36.
+
+### Performance
+
+- ⚠ **`lens/seidel_coefficients` is 37% SLOWER, and that is the honest price of
+  the sign fix.** Measured same-binary, 1e6 iterations, full struct-returning
+  function on both sides: **75 ns → 103 ns**. The bracket is division-dominated
+  and correctness needs one more division. Writing the new constant as
+  `(n/(n-1))^2` rather than `n^2/(n-1)^2` recovered 4 ns of that (107 → 103) and
+  is ~1 ULP more accurate (two roundings instead of three) — ⚠ the two forms are
+  **not** bit-equal, differing in 13 of 30 samples over n = 1.0..4.0.
+  Precomputing `1/(n(n-1))` once would recover more, and was **rejected**:
+  reciprocal-multiply is not divide, and it would move every published Seidel
+  value in a release whose job is correctness.
+- **`pbr/distribution_ggx` is ~2 ns slower** (21 → 23 ns, same-binary, 3e6
+  iterations, stable across rounds) — the alpha clamp replacing the additive
+  epsilon. It buys 8 orders of magnitude of correctness.
+- **Whole-suite median +0.0% across 36 benchmarks.** ⚠ Rows other than those two
+  are not separately attributable: this host's run-to-run spread reaches 40% on
+  the sub-100 ns benchmarks, which is why both claims above rest on same-binary
+  A/B rather than the history CSV.
+
+### Notes
+
+- ⚠ **Seven confirmed findings are NOT fixed here** and are recorded rather than
+  silently dropped. The three spectral-data ones each need an authoritative CIE
+  source transcribed and re-verified, which is a research task, not a patch, and
+  getting them wrong would be worse than leaving them documented:
+  - `_illum_f11_data` is **not** CIE Illuminant F11 (wrong chromaticity, missing
+    the mercury lines) though `illuminant_f11()` is public and advertised in
+    README.md.
+  - `_vlambda_scotopic` is **not** CIE 1951 V'(lambda) (peak displaced to 500 nm).
+  - `color_rendering_index` returns ~85 for a monochromatic source and 98.3 for
+    F2, whose published CIE Ra is 64. It is not CIE 13.3 and should either become
+    it or be renamed.
+  - `multilayer_reflectance`'s transfer-matrix product has two sign errors in the
+    M12/M21 cross terms (2+ layers, away from the design wavelength).
+  - `pbr_split_sum_scale_bias` has its `n_dot_v` dependence inverted; the bias
+    polynomial needs refitting against `pbr_integrate_brdf_lut`, not patching.
+  - The six `*_to_json` encoders have no null-handle guard — the mirror of the
+    decode-side class 2.0.2 hardened (confirmed, downgraded to low: the
+    documented contract is a valid handle).
+  - **1458 hand-transcribed spectral constants are pinned by nothing but sign and
+    range checks.** This is the systemic version of the three above.
+- **`CLAUDE.md` still describes the pre-port Rust crate** — "Flat library crate",
+  "MSRV 1.89", "SemVer 1.0.0", and cleanliness gates written as `cargo fmt` /
+  `clippy` / `audit` / `deny` / `RUSTDOCFLAGS cargo doc`, none of which can run
+  here. Left for the maintainer: it is the project's operating manual, and
+  rewriting it is not a library change.
+- One finding was **refuted** on verification: `ai_register_agent`'s missing null
+  guard, correctly downgraded — the documented contract is a valid client.
+
 ## [2.2.5] - 2026-08-21 — `_prk_pow` conforms to IEEE-754 across the non-finite domain
 
 2.2.4 documented one latent divergence in `_prk_pow` and deferred it as a

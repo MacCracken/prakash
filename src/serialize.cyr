@@ -153,8 +153,15 @@ fn medium_from_json(json, len, err_out) {
     var n = _ser_num(v, "n", err_out);
     var name = _ser_str(v, "name", err_out);
     if (prakash_is_err(load64(err_out)) == 1) { return 0; }
-    var built = _medium_mk(n, name);
-    if (built == 0) { store64(err_out, PK_ERR_ALLOCATION); }
+    # 2.2.6: was `_medium_mk(n, name)`, which skips the n >= 1.0 check that
+    # medium_custom enforces — a document carrying "n": -0.5 minted a Medium
+    # with a negative refractive index and reported PK_ERR_NONE. Routing
+    # through medium_custom makes the decoder honour the same invariant as the
+    # constructor, reporting PK_ERR_INVALID_INDEX instead.
+    var built = medium_custom(n, name, err_out);
+    if (built == 0) {
+        if (prakash_is_err(load64(err_out)) == 0) { store64(err_out, PK_ERR_ALLOCATION); }
+    }
     return built;
 }
 

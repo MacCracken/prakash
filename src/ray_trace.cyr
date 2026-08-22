@@ -11,6 +11,18 @@ var SURF_PLANE = 1;
 
 # Small geometry thresholds (Rust literals 1e-15 / 1e-10).
 fn _trace_eps15() { return f64_div(F64_ONE, f64_from(1000000000000000)); }
+# 1 if the hit at parameter `t` lies on the cap of the sphere that contains the
+# surface vertex, else 0. The vertex sits at z = cz - radius, so the vertex cap
+# is the side where (hit_z - cz) has the OPPOSITE sign to radius; the product
+# being <= 0 is that test, and it admits the equator exactly. See the sphere
+# branch of trace_surface for why taking the nearest root alone is wrong.
+#must_use
+fn _trace_on_vertex_cap(pz, dz, t, cz, radius) {
+    var hz = f64_add(pz, f64_mul(t, dz));
+    if (f64_gt(f64_mul(f64_sub(hz, cz), radius), f64_from(0)) == 1) { return 0; }
+    return 1;
+}
+
 fn _trace_eps10() { return f64_div(F64_ONE, f64_from(10000000000)); }
 
 # An interface between two media. shape_tag is SURF_SPHERE/SURF_PLANE; radius is
@@ -93,7 +105,11 @@ fn trace_surface(ray, surface, err_out) {
             return 0;
         }
         var t = f64_div(f64_sub(z_pos, pz), dz);
-        if (f64_lt(t, f64_from(0)) == 1) {
+        # 2.2.6: was `f64_lt(t, 0)`, which ACCEPTS t == 0 — a ray whose origin
+        # already lies on the plane re-hits it at zero distance, so
+        # trace_recursive re-enters the same surface forever. The sphere branch
+        # below always required t > _trace_eps10(); this now matches it.
+        if (f64_gt(t, _trace_eps10()) == 0) {
             store64(err_out, PK_ERR_INVALID_PARAMETER);
             return 0;
         }
@@ -125,12 +141,32 @@ fn trace_surface(ray, surface, err_out) {
         var sqrt_d = f64_sqrt(disc);
         var t1 = f64_sub(f64_neg(half_b), sqrt_d);
         var t2 = f64_add(f64_neg(half_b), sqrt_d);
+        # 2.2.6: this took the nearest positive root of the WHOLE sphere. The
+        # optical surface is only the cap containing the vertex at z_position —
+        # the cap where sign(hit_z - cz) == sign(-radius). For radius > 0 the
+        # vertex cap IS the near cap, so convex surfaces were always right; for
+        # radius < 0 the vertex cap is the FAR one, so any concave surface
+        # reached from outside its own sphere took the back cap. That is not
+        # merely a displaced hit: the normal is flipped to face the incoming ray
+        # below, so the transverse component comes out with the opposite sign
+        # and the concave surface REFRACTS LIKE A CONVEX ONE, with err_out left
+        # at PK_ERR_NONE. Measured (radius = -50, z = 0, axis-parallel ray at
+        # y = 10): from z = -200 the hit was z = -98.99 with outgoing dy
+        # -0.067575; the correct vertex-cap hit is z = -1.010205 with dy
+        # +0.067575. The shipped prescriptions all place the concave centre far
+        # enough left that the ray starts inside the sphere, which is why the
+        # suite never saw it.
         var t = f64_from(0);
+        var got = 0;
         if (f64_gt(t1, _trace_eps10()) == 1) {
-            t = t1;
-        } elif (f64_gt(t2, _trace_eps10()) == 1) {
-            t = t2;
-        } else {
+            if (_trace_on_vertex_cap(pz, dz, t1, cz, radius) == 1) { t = t1; got = 1; }
+        }
+        if (got == 0) {
+            if (f64_gt(t2, _trace_eps10()) == 1) {
+                if (_trace_on_vertex_cap(pz, dz, t2, cz, radius) == 1) { t = t2; got = 1; }
+            }
+        }
+        if (got == 0) {
             store64(err_out, PK_ERR_INVALID_PARAMETER);
             return 0;
         }

@@ -121,8 +121,17 @@ fn atm_mie_phase_cornette_shanks(cos_theta, g) {
 # 1 / (cos(z) + 0.50572*(96.07995 - z_deg)^-1.6364), z_deg = to_degrees(z).min(90).
 #must_use
 fn atm_air_mass(zenith_angle) {
-    var zenith_deg = f64_min(_atm_to_degrees(zenith_angle), f64_from(90));
-    var cos_z = _prk_cos(zenith_angle);
+    # 2.2.6: the clamp was applied ONLY to the degree value feeding the
+    # Kasten-Young correction term, while cos_z used the RAW angle. Past 90 deg
+    # cos goes negative, the denominator goes negative, and air mass goes
+    # NEGATIVE — which turns atm_atmospheric_transmittance's exp(-tau*m) into
+    # exponential GAIN. Kasten-Young is only fitted for z <= 90, so the angle is
+    # now clamped once, up front, and BOTH terms use the clamped value; air mass
+    # saturates at the horizon value (~37.92) for any sun at or below the
+    # horizon, which is the standard treatment.
+    var z = f64_min(zenith_angle, F64_PI_2);
+    var zenith_deg = f64_min(_atm_to_degrees(z), f64_from(90));
+    var cos_z = _prk_cos(z);
     var correction = f64_mul(_atm_r(50572, 100000),
       _prk_pow(f64_sub(_atm_r(9607995, 100000), zenith_deg), f64_neg(_atm_r(16364, 10000))));
     return f64_div(F64_ONE, f64_add(cos_z, correction));

@@ -223,6 +223,28 @@ assert(f64_lt(f64_abs(lens_conjugate_factor(f64_from(100), f64_from(100))), EPS)
 
 var sc_eq = lens_seidel_coefficients(N15, f64_from(100), Z, f64_neg(F64_ONE));
 assert(f64_gt(f64_abs(SeidelCoefficients_spherical(sc_eq)), EPS), "spherical nonzero");
+
+# ⚠ 2.2.6: EVERY SEIDEL ASSERTION IN THIS BLOCK WRAPS THE VALUE IN f64_abs,
+# WHICH IS WHY A SIGN ERROR SURVIVED THEM ALL. The bracket was missing its
+# n^2/(n-1)^2 constant term and mis-scaled the p^2 one, so the quadratic in q
+# crossed zero and spherical came out NEGATIVE for q >= 0.5 at n = 1.5 — the
+# wrong aberration DIRECTION, not merely a wrong magnitude. A positive singlet
+# in air with the object at infinity is always undercorrected, so the sign is
+# invariant; these assert it directly. Measured minimum over q in [-4,4], p=-1:
+# n=1.5 was -7.353 (bracket units), now +3.813.
+for (var _sqi = 0 - 40; _sqi <= 40; _sqi = _sqi + 1) {
+    var _sq = f64_mul(f64_from(_sqi), _fd(1, 10));
+    assert(f64_gt(SeidelCoefficients_spherical(
+          lens_seidel_coefficients(N15, f64_from(100), _sq, f64_neg(F64_ONE))), Z),
+      "spherical is POSITIVE for every shape factor (n=1.5, object at infinity)");
+}
+# Same invariant must hold across ordinary glasses, not just n = 1.5.
+for (var _sni = 15; _sni <= 18; _sni = _sni + 1) {
+    var _sn = _fd(_sni, 10);
+    assert(f64_gt(SeidelCoefficients_spherical(
+          lens_seidel_coefficients(_sn, f64_from(100), _fd(15, 10), f64_neg(F64_ONE))), Z),
+      "spherical stays positive at the worst-case q for n = 1.5..1.8");
+}
 assert(f64_gt(f64_abs(SeidelCoefficients_coma(sc_eq)), EPS), "coma nonzero");
 assert(f64_gt(SeidelCoefficients_field_curvature(sc_eq), Z), "field curvature > 0");
 

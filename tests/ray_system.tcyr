@@ -181,6 +181,28 @@ var p_db = prescription_doublet(f64_from(200), _fd(1517, 1000), f64_from(64),
 assert_eq(prescription_len(p_db), 3, "doublet len 3");
 assert_eq(streq(Prescription_name(p_db), "achromatic doublet"), 1, "doublet name");
 
+# ⚠ 2.2.6: THE TWO ASSERTIONS ABOVE WERE THE WHOLE DOUBLET COVERAGE — a length
+# and a name string. Neither touches a radius or the focal length, so the
+# constructor shipped 34.7% off its requested EFL through a 5537-assertion
+# suite. The cemented radius was computed as `(n1-1)/(phi1/2)`, algebraically
+# IDENTICAL to r1 rather than its negative, so R1 == R2 bitwise and the crown
+# element had exactly zero power. These pin the design intent instead.
+var _db_r1 = PrescriptionSurface_radius(vec_get(Prescription_surfaces(p_db), 0));
+var _db_r2 = PrescriptionSurface_radius(vec_get(Prescription_surfaces(p_db), 1));
+assert(f64_gt(_db_r1, Z), "doublet R1 > 0 (crown front is convex)");
+assert(f64_lt(_db_r2, Z), "doublet R2 < 0 — equiconvex crown, NOT a zero-power meniscus");
+_assert_near(_db_r2, f64_neg(_db_r1), _fd(1, 1000000), "doublet crown is equiconvex: R2 == -R1");
+assert(f64_gt(f64_abs(f64_sub(f64_div(F64_ONE, _db_r1), f64_div(F64_ONE, _db_r2))), _fd(1, 1000)),
+  "crown curvature difference is non-zero, so the element has power");
+
+# The whole point of the constructor: it must actually deliver the focal length
+# it was asked for. Residual is the thick-lens term, hence the 0.5% tolerance.
+var _db_e = 0;
+var _db_props = find_system_properties(p_db, &_db_e);
+assert_eq(_db_e, 0, "doublet system properties resolve");
+_assert_near(SystemProperties_focal_length(_db_props), f64_from(200), F64_ONE,
+  "doublet delivers its requested EFL of 200 (shipped 130.53 through 2.2.5)");
+
 # ── paraxial vs full trace consistency ────────
 test_group("paraxial_vs_full");
 

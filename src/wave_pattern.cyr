@@ -332,6 +332,11 @@ fn point_source_new(x, y, amplitude, phase) {
 #must_use
 fn interference_pattern(sources, num_sources, wavelength, distance, gx0, gx1, gy0, gy1, nx, ny) {
     _prk_trace("interference_pattern");
+    # 2.2.6: the one grid entry point the 2.0.2 null-guard sweep missed.
+    # diffraction_pattern_2d and psf_from_wavefront both guard their buffer;
+    # this read PointSource fields straight off address 0.
+    if (sources == 0) { return 0; }
+    if (num_sources < 1) { return 0; }
     var k = f64_div(F64_TAU, wavelength);
     var dx = f64_from(0);
     if (nx > 1) {

@@ -81,12 +81,55 @@ assert(f64_lt(f64_abs(f64_add(fresnel_integral_s(f64_neg(F64_TWO)), fresnel_inte
 _assert_near(fresnel_integral_c(F64_ONE), _fd(7799, 10000), _fd(1, 100), "C(1) ~ 0.7799");
 _assert_near(fresnel_integral_s(F64_ONE), _fd(4383, 10000), _fd(1, 100), "S(1) ~ 0.4383");
 
+# 2.2.6: the four samples above (0, 1, 10 and the +/-2 symmetry pair) were the
+# WHOLE of the Fresnel coverage, and all four survive a badly wrong C and S.
+# x = 0 and x = 10 are fixed points of any approximation (0 and the 0.5
+# asymptote), and x = 1 sits exactly on the branch boundary where the two wrong
+# forms happen to agree to 0.08%. The error lived at 0.5 < x < 5 and peaked at
+# 15.5% (C(3)) — untested. These pin both branches against values computed by
+# Simpson quadrature on the defining integrals, cross-checked with published
+# Fresnel tables. Tolerance 2e-3 is Abramowitz & Stegun's stated bound for the
+# 7.3.32/7.3.33 rational approximation; the series branch is far tighter.
+var _FR_TOL = _fd(2, 1000);
+_assert_near(fresnel_integral_c(_fd(2, 10)), _fd(199921, 1000000), _FR_TOL, "C(0.2) = 0.199921 (series branch)");
+_assert_near(fresnel_integral_c(_fd(5, 10)), _fd(492344, 1000000), _FR_TOL, "C(0.5) = 0.492344 (series branch)");
+_assert_near(fresnel_integral_c(_fd(9, 10)), _fd(764823, 1000000), _FR_TOL, "C(0.9) = 0.764823 (series, was +8.3%)");
+_assert_near(fresnel_integral_c(_fd(15, 10)), _fd(445261, 1000000), _FR_TOL, "C(1.5) = 0.445261 (aux, was +4.8%)");
+_assert_near(fresnel_integral_c(F64_TWO), _fd(488253, 1000000), _FR_TOL, "C(2.0) = 0.488253 (aux, was +2.4%)");
+_assert_near(fresnel_integral_c(f64_from(3)), _fd(605721, 1000000), _FR_TOL, "C(3.0) = 0.605721 (aux, was -15.5%)");
+_assert_near(fresnel_integral_c(f64_from(5)), _fd(563631, 1000000), _FR_TOL, "C(5.0) = 0.563631 (aux)");
+_assert_near(fresnel_integral_s(_fd(5, 10)), _fd(64732, 1000000), _FR_TOL, "S(0.5) = 0.064732 (series branch)");
+_assert_near(fresnel_integral_s(_fd(9, 10)), _fd(339776, 1000000), _FR_TOL, "S(0.9) = 0.339776 (series branch)");
+_assert_near(fresnel_integral_s(_fd(15, 10)), _fd(697505, 1000000), _FR_TOL, "S(1.5) = 0.697505 (aux branch)");
+_assert_near(fresnel_integral_s(f64_from(3)), _fd(496313, 1000000), _FR_TOL, "S(3.0) = 0.496313 (aux branch)");
+_assert_near(fresnel_integral_s(f64_from(5)), _fd(499191, 1000000), _FR_TOL, "S(5.0) = 0.499191 (aux branch)");
+
 # ── Fresnel straight-edge ────────
 test_group("fresnel_edge");
 
 _assert_near(fresnel_edge_intensity(Z), _fd(1, 4), _fd(1, 100), "edge boundary I ~ 0.25");
 assert(f64_lt(fresnel_edge_intensity(f64_from(0 - 5)), _fd(1, 100)), "deep shadow ~ 0");
-_assert_near(fresnel_edge_intensity(f64_from(5)), F64_ONE, _fd(5, 100), "illuminated ~ 1");
+
+# ⚠ 2.2.6 CORRECTED A TEST THAT WAS PINNING THE BUG. This read
+#   _assert_near(fresnel_edge_intensity(5), 1.0, 0.05, "illuminated ~ 1")
+# and it passed only because C and S were wrong. The straight-edge intensity
+# does NOT settle to 1 in the illuminated region — it oscillates about 1 with
+# slowly decaying amplitude, and the true value at u = 5 is 1.0648, which the
+# old assertion's 0.05 tolerance EXCLUDES. The physics is Fresnel's classic
+# edge fringe pattern: first and largest maximum I = 1.3697 at u = 1.2, first
+# minimum I = 0.8440 at u = 2.0. Reference values from Simpson quadrature on
+# the defining integrals. Pinning the oscillation is the point — an
+# approximation that merely converges to 1 would now fail.
+_assert_near(fresnel_edge_intensity(_fd(12, 10)), _fd(1369659, 1000000), _fd(5, 1000),
+  "first edge maximum I = 1.3697 at u = 1.2");
+_assert_near(fresnel_edge_intensity(F64_TWO), _fd(843997, 1000000), _fd(5, 1000),
+  "first edge minimum I = 0.8440 at u = 2.0");
+_assert_near(fresnel_edge_intensity(f64_from(3)), _fd(1107629, 1000000), _fd(5, 1000),
+  "second edge maximum I = 1.1076 at u = 3.0");
+_assert_near(fresnel_edge_intensity(f64_from(5)), _fd(1064847, 1000000), _fd(5, 1000),
+  "I = 1.0648 at u = 5 — NOT 1.0; the old assertion pinned the bug");
+assert(f64_gt(fresnel_edge_intensity(_fd(12, 10)), fresnel_edge_intensity(F64_TWO)),
+  "edge intensity oscillates: max at 1.2 exceeds min at 2.0");
 
 # ── Fresnel parameter ────────
 test_group("fresnel_parameter");
