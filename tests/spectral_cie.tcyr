@@ -261,4 +261,75 @@ while (oj < 4) {
     oj = oj + 1;
 }
 
+# ── 2.2.7: the 1458 spectral constants get an EXTERNAL check ────────
+# ⚠ THIS FILE HAD 1168 ASSERTIONS AND NONE OF THEM PINNED A TABLE VALUE AGAINST
+# AN OUTSIDE REFERENCE. They asserted per-entry non-negativity, [0,1] membership
+# and three argmax positions — properties a completely wrong table satisfies.
+# Two independent checks are added here.
+#
+# (1) CHROMATICITY ROUND-TRIP. Integrating an illuminant SPD against the CMFs
+# and reducing to (x, y) exercises 81 SPD values AND 243 CMF values in one
+# number that has a published answer. It is the cheapest external check
+# available for a table this size.
+test_group("spectral tables against published references");
+
+fn _xy_of(spd, out) {
+    var xyz = spd_to_xyz(spd);
+    var sum = f64_add(f64_add(Xyz_x(xyz), Xyz_y(xyz)), Xyz_z(xyz));
+    store64(out, f64_div(Xyz_x(xyz), sum));
+    store64(out + 8, f64_div(Xyz_y(xyz), sum));
+    return 0;
+}
+var _xy = alloc(16);
+
+# D65 and A are CORRECT, and that is what isolates the fault to the F-series
+# SPDs rather than the CMFs: the same integration path reproduces both to 1e-4.
+_xy_of(illuminant_d65(), _xy);
+_assert_near(load64(_xy), _fd(31271, 100000), TOL3, "D65 chromaticity x = 0.31271 (CIE)");
+_assert_near(load64(_xy + 8), _fd(32902, 100000), TOL3, "D65 chromaticity y = 0.32902 (CIE)");
+_xy_of(illuminant_a(), _xy);
+_assert_near(load64(_xy), _fd(44757, 100000), TOL3, "Illuminant A chromaticity x = 0.44757 (CIE)");
+_assert_near(load64(_xy + 8), _fd(40745, 100000), TOL3, "Illuminant A chromaticity y = 0.40745 (CIE)");
+
+# ⚠ F2 AND F11 ARE PINNED TO THEIR WRONG VALUES ON PURPOSE. Both fail their
+# published chromaticity (F2 by ~0.0034, F11 by 0.081/0.087 — F11's emission
+# lines sit at 440/565/615 nm where CIE F11's are at 436/546/611). The data
+# could not be corrected in 2.2.7 without the CIE datasets: unlike
+# _vlambda_scotopic, which agreed with its reference at 25 of 55 points and so
+# could be repaired with confidence, F11 matches at only 6 — all in the leading
+# low-value run. Pinning the WRONG numbers stops them drifting further
+# unobserved and turns the arrival of real data into a visible test failure.
+_xy_of(illuminant_f2(), _xy);
+_assert_near(load64(_xy), _fd(37546, 100000), TOL3, "KNOWN-WRONG: F2 x = 0.37546, CIE says 0.37208");
+_assert_near(load64(_xy + 8), _fd(37184, 100000), TOL3, "KNOWN-WRONG: F2 y = 0.37184, CIE says 0.37529");
+_xy_of(illuminant_f11(), _xy);
+_assert_near(load64(_xy), _fd(46141, 100000), TOL3, "KNOWN-WRONG: F11 x = 0.46141, CIE says 0.38052");
+_assert_near(load64(_xy + 8), _fd(46385, 100000), TOL3, "KNOWN-WRONG: F11 y = 0.46385, CIE says 0.37713");
+
+# (2) CMF LANDMARK VALUES, direct from the published CIE 1931 table. These are
+# the anchors the whole colour pipeline rests on.
+var _t31 = cie_1931_table();
+fn _cmf(i, c) { return load64(_t31 + (i * 3 + c) * 8); }
+_assert_near(_cmf(35, 1), F64_ONE, TOL6, "y_bar(555nm) = 1.000000 exactly (the definition of the scale)");
+_assert_near(_cmf(44, 0), _fd(10622, 10000), TOL6, "x_bar(600nm) = 1.06220");
+_assert_near(_cmf(13, 2), _fd(17826, 10000), TOL6, "z_bar(445nm) = 1.78260");
+_assert_near(_cmf(14, 2), _fd(177211, 100000), TOL6, "z_bar(450nm) = 1.77211");
+_assert_near(_cmf(25, 1), _fd(4073, 10000), TOL6, "y_bar(505nm) = 0.40730");
+_assert_near(_cmf(0, 0), _fd(1368, 1000000), TOL6, "x_bar(380nm) = 0.001368");
+_assert_near(_cmf(64, 0), _fd(11359, 1000000), TOL6, "x_bar(700nm) = 0.011359");
+_assert_near(_cmf(64, 2), Z, TOL6, "z_bar(700nm) = 0 (z is zero above ~650nm)");
+
+# (3) `color_rendering_index` is NOT CIE Ra, and 2.2.7 stops it claiming to be.
+# spectral_band_similarity is the honest name; the old one is a wrapper. Pinned
+# to the MEASURED values against published Ra, so the gap stays visible.
+_assert_near(spectral_band_similarity(illuminant_d65()), f64_from(100), TOL_01,
+  "band similarity of D65 against itself = 100");
+_assert_near(spectral_band_similarity(illuminant_f2()), _fd(982886, 10000), TOL_01,
+  "KNOWN-WRONG: F2 scores 98.29 where published CIE Ra is 64");
+_assert_near(spectral_band_similarity(illuminant_f11()), _fd(920010, 10000), TOL_01,
+  "KNOWN-WRONG: F11 scores 92.00 where published CIE Ra is 83");
+assert(f64_lt(f64_abs(f64_sub(color_rendering_index(illuminant_f2()),
+        spectral_band_similarity(illuminant_f2()))), TOL6),
+  "the deprecated color_rendering_index name still returns the same value");
+
 var r = assert_summary();

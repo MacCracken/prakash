@@ -1,5 +1,155 @@
 # Changelog
 
+## [2.2.7] - 2026-08-21 — The seven deferred findings: five fixed, two proved unfixable without the CIE datasets
+
+2.2.6 recorded seven confirmed findings it would not fix. This closes five of
+them, corrects a sixth defect found while investigating, and — for the two that
+need data this repo does not have — replaces "documented" with "measured,
+quantified, and pinned so it cannot drift". Suite **5615 → 5757 assertions across
+29 suites**, 0 failed. `cyrius audit` still exits 0.
+
+⚠ **THREE MORE INHERITED DEFECTS.** The transfer-matrix signs, the split-sum fit
+and the split-sum integrator are all character-for-character identical in the
+deleted Rust original (`git show 524a7aa^:rust-old/...`), bringing the running
+total to **nine**. See the note in `CLAUDE.md`: the Rust archive is a fidelity
+reference, not a correctness one.
+
+⚠ **THE PATTERN IN THE TESTS IS NOW UNMISTAKABLE.** Every defect below was
+guarded only by bounds checks. `multilayer_reflectance` had `R >= 0 && R <= 1`
+against a value 4.75x wrong. `pbr_split_sum_scale_bias` had `bias >= 0 &&
+bias <= 1` against a bias that was **identically zero at all 110 grid points**.
+`_vlambda_scotopic` had "peak within ±10 nm" against a peak displaced by 7 nm.
+A bound is not a value.
+
+### Fixed
+
+- ⭐ **The transfer-matrix layer product had two sign errors, making multilayer
+  coatings up to 4.75x wrong.** With `M = [[m11, i·m12], [i·m21, m22]]` and a
+  layer `L = [[cos δ, i sin δ/η], [i η sin δ, cos δ]]`, the product `M·L` gives
+  `M12' = +m11 sin δ/η + m12 cos δ` and `M21' = m21 cos δ + m22 η sin δ`; both
+  carried a negation (Rust `rust-old/src/wave/diffraction.rs:308-309`, identical).
+  Fixed in `multilayer_reflectance` and `_diff_tmm_stack`.
+
+  ⚠ **WHY EVERY TEST PASSED:** the two wrong signs flip `m12` and `m21`
+  *together*, and the reflectance uses them only inside `num_i²/den_i²` — so a
+  **single layer is bit-identical either way**, and at the design wavelength
+  `cos δ = 0` kills the mixing term so quarter-wave stacks agree too. It needed
+  2+ layers **and** an off-design wavelength. Verified against an independent
+  complex-arithmetic TMM; all nine sampled points now match exactly:
+
+  | | 1 layer | 2 layers | 3 layers |
+  |---|---|---|---|
+  | 450 nm | 0.016204 ✓ | 0.077175 → **0.130025** | 0.039460 → **0.187549** |
+  | 550 nm (design) | 0.012601 ✓ | 0.085649 ✓ | 0.143126 ✓ |
+  | 650 nm | 0.014368 ✓ | 0.080572 → **0.109545** | 0.066815 → **0.168553** |
+
+- ⭐ **The split-sum bias term was identically zero, provably, and the scale ran
+  backwards.** `pbr_split_sum_scale_bias` (Rust `pbr/advanced.rs:540,549`,
+  identical) computed a bias polynomial `((0.042x − 0.1)x + 0.03)x − 0.002` that
+  is **negative across the entire x = roughness² ∈ [0,1] domain**, multiplied it
+  by a non-negative angular factor, and clamped to [0,1] — so it returned
+  −0.000000 at every one of 110 grid points. Its scale factor
+  `min(−1.613·ndv + 2.227, 1)` equals 1 for every `n·v` below 0.761 and then
+  *decreases* to 0.614 at normal incidence: flat across most of the domain and
+  lowest exactly where specular response is strongest. Replaced with the
+  published Karis/Lazarov 2013 `EnvBRDFApprox`. Error against the (corrected)
+  integrator over an 11×10 grid: scale max **0.9167 → 0.5547**, mean
+  **0.3357 → 0.1275**; bias max **0.1456 → 0.0861**.
+- ⭐ **And the integrator it approximates was wrong too — found while building the
+  ground truth.** `pbr_integrate_brdf_lut` used the **direct-lighting** Smith
+  remap `k = (r+1)²/8` where image-based lighting needs `k = α²/2`. Diagnosed by
+  exact model match: a Python reference using the direct `k` reproduced the
+  function's output **to six decimals at every sampled point**, and the IBL `k`
+  did not. The invariant that settles it — at roughness 0 the split sum must
+  satisfy **A + B = 1 exactly** for every angle, because F is the only thing
+  being split — gave **0.2215** at `n·v = 0.1`; it now gives **1.000000** at
+  every angle. New `pbr_geometry_smith_ibl` / `pbr_geometry_schlick_ggx_ibl` in
+  `pbr_core`; the direct-lighting form is untouched for direct lighting.
+- ⭐ **`_vlambda_scotopic` was not CIE 1951 V′(λ) — 30 of 81 entries corrected.**
+  Its peak sat at **500 nm** where the CIE curve peaks at 507 (505 = 0.998,
+  510 = 0.997 on this grid), and the 445–525 nm block was inflated by up to
+  **+0.1174 at 475 nm** (0.8514 against 0.7340 — a 16% error on the steepest part
+  of the curve).
+
+  ⚠ **How the replacement was justified, since transcribing a table from memory
+  is exactly the failure mode this repo keeps finding:** the shipped table
+  already agreed with the CIE reference **exactly, bit-for-bit, at 25 of the 55
+  points below 650 nm**, scattered across the range, disagreeing only across one
+  contiguous band. A reference that reproduces 25 existing entries exactly is
+  the same source, not a different one. Post-fix the table matches at all 55, is
+  monotone rising to 505 and falling from 510, and peaks where CIE says.
+  ⚠ **655–780 nm was deliberately NOT touched** — those 26 entries are all below
+  2.5e-4 and could not be cross-checked to the same standard, so they were left
+  alone rather than replaced on weaker evidence.
+- **All six `*_to_json` encoders dereferenced a null handle.** The decode side was
+  hardened in 2.0.2 and pinned; the encode side never was. Each now returns the
+  same 0 sentinel the decoders use.
+
+### Changed
+
+- **`color_rendering_index` is renamed to `spectral_band_similarity`**, because it
+  is not CIE 13.3 Ra and should not claim to be. It compares normalised energy in
+  eight fixed wavelength bands — no Test Colour Samples, no W\*U\*V\*, no von
+  Kries adaptation. Measured against published Ra: **F2 scores 98.29 where Ra is
+  64**, F11 scores 92.00 where Ra is 83. (D65 and A score ~100 only because any
+  similarity metric scores an illuminant against itself as perfect.) ⚠ **Not a
+  breaking change** — `color_rendering_index` remains as a thin wrapper, marked
+  deprecated, and is a candidate for removal in the next major version.
+- **`CLAUDE.md` is now a Cyrius document.** Every quality gate it named was a
+  `cargo` command that cannot run in this repo. The P(-1) and Work Loop gates now
+  read `cyrius fmt --check` / `lint` / `doc --check` / `vet` / `deny` /
+  `deps --verify` / `audit`, with the caveat that `cyrius lint` **exits 0 even
+  with warnings** so its stdout must be grepped. Also corrected: "Flat library
+  crate" → the two-bundle `cyrius distlib` layout; "MSRV 1.89" → the cyrius 6.5.33
+  pin; "Cargo.toml in sync" → `VERSION` via `${file:VERSION}`; a new step 12 for
+  regenerating the bundles (⚠ `cyrius distlib` **overwrites** the `.deps`
+  sidecars, so `sync-deps-sidecar.sh` must follow it every time).
+  ⚠ **`#[inline]` and `#[non_exhaustive]` are retired, not translated** — Cyrius
+  has neither, and **`cycc` silently ignores unknown attributes** (verified:
+  `#definitely_not_a_real_attribute` compiles and lints clean, exactly as
+  `#inline` did). The rule had **zero** instances across 8382 lines of `src/`
+  because it was never followable. Real attributes, per the vendored stdlib:
+  `#must_use`, `#pure`, `#derive`, `#naked`, `#io`, `#host_only`.
+- **README** no longer advertises F2/F11 as usable standard illuminants, or the
+  band-similarity metric as CRI.
+
+### Notes
+
+- ⚠ **TWO FINDINGS ARE NOT FIXED, AND THE REASON IS EVIDENCE, NOT EFFORT.**
+  `illuminant_f11` is **not** CIE F11: its emission lines sit at 440/565/615 nm
+  where F11's are at 436/546/611, and integrated against this repo's own CMFs it
+  gives **(0.46141, 0.46385)** against a published **(0.38052, 0.37713)**. F2 is
+  off by ~0.0034. But the signature that justified the V′(λ) repair is absent —
+  F11 matches a published reference at only **6 of 81** points, all in the
+  leading low-value run. Replacing 75 values on that evidence would risk
+  substituting new errors for the existing ones. **These need the CIE datasets.**
+  - ⚠ **The fault is isolated to the F-series SPDs, not the CMFs** — and that is
+    measured, not assumed: D65 **(0.31272, 0.32903)** and A **(0.44754, 0.40743)**
+    reproduce their published chromaticities to 1e-5 through the same integration
+    path, and the CMF landmarks are exact (`ȳ(555) = 1.000000`,
+    `x̄(600) = 1.062200`, `z̄(445) = 1.782600`, `x̄(380) = 0.001368`).
+  - **F2, F11 and the band-similarity scores are now pinned to their WRONG
+    values**, deliberately, so they cannot drift further unobserved and so the
+    arrival of real data shows up as a visible test failure.
+- **The 1458 hand-transcribed spectral constants finally have an external check.**
+  `tests/spectral_cie.tcyr` had 1168 assertions and **not one pinned a table
+  value against an outside reference** — they asserted non-negativity, [0,1]
+  membership and three argmax positions, all of which a completely wrong table
+  satisfies. Chromaticity round-trips now exercise 81 SPD values and 243 CMF
+  values per assertion against a published answer, plus eight CMF landmarks.
+
+### Performance
+
+- ⚠ **`pbr_split_sum_scale_bias` is 24% slower: 85 ns → 105 ns**, measured
+  same-binary, 2e6 iterations × 2 rounds. Karis' form needs `2^(-9.28·n·v)`,
+  which costs a `_prk_exp` where the old polynomial cost none. It buys a bias
+  term that is not identically zero.
+- ⚠ **No other performance claim is made, and the whole-suite run is reported as
+  NOT ATTRIBUTABLE.** Median +2.5% across 36 benchmarks — but `wave/zernike_poly`
+  (+12.2%) and `atmosphere/rayleigh_cross_section` (+11.1%) moved as much as
+  anything touched, neither is on a changed path, and the harness's measured
+  timer floor itself moved 1342 → 1404 ns between runs. That is host drift.
+
 ## [2.2.6] - 2026-08-21 — A P(-1) review finds six wrong physics formulas, five of them inherited verbatim from the Rust original
 
 `cyrius audit` **exits 0 for the first time**, and that was the small half of this

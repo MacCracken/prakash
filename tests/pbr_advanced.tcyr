@@ -287,6 +287,72 @@ for (var nv = 1; nv <= 10; nv = nv + 1) {
 }
 pbr_split_sum_scale_bias(F64_ONE, Z, sb2);
 assert(f64_gt(load64(sb2), F64_HALF), "smooth normal high scale");
+
+# ⚠ 2.2.7: THE 440 ASSERTIONS ABOVE ARE ALL BOUNDS CHECKS, AND A BIAS THAT IS
+# IDENTICALLY ZERO SATISFIES EVERY ONE OF THEM. It was: the old fit's bias
+# polynomial ((0.042x - 0.1)x + 0.03)x - 0.002 is negative across the entire
+# x = roughness^2 in [0,1] domain, was multiplied by a non-negative angular
+# factor, and then clamped to [0,1] — so it returned -0.000000 at all 110 grid
+# points. The scale's angular factor also ran backwards, sitting flat at 0.998
+# for every n.v below 0.761 and falling to its LOWEST value at normal
+# incidence. These assert the two properties that were actually violated.
+var _ss_lo = alloc(16);
+var _ss_hi = alloc(16);
+var _ss_nonzero = 0;
+for (var _sv = 1; _sv <= 10; _sv = _sv + 1) {
+    for (var _sr = 0; _sr <= 10; _sr = _sr + 1) {
+        pbr_split_sum_scale_bias(_fd(_sv, 10), _fd(_sr, 10), sb2);
+        if (f64_gt(load64(sb2 + 8), _fd(1, 1000)) == 1) { _ss_nonzero = _ss_nonzero + 1; }
+    }
+}
+assert(_ss_nonzero > 20, "the bias term is not identically zero (it was, at every grid point)");
+
+# Scale must RISE toward normal incidence, not fall — the inverted direction.
+# ⚠ ONLY FOR SMOOTH SURFACES. Checked against the integrator: A is monotonic
+# rising in n.v up to roughness ~0.4 (r=0.3: 0.660 -> 0.951 -> 0.992), then the
+# ordering REVERSES (r=1.0: 0.544 at grazing against 0.307 at normal), because
+# the grazing lobe keeps energy the normal-incidence one has already lost. So
+# the loop stops at 0.3 — asserting it at r=1.0 would be asserting wrong physics
+# and would fail on a correct implementation, which is how the first draft of
+# this test failed. The old fit violated it everywhere: scale sat flat at 0.998
+# for every n.v below 0.761 and then fell to its minimum at normal incidence.
+for (var _sr2 = 0; _sr2 <= 3; _sr2 = _sr2 + 1) {
+    pbr_split_sum_scale_bias(_fd(1, 10), _fd(_sr2, 10), _ss_lo);
+    pbr_split_sum_scale_bias(F64_ONE, _fd(_sr2, 10), _ss_hi);
+    assert(f64_gt(load64(_ss_hi), load64(_ss_lo)),
+      "split-sum scale rises toward normal incidence for a smooth surface");
+}
+# And the integrator agrees on that ordering, independently.
+var _mo_lo = alloc(16);
+var _mo_hi = alloc(16);
+for (var _mr = 0; _mr <= 3; _mr = _mr + 1) {
+    pbr_integrate_brdf_lut(_fd(1, 10), _fd(_mr, 10), 2048, _mo_lo);
+    pbr_integrate_brdf_lut(F64_ONE, _fd(_mr, 10), 2048, _mo_hi);
+    assert(f64_gt(load64(_mo_hi), load64(_mo_lo)),
+      "integrated split-sum scale rises toward normal for a smooth surface");
+}
+
+# ⚠ AND THE INTEGRATOR IT IS APPROXIMATING WAS ALSO WRONG. It used the
+# DIRECT-lighting Smith remap k = (r+1)^2/8 where image-based lighting needs
+# k = alpha^2/2. The invariant that settles it: at roughness 0 the split sum is
+# exactly A + B = 1 for every angle, because F is the only thing being split.
+# It returned 0.2215 at n.v = 0.1. Reference values below are an independent
+# complex-free Python integrator agreeing to 1e-6.
+var _lut = alloc(16);
+for (var _lv = 1; _lv <= 10; _lv = _lv + 1) {
+    pbr_integrate_brdf_lut(_fd(_lv, 10), Z, 2048, _lut);
+    _assert_near(f64_add(load64(_lut), load64(_lut + 8)), F64_ONE, _fd(1, 10000),
+      "split-sum A + B = 1 at roughness 0, every angle (was 0.22 at grazing)");
+}
+pbr_integrate_brdf_lut(_fd(1, 10), Z, 2048, _lut);
+_assert_near(load64(_lut), _fd(409510, 1000000), _fd(1, 10000), "lut A(r=0, nv=0.1) = 0.409510");
+_assert_near(load64(_lut + 8), _fd(590490, 1000000), _fd(1, 10000), "lut B(r=0, nv=0.1) = 0.590490");
+pbr_integrate_brdf_lut(F64_HALF, Z, 2048, _lut);
+_assert_near(load64(_lut), _fd(96875, 100000), _fd(1, 10000), "lut A(r=0, nv=0.5) = 0.968750");
+pbr_integrate_brdf_lut(F64_ONE, Z, 2048, _lut);
+_assert_near(load64(_lut), F64_ONE, _fd(1, 10000), "lut A(r=0, nv=1) = 1.0 (perfect mirror, normal)");
+pbr_integrate_brdf_lut(F64_HALF, F64_HALF, 2048, _lut);
+_assert_near(load64(_lut), _fd(871732, 1000000), _fd(1, 10000), "lut A(r=0.5, nv=0.5) = 0.871732");
 _assert_near(pbr_env_map_lod(Z, f64_from(8)), Z, EPS, "env_lod 0 = 0");
 _assert_near(pbr_env_map_lod(F64_ONE, f64_from(8)), f64_from(8), EPS, "env_lod 1 = 8");
 _assert_near(pbr_env_map_lod(F64_HALF, f64_from(8)), f64_from(4), EPS, "env_lod 0.5 = 4");

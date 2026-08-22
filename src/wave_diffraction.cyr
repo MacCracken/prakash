@@ -305,9 +305,29 @@ fn multilayer_reflectance(wavelength, n_incident, n_substrate, layers, num_layer
         var delta = f64_div(f64_mul(f64_mul(F64_TAU, n), d), wavelength);
         var sin_d = _prk_sin(delta);
         var cos_d = _prk_cos(delta);
+        # ⚠ 2.2.7 DELIBERATELY DIVERGES FROM THE RUST ORIGINAL. The M12 and M21
+        # cross terms carried the wrong sign (Rust `rust-old/src/wave/
+        # diffraction.rs:308-309`, identical). With
+        # M = [[m11_r, i*m12_i], [i*m21_i, m22_r]] and a layer
+        # L = [[cos d, i sin d / eta], [i eta sin d, cos d]], the product M*L is
+        #   M11' = m11_r cos d - m12_i eta sin d      (was correct)
+        #   M12' = + m11_r sin d / eta + m12_i cos d  (had a leading minus)
+        #   M21' = m21_i cos d + m22_r eta sin d      (had a minus on the 2nd term)
+        #   M22' = -m21_i sin d / eta + m22_r cos d   (was correct)
+        # ⚠ WHY EVERY TEST PASSED: both wrong signs flip m12_i and m21_i
+        # TOGETHER, and the reflectance uses them only inside num_i^2 / den_i^2,
+        # so a SINGLE layer is bit-identical either way. At the design
+        # wavelength cos d = 0, which kills the mixing term, so quarter-wave
+        # stacks also agree. The error needs 2+ layers AND a wavelength off
+        # design. Measured against an independent complex-arithmetic TMM,
+        # n_i = 1.0, substrate 1.52, quarter-wave 1.38/2.30 stack at 550 nm:
+        #   450 nm, 2 layers: 0.077175 -> 0.130025
+        #   450 nm, 3 layers: 0.039460 -> 0.187549   (4.75x low)
+        #   650 nm, 3 layers: 0.066815 -> 0.168553
+        #   550 nm (design), any depth: unchanged, as is any single layer
         var n11 = f64_sub(f64_mul(m11_r, cos_d), f64_mul(f64_mul(m12_i, n), sin_d));
-        var n12 = f64_add(f64_div(f64_mul(f64_neg(m11_r), sin_d), n), f64_mul(m12_i, cos_d));
-        var n21 = f64_sub(f64_mul(m21_i, cos_d), f64_mul(f64_mul(m22_r, n), sin_d));
+        var n12 = f64_add(f64_div(f64_mul(m11_r, sin_d), n), f64_mul(m12_i, cos_d));
+        var n21 = f64_add(f64_mul(m21_i, cos_d), f64_mul(f64_mul(m22_r, n), sin_d));
         var n22 = f64_add(f64_div(f64_mul(f64_neg(m21_i), sin_d), n), f64_mul(m22_r, cos_d));
         m11_r = n11;
         m12_i = n12;
@@ -368,9 +388,12 @@ fn _diff_tmm_stack(wavelength, ni, ns, layers, num_layers, cos_i, cos_sub, ni_si
         var eta = _diff_eta(n, cos_l, is_p);
         var sin_d = _prk_sin(delta);
         var cos_d = _prk_cos(delta);
+        # 2.2.7: same two sign errors as multilayer_reflectance above, with the
+        # admittance eta in place of n for the oblique s/p split. See that
+        # function for the derivation and the measured effect.
         var n11 = f64_sub(f64_mul(m11_r, cos_d), f64_mul(f64_mul(m12_i, eta), sin_d));
-        var n12 = f64_add(f64_div(f64_mul(f64_neg(m11_r), sin_d), eta), f64_mul(m12_i, cos_d));
-        var n21 = f64_sub(f64_mul(m21_i, cos_d), f64_mul(f64_mul(m22_r, eta), sin_d));
+        var n12 = f64_add(f64_div(f64_mul(m11_r, sin_d), eta), f64_mul(m12_i, cos_d));
+        var n21 = f64_add(f64_mul(m21_i, cos_d), f64_mul(f64_mul(m22_r, eta), sin_d));
         var n22 = f64_add(f64_div(f64_mul(f64_neg(m21_i), sin_d), eta), f64_mul(m22_r, cos_d));
         m11_r = n11;
         m12_i = n12;

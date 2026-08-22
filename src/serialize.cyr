@@ -109,6 +109,12 @@ fn _ser_str(v, key, err_out) {
 # Rgb -> JSON Str: {"r":..,"g":..,"b":..}.
 #must_use
 fn rgb_to_json(c) {
+    # 2.2.7: a null handle read straight off address 0. The DECODE side was
+    # hardened in 2.0.2 (every *_from_json returns 0 rather than dereferencing
+    # null) and pinned in tests/hardening.tcyr; the ENCODE side never was, and
+    # `cyrius coverage` could not see it because these are all exercised with
+    # valid handles. Returning 0 matches the decoders' sentinel.
+    if (c == 0) { return 0; }
     var o = bayan_json_v_obj_new();
     bayan_json_v_obj_set(o, str_from("r"), bayan_json_v_float_new(Rgb_r(c)));
     bayan_json_v_obj_set(o, str_from("g"), bayan_json_v_float_new(Rgb_g(c)));
@@ -137,6 +143,12 @@ fn rgb_from_json(json, len, err_out) {
 # Medium -> JSON Str: {"n":..,"name":".."}.
 #must_use
 fn medium_to_json(m) {
+    # 2.2.7: a null handle read straight off address 0. The DECODE side was
+    # hardened in 2.0.2 (every *_from_json returns 0 rather than dereferencing
+    # null) and pinned in tests/hardening.tcyr; the ENCODE side never was, and
+    # `cyrius coverage` could not see it because these are all exercised with
+    # valid handles. Returning 0 matches the decoders' sentinel.
+    if (m == 0) { return 0; }
     var o = bayan_json_v_obj_new();
     bayan_json_v_obj_set(o, str_from("n"), bayan_json_v_float_new(Medium_n(m)));
     bayan_json_v_obj_set(o, str_from("name"), bayan_json_v_str_new(str_from(Medium_name(m))));
@@ -170,6 +182,12 @@ fn medium_from_json(json, len, err_out) {
 # SellmeierCoefficients -> JSON Str: {"b1":..,"c1":..,"b2":..,"c2":..,"b3":..,"c3":..}.
 #must_use
 fn sellmeier_to_json(s) {
+    # 2.2.7: a null handle read straight off address 0. The DECODE side was
+    # hardened in 2.0.2 (every *_from_json returns 0 rather than dereferencing
+    # null) and pinned in tests/hardening.tcyr; the ENCODE side never was, and
+    # `cyrius coverage` could not see it because these are all exercised with
+    # valid handles. Returning 0 matches the decoders' sentinel.
+    if (s == 0) { return 0; }
     var o = bayan_json_v_obj_new();
     bayan_json_v_obj_set(o, str_from("b1"), bayan_json_v_float_new(SellmeierCoefficients_b1(s)));
     bayan_json_v_obj_set(o, str_from("c1"), bayan_json_v_float_new(SellmeierCoefficients_c1(s)));
@@ -242,6 +260,12 @@ fn lens_type_from_json(json, len, err_out) {
 # Polarization -> JSON Str: {"ex":..,"ey":..,"phase":..}.
 #must_use
 fn polarization_to_json(p) {
+    # 2.2.7: a null handle read straight off address 0. The DECODE side was
+    # hardened in 2.0.2 (every *_from_json returns 0 rather than dereferencing
+    # null) and pinned in tests/hardening.tcyr; the ENCODE side never was, and
+    # `cyrius coverage` could not see it because these are all exercised with
+    # valid handles. Returning 0 matches the decoders' sentinel.
+    if (p == 0) { return 0; }
     var o = bayan_json_v_obj_new();
     bayan_json_v_obj_set(o, str_from("ex"), bayan_json_v_float_new(Polarization_ex(p)));
     bayan_json_v_obj_set(o, str_from("ey"), bayan_json_v_float_new(Polarization_ey(p)));
@@ -273,6 +297,12 @@ fn polarization_from_json(json, len, err_out) {
 # `prescription_from_json` restores it (see `_ser_num_or_inf`).
 #must_use
 fn prescription_to_json(p) {
+    # 2.2.7: a null handle read straight off address 0. The DECODE side was
+    # hardened in 2.0.2 (every *_from_json returns 0 rather than dereferencing
+    # null) and pinned in tests/hardening.tcyr; the ENCODE side never was, and
+    # `cyrius coverage` could not see it because these are all exercised with
+    # valid handles. Returning 0 matches the decoders' sentinel.
+    if (p == 0) { return 0; }
     var o = bayan_json_v_obj_new();
     bayan_json_v_obj_set(o, str_from("name"), bayan_json_v_str_new(str_from(Prescription_name(p))));
     var surfaces = bayan_json_v_arr_new();
@@ -342,6 +372,12 @@ fn prescription_from_json(json, len, err_out) {
 # Spd -> JSON Str: {"start_nm":..,"step_nm":..,"values":[..]}.
 #must_use
 fn spd_to_json(s) {
+    # 2.2.7: a null handle read straight off address 0. The DECODE side was
+    # hardened in 2.0.2 (every *_from_json returns 0 rather than dereferencing
+    # null) and pinned in tests/hardening.tcyr; the ENCODE side never was, and
+    # `cyrius coverage` could not see it because these are all exercised with
+    # valid handles. Returning 0 matches the decoders' sentinel.
+    if (s == 0) { return 0; }
     var o = bayan_json_v_obj_new();
     bayan_json_v_obj_set(o, str_from("start_nm"), bayan_json_v_float_new(Spd_start_nm(s)));
     bayan_json_v_obj_set(o, str_from("step_nm"), bayan_json_v_float_new(Spd_step_nm(s)));

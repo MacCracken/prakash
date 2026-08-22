@@ -100,6 +100,23 @@ fn _vlambda_photopic() {
     return t;
 }
 
+# CIE 1951 scotopic luminous efficiency V'(lambda), 380-780 nm at 5 nm.
+#
+# ⚠ 2.2.7 CORRECTED 30 OF THE 81 ENTRIES. The shipped table was not V'(lambda):
+# its peak sat at 500 nm where the CIE curve peaks at 507 nm (505 = 0.998,
+# 510 = 0.997 on this grid), and the 445-525 nm block was inflated by up to
+# +0.1174 at 475 nm — a 16% error on the steepest part of the curve.
+# ⚠ HOW THE CORRECTION WAS VALIDATED, because a table transcribed from memory is
+# exactly the failure mode this repo keeps finding: the shipped table already
+# agreed with the CIE values EXACTLY (bit-for-bit) at 25 of the 55 points below
+# 650 nm. A reference that reproduces 25 existing entries exactly and disagrees
+# only across one contiguous corrupted band is the same source, not a different
+# one. The corrected table now matches at all 55, is monotone rising to 505 and
+# monotone falling from 510, and peaks where CIE says it does.
+# ⚠ WHAT WAS NOT TOUCHED: 655-780 nm. Those 26 entries are all below 2.5e-4 and
+# could not be cross-checked to the same standard, so they were left exactly as
+# they were rather than replaced on weaker evidence. They contribute
+# ~0.01% of any scotopic integral.
 var _vlambda_scotopic_p = 0;
 fn _vlambda_scotopic() {
     if (_vlambda_scotopic_p != 0) { return _vlambda_scotopic_p; }
@@ -109,31 +126,31 @@ fn _vlambda_scotopic() {
     store64(t + 16, 0x3F62189BD8383ADA);
     store64(t + 24, 0x3F728E0C9D9D3459);
     store64(t + 32, 0x3F8306A2B1704FF4);
-    store64(t + 40, 0x3F92EC6BCE8533B1);
+    store64(t + 40, 0x3F92F6E82949A565);   # 405 nm = 0.01852 (was 0.01848)
     store64(t + 48, 0x3FA1D68C692F6E83);
     store64(t + 56, 0x3FAEECBFB15B573F);
     store64(t + 64, 0x3FB8BAC710CB295F);
-    store64(t + 72, 0x3FC26B50B0F27BB3);
+    store64(t + 72, 0x3FC2617C1BDA511A);   # 425 nm = 0.1436 (was 0.1439)
     store64(t + 80, 0x3FC9930BE0DED289);
     store64(t + 88, 0x3FD0CCCCCCCCCCCD);
     store64(t + 96, 0x3FD4FF972474538F);
-    store64(t + 104, 0x3FD9F06F69446738);
-    store64(t + 112, 0x3FDF089A02752546);
-    store64(t + 120, 0x3FE229C779A6B50B);
-    store64(t + 128, 0x3FE4C7E28240B780);
-    store64(t + 136, 0x3FE73B645A1CAC08);
-    store64(t + 144, 0x3FE961E4F765FD8B);
-    store64(t + 152, 0x3FEB3EAB367A0F91);
-    store64(t + 160, 0x3FECC63F141205BC);
-    store64(t + 168, 0x3FEE00D1B71758E2);
-    store64(t + 176, 0x3FEED1B71758E219);
-    store64(t + 184, 0x3FEF4E3BCD35A858);
+    store64(t + 104, 0x3FD9288CE703AFB8);   # 445 nm = 0.3931 (was 0.4053)
+    store64(t + 112, 0x3FDD1EB851EB851F);   # 450 nm = 0.455 (was 0.4849)
+    store64(t + 120, 0x3FE06A7EF9DB22D1);   # 455 nm = 0.513 (was 0.5676)
+    store64(t + 128, 0x3FE224DD2F1A9FBE);   # 460 nm = 0.567 (was 0.6494)
+    store64(t + 136, 0x3FE3D70A3D70A3D7);   # 465 nm = 0.62 (was 0.726)
+    store64(t + 144, 0x3FE5A1CAC083126F);   # 470 nm = 0.676 (was 0.7932)
+    store64(t + 152, 0x3FE77CED916872B0);   # 475 nm = 0.734 (was 0.8514)
+    store64(t + 160, 0x3FE9604189374BC7);   # 480 nm = 0.793 (was 0.8992)
+    store64(t + 168, 0x3FEB3B645A1CAC08);   # 485 nm = 0.851 (was 0.9376)
+    store64(t + 176, 0x3FECED916872B021);   # 490 nm = 0.904 (was 0.9631)
+    store64(t + 184, 0x3FEE5E353F7CED91);   # 495 nm = 0.949 (was 0.9783)
     store64(t + 192, 0x3FEF6C8B43958106);
-    store64(t + 200, 0x3FEF6113404EA4A9);
-    store64(t + 208, 0x3FEF0F27BB2FEC57);
-    store64(t + 216, 0x3FEE5AEE631F8A09);
-    store64(t + 224, 0x3FED3C36113404EA);
-    store64(t + 232, 0x3FEBD2F1A9FBE76D);
+    store64(t + 200, 0x3FEFEF9DB22D0E56);   # 505 nm = 0.998 (was 0.9806)
+    store64(t + 208, 0x3FEFE76C8B439581);   # 510 nm = 0.997 (was 0.9706)
+    store64(t + 216, 0x3FEF333333333333);   # 515 nm = 0.975 (was 0.9486)
+    store64(t + 224, 0x3FEDEB851EB851EC);   # 520 nm = 0.935 (was 0.9136)
+    store64(t + 232, 0x3FEC28F5C28F5C29);   # 525 nm = 0.88 (was 0.8695)
     store64(t + 240, 0x3FE9F3B645A1CAC1);
     store64(t + 248, 0x3FE774BC6A7EF9DB);
     store64(t + 256, 0x3FE4CCCCCCCCCCCD);
@@ -141,24 +158,24 @@ fn _vlambda_scotopic() {
     store64(t + 272, 0x3FDEC8B439581062);
     store64(t + 280, 0x3FD9BA5E353F7CEE);
     store64(t + 288, 0x3FD50B0F27BB2FEC);
-    store64(t + 296, 0x3FD0ED916872B021);
+    store64(t + 296, 0x3FD0E5604189374C);   # 565 nm = 0.264 (was 0.2645)
     store64(t + 304, 0x3FCA92A305532618);
     store64(t + 312, 0x3FC4816F0068DB8C);
     store64(t + 320, 0x3FBF06F694467382);
     store64(t + 328, 0x3FB703AFB7E90FF9);
     store64(t + 336, 0x3FB0C49BA5E353F8);
     store64(t + 344, 0x3FA80346DC5D6388);
-    store64(t + 352, 0x3FA0F27BB2FEC56D);
-    store64(t + 360, 0x3F973EAB367A0F91);
-    store64(t + 368, 0x3F9013A92A305532);
-    store64(t + 376, 0x3F854C985F06F694);
-    store64(t + 384, 0x3F7C432CA57A786C);
-    store64(t + 392, 0x3F728E0C9D9D3459);
-    store64(t + 400, 0x3F67C1BDA5119CE0);
-    store64(t + 408, 0x3F5E2584F4C6E6DA);
-    store64(t + 416, 0x3F52AD81ADEA8976);
-    store64(t + 424, 0x3F469C23B7952D23);
-    store64(t + 432, 0x3F3B866E43AA79BC);
+    store64(t + 352, 0x3FA0F9096BB98C7E);   # 600 nm = 0.03315 (was 0.0331)
+    store64(t + 360, 0x3F97ACC4EF88B978);   # 605 nm = 0.02312 (was 0.0227)
+    store64(t + 368, 0x3F904FF43419E300);   # 610 nm = 0.01593 (was 0.0157)
+    store64(t + 376, 0x3F864840E1719F80);   # 615 nm = 0.01088 (was 0.0104)
+    store64(t + 384, 0x3F7E30014F8B588E);   # 620 nm = 0.00737 (was 0.0069)
+    store64(t + 392, 0x3F745B6C3760BF5D);   # 625 nm = 0.00497 (was 0.00453)
+    store64(t + 400, 0x3F6B52007DD44135);   # 630 nm = 0.003335 (was 0.0029)
+    store64(t + 408, 0x3F624F227D028A1E);   # 635 nm = 0.002235 (was 0.00184)
+    store64(t + 416, 0x3F5886DF82B1F688);   # 640 nm = 0.001497 (was 0.00114)
+    store64(t + 424, 0x3F507746887A8D65);   # 645 nm = 0.001005 (was 0.00069)
+    store64(t + 432, 0x3F462F166E008E9B);   # 650 nm = 0.000677 (was 0.00042)
     store64(t + 440, 0x3F30624DD2F1A9FC);
     store64(t + 448, 0x3F23879C4113C686);
     store64(t + 456, 0x3F1711947CFA26A2);

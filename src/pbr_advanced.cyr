@@ -339,21 +339,49 @@ fn pbr_sample_cosine_pdf(n_dot_l) {
 
 # ── Split-Sum IBL ────────
 
-# Analytic split-sum (scale, bias) fit (Lazarov 2013) into a 2-f64 out buffer.
+# Analytic split-sum (scale, bias) approximation into a 2-f64 out buffer.
+# Karis / Lazarov 2013 `EnvBRDFApprox`:
+#   r  = (1 - m, -0.0275m + 0.0425, -0.572m + 1.04, 0.022m - 0.04)
+#   a  = min(r.x^2, 2^(-9.28 * n.v)) * r.x + r.y
+#   A  = -1.04a + r.z        B = 1.04a + r.w
+#
+# ⚠ 2.2.7 REPLACED THE PREVIOUS FIT OUTRIGHT — it was not merely inaccurate,
+# it was inert. Inherited verbatim from the Rust original
+# (`rust-old/src/pbr/advanced.rs:540,549`). Two independent failures:
+#
+#   1. THE BIAS TERM WAS IDENTICALLY ZERO EVERYWHERE, provably. The polynomial
+#      b3 = ((0.042x - 0.1)x + 0.03)x - 0.002 is NEGATIVE across the whole
+#      x = roughness^2 in [0,1] range (-0.002 at x=0, -0.030 at x=1), and it was
+#      multiplied by max(3.09*ndv - 1.929, 0) >= 0, so the product could never be
+#      positive — and was then clamped to [0,1]. Measured over a 110-point grid:
+#      bias was -0.000000 at every single point.
+#   2. THE SCALE'S ANGULAR FACTOR RAN BACKWARDS. min(-1.613*ndv + 2.227, 1)
+#      equals 1 for every ndv below 0.761 and then DECREASES to 0.614 at normal
+#      incidence — so scale was flat at 0.998 across most of the domain and
+#      lowest exactly where the specular response is strongest.
+#
+# Accuracy of the replacement, measured against pbr_integrate_brdf_lut (itself
+# corrected in 2.2.7 — see the k remap there) over an 11x10 grid:
+#   old fit:  scale max err 0.9167, mean 0.3357 | bias max 0.1456, mean 0.0202
+#   Karis:    scale max err 0.5547, mean 0.1275 | bias max 0.0861, mean 0.0130
+# ⚠ Karis is a published MOBILE approximation and its residual is concentrated
+# at extreme grazing with mid roughness (worst point r = 0.6, n.v = 0.1, where
+# the integral is 1.158 and the fit gives 0.603). It is an approximation, not a
+# replacement for pbr_integrate_brdf_lut — callers wanting accuracy there should
+# integrate. What it is not, any more, is a constant and a zero.
 fn pbr_split_sum_scale_bias(n_dot_v, roughness, out) {
     var ndv = f64_clamp(n_dot_v, f64_from(0), F64_ONE);
-    var rc = f64_min(roughness, F64_ONE);
-    var x = f64_mul(rc, rc);
-    var s1 = f64_add(f64_mul(f64_neg(_pbr_r(24, 1000)), x), _pbr_r(132, 1000));
-    var s2 = f64_add(f64_mul(s1, x), f64_neg(_pbr_r(333, 1000)));
-    var s3 = f64_add(f64_mul(s2, x), _pbr_r(998, 1000));
-    var st1 = f64_add(f64_mul(f64_neg(_pbr_r(1613, 1000)), ndv), _pbr_r(2227, 1000));
-    var scale = f64_mul(s3, f64_min(st1, F64_ONE));
-    var b1 = f64_add(f64_mul(_pbr_r(42, 1000), x), f64_neg(_pbr_r(1, 10)));
-    var b2 = f64_add(f64_mul(b1, x), _pbr_r(3, 100));
-    var b3 = f64_add(f64_mul(b2, x), f64_neg(_pbr_r(2, 1000)));
-    var bt1 = f64_add(f64_mul(_pbr_r(309, 100), ndv), f64_neg(_pbr_r(1929, 1000)));
-    var bias = f64_mul(b3, f64_max(bt1, f64_from(0)));
+    var m = f64_clamp(roughness, f64_from(0), F64_ONE);
+    var rx = f64_sub(F64_ONE, m);
+    var ry = f64_add(f64_mul(f64_neg(_pbr_r(275, 10000)), m), _pbr_r(425, 10000));
+    var rz = f64_add(f64_mul(f64_neg(_pbr_r(572, 1000)), m), _pbr_r(104, 100));
+    var rw = f64_add(f64_mul(_pbr_r(22, 1000), m), f64_neg(_pbr_r(4, 100)));
+    # 2^(-9.28 * n.v) via exp: the shim handles the infinities, and the exponent
+    # here is always finite and non-positive.
+    var e = _prk_exp(f64_mul(f64_mul(f64_neg(_pbr_r(928, 100)), ndv), _pbr_ln2()));
+    var a004 = f64_add(f64_mul(f64_min(f64_mul(rx, rx), e), rx), ry);
+    var scale = f64_add(f64_mul(f64_neg(_pbr_r(104, 100)), a004), rz);
+    var bias = f64_add(f64_mul(_pbr_r(104, 100), a004), rw);
     store64(out, f64_clamp(scale, f64_from(0), F64_ONE));
     store64(out + 8, f64_clamp(bias, f64_from(0), F64_ONE));
     return 0;
@@ -408,7 +436,15 @@ fn pbr_integrate_brdf_lut(n_dot_v, roughness, num_samples, out) {
           f64_from(0));
         var n_dot_h = f64_max(load64(h + 16), f64_from(0));
         if (f64_gt(n_dot_l, f64_from(0)) == 1) {
-            var g = pbr_geometry_smith(ndv, n_dot_l, roughness);
+            # 2.2.7: was pbr_geometry_smith, the DIRECT-lighting remapping
+            # k = (r+1)^2/8. The split-sum integral is image-based lighting and
+            # needs k = alpha^2/2. Diagnosed by exact model match — a Python
+            # reference using the direct k reproduced this function's output to
+            # six decimals at every sampled point, and the IBL k does not.
+            # The invariant that settles it: at roughness 0 the split sum must
+            # satisfy A + B = 1 exactly for every angle. It gave 0.2215 at
+            # n.v = 0.1 (A = 0.090687, B = 0.130766); it now gives 1.000000.
+            var g = pbr_geometry_smith_ibl(ndv, n_dot_l, roughness);
             var g_vis = f64_div(f64_mul(g, vdh), f64_add(f64_mul(n_dot_h, ndv), _pbr_eps15()));
             var fc = _pbr_pow5(f64_sub(F64_ONE, vdh));
             scale = f64_add(scale, f64_mul(g_vis, f64_sub(F64_ONE, fc)));

@@ -45,6 +45,35 @@ while (si < 81) {
 }
 _assert_near(f64_from(380 + best_i * 5), f64_from(505), f64_from(10), "scotopic peak near 507nm");
 
+# ⚠ 2.2.7: THE ASSERTION ABOVE HAS A +/-10 nm TOLERANCE, so a table peaking at
+# 500 nm passed it — and one did. The shipped V'(lambda) was not the CIE 1951
+# curve: its peak sat at 500 nm and the 445-525 nm block was inflated by up to
+# +0.1174 at 475 nm (0.8514 against 0.7340, a 16% error on the steepest part of
+# the curve). 30 of 81 entries were corrected. These pin VALUES against the
+# published CIE 1951 table, and the shape invariants separately.
+_assert_near(_vl(vs, 4), _fd(929, 100000), TOL6, "V'(400nm) = 0.00929");
+_assert_near(_vl(vs, 14), _fd(455, 1000), TOL6, "V'(450nm) = 0.455 (was 0.4849)");
+_assert_near(_vl(vs, 19), _fd(734, 1000), TOL6, "V'(475nm) = 0.734 (was 0.8514 — the worst point)");
+_assert_near(_vl(vs, 24), _fd(982, 1000), TOL6, "V'(500nm) = 0.982");
+_assert_near(_vl(vs, 25), _fd(998, 1000), TOL6, "V'(505nm) = 0.998 — the peak (was 0.9806)");
+_assert_near(_vl(vs, 26), _fd(997, 1000), TOL6, "V'(510nm) = 0.997 (was 0.9706)");
+_assert_near(_vl(vs, 34), _fd(481, 1000), TOL6, "V'(550nm) = 0.481");
+_assert_near(_vl(vs, 44), _fd(3315, 100000), TOL6, "V'(600nm) = 0.03315 (was 0.0331)");
+_assert_near(_vl(vs, 54), _fd(677, 1000000), TOL6, "V'(650nm) = 0.000677 (was 0.00042)");
+
+# Shape invariants: the curve is unimodal about 505/510 on this grid. The old
+# table satisfied "peak within 10nm" while being wrong at 30 points, so the
+# monotonicity is asserted directly rather than inferred from the peak.
+for (var mi = 0; mi < 25; mi = mi + 1) {
+    assert(f64_le(_vl(vs, mi), _vl(vs, mi + 1)), "scotopic V' rises monotonically to 505nm");
+}
+for (var mj = 26; mj < 80; mj = mj + 1) {
+    assert(f64_ge(_vl(vs, mj), _vl(vs, mj + 1)), "scotopic V' falls monotonically from 510nm");
+}
+# Scotopic vision is blue-shifted relative to photopic — the Purkinje shift.
+assert(f64_gt(_vl(vs, 24), _vl(vp, 24)), "V' exceeds V at 500nm (Purkinje shift)");
+assert(f64_lt(_vl(vs, 44), _vl(vp, 44)), "V' below V at 600nm (Purkinje shift)");
+
 # ── luminous flux & efficacy ────────
 test_group("luminous");
 

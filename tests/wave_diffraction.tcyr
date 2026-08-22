@@ -159,6 +159,7 @@ var N152 = _fd(152, 100);   # 1.52 glass
 var N138 = _fd(138, 100);   # 1.38 MgF2
 var N210 = _fd(21, 10);     # 2.1 ZrO2
 var TOL3 = _fd(1, 1000);    # 0.001
+var TOL4 = _fd(1, 10000);   # 1e-4 — 2.2.7 multilayer value pins
 
 # air->glass: sqrt(1*1.52) ~ 1.233
 _assert_near(ar_ideal_index(F64_ONE, N152), _fd(1233, 1000), TOL3, "ideal index ~ 1.233");
@@ -225,6 +226,43 @@ for (var wl2 = 400; wl2 <= 700; wl2 = wl2 + 10) {
     assert(f64_ge(rm, Z), "multilayer R >= 0");
     assert(f64_le(rm, f64_add(F64_ONE, EPS)), "multilayer R <= 1");
 }
+
+# ⚠ 2.2.7: EVERYTHING ABOVE THIS LINE IS A BOUNDS CHECK. `R >= 0 && R <= 1` is
+# satisfied by a value 4.75x wrong, and that is exactly what shipped: the
+# transfer-matrix M12/M21 cross terms carried the wrong sign. Both flip
+# TOGETHER and the reflectance squares them, so a SINGLE layer was bit-identical
+# either way (the "single layer matches coating" assertion above can never see
+# it), and at the 550 nm design wavelength cos(delta) = 0 kills the mixing term
+# so quarter-wave stacks agreed too. It needed 2+ layers AND an off-design
+# wavelength — the one combination nothing sampled.
+# References below are an independent complex-arithmetic TMM (no real/imaginary
+# splitting), same admittance formula, computed off-repo.
+_assert_near(multilayer_reflectance(f64_from(450), F64_ONE, N152, lay2, 2), _fd(83770, 1000000), TOL4,
+  "2-layer R(450nm) = 0.083770 (shipped 0.056 through 2.2.6)");
+_assert_near(multilayer_reflectance(f64_from(500), F64_ONE, N152, lay2, 2), _fd(52768, 1000000), TOL4,
+  "2-layer R(500nm) = 0.052768");
+_assert_near(multilayer_reflectance(f64_from(550), F64_ONE, N152, lay2, 2), _fd(43033, 1000000), TOL4,
+  "2-layer R(550nm) = 0.043033 (design wavelength — agreed even when wrong)");
+_assert_near(multilayer_reflectance(f64_from(600), F64_ONE, N152, lay2, 2), _fd(49883, 1000000), TOL4,
+  "2-layer R(600nm) = 0.049883");
+_assert_near(multilayer_reflectance(f64_from(650), F64_ONE, N152, lay2, 2), _fd(64770, 1000000), TOL4,
+  "2-layer R(650nm) = 0.064770");
+_assert_near(multilayer_reflectance(f64_from(700), F64_ONE, N152, lay2, 2), _fd(81458, 1000000), TOL4,
+  "2-layer R(700nm) = 0.081458");
+
+# Three layers mixes the cross terms harder — this is where the old code was
+# worst (0.039460 against a true 0.187549 on the 1.38/2.30 stack).
+var lay3 = alloc(48);
+store64(lay3, N138);
+store64(lay3 + 8, d_qw);
+store64(lay3 + 16, N210);
+store64(lay3 + 24, d_zro2);
+store64(lay3 + 32, N138);
+store64(lay3 + 40, d_qw);
+_assert_near(multilayer_reflectance(f64_from(450), F64_ONE, N152, lay3, 3), _fd(135478, 1000000), TOL4,
+  "3-layer R(450nm) = 0.135478");
+_assert_near(multilayer_reflectance(f64_from(650), F64_ONE, N152, lay3, 3), _fd(115324, 1000000), TOL4,
+  "3-layer R(650nm) = 0.115324");
 
 # ── full TMM (s/p split) ────────
 test_group("multilayer_rt");

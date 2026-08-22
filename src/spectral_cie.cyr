@@ -1694,6 +1694,36 @@ fn spd_blackbody(temperature_k) {
 fn illuminant_d65() { return spd_from_static(f64_from(380), f64_from(5), _illum_d65_data(), 81); }
 #must_use
 fn illuminant_d50() { return spd_from_static(f64_from(380), f64_from(5), _illum_d50_data(), 81); }
+# ⚠ THE TWO FLUORESCENT SPDs BELOW DO NOT REPRODUCE THEIR CIE CHROMATICITIES,
+# AND 2.2.7 DOCUMENTS THAT RATHER THAN GUESSING AT REPLACEMENT DATA.
+# Integrated against this file's own CIE 1931 CMFs:
+#
+#   illuminant    prakash (x, y)        published CIE       status
+#   D65           0.31272, 0.32903      0.31271, 0.32902    correct
+#   A             0.44754, 0.40743      0.44757, 0.40745    correct
+#   F2            0.37546, 0.37184      0.37208, 0.37529    off by ~0.0034
+#   F11           0.46141, 0.46385      0.38052, 0.37713    off by 0.081/0.087
+#
+# ⚠ THE FAULT IS ISOLATED TO THESE SPDs, NOT THE CMFs. D65 and A reproduce their
+# published chromaticities to 1e-5 through the same integration path, and the
+# CMF landmarks check out (y_bar(555) = 1.000000, x_bar(600) = 1.062200,
+# z_bar(445) = 1.782600, x_bar(380) = 0.001368 — all exact). So the CMF tables
+# are sound and the F-series tables are not.
+#
+# ⚠ F11 IS NOT CIE F11. F11 is a narrow-band triphosphor whose lines sit at 436,
+# 546 and 611 nm; this table's lines sit at 440, 565 and 615 nm. Only its first
+# six entries (380-405 nm) match the published F11 SPD; the other 75 do not.
+#
+# ⚠ WHY THIS IS NOT FIXED HERE. 2.2.7 DID correct `_vlambda_scotopic`, and the
+# justification was a measurable signature: that table already agreed with the
+# CIE reference EXACTLY at 25 of 55 points, scattered across the range, so the
+# reference was demonstrably the same source with one corrupted band. F11 shows
+# no such signature — 6 matches, all in the leading low-value run. Replacing 75
+# values on that evidence would risk substituting new errors for the existing
+# ones, which is precisely the failure mode this codebase keeps finding.
+# Correcting these needs the CIE datasets themselves, not a reconstruction.
+# tests/spectral_cie.tcyr PINS the wrong chromaticities so they cannot drift
+# further unobserved, and flips to a failure the moment real data lands.
 #must_use
 fn illuminant_f2() { return spd_from_static(f64_from(380), f64_from(5), _illum_f2_data(), 81); }
 #must_use
@@ -1744,9 +1774,49 @@ fn _cri_band_delta(test_spd, ref_spd, test_y_total, ref_y_total, start, end) {
     return f64_abs(f64_sub(test_norm, ref_norm));
 }
 
-# Color Rendering Index Ra (0-100), simplified chromaticity-shift method.
+# 8-band spectral similarity of a test SPD against its reference illuminant,
+# normalised to a 0-100 scale. Reference is D65 at or above 5000 K, a Planckian
+# radiator of matching CCT below.
+#
+# ⚠ THIS IS NOT CIE 13.3 Ra, AND 2.2.7 RENAMED IT SO IT STOPS CLAIMING TO BE.
+# CIE 13.3 requires eight Test Colour Samples with tabulated spectral
+# reflectances, conversion into CIE 1964 W*U*V*, a von Kries chromatic
+# adaptation, per-sample R_i = 100 - 4.6*dE_i, and Ra as their mean. This
+# computes none of that: it compares NORMALISED ENERGY IN EIGHT FIXED
+# WAVELENGTH BANDS. Measured against published Ra:
+#
+#   illuminant   this metric   published CIE Ra
+#   D65          100.000       100 (reference, by definition)
+#   A             99.996       100 (reference, by definition)
+#   F2            98.289        64
+#   F11           92.001        83
+#
+# The two reference illuminants come out right because any similarity metric
+# scores an illuminant against itself as perfect; the two that carry real
+# information are wrong by 34 and 9 points, and in F2's case it reports
+# near-perfect rendering for a lamp that is notoriously poor. A caller comparing
+# these numbers to a datasheet is being actively misled, which is why the honest
+# name is the primary one now.
+#
+# ⚠ Implementing real Ra needs the eight TCS reflectance tables (8 x 81 values)
+# from the CIE dataset. That is data this repo does not have, and reconstructing
+# it is the same hazard documented at illuminant_f11 above.
+#must_use
+fn spectral_band_similarity(test_spd) {
+    return _cri_impl(test_spd);
+}
+
+# ⚠ DEPRECATED NAME — kept so existing consumers keep compiling. It does NOT
+# return CIE Ra; see spectral_band_similarity above for what it does return and
+# for the measured gap against published Ra. Prefer the honest name; this
+# wrapper is a candidate for removal in the next major version.
 #must_use
 fn color_rendering_index(test_spd) {
+    return _cri_impl(test_spd);
+}
+
+#must_use
+fn _cri_impl(test_spd) {
     _prk_trace("color_rendering_index");
     var test_xyz = spd_to_xyz(test_spd);
     var xyy = xyz_to_xyy(test_xyz);

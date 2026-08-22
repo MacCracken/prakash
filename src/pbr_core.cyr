@@ -8,6 +8,12 @@
 # `_pbr_pow5` replicates Rust `powi(5)` (square-and-multiply): x * (x^2)^2.
 
 fn _pbr_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+
+# ln 2, for turning a base-2 exponential into the f64_exp the toolchain has.
+# 0x3FE62E42FEFA39EF = 0.69314718055994530942 — the same bits f64_ln(2) returns
+# (verified), written as a literal so it costs nothing at a call site.
+#must_use
+fn _pbr_ln2() { return 0x3FE62E42FEFA39EF; }
 fn _pbr_eps15() { return f64_div(F64_ONE, f64_from(1000000000000000)); }
 
 # Minimum GGX alpha (= roughness^2). Floors roughness at 1e-4, which is below
@@ -96,6 +102,28 @@ fn pbr_geometry_schlick_ggx(n_dot_v, roughness) {
     var ndv = f64_clamp(n_dot_v, f64_from(0), F64_ONE);
     return f64_div(ndv,
       f64_add(f64_add(f64_mul(ndv, f64_sub(F64_ONE, k)), k), _pbr_eps15()));
+}
+
+# Schlick-GGX G1 for IMAGE-BASED LIGHTING: k = alpha^2/2 with alpha = r^2,
+# where the direct-lighting form above uses k = (r+1)^2/8. The two are different
+# remappings of the same Smith G1 and are not interchangeable — see
+# pbr_integrate_brdf_lut, which used the direct form and consequently produced a
+# split-sum whose A + B was 0.22 at roughness 0 where it must be exactly 1.
+#must_use
+fn pbr_geometry_schlick_ggx_ibl(n_dot_v, roughness) {
+    var a = f64_mul(roughness, roughness);
+    var k = f64_div(f64_mul(a, a), F64_TWO);
+    var ndv = f64_clamp(n_dot_v, f64_from(0), F64_ONE);
+    return f64_div(ndv,
+      f64_add(f64_add(f64_mul(ndv, f64_sub(F64_ONE, k)), k), _pbr_eps15()));
+}
+
+# Smith geometry for IBL: G = G1_ibl(n.v) * G1_ibl(n.l).
+#must_use
+fn pbr_geometry_smith_ibl(n_dot_v, n_dot_l, roughness) {
+    return f64_mul(
+      pbr_geometry_schlick_ggx_ibl(n_dot_v, roughness),
+      pbr_geometry_schlick_ggx_ibl(n_dot_l, roughness));
 }
 
 # Smith geometry: G = G1(n.v) * G1(n.l).
