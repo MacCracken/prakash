@@ -283,8 +283,16 @@ struct PointSource { x; y; amplitude; phase; }
 #must_use
 fn point_source_array_new(n) {
     if (_pat_dims_bad(n, 1, sizeof(PointSource)) == 1) { return 0; }
-    var arr = alloc(n * sizeof(PointSource));
-    if (arr == 0) { return 0; }
+    # ⚠ 2.2.8: an 8-byte length header now precedes the elements. Without it
+    # there was no length to check, so point_source_set accepted ANY i >= 0 and
+    # wrote 32 bytes past the end of the buffer while returning PK_ERR_NONE —
+    # a silent heap corruption reported as success. The returned pointer still
+    # addresses element i at ret + i*sizeof(PointSource), so interference_pattern
+    # and every existing caller are unaffected by the layout change.
+    var base = alloc(8 + n * sizeof(PointSource));
+    if (base == 0) { return 0; }
+    store64(base, n);
+    var arr = base + 8;
     for (var i = 0; i < n * 4; i = i + 1) {
         store64(arr + i * 8, f64_from(0));
     }
@@ -296,6 +304,8 @@ fn point_source_array_new(n) {
 fn point_source_set(arr, i, x, y, amplitude, phase) {
     if (arr == 0) { return PK_ERR_INVALID_PARAMETER; }
     if (i < 0) { return PK_ERR_INVALID_PARAMETER; }
+    # 2.2.8: the upper bound, which did not exist before the length header.
+    if (i >= load64(arr - 8)) { return PK_ERR_INVALID_PARAMETER; }
     var s = arr + i * sizeof(PointSource);
     PointSource_set_x(s, x);
     PointSource_set_y(s, y);
@@ -310,6 +320,7 @@ fn point_source_set(arr, i, x, y, amplitude, phase) {
 fn point_source_at(arr, i) {
     if (arr == 0) { return 0; }
     if (i < 0) { return 0; }
+    if (i >= load64(arr - 8)) { return 0; }
     return arr + i * sizeof(PointSource);
 }
 

@@ -1,6 +1,17 @@
 # Mathematical Reference
 
-Quick reference for all physics formulas implemented in prakash.
+Quick reference for the core ray, wave, spectral, lens, PBR and atmosphere
+formulas in prakash.
+
+⚠ **This file is a subset, not a complete index, and 2.2.8 narrowed the claim
+rather than pretending otherwise.** It previously said "all physics formulas".
+Not covered here: CIE 13.3 colour rendering (R_i = 100 - 4.6*dE_i in CIE 1964
+W*U*V* after the von Kries c/d adaptation, with the reference illuminant chosen
+Planckian below 5000 K and D-series above), the thin-film transfer matrix, the
+Zernike/Strehl family, Malus/Jones/Mueller polarisation, the Conrady and
+Herzberger dispersion models, fibre NA / V-number / mode-field diameter, and
+Huygens-Fresnel propagation. For those, the source comments are the reference —
+they carry the derivations and the measured validation tables.
 
 ## Ray Optics
 

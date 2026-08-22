@@ -176,7 +176,21 @@ fn ai_hoosh_config_from_json(json, len, err_out) {
 #must_use
 fn ai_register_agent(client, err_out) {
     store64(err_out, PK_ERR_NONE);
+    # 2.2.8: `ai_daimon_client_new` is documented to return 0 on allocation
+    # failure, and this read DaimonClient_config straight off address 0. Every
+    # other entry point gained a null guard in 2.2.6/2.2.7; this one was missed
+    # because it is the single public function with no test — `cyrius coverage`
+    # reported it unreferenced. Reporting PK_ERR_INVALID_PARAMETER also makes the
+    # function reachable in a test without a network.
+    if (client == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return "unknown";
+    }
     var config = DaimonClient_config(client);
+    if (config == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return "unknown";
+    }
     # Request body: {"name":"prakash","capabilities":[...5 caps...]}
     var body = bayan_json_v_obj_new();
     bayan_json_v_obj_set(body, str_from("name"), bayan_json_v_str_new(str_from("prakash")));

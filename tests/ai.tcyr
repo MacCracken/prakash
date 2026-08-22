@@ -1,6 +1,10 @@
 # ai test suite — from rust-old/src/ai.rs (inline #[cfg(test)] mod).
-# Config + serde tests; register_agent is not unit-tested (needs a live server),
-# matching the Rust module. bayan/sandhi resolve from [deps] stdlib.
+# Config + serde tests. ⚠ 2.2.8: register_agent's HAPPY PATH still needs a live
+# server and is not unit-tested, but "needs a server" was doing more work than it
+# should — it left the function with NO test of any kind, which is why
+# `cyrius coverage` reported it unreferenced and why it kept its null-dereference
+# through three hardening passes. Its failure paths are testable offline and now
+# are. bayan/sandhi resolve from [deps] stdlib.
 
 include "src/error.cyr"
 include "src/ai.cyr"
@@ -86,5 +90,26 @@ assert(ai_hoosh_config_from_json(m_wrongtype, strlen(m_wrongtype), &e) == 0, "ho
 assert(ai_hoosh_config_from_json(m_null, strlen(m_null), &e) == 0, "hoosh: endpoint null -> 0");
 assert(ai_hoosh_config_from_json(m_notobj, strlen(m_notobj), &e) == 0, "hoosh: non-object document -> 0");
 assert(ai_hoosh_config_from_json(m_junk, strlen(m_junk), &e) == 0, "hoosh: unparseable -> 0");
+
+# ── 2.2.8: the two functions cyrius coverage reported unreferenced ────────
+test_group("ai: the untested surface");
+
+# ai_hoosh_config_new is a plain constructor and was simply never asserted.
+var _hc = ai_hoosh_config_new("http://example.invalid:9999");
+assert(_hc != 0, "ai_hoosh_config_new returns a config");
+assert_eq(streq(HooshConfig_endpoint(_hc), "http://example.invalid:9999"), 1,
+  "ai_hoosh_config_new stores the endpoint it was given");
+var _hd = ai_hoosh_config_default();
+assert(_hd != 0, "ai_hoosh_config_default returns a config");
+assert_eq(streq(HooshConfig_endpoint(_hd), "http://localhost:8088"), 1,
+  "ai_hoosh_config_default endpoint is localhost:8088");
+
+# ai_register_agent: the null-client path. `ai_daimon_client_new` is documented
+# to return 0 on allocation failure, and this dereferenced that 0 until 2.2.8.
+# Reaching the network is not required to assert the contract.
+var _re = 0;
+var _rid = ai_register_agent(0, &_re);
+assert_eq(_re, PK_ERR_INVALID_PARAMETER, "ai_register_agent(null) reports PK_ERR_INVALID_PARAMETER");
+assert_eq(streq(_rid, "unknown"), 1, "ai_register_agent(null) returns the \"unknown\" sentinel");
 
 var r = assert_summary();

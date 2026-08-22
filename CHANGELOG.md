@@ -1,5 +1,151 @@
 # Changelog
 
+## [2.2.8] - 2026-08-21 — A P(-1) review of the last three releases, which found that four of the fixes were wrong
+
+Eight reviewers over the whole tree, then batched adversarial verification:
+**18 findings confirmed, 0 refuted**. Suite **5775 → 6391 assertions across 29
+suites**, 0 failed. Reference coverage reaches **412/412 (100%)** for the first
+time. `cyrius audit` exits 0.
+
+⚠ **FOUR OF THE DEFECTS WERE INTRODUCED BY 2.2.6 AND 2.2.7 — THE HARDENING
+RELEASES.** The split-sum k, the Seidel q² term, the CRI reference CCT and the
+scotopic tail were all either created or left half-done by the passes that
+claimed to fix them, and in two cases the *tests written at the time pinned the
+wrong value*. That is the same failure this project keeps finding in its own
+history, committed while documenting it. Each is called out below with what the
+original check could not see.
+
+### Fixed
+
+- ⭐ **The IBL Smith k was squared twice, and the split-sum broke energy
+  conservation.** 2.2.7 wrote `a = roughness*roughness` — that IS alpha — and
+  then `k = a*a/2`, giving `k = alpha²/2 = roughness⁴/2` where Karis' IBL remap
+  is `k = alpha/2`. The split-sum scale A is the directional albedo of an F0 = 1
+  material and cannot exceed 1; measured, `pbr_integrate_brdf_lut` returned
+  **A + B = 1.304** at n·v = 0.1, roughness 0.6, and **A = 1.4547** at
+  n·v = 0.05, roughness 0.5 — a surface reflecting 45% more light than reached
+  it. With the correct k the maximum over a 210-point grid is exactly **1.000000**,
+  at roughness 0 where it must be.
+
+  ⚠ **The invariant 2.2.7 used to "settle" the k question cannot see this.**
+  A + B = 1 at roughness 0 holds for *both* remaps, because both give k = 0
+  there; the two also coincide at roughness 1 (k = 0.5). The error was a bulge
+  over the interior, invisible at exactly the two points anyone would test — and
+  the tests written for it in 2.2.8 pinned `smith_ibl(0.6,0.4,0.3) = 0.991285`,
+  the implementation's own wrong output, with a second assertion labelled "pins
+  k = alpha²/2 exactly" sitting at roughness 1 where nothing is discriminated.
+  Both are replaced, and the LUT now asserts **A + B ≤ 1 over the whole grid**.
+- ⭐ **Total internal reflection was treated as a miss, so the ray passed straight
+  through.** `trace_surface` returned 0 for TIR exactly as for a geometric miss,
+  and `trace_recursive`'s candidate filter is `prakash_is_err(e) == 0` — so a
+  totally-internally-reflecting surface was **dropped from the nearest-surface
+  search entirely**. Measured: a ray at 60° inside n = 1.5 (critical angle 41.8°)
+  hitting a glass-air plane gave **interactions = 0** and a single
+  EVENT_ESCAPED segment at full energy. The defining phenomenon of a prism or a
+  light guide, silently deleted. TIR now returns a real `TraceHit` carrying the
+  hit point and normal with reflectance = 1.0 and `ray_after` = 0, still
+  reporting `PK_ERR_TIR`; the tracer reflects at full energy.
+- ⭐ **Total internal reflection *inside* a layer produced NaN.**
+  `_diff_cos_in_medium` returns 0.0 as its evanescent sentinel and
+  `_diff_tmm_stack` consumed it as a real cosine: for s-polarisation eta = n·0 = 0
+  and delta = 0, so `sin_d / eta` evaluated **0/0 = NaN** on the first iteration
+  and NaN reached `r_s`, `t_s`, `r_avg` and `t_avg` with no error signal. For
+  p-polarisation the eta guard dodged the NaN but delta = 0 collapsed the layer
+  to the identity — the evanescent layer was **deleted from the stack**, which is
+  why `r_p` was bit-identical for every thickness.
+
+  Past the critical angle `cos = i·κ`, so delta and eta are both pure imaginary
+  and the layer matrix stays `[[A, i·Bi], [i·Ci, A]]` with `A = cosh β`,
+  `Bi = sinh β / η'`, `Ci = −η'·sinh β` — the existing real/imaginary split
+  needed no restructuring. Frustrated-TIR tunnelling now works: glass → air gap
+  → glass at 50°, R_s = **0.0055** at a 10 nm gap rising monotonically to
+  **0.99999** at 1000 nm, with T decaying to 8e-6.
+- ⭐ **The Seidel q² term was still wrong after 2.2.6, and 2.2.6's check was
+  circular.** Three of the four bracket terms follow the stated "standard bracket
+  ÷ n(n−1)" scheme; the q² term kept a factor of (n−1) too much. 2.2.6
+  "verified" the argmin against `2(n+1)/(n+2)` — a value derived from the same
+  bracket — so it agreed by construction. The independent result is the textbook
+  best-form singlet, **argmin q = 2(n²−1)/(n+2) = 0.7143** at n = 1.5; the
+  shipped code put it at 1.4286. Measured after the fix: 0.71 / 0.87 / 1.02 at
+  n = 1.5 / 1.6 / 1.7 against 0.7143 / 0.8667 / 1.0162.
+- ⭐ **Both coma coefficients were wrong**, sitting directly beside the bracket
+  2.2.6 audited without looking at them. The Coddington coma bracket is
+  `(n+1)/(n(n−1)) q + (2n+1)/n p`; the code had `2(n+1)` and `(3n+1)`. Coma
+  crossed zero at **q = 0.55** where the true aplanatic singlet is **q = 0.80** —
+  reporting zero coma for a shape with substantial real coma, and placing the
+  coma-free shape on the wrong side of the spherical minimum, inverting the
+  standard design conclusion. Now measured at exactly 0.8000.
+- ⭐ **The CRI reference illuminant came straight from McCamy's cubic**, so a
+  Planckian source did not score Ra = 100 — which it must, being its own
+  reference below 5000 K. A 2000 K blackbody was assigned CCT 1981.4 K and scored
+  **Ra = 99.1024**. The reference CCT is now refined by golden-section against
+  the Planckian locus (22 steps over a ±3% bracket, ~0.002 K). Every blackbody
+  from 2000–4800 K now scores **exactly 100.0000**, and Illuminant A — a 2856 K
+  Planckian radiator — went from 99.9515 to **100.000000**. ⚠ The public
+  `cct_from_xy` is deliberately still McCamy: it is the documented, tested
+  approximation callers asked for.
+- ⭐ **The scotopic V'(λ) tail 2.2.7 deliberately left alone was wrong in all 26
+  entries.** 2.2.7 said it "could not be cross-checked to the same standard" —
+  a claim about effort, not evidence; the CVRL/CIE 1951 table is public and
+  machine-readable. The seam was detectable from the corrected head alone:
+  successive-value ratios run ~0.671, 0.674 through the repaired region and then
+  **collapsed to 0.369** at 650/655, in a curve that decays smoothly at ~0.68 per
+  5 nm. The old tail also hit **exact zero above 710 nm**, which no luminous
+  efficiency curve does. All 81 points are now bit-exact against CVRL.
+- **The whole `Spd` consumer family dereferenced a null handle**, reachable
+  straight from the untrusted-JSON decoder's documented failure return —
+  verified end to end: a document with a scalar `values` field makes
+  `spd_from_json` return 0, and `spd_to_xyz(0)` then killed the process. Guarded
+  at the three dereference sites, covering all nine consumers.
+- **`point_source_set` wrote 32 bytes past the end of the array and returned
+  `PK_ERR_NONE`.** It checked `i < 0` and nothing else, because no length was
+  recorded anywhere. An 8-byte length header now precedes the elements; element
+  i is still at `arr + i*sizeof(PointSource)`, so no caller's layout assumption
+  changed.
+- **`multilayer_reflectance` / `multilayer_rt` segfaulted on a null layers
+  buffer**; **`spectral_band_similarity` segfaulted on a null SPD** while its
+  sibling `color_rendering_index` guarded it; **`pbr_integrate_brdf_lut` wrote
+  NaN and reported `PK_ERR_NONE`** for `num_samples <= 0`, and wrote through a
+  null `out` unconditionally. All now report.
+- **`pbr_geometry_smith_ibl`, `pbr_geometry_schlick_ggx_ibl` and
+  `ai_register_agent` had no test at all** — `cyrius coverage` reported them
+  unreferenced. `ai_register_agent` still dereferenced a null client, which is
+  precisely why it kept that through three hardening passes: it was the one
+  public function nothing exercised. Coverage is now **412/412**.
+
+### Changed
+
+- **`cri_special`'s failure sentinels are split.** 0.0 is a *legitimate* R_i — a
+  bad enough source scores 0, a very bad one scores negative — so returning 0.0
+  on failure was indistinguishable from an answer. The documented null/index
+  sentinels stay 0.0; internal failures now return NaN, which is never a valid
+  R_i.
+- **`docs/architecture/math.md` no longer claims to cover "all physics
+  formulas"** — it omitted CIE 13.3, the transfer matrix, Zernike/Strehl,
+  Malus/Jones/Mueller, two dispersion models, fibre optics and Huygens-Fresnel.
+  The claim is narrowed and the omissions are listed. **README** and
+  **overview.md** counts corrected, and README's Quick Start tag moved off 2.2.4.
+
+### Performance
+
+- ⭐ **`color_rendering_index` is 4.5× faster algorithmically: 202 µs → 44.5 µs**,
+  and its heap per call drops **10.8×, 23.6 KB → 2,192 bytes**. Three causes,
+  all introduced by 2.2.7: it recomputed the entire sample-independent half eight
+  times (test XYZ, CCT, the whole reference SPD, both u,v / c,d pairs); it went
+  through `spd_at` 81 times per sample — **16× per Ra call** — for values already
+  at known offsets, which is the same defect the 2.2.6 review found in the
+  photometry integrators; and `_cri_tcs_xyz` allocated a 648-byte scratch SPD per
+  sample. The TCS integration is now fused, and **bit-identical** — preserving
+  the `(power × tcs) × cmf` association, verified against the pinned Ra bits.
+- ⚠ **And then CIE 13.3 conformance gave most of that back: 44.5 µs → 290 µs.**
+  The reference-CCT refinement costs 22 Planckian locus evaluations. Net against
+  2.2.7 the function is **~1.4× slower and correct** where it was faster and not;
+  the benchmark row moves +130.7%. Golden-section rather than ternary halves the
+  evaluations, and 16 steps instead of 22 would save ~66 µs at the cost of
+  Ra = 99.9993 instead of exactly 100 — exactness was chosen.
+- **No other performance claim.** Median across 36 benchmarks is −2.4% and no
+  other row moves beyond this host's noise.
+
 ## [2.2.7] - 2026-08-21 — All seven deferred findings closed, including the two that needed the CIE datasets
 
 2.2.6 recorded seven confirmed findings it would not fix. **All seven are closed

@@ -356,12 +356,29 @@ _assert_near(color_rendering_index(illuminant_d65()), f64_from(100), TOL_01,
 _assert_near(color_rendering_index(illuminant_a()), f64_from(100), F64_ONE,
   "CIE 13.3 Ra(A) = 100 — reference against itself, Planckian branch");
 
+# ⚠ 2.2.8: THE SELF-CONSISTENCY INVARIANT THE 2.2.7 IMPLEMENTATION FAILED.
+# Below 5000 K a Planckian radiator IS its own CRI reference, so its Ra must be
+# exactly 100 — and this is the check that exposes an inaccurate reference CCT,
+# because nothing else in the suite is sensitive to a few kelvin. 2.2.7 selected
+# the reference straight from McCamy's cubic, which put a 2000 K blackbody at
+# 1981.4 K, and it scored Ra = 99.1024. The reference CCT is now refined by
+# golden-section against the Planckian locus; the public cct_from_xy is
+# deliberately still McCamy, since that is the documented approximation callers
+# asked for.
+for (var _bb = 2000; _bb <= 4800; _bb = _bb + 400) {
+    _assert_near(color_rendering_index(spd_blackbody(f64_from(_bb))), f64_from(100), _fd(1, 1000),
+      "a Planckian radiator scores exactly Ra = 100 (2.2.7 gave 99.10 at 2000K)");
+}
+# Illuminant A is a 2856 K Planckian radiator, so the same invariant binds it.
+_assert_near(color_rendering_index(illuminant_a()), f64_from(100), _fd(1, 1000),
+  "Ra(A) = 100 to 3 decimals — A is Planckian (2.2.7 gave 99.95)");
+
 # Per-sample R_i is the capability Ra alone hides. F2's R8 = 33 is the
 # well-documented deep-red failure of cool-white fluorescent; a metric that
 # cannot show that is not CRI.
-_assert_near(cri_special(illuminant_f2(), 8), f64_from(33), F64_TWO,
+_assert_near(cri_special(illuminant_f2(), 8), _fd(3316, 100), F64_ONE,
   "R8(F2) = 33 — the deep-red sample cool-white fluorescent renders worst");
-_assert_near(cri_special(illuminant_f2(), 3), f64_from(90), F64_TWO,
+_assert_near(cri_special(illuminant_f2(), 3), _fd(9029, 100), F64_ONE,
   "R3(F2) = 90 — and the yellow-green sample it renders best");
 assert(f64_gt(cri_special(illuminant_f2(), 3), cri_special(illuminant_f2(), 8)),
   "F2 renders TCS03 far better than TCS08");

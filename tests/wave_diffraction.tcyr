@@ -316,4 +316,51 @@ for (var ad = 0; ad <= 80; ad = ad + 10) {
     assert(f64_le(ThinFilmResult_r_p(res_a), f64_add(F64_ONE, _fd(1, 100))), "range R_p <= 1");
 }
 
+# ── 2.2.8: total internal reflection INSIDE a layer ────────
+# ⚠ THE EVANESCENT CASE PRODUCED NaN, SILENTLY. _diff_cos_in_medium returns 0.0
+# as its TIR sentinel and _diff_tmm_stack consumed it as a real cosine: for
+# s-polarisation eta = n*0 = 0 and delta = 0, so `sin_d / eta` evaluated
+# 0/0 = NaN on the first iteration and NaN reached r_s, t_s, r_avg and t_avg
+# with no error signal. For p-polarisation the eta guard dodged the NaN but
+# delta = 0 collapsed the layer to the identity matrix — the evanescent layer
+# was DELETED from the stack, so r_p came out bit-identical for every thickness.
+# Past the critical angle the layer matrix is carried with cosh/sinh instead,
+# which is what produces frustrated-TIR tunnelling.
+test_group("frustrated TIR through an evanescent layer");
+
+fn _ftir(d_nm, ang_deg) {
+    var L = alloc(16);
+    store64(L, F64_ONE);
+    store64(L + 8, f64_from(d_nm));
+    return multilayer_rt(f64_from(550), f64_mul(_fd(ang_deg, 180), F64_PI), _fd(15, 10), _fd(15, 10), L, 1);
+}
+# Glass -> air gap -> glass at 50 deg; the critical angle is 41.8 deg, so the
+# gap is evanescent. R must rise monotonically toward 1 as the gap widens, and
+# T must decay — the defining behaviour of frustrated TIR.
+var _g10 = _ftir(10, 50);
+var _g100 = _ftir(100, 50);
+var _g300 = _ftir(300, 50);
+var _g1000 = _ftir(1000, 50);
+assert(_g10 != 0, "evanescent stack returns a result");
+assert(f64_lt(ThinFilmResult_r_s(_g10), _fd(1, 100)),
+  "a 10nm gap tunnels almost perfectly: R_s < 0.01");
+assert(f64_gt(ThinFilmResult_r_s(_g1000), _fd(999, 1000)),
+  "a 1000nm gap is opaque: R_s > 0.999");
+assert(f64_lt(ThinFilmResult_r_s(_g10), ThinFilmResult_r_s(_g100)), "R_s rises with gap width (10 -> 100nm)");
+assert(f64_lt(ThinFilmResult_r_s(_g100), ThinFilmResult_r_s(_g300)), "R_s rises with gap width (100 -> 300nm)");
+assert(f64_lt(ThinFilmResult_r_s(_g300), ThinFilmResult_r_s(_g1000)), "R_s rises with gap width (300 -> 1000nm)");
+_assert_near(ThinFilmResult_r_s(_g100), _fd(386197, 1000000), TOL3, "R_s(100nm gap, 50deg) = 0.3862");
+_assert_near(ThinFilmResult_r_p(_g100), _fd(341153, 1000000), TOL3, "R_p(100nm gap, 50deg) = 0.3412");
+
+# ⚠ NaN IS THE THING THIS GUARDS. Every output must be finite — a NaN compares
+# false to everything, so it is asserted as (x <= 1 AND x >= 0), which NaN fails.
+assert(f64_ge(ThinFilmResult_r_s(_g100), Z), "r_s is finite, not NaN");
+assert(f64_le(ThinFilmResult_r_s(_g100), F64_ONE), "r_s <= 1");
+assert(f64_ge(ThinFilmResult_t_avg(_g100), Z), "t_avg is finite, not NaN");
+assert(f64_le(ThinFilmResult_t_avg(_g100), F64_ONE), "t_avg <= 1");
+
+# And the thickness dependence the old p-polarisation path lost entirely.
+assert(f64_gt(f64_abs(f64_sub(ThinFilmResult_r_p(_g100), ThinFilmResult_r_p(_g300))), _fd(1, 100)),
+  "r_p depends on gap thickness (it was bit-identical across thicknesses)");
+
 var r = assert_summary();

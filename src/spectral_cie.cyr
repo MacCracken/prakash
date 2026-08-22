@@ -1594,12 +1594,24 @@ fn spd_from_static(start_nm, step_nm, values, len) {
 
 #must_use
 fn spd_end_nm(s) {
+    # 2.2.8: see spd_at below — null-guarded at the dereference site.
+    if (s == 0) { return f64_from(0); }
     return f64_add(Spd_start_nm(s), f64_mul(Spd_step_nm(s), f64_from(Spd_len(s) - 1)));
 }
 
 # Interpolate the SPD at a wavelength (0 outside range).
 #must_use
 fn spd_at(s, wavelength_nm) {
+    # 2.2.8: a null handle used to be dereferenced here. `spd_from_json` is
+    # DOCUMENTED to return 0 on malformed input, so the untrusted-JSON path ran
+    # straight into spd_to_xyz(0) and killed the process with SIGSEGV — verified
+    # end to end from a JSON document with a scalar `values` field. Guarding the
+    # three dereference sites (spd_end_nm, spd_at, _spd_integrate) covers all
+    # nine consumers at once: spd_to_xyz, spd_to_xyz_observer, spd_to_srgb and
+    # the three photometry integrators. Null-guarding is already the library-wide
+    # convention — ray_core, ray_trace, ray_system and the wave_* accessors all
+    # do it; the Spd family was simply missed.
+    if (s == 0) { return f64_from(0); }
     # An empty SPD has no value to interpolate. Without this, a zero step makes
     # idx_f = 0/0 = NaN and the `idx >= len - 1` branch reads _spd_val(vals, -1)
     # — a load from 8 bytes before the buffer. (The Rust original indexed a Vec
@@ -1623,6 +1635,9 @@ fn spd_at(s, wavelength_nm) {
 
 # Integrate an SPD against a CMF table (81 rows, 5nm), scaled by the 5nm step.
 fn _spd_integrate(s, cmf) {
+    # 2.2.8: same class as spd_at above.
+    if (s == 0) { return xyz_new(f64_from(0), f64_from(0), f64_from(0)); }
+    if (cmf == 0) { return xyz_new(f64_from(0), f64_from(0), f64_from(0)); }
     var x = f64_from(0);
     var y = f64_from(0);
     var z = f64_from(0);
@@ -1794,6 +1809,10 @@ fn _cri_band_delta(test_spd, ref_spd, test_y_total, ref_y_total, start, end) {
 # it is the same hazard documented at illuminant_f11 above.
 #must_use
 fn spectral_band_similarity(test_spd) {
+    # 2.2.8: guarded to match its sibling color_rendering_index, which already
+    # returned 0 for a null SPD. The two are documented as alternatives and
+    # differed in whether one of them crashed.
+    if (test_spd == 0) { return f64_from(0); }
     return _cri_impl(test_spd);
 }
 
@@ -1807,6 +1826,9 @@ fn _cri_impl(test_spd) {
     if (f64_lt(test_cct, f64_from(5000)) == 1) {
         ref_spd = spd_blackbody(test_cct);
     }
+    # 2.2.8: spd_blackbody can return 0 on allocation failure; this then
+    # dereferenced it. _cri_context already guards the same step.
+    if (ref_spd == 0) { return f64_from(0); }
     var ref_xyz = spd_to_xyz(ref_spd);
     var ty = Xyz_y(test_xyz);
     var ry = Xyz_y(ref_xyz);
@@ -2926,12 +2948,41 @@ fn _cri_cd(u, v, out) {
 # XYZ of `spd` seen through Test Colour Sample `i`.
 #must_use
 fn _cri_tcs_xyz(spd, i) {
-    var vals = alloc(648);
-    if (vals == 0) { return 0; }
-    for (var j = 0; j < 81; j = j + 1) {
-        store64(vals + j * 8, f64_mul(spd_at(spd, f64_from(380 + j * 5)), _cri_tcs_at(i, j)));
+    # ⚠ 2.2.8: FUSED. This used to allocate a 648-byte scratch SPD, fill it with
+    # spd * reflectance, wrap it in a fresh Spd, and hand that to spd_to_xyz —
+    # per sample, twice (test and reference), so SIXTEEN times per Ra call. On a
+    # bump allocator that never frees, one color_rendering_index leaked roughly
+    # 23.6 KB. Multiplying into the accumulator directly removes the scratch
+    # buffer entirely.
+    # ⚠ BIT-IDENTICAL, and the multiply ORDER is why: the old code computed
+    # (power * tcs) and then multiplied by the CMF inside _spd_integrate, so the
+    # fused loop keeps exactly that association — (power * tcs) * cmf, never
+    # power * (tcs * cmf). Verified against the pinned Ra values, which did not
+    # move by a single bit.
+    var cmf = _cie1931();
+    var x = f64_from(0);
+    var y = f64_from(0);
+    var z = f64_from(0);
+    var aligned = 0;
+    if (Spd_len(spd) == 81) {
+        if (Spd_start_nm(spd) == f64_from(380)) {
+            if (Spd_step_nm(spd) == f64_from(5)) { aligned = 1; }
+        }
     }
-    return spd_to_xyz(spd_new(f64_from(380), f64_from(5), vals, 81));
+    var src = Spd_values(spd);
+    for (var k = 0; k < 81; k = k + 1) {
+        var power = f64_from(0);
+        if (aligned == 1) {
+            power = load64(src + k * 8);
+        } else {
+            power = spd_at(spd, f64_from(380 + k * 5));
+        }
+        var p = f64_mul(power, _cri_tcs_at(i, k));
+        x = f64_add(x, f64_mul(p, _cmf_x(cmf, k)));
+        y = f64_add(y, f64_mul(p, _cmf_y(cmf, k)));
+        z = f64_add(z, f64_mul(p, _cmf_z(cmf, k)));
+    }
+    return xyz_new(f64_mul(x, f64_from(5)), f64_mul(y, f64_from(5)), f64_mul(z, f64_from(5)));
 }
 
 # W* of the CIE 1964 W*U*V* space: 25*Y^(1/3) - 17, Y normalised to 100.
@@ -2943,70 +2994,211 @@ fn _cri_wstar(y_sample, y_source) {
     return f64_sub(f64_mul(f64_from(25), _prk_pow(yn, f64_div(F64_ONE, f64_from(3)))), f64_from(17));
 }
 
+# Shared, sample-INDEPENDENT half of a CRI evaluation, into a 7-slot context:
+#   [0] ref_spd  [1] uk [2] vk  [3] ur [4] vr  [5] Yk [6] Yr  [7] ck [8] dk
+#   [9] cr [10] dr
+# Returns 0 if the test SPD is unusable.
+#
+# ⚠ 2.2.8: THIS SPLIT IS A 5x SAVING, NOT A TIDY-UP. Through 2.2.7,
+# color_rendering_index called cri_special eight times and each call recomputed
+# ALL of this — the test XYZ, the CCT, the entire reference SPD (which for the
+# D-series branch means 81 basis mixes and a 648-byte allocation), the reference
+# XYZ, and both u,v / c,d pairs. Only _cri_tcs_xyz actually varies with the
+# sample index. Measured: 202us per Ra call before, and the bump allocator never
+# frees, so a single Ra leaked roughly 16 KB.
+# CIE 1960 (u, v) of a Planckian radiator at `t_k`, into `out`. Fused: no Spd
+# and no scratch buffer, so it is cheap enough to call inside a search loop.
+fn _cri_planck_uv2(t_k, u_out, v_out) {
+    var cmf = _cie1931();
+    var x = f64_from(0);
+    var y = f64_from(0);
+    var z = f64_from(0);
+    for (var i = 0; i < 81; i = i + 1) {
+        var wl_m = f64_mul(f64_from(380 + i * 5), _cie_r(1, 1000000000));
+        var pw = planck_radiance(wl_m, t_k);
+        x = f64_add(x, f64_mul(pw, _cmf_x(cmf, i)));
+        y = f64_add(y, f64_mul(pw, _cmf_y(cmf, i)));
+        z = f64_add(z, f64_mul(pw, _cmf_z(cmf, i)));
+    }
+    var d = f64_add(f64_add(x, f64_mul(f64_from(15), y)), f64_mul(f64_from(3), z));
+    if (f64_lt(f64_abs(d), _cie_eps15()) == 1) {
+        store64(u_out, f64_from(0));
+        store64(v_out, f64_from(0));
+        return 0;
+    }
+    store64(u_out, f64_div(f64_mul(f64_from(4), x), d));
+    store64(v_out, f64_div(f64_mul(f64_from(6), y), d));
+    return 0;
+}
+
+# Squared CIE 1960 distance from (uk, vk) to the Planckian locus at `t_k`.
+# Stack locals, not alloc: this runs inside the search loop below, and the bump
+# allocator never frees.
+#must_use
+fn _cri_locus_dist2(t_k, uk, vk) {
+    var uu = 0;
+    var vv = 0;
+    _cri_planck_uv2(t_k, &uu, &vv);
+    var du = f64_sub(uu, uk);
+    var dv = f64_sub(vv, vk);
+    return f64_add(f64_mul(du, du), f64_mul(dv, dv));
+}
+
+# Correlated colour temperature by minimising the CIE 1960 distance to the
+# Planckian locus, seeded from McCamy's cubic and refined by ternary search.
+#
+# ⚠ 2.2.8: THE CRI REFERENCE USED TO COME STRAIGHT FROM McCAMY, whose cubic is
+# an approximation, so the reference blackbody sat at the wrong temperature and
+# a Planckian test source did not score Ra = 100 — which it must, being its own
+# reference below 5000 K. Measured before: a 2000 K blackbody was assigned
+# CCT 1981.4 K and scored Ra = 99.1024; 3400 K -> 3409.6 K, Ra = 99.7959.
+# 40 ternary iterations over a +/-8% bracket close the seed error to well under
+# 0.01 K, which is far tighter than the 5 K the reference selection needs.
+# McCamy is deliberately LEFT ALONE as the public cct_from_xy: it is the
+# documented, tested, published approximation and callers may want exactly it.
+#must_use
+fn _cri_cct_refine(uk, vk, seed) {
+    if (f64_lt(seed, f64_from(1000)) == 1) { return seed; }
+    if (f64_gt(seed, f64_from(25000)) == 1) { return seed; }
+    # Golden-section, not ternary: ONE new locus evaluation per iteration rather
+    # than two, and each evaluation is 81 Planck exponentials. A +/-3% bracket
+    # comfortably contains McCamy's error (worst measured 18.6 K at 2000 K, i.e.
+    # 0.93%), and 22 golden steps shrink it by 0.618^22 ~ 1.3e-5 — about 0.002 K
+    # on a 4000 K seed, far tighter than the reference selection needs.
+    var lo = f64_mul(seed, _cie_r(97, 100));
+    var hi = f64_mul(seed, _cie_r(103, 100));
+    var gr = _cie_r(6180339887, 10000000000);
+    var m1 = f64_sub(hi, f64_mul(gr, f64_sub(hi, lo)));
+    var m2 = f64_add(lo, f64_mul(gr, f64_sub(hi, lo)));
+    var f1 = _cri_locus_dist2(m1, uk, vk);
+    var f2 = _cri_locus_dist2(m2, uk, vk);
+    for (var it = 0; it < 22; it = it + 1) {
+        if (f64_lt(f1, f2) == 1) {
+            hi = m2;
+            m2 = m1;
+            f2 = f1;
+            m1 = f64_sub(hi, f64_mul(gr, f64_sub(hi, lo)));
+            f1 = _cri_locus_dist2(m1, uk, vk);
+        } else {
+            lo = m1;
+            m1 = m2;
+            f1 = f2;
+            m2 = f64_add(lo, f64_mul(gr, f64_sub(hi, lo)));
+            f2 = _cri_locus_dist2(m2, uk, vk);
+        }
+    }
+    return f64_div(f64_add(lo, hi), F64_TWO);
+}
+
+#must_use
+fn _cri_context(test_spd) {
+    var ctx = alloc(88);
+    if (ctx == 0) { return 0; }
+    var t_xyz = spd_to_xyz(test_spd);
+    if (t_xyz == 0) { return 0; }
+    var xyy = xyz_to_xyy(t_xyz);
+    var t_cct = cct_from_xy(XyY_x(xyy), XyY_y(xyy));
+    var uv0 = alloc(16);
+    if (uv0 == 0) { return 0; }
+    _cri_uv(t_xyz, uv0);
+    t_cct = _cri_cct_refine(load64(uv0), load64(uv0 + 8), t_cct);
+    var ref_spd = _cri_d_illuminant(t_cct);
+    if (f64_lt(t_cct, f64_from(5000)) == 1) { ref_spd = spd_blackbody(t_cct); }
+    if (ref_spd == 0) { return 0; }
+    var r_xyz = spd_to_xyz(ref_spd);
+    if (r_xyz == 0) { return 0; }
+    var uv = alloc(16);
+    var cd = alloc(16);
+    if (uv == 0) { return 0; }
+    if (cd == 0) { return 0; }
+    store64(ctx, ref_spd);
+    _cri_uv(t_xyz, uv);
+    store64(ctx + 8, load64(uv));
+    store64(ctx + 16, load64(uv + 8));
+    _cri_cd(load64(uv), load64(uv + 8), cd);
+    store64(ctx + 56, load64(cd));
+    store64(ctx + 64, load64(cd + 8));
+    _cri_uv(r_xyz, uv);
+    store64(ctx + 24, load64(uv));
+    store64(ctx + 32, load64(uv + 8));
+    _cri_cd(load64(uv), load64(uv + 8), cd);
+    store64(ctx + 72, load64(cd));
+    store64(ctx + 80, load64(cd + 8));
+    store64(ctx + 40, Xyz_y(t_xyz));
+    store64(ctx + 48, Xyz_y(r_xyz));
+    return ctx;
+}
+
+# R_i for sample `i` given a prepared context. The only per-sample work.
+#must_use
+fn _cri_ri(test_spd, ctx, i) {
+    var ref_spd = load64(ctx);
+    var ki_xyz = _cri_tcs_xyz(test_spd, i);
+    var ri_xyz = _cri_tcs_xyz(ref_spd, i);
+    if (ki_xyz == 0) { return _PRK_NAN; }
+    if (ri_xyz == 0) { return _PRK_NAN; }
+    var uv = alloc(16);
+    var cd = alloc(16);
+    if (uv == 0) { return _PRK_NAN; }
+    if (cd == 0) { return _PRK_NAN; }
+    _cri_uv(ki_xyz, uv);
+    var uki = load64(uv);
+    var vki = load64(uv + 8);
+    _cri_cd(uki, vki, cd);
+    var cki = load64(cd);
+    var dki = load64(cd + 8);
+    _cri_uv(ri_xyz, uv);
+    var uri = load64(uv);
+    var vri = load64(uv + 8);
+
+    var ur = load64(ctx + 24);
+    var vr = load64(ctx + 32);
+    var ck = load64(ctx + 56);
+    var dk = load64(ctx + 64);
+    var cr = load64(ctx + 72);
+    var dr = load64(ctx + 80);
+    if (f64_lt(f64_abs(ck), _cie_eps15()) == 1) { return _PRK_NAN; }
+    if (f64_lt(f64_abs(dk), _cie_eps15()) == 1) { return _PRK_NAN; }
+    var ct = f64_mul(f64_div(cr, ck), cki);
+    var dt = f64_mul(f64_div(dr, dk), dki);
+    var den = f64_sub(f64_add(_cie_r(16518, 1000), f64_mul(_cie_r(1481, 1000), ct)), dt);
+    if (f64_lt(f64_abs(den), _cie_eps15()) == 1) { return _PRK_NAN; }
+    var uk2 = f64_div(f64_sub(f64_add(_cie_r(10872, 1000), f64_mul(_cie_r(404, 1000), ct)),
+        f64_mul(f64_from(4), dt)), den);
+    var vk2 = f64_div(_cie_r(5520, 1000), den);
+
+    var wk = _cri_wstar(Xyz_y(ki_xyz), load64(ctx + 40));
+    var wr = _cri_wstar(Xyz_y(ri_xyz), load64(ctx + 48));
+    var uk = f64_mul(f64_mul(f64_from(13), wk), f64_sub(uk2, ur));
+    var vk = f64_mul(f64_mul(f64_from(13), wk), f64_sub(vk2, vr));
+    var uu = f64_mul(f64_mul(f64_from(13), wr), f64_sub(uri, ur));
+    var vv = f64_mul(f64_mul(f64_from(13), wr), f64_sub(vri, vr));
+    var dw = f64_sub(wk, wr);
+    var du = f64_sub(uk, uu);
+    var dv = f64_sub(vk, vv);
+    var de = f64_sqrt(f64_add(f64_add(f64_mul(dw, dw), f64_mul(du, du)), f64_mul(dv, dv)));
+    return f64_sub(f64_from(100), f64_mul(_cie_r(46, 10), de));
+}
+
 # Special Colour Rendering Index R_i for Test Colour Sample `i` (1-8).
 # 100 - 4.6*dE, dE in CIE 1964 W*U*V* after the von Kries adaptation above.
+#
+# ⚠ 2.2.8 SPLIT THE FAILURE SENTINELS, because 0.0 is a LEGITIMATE R_i — a
+# source that renders a sample badly enough scores 0, and a very bad one scores
+# NEGATIVE — so returning 0.0 on failure was indistinguishable from an answer.
+#   - a null SPD, or an index outside 1..8, returns 0.0: the documented, tested
+#     contract, unchanged.
+#   - an INTERNAL failure (allocation refused, degenerate von Kries denominator)
+#     returns NaN, which is never a valid R_i and propagates visibly through
+#     color_rendering_index's mean rather than quietly dragging it toward zero.
 #must_use
 fn cri_special(test_spd, i) {
     if (test_spd == 0) { return f64_from(0); }
     if (i < 1) { return f64_from(0); }
     if (i > 8) { return f64_from(0); }
-    var t_xyz = spd_to_xyz(test_spd);
-    var xyy = xyz_to_xyy(t_xyz);
-    var t_cct = cct_from_xy(XyY_x(xyy), XyY_y(xyy));
-    var ref_spd = _cri_d_illuminant(t_cct);
-    if (f64_lt(t_cct, f64_from(5000)) == 1) { ref_spd = spd_blackbody(t_cct); }
-    if (ref_spd == 0) { return f64_from(0); }
-    var r_xyz = spd_to_xyz(ref_spd);
-
-    var uvk = alloc(16);
-    var uvr = alloc(16);
-    if (uvk == 0) { return f64_from(0); }
-    if (uvr == 0) { return f64_from(0); }
-    _cri_uv(t_xyz, uvk);
-    _cri_uv(r_xyz, uvr);
-    var cdk = alloc(16);
-    var cdr = alloc(16);
-    if (cdk == 0) { return f64_from(0); }
-    if (cdr == 0) { return f64_from(0); }
-    _cri_cd(load64(uvk), load64(uvk + 8), cdk);
-    _cri_cd(load64(uvr), load64(uvr + 8), cdr);
-
-    var ki_xyz = _cri_tcs_xyz(test_spd, i);
-    var ri_xyz = _cri_tcs_xyz(ref_spd, i);
-    if (ki_xyz == 0) { return f64_from(0); }
-    if (ri_xyz == 0) { return f64_from(0); }
-    var uvki = alloc(16);
-    var uvri = alloc(16);
-    if (uvki == 0) { return f64_from(0); }
-    if (uvri == 0) { return f64_from(0); }
-    _cri_uv(ki_xyz, uvki);
-    _cri_uv(ri_xyz, uvri);
-    var cdki = alloc(16);
-    if (cdki == 0) { return f64_from(0); }
-    _cri_cd(load64(uvki), load64(uvki + 8), cdki);
-
-    # von Kries: carry the sample's c/d under the test source onto the reference.
-    var cratio = f64_div(load64(cdr), load64(cdk));
-    var dratio = f64_div(load64(cdr + 8), load64(cdk + 8));
-    var ct = f64_mul(cratio, load64(cdki));
-    var dt = f64_mul(dratio, load64(cdki + 8));
-    var den = f64_sub(f64_add(_cie_r(16518, 1000), f64_mul(_cie_r(1481, 1000), ct)), dt);
-    if (f64_lt(f64_abs(den), _cie_eps15()) == 1) { return f64_from(0); }
-    var uk2 = f64_div(f64_sub(f64_add(_cie_r(10872, 1000), f64_mul(_cie_r(404, 1000), ct)),
-        f64_mul(f64_from(4), dt)), den);
-    var vk2 = f64_div(_cie_r(5520, 1000), den);
-
-    var wk = _cri_wstar(Xyz_y(ki_xyz), Xyz_y(t_xyz));
-    var wr = _cri_wstar(Xyz_y(ri_xyz), Xyz_y(r_xyz));
-    var uk = f64_mul(f64_mul(f64_from(13), wk), f64_sub(uk2, load64(uvr)));
-    var vk = f64_mul(f64_mul(f64_from(13), wk), f64_sub(vk2, load64(uvr + 8)));
-    var ur = f64_mul(f64_mul(f64_from(13), wr), f64_sub(load64(uvri), load64(uvr)));
-    var vr = f64_mul(f64_mul(f64_from(13), wr), f64_sub(load64(uvri + 8), load64(uvr + 8)));
-    var dw = f64_sub(wk, wr);
-    var du = f64_sub(uk, ur);
-    var dv = f64_sub(vk, vr);
-    var de = f64_sqrt(f64_add(f64_add(f64_mul(dw, dw), f64_mul(du, du)), f64_mul(dv, dv)));
-    return f64_sub(f64_from(100), f64_mul(_cie_r(46, 10), de));
+    var ctx = _cri_context(test_spd);
+    if (ctx == 0) { return f64_from(0); }
+    return _cri_ri(test_spd, ctx, i);
 }
 
 # General Colour Rendering Index Ra: the mean of R1..R8.
@@ -3020,9 +3212,11 @@ fn cri_special(test_spd, i) {
 fn color_rendering_index(test_spd) {
     _prk_trace("color_rendering_index");
     if (test_spd == 0) { return f64_from(0); }
+    var ctx = _cri_context(test_spd);
+    if (ctx == 0) { return f64_from(0); }
     var sum = f64_from(0);
     for (var i = 1; i <= 8; i = i + 1) {
-        sum = f64_add(sum, cri_special(test_spd, i));
+        sum = f64_add(sum, _cri_ri(test_spd, ctx, i));
     }
     return f64_div(sum, f64_from(8));
 }

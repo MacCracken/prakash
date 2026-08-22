@@ -197,4 +197,62 @@ for (var ii = 0; ii < 7; ii = ii + 1) {
     assert(f64_lt(f0, F64_ONE), "f0 range hi");
 }
 
+# ── 2.2.8: the IBL Smith pair ────────
+# ⚠ THE FIRST VERSION OF THIS BLOCK PINNED THE BUG. 2.2.7 added
+# pbr_geometry_schlick_ggx_ibl with k = alpha^2/2 (= roughness^4/2) where the
+# canonical IBL remap is k = alpha/2 (Karis, Real Shading in UE4). The tests
+# written for it in 2.2.8 asserted smith_ibl(0.6,0.4,0.3) = 0.991285 — the
+# implementation's own wrong output — and advertised a second assertion as
+# "pins k = alpha^2/2 exactly" at roughness 1, where BOTH remaps give k = 0.5
+# and nothing is discriminated. The two forms also coincide at roughness 0
+# (k = 0), so the error was a bulge over the interior, invisible at exactly the
+# two points anybody would reach for.
+#
+# The check that actually discriminates is ENERGY CONSERVATION: the split-sum
+# scale A is the directional albedo of an F0 = 1 material, so A + B <= 1 always.
+# The wrong k returned A + B = 1.304 at r = 0.6 / n.v = 0.1 and A = 1.4547 at
+# r = 0.5 / n.v = 0.05 — a surface emitting 45% more light than reached it.
+test_group("IBL Smith geometry (k = alpha/2)");
+
+# Both remaps agree at roughness 0 (k = 0) — necessary, but NOT sufficient, and
+# asserting only this is how the wrong k survived 2.2.7.
+_assert_near(pbr_geometry_schlick_ggx_ibl(F64_ONE, Z), F64_ONE, EPS, "IBL G1(ndv=1, r=0) = 1");
+_assert_near(pbr_geometry_schlick_ggx_ibl(_fd(1, 10), Z), F64_ONE, EPS,
+  "IBL G1(ndv=0.1, r=0) = 1 (no shadowing at r=0)");
+_assert_near(pbr_geometry_schlick_ggx(_fd(1, 10), Z), _fd(470588, 1000000), _fd(1, 10000),
+  "DIRECT G1(ndv=0.1, r=0) = 0.4706 — the two remaps must differ here");
+
+# ⚠ MID-ROUGHNESS IS WHERE THE TWO REMAPS SEPARATE, so that is where k is pinned.
+# At r = 0.5: alpha = 0.25, canonical k = 0.125, and
+# G1 = 0.5/(0.5*0.875 + 0.125) = 0.888889. The old alpha^2/2 gave k = 0.03125
+# and 0.969697. This assertion is the one that fails if the squaring returns.
+_assert_near(pbr_geometry_schlick_ggx_ibl(F64_HALF, F64_HALF), _fd(888889, 1000000), _fd(1, 10000),
+  "IBL G1(ndv=0.5, r=0.5) = 0.888889 — pins k = alpha/2, NOT alpha^2/2");
+_assert_near(pbr_geometry_schlick_ggx_ibl(F64_HALF, F64_ONE), _fd(2, 3), _fd(1, 10000),
+  "IBL G1(ndv=0.5, r=1) = 2/3 (control: both remaps coincide at r=1, k=0.5)");
+_assert_near(pbr_geometry_schlick_ggx_ibl(Z, F64_HALF), Z, EPS, "IBL G1(ndv=0) = 0 at grazing");
+
+# Smith is separable: G = G1(n.v) * G1(n.l).
+_assert_near(pbr_geometry_smith_ibl(_fd(6, 10), _fd(4, 10), _fd(3, 10)),
+  f64_mul(pbr_geometry_schlick_ggx_ibl(_fd(6, 10), _fd(3, 10)),
+    pbr_geometry_schlick_ggx_ibl(_fd(4, 10), _fd(3, 10))), EPS,
+  "IBL Smith is the product of the two G1 terms");
+_assert_near(pbr_geometry_smith_ibl(_fd(6, 10), _fd(4, 10), _fd(3, 10)), _fd(909484, 1000000), _fd(1, 10000),
+  "IBL Smith(0.6, 0.4, 0.3) = 0.909484 (was pinned at the wrong 0.991285)");
+
+for (var _gi = 0; _gi <= 10; _gi = _gi + 1) {
+    for (var _gj = 0; _gj <= 10; _gj = _gj + 1) {
+        var _g = pbr_geometry_smith_ibl(_fd(_gi, 10), _fd(_gi, 10), _fd(_gj, 10));
+        assert(f64_ge(_g, Z), "IBL Smith >= 0");
+        assert(f64_le(_g, f64_add(F64_ONE, EPS)), "IBL Smith <= 1");
+    }
+}
+for (var _gk = 1; _gk <= 10; _gk = _gk + 1) {
+    assert(f64_ge(pbr_geometry_schlick_ggx_ibl(F64_ONE, _fd(_gk, 10)),
+        pbr_geometry_schlick_ggx_ibl(_fd(1, 10), _fd(_gk, 10))),
+      "IBL G1 is monotone in n.v at fixed roughness");
+}
+
+assert(f64_ln(F64_TWO) == _pbr_ln2(), "_pbr_ln2 is bit-identical to f64_ln(2)");
+
 var r = assert_summary();

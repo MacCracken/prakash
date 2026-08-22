@@ -414,6 +414,16 @@ fn _pbr_radvdc(bits) {
 # via importance-sampled GGX + Hammersley points.
 fn pbr_integrate_brdf_lut(n_dot_v, roughness, num_samples, out) {
     _prk_trace("integrate_brdf_lut");
+    # ⚠ 2.2.8: num_samples <= 0 made inv_samples = 1/0 = +inf, the loop never
+    # ran, and the function stored inf*0 = NaN into out while returning
+    # PK_ERR_NONE. A null out was written through unconditionally. Both now
+    # report instead of fabricating.
+    if (out == 0) { return PK_ERR_INVALID_PARAMETER; }
+    if (num_samples <= 0) {
+        store64(out, f64_from(0));
+        store64(out + 8, f64_from(0));
+        return PK_ERR_INVALID_PARAMETER;
+    }
     var ndv = f64_clamp(n_dot_v, _pbr_r(1, 1000), F64_ONE);
     var v = alloc(24);
     if (v == 0) { return 0; }

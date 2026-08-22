@@ -44,6 +44,7 @@ fn _h_frac(num, den) { return f64_div(f64_from(num), f64_from(den)); }
 var PINF = 0x7FF0000000000000;
 var NINF = 0xFFF0000000000000;
 var ZERO = 0;
+var PK_NAN_BITS = 0x7FF8000000000000;
 # 2.2.5: the pow domain table needs signed zeros, signed NaNs and a NaN
 # carrying a payload, none of which are reachable through the f64 helpers
 # (`f64_neg(f64_from(0))` yields +0 on cyrius), so they are written as bits.
@@ -474,6 +475,46 @@ assert(point_source_set(psa, 0, ZZ, ZZ, F64_ONE, ZZ) == PK_ERR_NONE, "point_sour
 assert(point_source_set(psa, 2, F64_ONE, ZZ, F64_TWO, ZZ) == PK_ERR_NONE, "point_source_set writes element 2");
 assert(point_source_set(0, 0, ZZ, ZZ, F64_ONE, ZZ) == PK_ERR_INVALID_PARAMETER,
   "point_source_set rejects a null array");
+
+# ⚠ 2.2.8: point_source_set CHECKED i < 0 AND NOTHING ELSE. There was no length
+# recorded anywhere, so any i >= n wrote 32 bytes past the end of the buffer and
+# returned PK_ERR_NONE — silent heap corruption reported as success. An 8-byte
+# length header now precedes the elements; element i is still at
+# arr + i*sizeof(PointSource), so no caller's layout assumption changed.
+assert(point_source_set(psa, 3, F64_ONE, ZZ, F64_TWO, ZZ) == PK_ERR_INVALID_PARAMETER,
+  "point_source_set refuses i == n (was a 32-byte overrun reported as success)");
+assert(point_source_set(psa, 99, F64_ONE, ZZ, F64_TWO, ZZ) == PK_ERR_INVALID_PARAMETER,
+  "point_source_set refuses i far past the end");
+assert(point_source_at(psa, 3) == 0, "point_source_at refuses i == n");
+assert(point_source_at(psa, 2) != 0, "point_source_at still returns element n-1 (control)");
+# The header must not shift the element addresses the pattern code relies on.
+assert(point_source_at(psa, 1) == point_source_at(psa, 0) + sizeof(PointSource),
+  "elements remain contiguous at sizeof(PointSource) stride");
+
+# 2.2.8: the multilayer entry points read a null buffer off address 0.
+assert(_h_bits(multilayer_reflectance(f64_from(550), F64_ONE, _h_frac(152, 100), 0, 2), PK_NAN_BITS) == 1,
+  "multilayer_reflectance(null layers) is NaN, not a plausible reflectance");
+assert(multilayer_rt(f64_from(550), ZZ, F64_ONE, _h_frac(152, 100), 0, 2) == 0,
+  "multilayer_rt(null layers) returns the 0 sentinel");
+assert(_h_bits(multilayer_reflectance(f64_from(550), F64_ONE, _h_frac(152, 100), 0, 0), PK_NAN_BITS) == 0,
+  "zero layers with a null buffer is still the bare interface, not an error");
+
+# 2.2.8: the Spd consumer family dereferenced null, reachable from the
+# documented spd_from_json failure return.
+assert(_h_bits(spd_at(0, f64_from(550)), ZZ) == 1, "spd_at(null) returns 0.0 instead of segfaulting");
+assert(_h_bits(spd_end_nm(0), ZZ) == 1, "spd_end_nm(null) returns 0.0");
+assert(spd_to_xyz(0) != 0, "spd_to_xyz(null) returns a zero Xyz rather than crashing");
+assert(_h_bits(Xyz_y(spd_to_xyz(0)), ZZ) == 1, "and that Xyz is all zeros");
+assert(_h_bits(luminous_flux(0), ZZ) == 1, "luminous_flux(null) returns 0.0");
+assert(_h_bits(spectral_band_similarity(0), ZZ) == 1, "spectral_band_similarity(null) returns 0.0");
+
+# 2.2.8: pbr_integrate_brdf_lut wrote NaN and reported PK_ERR_NONE.
+var _bl = alloc(16);
+assert(pbr_integrate_brdf_lut(F64_HALF, F64_HALF, 0, _bl) == PK_ERR_INVALID_PARAMETER,
+  "pbr_integrate_brdf_lut rejects num_samples = 0 (wrote NaN and said NONE)");
+assert(_h_bits(load64(_bl), ZZ) == 1, "and zeroes the out buffer rather than leaving NaN");
+assert(pbr_integrate_brdf_lut(F64_HALF, F64_HALF, 64, 0) == PK_ERR_INVALID_PARAMETER,
+  "pbr_integrate_brdf_lut rejects a null out buffer");
 assert(point_source_set(psa, 0 - 1, ZZ, ZZ, F64_ONE, ZZ) == PK_ERR_INVALID_PARAMETER,
   "point_source_set rejects a negative index");
 # elements are contiguous and independent

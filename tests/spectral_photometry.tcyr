@@ -70,6 +70,22 @@ for (var mi = 0; mi < 25; mi = mi + 1) {
 for (var mj = 26; mj < 80; mj = mj + 1) {
     assert(f64_ge(_vl(vs, mj), _vl(vs, mj + 1)), "scotopic V' falls monotonically from 510nm");
 }
+# ⚠ 2.2.8: THE TAIL 2.2.7 DELIBERATELY LEFT ALONE WAS WRONG IN ALL 26 ENTRIES.
+# 2.2.7 said it "could not be cross-checked to the same standard" — a claim
+# about effort, not evidence. The seam was detectable from the corrected head
+# alone: successive-value ratios run ~0.671, 0.674 through the repaired region
+# and then collapsed to 0.369 at 650/655, in a curve that decays smoothly at
+# ~0.68 per 5 nm. The old tail also hit EXACT ZERO above 710 nm.
+_assert_near(_vl(vs, 55), _fd(459, 1000000), _fd(1, 100000), "V'(655nm) = 0.000459 (was 0.00025)");
+_assert_near(_vl(vs, 64), _fd(178, 10000000), _fd(1, 1000000), "V'(700nm) = 1.78e-5 (was 2e-6)");
+assert(f64_gt(_vl(vs, 80), Z), "V'(780nm) is nonzero — the old tail was exactly 0 above 710nm");
+# The seam ratio is the check that found it, so it is the check that guards it.
+var _sr = f64_div(_vl(vs, 55), _vl(vs, 54));
+_assert_near(_sr, _fd(678, 1000), _fd(2, 100), "V' decays ~0.68 per 5nm across the 650/655 seam (was 0.369)");
+for (var _zi = 0; _zi < 81; _zi = _zi + 1) {
+    assert(f64_gt(_vl(vs, _zi), Z), "no V' entry is exactly zero");
+}
+
 # Scotopic vision is blue-shifted relative to photopic — the Purkinje shift.
 assert(f64_gt(_vl(vs, 24), _vl(vp, 24)), "V' exceeds V at 500nm (Purkinje shift)");
 assert(f64_lt(_vl(vs, 44), _vl(vp, 44)), "V' below V at 600nm (Purkinje shift)");

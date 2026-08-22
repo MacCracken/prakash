@@ -113,10 +113,23 @@ fn _vlambda_photopic() {
 # only across one contiguous corrupted band is the same source, not a different
 # one. The corrected table now matches at all 55, is monotone rising to 505 and
 # monotone falling from 510, and peaks where CIE says it does.
-# ⚠ WHAT WAS NOT TOUCHED: 655-780 nm. Those 26 entries are all below 2.5e-4 and
-# could not be cross-checked to the same standard, so they were left exactly as
-# they were rather than replaced on weaker evidence. They contribute
-# ~0.01% of any scotopic integral.
+# ⚠ 2.2.8 FINISHED THE JOB. 2.2.7 left 655-780 nm alone saying it "could not be
+# cross-checked to the same standard" — that was a claim about effort, not about
+# evidence, and it was wrong: the CVRL/CIE 1951 table is public and machine-
+# readable. ALL 26 tail entries were wrong, and the seam was visible from the
+# corrected head alone: the successive-value ratio runs 0.671, 0.674 through the
+# repaired region and then collapsed to 0.369 at 650/655 — a 1.8x discontinuity
+# in a curve that decays smoothly at ~0.68 per 5 nm. The old tail also went to
+# EXACT ZERO above 710 nm, which no luminous efficiency curve does.
+#   nm    was        now (CIE 1951)
+#   655   2.50e-4    4.590e-4
+#   675   3.00e-5    1.026e-4
+#   700   2.00e-6    1.780e-5
+#   725   0          3.482e-6
+#   775   0          1.829e-7
+# One head entry was also off: 565 nm read 0.264 against 0.2639. The whole table
+# is now bit-exact against CVRL's CIE 1951 data at all 81 points, transcribed
+# programmatically rather than by hand.
 var _vlambda_scotopic_p = 0;
 fn _vlambda_scotopic() {
     if (_vlambda_scotopic_p != 0) { return _vlambda_scotopic_p; }
@@ -158,7 +171,7 @@ fn _vlambda_scotopic() {
     store64(t + 272, 0x3FDEC8B439581062);
     store64(t + 280, 0x3FD9BA5E353F7CEE);
     store64(t + 288, 0x3FD50B0F27BB2FEC);
-    store64(t + 296, 0x3FD0E5604189374C);   # 565 nm = 0.264 (was 0.2645)
+    store64(t + 296, 0x3FD0E3BCD35A8588);   # 565 nm = 0.2639
     store64(t + 304, 0x3FCA92A305532618);
     store64(t + 312, 0x3FC4816F0068DB8C);
     store64(t + 320, 0x3FBF06F694467382);
@@ -176,32 +189,32 @@ fn _vlambda_scotopic() {
     store64(t + 416, 0x3F5886DF82B1F688);   # 640 nm = 0.001497 (was 0.00114)
     store64(t + 424, 0x3F507746887A8D65);   # 645 nm = 0.001005 (was 0.00069)
     store64(t + 432, 0x3F462F166E008E9B);   # 650 nm = 0.000677 (was 0.00042)
-    store64(t + 440, 0x3F30624DD2F1A9FC);
-    store64(t + 448, 0x3F23879C4113C686);
-    store64(t + 456, 0x3F1711947CFA26A2);
-    store64(t + 464, 0x3F0B43526527A205);
-    store64(t + 472, 0x3EFF75104D551D69);
-    store64(t + 480, 0x3EF2DFD694CCAB3F);
-    store64(t + 488, 0x3EE4F8B588E368F1);
-    store64(t + 496, 0x3ED92A737110E454);
-    store64(t + 504, 0x3EC92A737110E454);
-    store64(t + 512, 0x3EC0C6F7A0B5ED8D);
-    store64(t + 520, 0x3EB0C6F7A0B5ED8D);
-    store64(t + 528, 0x3EB0C6F7A0B5ED8D);
-    store64(t + 536, 0x0000000000000000);
-    store64(t + 544, 0x0000000000000000);
-    store64(t + 552, 0x0000000000000000);
-    store64(t + 560, 0x0000000000000000);
-    store64(t + 568, 0x0000000000000000);
-    store64(t + 576, 0x0000000000000000);
-    store64(t + 584, 0x0000000000000000);
-    store64(t + 592, 0x0000000000000000);
-    store64(t + 600, 0x0000000000000000);
-    store64(t + 608, 0x0000000000000000);
-    store64(t + 616, 0x0000000000000000);
-    store64(t + 624, 0x0000000000000000);
-    store64(t + 632, 0x0000000000000000);
-    store64(t + 640, 0x0000000000000000);
+    store64(t + 440, 0x3F3E14BDFD2630EC);   # 655 nm = 0.000459
+    store64(t + 448, 0x3F3481974454C3A7);   # 660 nm = 0.0003129
+    store64(t + 456, 0x3F2C20C7F6A436AC);   # 665 nm = 0.0002146
+    store64(t + 464, 0x3F23660E51D25AAB);   # 670 nm = 0.000148
+    store64(t + 472, 0x3F1AE55E940A0DA0);   # 675 nm = 0.0001026
+    store64(t + 480, 0x3F12BE48A58B3F64);   # 680 nm = 7.15e-05
+    store64(t + 488, 0x3F0A444EE469A184);   # 685 nm = 5.01e-05
+    store64(t + 496, 0x3F0285E98E797FF4);   # 690 nm = 3.533e-05
+    store64(t + 504, 0x3EFA39921CF8893E);   # 695 nm = 2.501e-05
+    store64(t + 512, 0x3EF2AA26AF9731E0);   # 700 nm = 1.78e-05
+    store64(t + 520, 0x3EEAB25DE0B0DA53);   # 705 nm = 1.273e-05
+    store64(t + 528, 0x3EE32B0008E4552A);   # 710 nm = 9.14e-06
+    store64(t + 536, 0x3EDBAEB22F9294C3);   # 715 nm = 6.6e-06
+    store64(t + 544, 0x3ED40C7C652B52EA);   # 720 nm = 4.78e-06
+    store64(t + 552, 0x3ECD3589BE740854);   # 725 nm = 3.482e-06
+    store64(t + 560, 0x3EC55B7E4D5A4842);   # 730 nm = 2.546e-06
+    store64(t + 568, 0x3EBF5F96BE72ECDD);   # 735 nm = 1.87e-06
+    store64(t + 576, 0x3EB722C288E24D79);   # 740 nm = 1.379e-06
+    store64(t + 584, 0x3EB12574E232C329);   # 745 nm = 1.022e-06
+    store64(t + 592, 0x3EA98059AC99A685);   # 750 nm = 7.6e-07
+    store64(t + 600, 0x3EA3067E2F9702A2);   # 755 nm = 5.67e-07
+    store64(t + 608, 0x3E9C8571C4687A3D);   # 760 nm = 4.25e-07
+    store64(t + 616, 0x3E9572AFAA3A164A);   # 765 nm = 3.196e-07
+    store64(t + 624, 0x3E9031809F856876);   # 770 nm = 2.413e-07
+    store64(t + 632, 0x3E888C6569EC4BD1);   # 775 nm = 1.829e-07
+    store64(t + 640, 0x3E82A800EE1A2D05);   # 780 nm = 1.39e-07
     _vlambda_scotopic_p = t;
     return t;
 }

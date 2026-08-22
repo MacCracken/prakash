@@ -21,7 +21,7 @@ after the port-completeness review; recover it with
 | `serialize` | serialize.cyr | 31 | (free functions) | JSON roundtrips (bayan) for the seven serde-tested types; floats are bit-exact (Grisu2) since bayan 1.2.1; every `*_from_json` reports via `err_out` |
 | `ai` | ai.cyr | 24 | `DaimonClient`, `DaimonConfig`, `HooshConfig` | AI-assisted optics queries via sandhi HTTP POST — **not in the core bundle** |
 
-**Total**: 25 science modules + error, **5615 test assertions across 29 suites**,
+**Total**: 25 science modules + error, **6378 test assertions across 29 suites**,
 36 benchmarks. (`tests/hardening.tcyr` is the cross-module regression suite for the
 2.0.2 audit repairs and the 2.1.0 error channels — see those CHANGELOG entries.)
 

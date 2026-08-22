@@ -351,8 +351,36 @@ pbr_integrate_brdf_lut(F64_HALF, Z, 2048, _lut);
 _assert_near(load64(_lut), _fd(96875, 100000), _fd(1, 10000), "lut A(r=0, nv=0.5) = 0.968750");
 pbr_integrate_brdf_lut(F64_ONE, Z, 2048, _lut);
 _assert_near(load64(_lut), F64_ONE, _fd(1, 10000), "lut A(r=0, nv=1) = 1.0 (perfect mirror, normal)");
+# ⚠ 2.2.8: this pin MOVED, and only this one. 0.871732 was computed with the
+# wrong k = alpha^2/2; the canonical k = alpha/2 gives 0.728832. Every r = 0
+# value above is unchanged, because both remaps give k = 0 there — which is
+# exactly why the r = 0 assertions could not detect the defect.
 pbr_integrate_brdf_lut(F64_HALF, F64_HALF, 2048, _lut);
-_assert_near(load64(_lut), _fd(871732, 1000000), _fd(1, 10000), "lut A(r=0.5, nv=0.5) = 0.871732");
+_assert_near(load64(_lut), _fd(728832, 1000000), _fd(1, 10000),
+  "lut A(r=0.5, nv=0.5) = 0.728832 (was 0.871732 under k = alpha^2/2)");
+
+# ⚠ 2.2.8: THE ENERGY-CONSERVATION INVARIANT, which is the only assertion here
+# that could have caught the wrong IBL k. The split-sum scale A is the
+# directional albedo of an F0 = 1 material, so A + B <= 1 at EVERY point. 2.2.7
+# shipped k = alpha^2/2 instead of alpha/2 and this LUT returned A + B = 1.304 at
+# r = 0.6 / n.v = 0.1, and A = 1.4547 at r = 0.5 / n.v = 0.05 — a surface
+# reflecting 45% more light than reached it. The invariant 2.2.7 DID assert,
+# A + B = 1 at roughness 0, holds for both remaps (k = 0 either way) and so
+# discriminated nothing. Grid, not spot-checks, because the error was a bulge
+# over the interior that vanished at both roughness endpoints.
+var _en = alloc(16);
+for (var _er = 0; _er <= 10; _er = _er + 1) {
+    for (var _ev = 1; _ev <= 10; _ev = _ev + 1) {
+        pbr_integrate_brdf_lut(_fd(_ev, 10), _fd(_er, 10), 1024, _en);
+        assert(f64_le(f64_add(load64(_en), load64(_en + 8)), f64_add(F64_ONE, _fd(1, 1000))),
+          "split-sum A + B <= 1: an F0=1 material cannot reflect more than it receives");
+        assert(f64_le(load64(_en), f64_add(F64_ONE, _fd(1, 1000))), "split-sum scale A <= 1");
+    }
+}
+# The worst point under the old k, asserted directly.
+pbr_integrate_brdf_lut(_fd(1, 10), _fd(6, 10), 1024, _en);
+_assert_near(f64_add(load64(_en), load64(_en + 8)), _fd(700512, 1000000), _fd(1, 1000),
+  "A+B at r=0.6, nv=0.1 is 0.7005 (was 1.3041 under k = alpha^2/2)");
 _assert_near(pbr_env_map_lod(Z, f64_from(8)), Z, EPS, "env_lod 0 = 0");
 _assert_near(pbr_env_map_lod(F64_ONE, f64_from(8)), f64_from(8), EPS, "env_lod 1 = 8");
 _assert_near(pbr_env_map_lod(F64_HALF, f64_from(8)), f64_from(4), EPS, "env_lod 0.5 = 4");

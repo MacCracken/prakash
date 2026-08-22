@@ -327,10 +327,28 @@ fn lens_seidel_coefficients(n, focal_length, q, p) {
     # divided term-wise by n(n-1) to sit under this function's existing
     # phi^3 * n/(4(n-1)^2) prefactor. Two changes fall out: the p^2 term loses
     # its extra (n-1), and the constant n^2/(n-1)^2 — absent entirely — comes
-    # back. Cross-check: the corrected argmin (q = 2(n+1)/(n+2): 1.4286 at
-    # n = 1.5, 1.4595 at n = 1.7) matches the standard form's argmin exactly.
-    # A = (n+2)/(n*(n-1)) * q * q
-    var sa = f64_mul(f64_mul(f64_div(f64_add(n, F64_TWO), f64_mul(n, nm1)), q), q);
+    # back.
+    # ⚠ 2.2.6'S CROSS-CHECK WAS SELF-REFERENTIAL and is replaced. It compared the
+    # argmin against q = 2(n+1)/(n+2) — derived from the same bracket it was
+    # validating — so it agreed by construction, and that is how the q^2 term
+    # below kept a wrong factor of (n-1) through an audit. The INDEPENDENT check
+    # is the textbook best-form singlet at p = -1, argmin q = 2(n^2-1)/(n+2):
+    # 0.7143 at n = 1.5, 0.8667 at 1.6, 1.0162 at 1.7 — measured 0.71 / 0.87 /
+    # 1.02 on a 0.01 scan. Its companion is the aplanatic (coma-free) shape at
+    # q = 0.80 for n = 1.5, which the coma bracket further down now reproduces.
+    # A = (n+2)/(n*(n-1)^2) * q * q
+    # ⚠ 2.2.8: 2.2.6 fixed the p^2 term and restored the missing constant but
+    # left THIS one a factor of (n-1) too large — three of the four terms follow
+    # the stated "standard bracket divided term-wise by n(n-1)" scheme and this
+    # one did not. The standard Coddington q^2 coefficient is (n+2)/(n-1), not
+    # (n+2), so dividing by n(n-1) gives (n+2)/(n(n-1)^2).
+    # ⚠ WHY 2.2.6 MISSED IT: its cross-check was SELF-REFERENTIAL. It compared
+    # the argmin against 2(n+1)/(n+2) — a value derived from the same wrong
+    # bracket — and matched, of course. The independent result is the textbook
+    # best-form singlet, argmin q = 2(n^2-1)/(n+2) = 0.7143 at n = 1.5, and the
+    # shipped code put it at 1.4286. The sign flip 2.2.6 claimed to have closed
+    # also still occurred for |p| > 1.32.
+    var sa = f64_mul(f64_mul(f64_div(f64_add(n, F64_TWO), f64_mul(n, _lens_pow2(nm1))), q), q);
     # B = (3n+2)/n * p * p
     var sb = f64_mul(
       f64_mul(f64_div(f64_add(f64_mul(f64_from(3), n), F64_TWO), n), p), p);
@@ -359,10 +377,19 @@ fn lens_seidel_coefficients(n, focal_length, q, p) {
     var spherical = f64_mul(f64_mul(_lens_pow3(phi), term2),
       f64_add(f64_add(f64_add(sa, sb), sc), sd));
     var cterm2 = f64_div(F64_ONE, f64_mul(F64_TWO, nm1));
-    # D = (2*(n+1))/(n*(n-1)) * q
-    var cd = f64_mul(f64_div(f64_mul(F64_TWO, f64_add(n, F64_ONE)), f64_mul(n, nm1)), q);
-    # E = (3n+1)/n * p
-    var ce = f64_mul(f64_div(f64_add(f64_mul(f64_from(3), n), F64_ONE), n), p);
+    # ⚠ 2.2.8: BOTH COMA COEFFICIENTS WERE WRONG, and they sat directly beside
+    # the spherical bracket that 2.2.6 audited without looking at them.
+    # The thin-lens Coddington coma bracket is (n+1)/(n(n-1)) q + (2n+1)/n p;
+    # the code had 2(n+1) and (3n+1). Consequence: coma crossed zero at q = 0.55
+    # where the true aplanatic singlet is q = 0.80 at n = 1.5 — so the function
+    # reported ZERO coma for a shape with substantial real coma, and placed the
+    # coma-free shape on the wrong side of the spherical minimum, inverting the
+    # standard design conclusion. cterm2 = 1/(2(n-1)) is a consistent
+    # normalisation and is left alone.
+    # D = (n+1)/(n*(n-1)) * q
+    var cd = f64_mul(f64_div(f64_add(n, F64_ONE), f64_mul(n, nm1)), q);
+    # E = (2n+1)/n * p
+    var ce = f64_mul(f64_div(f64_add(f64_mul(F64_TWO, n), F64_ONE), n), p);
     var coma = f64_mul(f64_mul(_lens_pow2(phi), cterm2), f64_add(cd, ce));
     var out = alloc(sizeof(SeidelCoefficients));
     if (out == 0) { return 0; }

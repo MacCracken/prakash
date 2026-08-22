@@ -238,6 +238,33 @@ for (var _sqi = 0 - 40; _sqi <= 40; _sqi = _sqi + 1) {
           lens_seidel_coefficients(N15, f64_from(100), _sq, f64_neg(F64_ONE))), Z),
       "spherical is POSITIVE for every shape factor (n=1.5, object at infinity)");
 }
+# ⚠ 2.2.8: THE 2.2.6 SEIDEL FIX WAS INCOMPLETE AND ITS CHECK WAS CIRCULAR.
+# The q^2 term kept a factor of (n-1) too much — three of the four bracket terms
+# followed the stated scheme and that one did not — and 2.2.6 "verified" the
+# argmin against a formula derived from the same bracket, so it agreed by
+# construction. These pin the INDEPENDENT textbook results instead:
+# best-form singlet argmin q = 2(n^2-1)/(n+2) at p = -1, and the aplanatic
+# (coma-free) shape at q = 0.80 for n = 1.5. The shipped code put the argmin at
+# 1.4286 and the coma zero at 0.55.
+var _bq = Z;
+var _bs = f64_div(F64_ONE, Z);
+for (var _bi = 0 - 300; _bi <= 300; _bi = _bi + 1) {
+    var _q = _fd(_bi, 100);
+    var _sp = SeidelCoefficients_spherical(lens_seidel_coefficients(N15, f64_from(100), _q, f64_neg(F64_ONE)));
+    if (f64_lt(_sp, _bs) == 1) { _bs = _sp; _bq = _q; }
+}
+_assert_near(_bq, _fd(7143, 10000), _fd(2, 100),
+  "best-form singlet argmin q = 0.7143 at n=1.5 (shipped 1.4286 through 2.2.7)");
+assert(f64_gt(_bs, Z), "and the spherical minimum is still positive there");
+
+# Coma must cross zero at the aplanatic shape, q = 0.80 for n = 1.5.
+assert(f64_lt(f64_mul(
+      SeidelCoefficients_coma(lens_seidel_coefficients(N15, f64_from(100), _fd(79, 100), f64_neg(F64_ONE))),
+      SeidelCoefficients_coma(lens_seidel_coefficients(N15, f64_from(100), _fd(81, 100), f64_neg(F64_ONE)))), Z),
+  "coma changes sign between q = 0.79 and q = 0.81 — the aplanatic singlet");
+assert(f64_lt(SeidelCoefficients_coma(lens_seidel_coefficients(N15, f64_from(100), _fd(55, 100), f64_neg(F64_ONE))), Z),
+  "coma is strictly negative at q = 0.55, where the old bracket reported zero");
+
 # Same invariant must hold across ordinary glasses, not just n = 1.5.
 for (var _sni = 15; _sni <= 18; _sni = _sni + 1) {
     var _sn = _fd(_sni, 10);

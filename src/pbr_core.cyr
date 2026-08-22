@@ -104,15 +104,34 @@ fn pbr_geometry_schlick_ggx(n_dot_v, roughness) {
       f64_add(f64_add(f64_mul(ndv, f64_sub(F64_ONE, k)), k), _pbr_eps15()));
 }
 
-# Schlick-GGX G1 for IMAGE-BASED LIGHTING: k = alpha^2/2 with alpha = r^2,
-# where the direct-lighting form above uses k = (r+1)^2/8. The two are different
-# remappings of the same Smith G1 and are not interchangeable — see
-# pbr_integrate_brdf_lut, which used the direct form and consequently produced a
-# split-sum whose A + B was 0.22 at roughness 0 where it must be exactly 1.
+# Schlick-GGX G1 for IMAGE-BASED LIGHTING: k = alpha/2 with alpha = roughness^2,
+# where the direct-lighting form above uses k = (r+1)^2/8 (Karis, Real Shading in
+# Unreal Engine 4). The two are different remappings of the same Smith G1 and are
+# not interchangeable — see pbr_integrate_brdf_lut, which used the DIRECT form
+# until 2.2.7 and produced a split-sum whose A + B was 0.22 at roughness 0 where
+# it must be exactly 1.
+#
+# ⚠ 2.2.8 FIXED A SECOND, OPPOSITE ERROR INTRODUCED BY THAT SAME 2.2.7 REPAIR:
+# `a` here IS alpha, and the code then squared it again, giving k = alpha^2/2 =
+# roughness^4/2. That is energy-GAINING. The split-sum scale A is the directional
+# albedo of an F0 = 1 material and cannot exceed 1; measured on the shipped
+# code, pbr_integrate_brdf_lut returned A = 1.168, B = 0.136, **A + B = 1.304**
+# at n.v = 0.1, roughness = 0.6, and A = 1.4547 at n.v = 0.05, roughness = 0.5 —
+# a surface reflecting 45% more light than reached it. With k = alpha/2 the LUT
+# satisfies A + B <= 1 at every grid point, with the maximum exactly 1.0 at
+# roughness 0 where it must be.
+#
+# ⚠ AND THE INVARIANT 2.2.7 USED TO "SETTLE" THE k QUESTION CANNOT SEE THIS.
+# A + B = 1 at roughness 0 holds for BOTH remaps, because both give k = 0 there.
+# The two also coincide at roughness 1 (k = 0.5). The error is a bulge over the
+# interior, invisible at exactly the two points anybody would test — and the
+# first 2.2.8 test written for this function pinned r = 1 and called it "pins
+# k = alpha^2/2 exactly". The discriminating check is energy conservation over
+# the whole grid, which is now asserted rather than described.
 #must_use
 fn pbr_geometry_schlick_ggx_ibl(n_dot_v, roughness) {
     var a = f64_mul(roughness, roughness);
-    var k = f64_div(f64_mul(a, a), F64_TWO);
+    var k = f64_div(a, F64_TWO);
     var ndv = f64_clamp(n_dot_v, f64_from(0), F64_ONE);
     return f64_div(ndv,
       f64_add(f64_add(f64_mul(ndv, f64_sub(F64_ONE, k)), k), _pbr_eps15()));

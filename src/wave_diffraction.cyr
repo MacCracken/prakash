@@ -295,6 +295,10 @@ fn vcoat_reflectance(n1, n2, n3) {
 #must_use
 fn multilayer_reflectance(wavelength, n_incident, n_substrate, layers, num_layers) {
     _prk_trace("multilayer_reflectance");
+    # 2.2.8: a null buffer with num_layers > 0 read straight off address 0.
+    # NaN rather than 0.0 because 0.0 is a legitimate reflectance.
+    if (num_layers < 0) { return _PRK_NAN; }
+    if (num_layers > 0) { if (layers == 0) { return _PRK_NAN; } }
     var m11_r = F64_ONE;
     var m12_i = f64_from(0);
     var m21_i = f64_from(0);
@@ -371,6 +375,29 @@ fn _diff_eta(n, cos_t, is_p) {
     return f64_div(n, cos_t);
 }
 
+# cosh/sinh from the exp shim, with the argument clamped. An evanescent layer
+# thick enough to push beta past ~350 is opaque to any precision that matters,
+# and exp would overflow to +inf and turn the whole matrix into NaN.
+#must_use
+fn _diff_cosh(x) {
+    var b = x;
+    if (f64_gt(b, f64_from(350)) == 1) { b = f64_from(350); }
+    var e = _prk_exp(b);
+    return f64_div(f64_add(e, f64_div(F64_ONE, e)), F64_TWO);
+}
+#must_use
+fn _diff_sinh(x) {
+    var b = x;
+    if (f64_gt(b, f64_from(350)) == 1) { b = f64_from(350); }
+    var e = _prk_exp(b);
+    return f64_div(f64_sub(e, f64_div(F64_ONE, e)), F64_TWO);
+}
+
+# |sin(theta_t)| in a medium of index n — the value _diff_cos_in_medium tests
+# against 1 to decide whether the layer is propagating or evanescent.
+#must_use
+fn _diff_sin_in_medium(n, ni_sin_i) { return f64_abs(f64_div(ni_sin_i, n)); }
+
 # One TMM stack for a single polarization (is_p: 0=s, 1=p). Writes reflectance to
 # rt_out and transmittance (1-R, lossless) to rt_out+8.
 fn _diff_tmm_stack(wavelength, ni, ns, layers, num_layers, cos_i, cos_sub, ni_sin_i, is_p, rt_out) {
@@ -385,16 +412,57 @@ fn _diff_tmm_stack(wavelength, ni, ns, layers, num_layers, cos_i, cos_sub, ni_si
         var delta = f64_div(
           f64_mul(f64_mul(f64_mul(F64_TAU, n), d), cos_l),
           wavelength);
-        var eta = _diff_eta(n, cos_l, is_p);
-        var sin_d = _prk_sin(delta);
-        var cos_d = _prk_cos(delta);
-        # 2.2.7: same two sign errors as multilayer_reflectance above, with the
-        # admittance eta in place of n for the oblique s/p split. See that
-        # function for the derivation and the measured effect.
-        var n11 = f64_sub(f64_mul(m11_r, cos_d), f64_mul(f64_mul(m12_i, eta), sin_d));
-        var n12 = f64_add(f64_div(f64_mul(m11_r, sin_d), eta), f64_mul(m12_i, cos_d));
-        var n21 = f64_add(f64_mul(m21_i, cos_d), f64_mul(f64_mul(m22_r, eta), sin_d));
-        var n22 = f64_add(f64_div(f64_mul(f64_neg(m21_i), sin_d), eta), f64_mul(m22_r, cos_d));
+        # The layer matrix is L = [[A, i*Bi], [i*Ci, A]] in both regimes, which
+        # is why the accumulator's real/imaginary split survives evanescence.
+        #   propagating: A = cos d,  Bi = sin d / eta,   Ci = eta * sin d
+        # ⚠ 2.2.8: THE EVANESCENT BRANCH DID NOT EXIST and the results were
+        # garbage. _diff_cos_in_medium returns 0.0 as its TIR sentinel and this
+        # loop consumed it as a real cosine: for s-polarisation eta = n*0 = 0 and
+        # delta = 0, so `sin_d / eta` evaluated 0/0 = NaN on the first iteration
+        # and NaN reached r_s, t_s, r_avg and t_avg with no error signal. For
+        # p-polarisation the eta guard avoided the NaN but delta = 0 collapsed
+        # the layer matrix to the identity — the evanescent layer was simply
+        # DELETED from the stack, which is why r_p came out bit-identical for
+        # d = 50, 100 and 300 nm.
+        # Past the critical angle cos_l = i*kappa with kappa = sqrt(sin_t^2 - 1),
+        # so delta = i*beta is pure imaginary and eta = i*eta_i is too. Then
+        # cos(delta) = cosh(beta), sin(delta) = i*sinh(beta), and the same
+        # algebra gives A = cosh b, Bi = sinh b / eta_i, Ci = -eta_i * sinh b —
+        # finite, non-identity and thickness-dependent, which is what produces
+        # frustrated-TIR tunnelling.
+        var sin_t = _diff_sin_in_medium(n, ni_sin_i);
+        var a_r = f64_from(0);
+        var b_i = f64_from(0);
+        var c_i = f64_from(0);
+        if (f64_gt(sin_t, F64_ONE) == 1) {
+            var kappa = f64_sqrt(f64_sub(f64_mul(sin_t, sin_t), F64_ONE));
+            var beta = f64_div(f64_mul(f64_mul(f64_mul(F64_TAU, n), d), kappa), wavelength);
+            # eta = i*eta_i: s-pol eta_i = n*kappa, p-pol eta_i = -n/kappa.
+            var eta_i2 = f64_mul(n, kappa);
+            if (is_p == 1) {
+                if (f64_lt(kappa, _diff_r(1, 1000000000000000)) == 1) {
+                    eta_i2 = f64_neg(f64_mul(n, f64_from(1000000000000000)));
+                } else {
+                    eta_i2 = f64_neg(f64_div(n, kappa));
+                }
+            }
+            var sh = _diff_sinh(beta);
+            a_r = _diff_cosh(beta);
+            b_i = f64_div(sh, eta_i2);
+            c_i = f64_neg(f64_mul(eta_i2, sh));
+        } else {
+            var eta = _diff_eta(n, cos_l, is_p);
+            var sin_d = _prk_sin(delta);
+            a_r = _prk_cos(delta);
+            b_i = f64_div(sin_d, eta);
+            c_i = f64_mul(eta, sin_d);
+        }
+        # 2.2.7 fixed two sign errors in this product; see multilayer_reflectance
+        # for the derivation of M' = M*L.
+        var n11 = f64_sub(f64_mul(m11_r, a_r), f64_mul(m12_i, c_i));
+        var n12 = f64_add(f64_mul(m11_r, b_i), f64_mul(m12_i, a_r));
+        var n21 = f64_add(f64_mul(m21_i, a_r), f64_mul(m22_r, c_i));
+        var n22 = f64_add(f64_mul(f64_neg(m21_i), b_i), f64_mul(m22_r, a_r));
         m11_r = n11;
         m12_i = n12;
         m21_i = n21;
@@ -418,6 +486,10 @@ fn _diff_tmm_stack(wavelength, ni, ns, layers, num_layers, cos_i, cos_sub, ni_si
 #must_use
 fn multilayer_rt(wavelength, angle, n_incident, n_substrate, layers, num_layers) {
     _prk_trace("multilayer_rt");
+    # 2.2.8: same class as multilayer_reflectance. Returns a pointer, so 0 is
+    # the sentinel, matching diffraction_pattern_2d and psf_from_wavefront.
+    if (num_layers < 0) { return 0; }
+    if (num_layers > 0) { if (layers == 0) { return 0; } }
     var cos_i = _prk_cos(angle);
     var sin_i = _prk_sin(angle);
     var ni_sin_i = f64_mul(n_incident, sin_i);

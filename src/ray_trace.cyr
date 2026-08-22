@@ -203,13 +203,34 @@ fn trace_surface(ray, surface, err_out) {
     var refl = f64_from(0);
     var serr = 0;
     var refr_dir = ray_snell_3d(dir, normal, TraceRay_n(ray), OpticalSurface_n_after(surface), &refl, &serr);
+    # ⚠ 2.2.8: TOTAL INTERNAL REFLECTION IS A HIT, NOT A MISS. This returned 0
+    # for TIR exactly as it does for a geometric miss, and trace_recursive's
+    # candidate filter is `prakash_is_err(e) == 0` — so a totally-internally-
+    # reflecting surface was dropped from the nearest-surface search and THE RAY
+    # PASSED STRAIGHT THROUGH IT. Measured: a ray at 60 deg inside n=1.5
+    # (critical angle 41.8 deg) hitting a glass-air plane produced
+    # interactions = 0 and a single EVENT_ESCAPED segment at full energy — the
+    # defining phenomenon of a prism or a light guide, silently deleted.
+    # TIR now returns a real TraceHit carrying the hit point and normal, with
+    # reflectance = 1.0 and ray_after = 0 (there is no transmitted ray), while
+    # STILL reporting PK_ERR_TIR through err_out. A caller that only checks
+    # err_out is unaffected; one that wants to reflect now has the geometry it
+    # needs, which it previously could not obtain at all.
+    var tir = 0;
     if (prakash_is_err(serr) == 1) {
-        store64(err_out, serr);
-        return 0;
+        if (serr != PK_ERR_TIR) {
+            store64(err_out, serr);
+            return 0;
+        }
+        tir = 1;
+        refl = F64_ONE;
     }
 
     var hit_point = ray_vec3(hit_x, hit_y, hit_z);
-    var ray_after = trace_ray_new(hit_point, refr_dir, OpticalSurface_n_after(surface));
+    var ray_after = 0;
+    if (tir == 0) {
+        ray_after = trace_ray_new(hit_point, refr_dir, OpticalSurface_n_after(surface));
+    }
     var hit = alloc(sizeof(TraceHit));
     if (hit == 0) {
         store64(err_out, PK_ERR_ALLOCATION);
@@ -219,6 +240,7 @@ fn trace_surface(ray, surface, err_out) {
     TraceHit_set_normal(hit, normal);
     TraceHit_set_ray_after(hit, ray_after);
     TraceHit_set_reflectance(hit, refl);
+    if (tir == 1) { store64(err_out, PK_ERR_TIR); }
     return hit;
 }
 
