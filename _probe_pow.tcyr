@@ -1,0 +1,16 @@
+include "src/error.cyr"
+alloc_init();
+fn ph(l, v) { syscall(1,1,l,strlen(l)); syscall(1,1,": ",2); fmt_hex(v); syscall(1,1,"\n",1); return 0; }
+var F2 = f64_from(2);
+var r1 = _prk_pow(F2, f64_from(3));
+ph("pow(2,3)", r1);
+ph("rust_exact_8", 0x4020000000000000);
+var r2 = _prk_pow(f64_neg(F2), f64_from(3));
+ph("pow(-2,3)", r2);
+var r3 = _prk_pow(F2, f64_div(f64_from(1), f64_from(2)));
+ph("pow(2,0.5)", r3);
+var r4 = _prk_pow(0x8000000000000001, f64_from(3));
+ph("pow(-5e-324,3)", r4);
+var r5 = ganita_f64_pow(F2, f64_from(3));
+ph("ganita_pow(2,3)", r5);
+var r = assert_summary();

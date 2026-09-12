@@ -161,16 +161,19 @@ assert(_h_bits(_prk_pow(ZERO, f64_from(3)), ZERO) == 1, "pow(+0, 3) = +0.0 (cont
 # These are ULP inexactness in the `exp`/`ln` pair and a lost underflow sign,
 # not domain errors; closing them means a correctly-rounded pow. They are pinned
 # to their MEASURED-WRONG values precisely so a toolchain bump cannot move them
-# unobserved — which is the failure mode 2.2.4 documented. If one of these
-# fails, the divergence CLOSED and the note in src/error.cyr needs retiring.
-assert(_h_bits(_prk_pow(F64_TWO, f64_from(3)), 0x401FFFFFFFFFFFFE) == 1,
-  "KNOWN: pow(2, 3) is 1 ULP under Rust's exact 0x4020000000000000");
-assert(_h_bits(_prk_pow(f64_neg(F64_TWO), f64_from(3)), 0xC01FFFFFFFFFFFFE) == 1,
-  "KNOWN: pow(-2, 3) is 1 ULP under Rust's exact 0xC020000000000000");
+# unobserved — which is the failure mode 2.2.4 documented, and the tripwire DID
+# ITS JOB: the cyrius 6.6.2 bump CLOSED three of the four and turned this file red
+# instead of letting it drift. Those three are now pinned to the CORRECT values.
+# `pow(2, 0.5)` is still 1 ULP under and stays pinned to its measured value; if
+# THAT one fails, the last divergence closed and src/error.cyr's note retires.
+assert(_h_bits(_prk_pow(F64_TWO, f64_from(3)), 0x4020000000000000) == 1,
+  "pow(2, 3) is now EXACT (1 ULP under until cyrius 6.6.2)");
+assert(_h_bits(_prk_pow(f64_neg(F64_TWO), f64_from(3)), 0xC020000000000000) == 1,
+  "pow(-2, 3) is now EXACT (1 ULP under until cyrius 6.6.2)");
 assert(_h_bits(_prk_pow(F64_TWO, F64_HALF), 0x3FF6A09E667F3BCC) == 1,
   "KNOWN: pow(2, 0.5) is 1 ULP under Rust's 0x3FF6A09E667F3BCD");
-assert(_h_bits(_prk_pow(0x8000000000000001, f64_from(3)), ZERO) == 1,
-  "KNOWN: pow(-5e-324, 3) underflows to +0.0 where Rust gives -0.0");
+assert(_h_bits(_prk_pow(0x8000000000000001, f64_from(3)), NZERO) == 1,
+  "pow(-5e-324, 3) now underflows to -0.0, matching Rust (+0.0 until 6.6.2)");
 assert(_h_bits(_prk_pow(f64_neg(F64_TWO), F64_HALF), NNAN) == 1,
   "control: a non-integral exponent on a negative base is still NaN");
 

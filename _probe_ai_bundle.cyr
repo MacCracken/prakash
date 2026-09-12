@@ -1,0 +1,7 @@
+include "dist/prakash-ai.cyr"
+alloc_init();
+var c = ai_daimon_config_default();
+var m = medium_air();
+var g = rgb_new(f64_from(1), f64_from(0), f64_from(0));
+var x = color_rendering_index(illuminant_d65());
+syscall(SYS_EXIT, 0);

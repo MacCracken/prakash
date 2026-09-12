@@ -1783,3 +1783,12 @@ self-contained Cyrius bundle. soorat, kiran, and ranga remain Rust for now; the
 - lens: thin lens equation, magnification, lensmaker's equation, optical power, mirrors, combined focal length, lens classification, depth of field
 - pbr: Fresnel-Schlick (scalar/RGB), GGX and Beckmann NDF, Schlick-GGX geometry, Smith geometry, Cook-Torrance specular BRDF, Lambert diffuse (scalar/RGB), IOR→F0
 - error: PrakashError with #[non_exhaustive], 7 variants
+
+## [Unreleased]
+
+## [2.2.9] - 2026-09-11
+
+### Changed
+
+- **Toolchain `6.5.33` → `6.6.2`.** No source change; the value form needed none.
+  Build, tests, and any bench/fuzz/distlib target the repo ships re-verified at the new pin.
