@@ -1,0 +1,87 @@
+# Guard-constant pins.
+#
+# 2.3.2 replaced 18 per-call constant helpers with hex literals. Each had been
+# running a division — several also an int->f64 conversion — on EVERY call, from
+# guard tests inside hot paths (Fresnel, ray tracing, Zernike, the CIE tables,
+# the Smith geometry terms). `_pbr_ln2` and `_pbr_frac_1_pi` had always been
+# literals and their comment stated the reason; the rest simply had not followed
+# it.
+#
+# ⚠ THESE ASSERTIONS ARE THE PROOF THAT THE SWAP WAS BIT-IDENTICAL, and they are
+# the only thing standing between a future edit and a silently moved published
+# optics value. Each recomputes the ORIGINAL expression and compares bit-for-bit
+# against the literal that replaced it. A tolerance would defeat the purpose.
+#
+# ⚠ The SOURCE modules are included, not `dist/prakash.cyr`. Including the bundle
+# was the first attempt and it is the wrong instrument: the bundle is a build
+# artifact, so a constant edited in `src/` without a `cyrius distlib` would be
+# checked against the OLD digits and pass. The whole point of these rows is to
+# fail on exactly that edit. (`tests/ai_bundle.tcyr` covers the separate question
+# of whether the shipped bundles link.) Order below is the `[lib]` dependency
+# order from cyrius.cyml.
+
+include "src/error.cyr"
+include "src/ray_core.cyr"
+include "src/ray_fresnel.cyr"
+include "src/ray_trace.cyr"
+include "src/ray_simulate.cyr"
+include "src/ray_system.cyr"
+include "src/ray_dispersion.cyr"
+include "src/ray_fiber.cyr"
+include "src/spectral_core.cyr"
+include "src/spectral_cie.cyr"
+include "src/spectral_photometry.cyr"
+include "src/wave_core.cyr"
+include "src/wave_polarization.cyr"
+include "src/wave_coherence.cyr"
+include "src/wave_airy.cyr"
+include "src/wave_fabry_perot.cyr"
+include "src/wave_diffraction.cyr"
+include "src/wave_zernike.cyr"
+include "src/wave_pattern.cyr"
+include "src/pbr_core.cyr"
+include "src/pbr_advanced.cyr"
+include "src/lens.cyr"
+include "src/atmosphere.cyr"
+include "src/bridge.cyr"
+include "src/serialize.cyr"
+
+alloc_init();
+
+test_group("guard_constants_1e15");
+
+var E15 = f64_div(F64_ONE, f64_from(1000000000000000));
+assert_eq(_atm_eps15(),  E15, "_atm_eps15 == 1/1e15");
+assert_eq(_trace_eps15(), E15, "_trace_eps15 == 1/1e15");
+assert_eq(_sys_eps15(),  E15, "_sys_eps15 == 1/1e15");
+assert_eq(_sim_eps15(),  E15, "_sim_eps15 == 1/1e15");
+assert_eq(_lens_eps15(), E15, "_lens_eps15 == 1/1e15");
+assert_eq(_zern_eps15(), E15, "_zern_eps15 == 1/1e15");
+assert_eq(_wp_eps15(),   E15, "_wp_eps15 == 1/1e15");
+assert_eq(_phot_eps15(), E15, "_phot_eps15 == 1/1e15");
+assert_eq(_fr_eps15(),   E15, "_fr_eps15 == 1/1e15");
+assert_eq(_disp_eps15(), E15, "_disp_eps15 == 1/1e15");
+assert_eq(_cie_eps15(),  E15, "_cie_eps15 == 1/1e15");
+assert_eq(_pbr_eps15(),  E15, "_pbr_eps15 == 1/1e15");
+
+test_group("guard_constants_1e10");
+
+var E10 = f64_div(F64_ONE, f64_from(10000000000));
+assert_eq(_trace_eps10(), E10, "_trace_eps10 == 1/1e10");
+assert_eq(_wave_eps10(),  E10, "_wave_eps10 == 1/1e10");
+assert_eq(_cie_eps10(),   E10, "_cie_eps10 == 1/1e10");
+
+test_group("guard_constants_other");
+
+assert_eq(_lens_two_over_pi(), f64_div(F64_TWO, F64_PI), "_lens_two_over_pi == 2/pi");
+assert_eq(_pbr_alpha_min(), f64_div(F64_ONE, f64_from(100000000)), "_pbr_alpha_min == 1/1e8");
+assert_eq(_pbr_min_dot(), f64_div(f64_from(1), f64_from(1000)), "_pbr_min_dot == 1/1000");
+assert_eq(_pbr_ln2(), f64_ln(F64_TWO), "_pbr_ln2 == ln(2)");
+
+# Every one of the above is a DISTINCT literal in a distinct module. Assert the
+# three families really do share a value, so a typo in one module's digits shows
+# up here as well as in its own row.
+assert_eq(_atm_eps15(), _pbr_eps15(), "the 1e-15 family agrees across modules");
+assert_eq(_trace_eps10(), _cie_eps10(), "the 1e-10 family agrees across modules");
+
+var r = assert_summary();

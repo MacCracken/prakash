@@ -10,7 +10,10 @@ var SURF_SPHERE = 0;
 var SURF_PLANE = 1;
 
 # Small geometry thresholds (Rust literals 1e-15 / 1e-10).
-fn _trace_eps15() { return f64_div(F64_ONE, f64_from(1000000000000000)); }
+# Literal, not a division: this ran `f64_div(F64_ONE, f64_from(1000000000000000))` on EVERY call, and it is read
+# from guard tests in hot paths. 0x3CD203AF9EE75616 is exactly what that expression
+# produced — asserted in the module's suite, not assumed. (2.3.2)
+fn _trace_eps15() { return 0x3CD203AF9EE75616; }
 # 1 if the hit at parameter `t` lies on the cap of the sphere that contains the
 # surface vertex, else 0. The vertex sits at z = cz - radius, so the vertex cap
 # is the side where (hit_z - cz) has the OPPOSITE sign to radius; the product
@@ -23,7 +26,10 @@ fn _trace_on_vertex_cap(pz, dz, t, cz, radius) {
     return 1;
 }
 
-fn _trace_eps10() { return f64_div(F64_ONE, f64_from(10000000000)); }
+# Literal, not a division: this ran `f64_div(F64_ONE, f64_from(10000000000))` on EVERY call, and it is read
+# from guard tests in hot paths. 0x3DDB7CDFD9D7BDBB is exactly what that expression
+# produced — asserted in the module's suite, not assumed. (2.3.2)
+fn _trace_eps10() { return 0x3DDB7CDFD9D7BDBB; }
 
 # An interface between two media. shape_tag is SURF_SPHERE/SURF_PLANE; radius is
 # the radius of curvature (sphere only; +radius = center to the right).

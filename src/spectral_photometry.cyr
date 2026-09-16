@@ -7,7 +7,10 @@
 # buffers of exact IEEE-754 hex bit patterns generated from the Rust source.
 
 fn _vl(t, i) { return load64(t + i * 8); }
-fn _phot_eps15() { return f64_div(F64_ONE, f64_from(1000000000000000)); }
+# Literal, not a division: this ran `f64_div(F64_ONE, f64_from(1000000000000000))` on EVERY call, and it is read
+# from guard tests in hot paths. 0x3CD203AF9EE75616 is exactly what that expression
+# produced — asserted in the module's suite, not assumed. (2.3.2)
+fn _phot_eps15() { return 0x3CD203AF9EE75616; }
 
 # ── V(lambda) tables (generated: exact IEEE-754 hex from spectral/photometry.rs) ──
 

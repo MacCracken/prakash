@@ -255,4 +255,19 @@ for (var _gk = 1; _gk <= 10; _gk = _gk + 1) {
 
 assert(f64_ln(F64_TWO) == _pbr_ln2(), "_pbr_ln2 is bit-identical to f64_ln(2)");
 
+# ── 2.3.2: the literalised guard constants ────────
+# _pbr_eps15 and _pbr_alpha_min were divisions evaluated on every call until
+# 2.3.2; they are now hex literals. These assertions ARE the proof that the swap
+# was bit-identical — they recompute the original expression and compare. Without
+# them a future edit could change the constant's last bit and move published PBR
+# values with nothing watching. Same reason _pbr_ln2 was already a literal.
+test_group("pbr_guard_constants");
+assert_eq(_pbr_eps15(), f64_div(F64_ONE, f64_from(1000000000000000)),
+  "_pbr_eps15 literal == 1/1e15 bit-for-bit");
+assert_eq(_pbr_alpha_min(), f64_div(F64_ONE, f64_from(100000000)),
+  "_pbr_alpha_min literal == 1/1e8 bit-for-bit");
+assert_eq(_pbr_ln2(), f64_ln(F64_TWO), "_pbr_ln2 literal == f64_ln(2) bit-for-bit");
+assert_eq(_pbr_min_dot(), f64_div(f64_from(1), f64_from(1000)),
+  "_pbr_min_dot literal == 1/1000 bit-for-bit");
+
 var r = assert_summary();

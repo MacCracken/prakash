@@ -1,4 +1,0 @@
-include "dist/prakash.cyr"
-alloc_init();
-var p = psf_diffraction_limited(32, f64_from(100));
-syscall(SYS_EXIT, 0);

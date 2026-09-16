@@ -12,7 +12,10 @@ var EVENT_REFLECTION = 1;
 var EVENT_ESCAPED = 2;
 var EVENT_TERMINATED = 3;
 
-fn _sim_eps15() { return f64_div(F64_ONE, f64_from(1000000000000000)); }
+# Literal, not a division: this ran `f64_div(F64_ONE, f64_from(1000000000000000))` on EVERY call, and it is read
+# from guard tests in hot paths. 0x3CD203AF9EE75616 is exactly what that expression
+# produced — asserted in the module's suite, not assumed. (2.3.2)
+fn _sim_eps15() { return 0x3CD203AF9EE75616; }
 
 # Euclidean distance between two RayVec3 points.
 fn _sim_dist(a, b) {

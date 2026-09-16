@@ -7,7 +7,10 @@
 # bit-for-bit. Wavelengths are in micrometers.
 
 fn _disp_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
-fn _disp_eps15() { return f64_div(F64_ONE, f64_from(1000000000000000)); }
+# Literal, not a division: this ran `f64_div(F64_ONE, f64_from(1000000000000000))` on EVERY call, and it is read
+# from guard tests in hot paths. 0x3CD203AF9EE75616 is exactly what that expression
+# produced — asserted in the module's suite, not assumed. (2.3.2)
+fn _disp_eps15() { return 0x3CD203AF9EE75616; }
 
 # Fraunhofer reference wavelengths (micrometers).
 #must_use

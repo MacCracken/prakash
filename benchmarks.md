@@ -18,41 +18,41 @@ harness-reported avg per iter.
 > column and this table filters on it.
 > **81 row(s) across 3 earlier run(s) are excluded** from the table for that reason — they remain in the CSV.
 
-| Benchmark | Baseline (`7ec51c8`) | Mid (`524a7aa`) | Current (`0dd2fcd`) | Δ |
+| Benchmark | Baseline (`7ec51c8`) | Mid (`8689997`) | Current (`59abdf9`) | Δ |
 |---|---|---|---|---|
-| atmosphere/mie_phase_cornette_shanks | 23.0 ns | 22.0 ns | 21.0 ns | -8.7% |
+| atmosphere/mie_phase_cornette_shanks | 23.0 ns | 21.0 ns | 20.0 ns | -13.0% |
 | atmosphere/rayleigh_cross_section | 9.0 ns | 8.0 ns | 8.0 ns | -11.1% |
-| atmosphere/sky_color_rgb | 1.014 µs | 949.0 ns | 1.016 µs | +0.2% |
-| bridge/stellar_temperature_to_rgb | 119.0 ns | 110.0 ns | 111.0 ns | -6.7% |
-| lens/mtf_diffraction_limited | 88.0 ns | 81.0 ns | 95.0 ns | +8.0% |
-| lens/seidel_coefficients | 117.0 ns | 101.0 ns | 91.0 ns | -22.2% |
-| pbr/cook_torrance | 101.0 ns | 95.0 ns | 91.0 ns | -9.9% |
-| pbr/distribution_ggx | 22.0 ns | 20.0 ns | 23.0 ns | +4.5% |
-| pbr/fresnel_schlick | 17.0 ns | 17.0 ns | 16.0 ns | -5.9% |
-| pbr/henyey_greenstein | 19.0 ns | 17.0 ns | 18.0 ns | -5.3% |
+| atmosphere/sky_color_rgb | 1.014 µs | 956.0 ns | 860.0 ns | -15.2% |
+| bridge/stellar_temperature_to_rgb | 119.0 ns | 116.0 ns | 111.0 ns | -6.7% |
+| lens/mtf_diffraction_limited | 88.0 ns | 81.0 ns | 94.0 ns | +6.8% |
+| lens/seidel_coefficients | 117.0 ns | 96.0 ns | 89.0 ns | -23.9% |
+| pbr/cook_torrance | 101.0 ns | 98.0 ns | 76.0 ns | -24.8% |
+| pbr/distribution_ggx | 22.0 ns | 20.0 ns | 17.0 ns | -22.7% |
+| pbr/fresnel_schlick | 17.0 ns | 16.0 ns | 12.0 ns | -29.4% |
+| pbr/henyey_greenstein | 19.0 ns | 18.0 ns | 17.0 ns | -10.5% |
 | pbr/iridescence_fresnel | 144.0 ns | 135.0 ns | 114.0 ns | -20.8% |
-| ray/fiber_na | 9.0 ns | 8.0 ns | 9.0 ns | +0.0% |
-| ray/fresnel_unpolarized | 108.0 ns | 115.0 ns | 115.0 ns | +6.5% |
-| ray/sellmeier_n_at | 51.0 ns | 47.0 ns | 37.0 ns | -27.5% |
-| ray/spot_diagram | — | 24.366 µs | 18.297 µs | — |
-| ray/trace_sequential | — | 836.0 ns | 634.0 ns | — |
-| ray/trace_surface | — | 290.0 ns | 214.0 ns | — |
-| ray/v_number | 9.0 ns | 9.0 ns | 8.0 ns | -11.1% |
-| serialize/rgb_to_json | 3.443 µs | 2.954 µs | 2.873 µs | -16.6% |
-| spectral/color_rendering_index | — | 11.046 µs | 281.384 µs | — |
-| spectral/luminous_flux | — | 3.792 µs | 2.528 µs | — |
-| spectral/planck_radiance | 80.0 ns | 111.0 ns | 112.0 ns | +40.0% |
-| spectral/spd_at | 43.0 ns | 43.0 ns | 30.0 ns | -30.2% |
-| spectral/spd_blackbody | — | 9.530 µs | 9.472 µs | — |
-| spectral/spd_to_xyz | — | 1.481 µs | 1.470 µs | — |
-| spectral/wavelength_to_rgb | 89.0 ns | 81.0 ns | 61.0 ns | -31.5% |
-| wave/airy_pattern | 217.0 ns | 205.0 ns | 201.0 ns | -7.4% |
-| wave/bessel_j1 | 61.0 ns | 56.0 ns | 56.0 ns | -8.2% |
-| wave/coating_reflectance | 103.0 ns | 107.0 ns | 105.0 ns | +1.9% |
-| wave/diffraction_pattern_2d_8x8 | 15.888 µs | 14.355 µs | 13.888 µs | -12.6% |
-| wave/fresnel_integral_c | 157.0 ns | 139.0 ns | 125.0 ns | -20.4% |
-| wave/interference_pattern_16x16 | — | 108.862 µs | 91.857 µs | — |
-| wave/malus_law | 46.0 ns | 49.0 ns | 49.0 ns | +6.5% |
-| wave/pattern2d_normalized_64x64 | — | 16.695 µs | 16.082 µs | — |
-| wave/single_slit_intensity | 121.0 ns | 113.0 ns | 112.0 ns | -7.4% |
-| wave/zernike_poly | 110.0 ns | 102.0 ns | 98.0 ns | -10.9% |
+| ray/fiber_na | 9.0 ns | 9.0 ns | 9.0 ns | +0.0% |
+| ray/fresnel_unpolarized | 108.0 ns | 118.0 ns | 118.0 ns | +9.3% |
+| ray/sellmeier_n_at | 51.0 ns | 47.0 ns | 34.0 ns | -33.3% |
+| ray/spot_diagram | — | 24.401 µs | 18.288 µs | — |
+| ray/trace_sequential | — | 824.0 ns | 630.0 ns | — |
+| ray/trace_surface | — | 305.0 ns | 208.0 ns | — |
+| ray/v_number | 9.0 ns | 9.0 ns | 9.0 ns | +0.0% |
+| serialize/rgb_to_json | 3.443 µs | 2.985 µs | 2.879 µs | -16.4% |
+| spectral/color_rendering_index | — | 10.997 µs | 281.845 µs | — |
+| spectral/luminous_flux | — | 3.697 µs | 2.612 µs | — |
+| spectral/planck_radiance | 80.0 ns | 112.0 ns | 117.0 ns | +46.2% |
+| spectral/spd_at | 43.0 ns | 41.0 ns | 32.0 ns | -25.6% |
+| spectral/spd_blackbody | — | 9.513 µs | 9.477 µs | — |
+| spectral/spd_to_xyz | — | 1.508 µs | 1.465 µs | — |
+| spectral/wavelength_to_rgb | 89.0 ns | 91.0 ns | 68.0 ns | -23.6% |
+| wave/airy_pattern | 217.0 ns | 207.0 ns | 202.0 ns | -6.9% |
+| wave/bessel_j1 | 61.0 ns | 49.0 ns | 50.0 ns | -18.0% |
+| wave/coating_reflectance | 103.0 ns | 108.0 ns | 105.0 ns | +1.9% |
+| wave/diffraction_pattern_2d_8x8 | 15.888 µs | 14.481 µs | 13.987 µs | -12.0% |
+| wave/fresnel_integral_c | 157.0 ns | 134.0 ns | 127.0 ns | -19.1% |
+| wave/interference_pattern_16x16 | — | 107.413 µs | 91.436 µs | — |
+| wave/malus_law | 46.0 ns | 50.0 ns | 49.0 ns | +6.5% |
+| wave/pattern2d_normalized_64x64 | — | 16.668 µs | 16.081 µs | — |
+| wave/single_slit_intensity | 121.0 ns | 113.0 ns | 114.0 ns | -5.8% |
+| wave/zernike_poly | 110.0 ns | 99.0 ns | 100.0 ns | -9.1% |

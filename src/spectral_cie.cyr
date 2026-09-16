@@ -8,8 +8,14 @@
 # Spd just holds a values pointer + length (from_static and new are equivalent).
 
 fn _cie_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
-fn _cie_eps15() { return f64_div(F64_ONE, f64_from(1000000000000000)); }
-fn _cie_eps10() { return f64_div(F64_ONE, f64_from(10000000000)); }
+# Literal, not a division: this ran `f64_div(F64_ONE, f64_from(1000000000000000))` on EVERY call, and it is read
+# from guard tests in hot paths. 0x3CD203AF9EE75616 is exactly what that expression
+# produced — asserted in the module's suite, not assumed. (2.3.2)
+fn _cie_eps15() { return 0x3CD203AF9EE75616; }
+# Literal, not a division: this ran `f64_div(F64_ONE, f64_from(10000000000))` on EVERY call, and it is read
+# from guard tests in hot paths. 0x3DDB7CDFD9D7BDBB is exactly what that expression
+# produced — asserted in the module's suite, not assumed. (2.3.2)
+fn _cie_eps10() { return 0x3DDB7CDFD9D7BDBB; }
 
 # CMF table row accessors (row i, 24 bytes: x@0, y@8, z@16).
 fn _cmf_x(t, i) { return load64(t + i * 24); }

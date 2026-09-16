@@ -8,7 +8,10 @@
 # use wavelengths R=650nm, G=550nm, B=450nm; [f64;3] returns -> 3-f64 out buffers.
 
 fn _atm_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
-fn _atm_eps15() { return f64_div(F64_ONE, f64_from(1000000000000000)); }
+# Literal, not a division: this ran `f64_div(F64_ONE, f64_from(1000000000000000))` on EVERY call, and it is read
+# from guard tests in hot paths. 0x3CD203AF9EE75616 is exactly what that expression
+# produced — asserted in the module's suite, not assumed. (2.3.2)
+fn _atm_eps15() { return 0x3CD203AF9EE75616; }
 
 # Physical constants.
 fn _atm_n_s() { return 0x4534B66D1EB52A20; }                # 2.504e25 molecules/m^3

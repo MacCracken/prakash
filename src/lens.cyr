@@ -7,7 +7,10 @@
 # error). `f64::INFINITY` = 0x7FF0000000000000; 1/inf = 0 via IEEE division.
 
 fn _lens_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
-fn _lens_eps15() { return f64_div(F64_ONE, f64_from(1000000000000000)); }
+# Literal, not a division: this ran `f64_div(F64_ONE, f64_from(1000000000000000))` on EVERY call, and it is read
+# from guard tests in hot paths. 0x3CD203AF9EE75616 is exactly what that expression
+# produced — asserted in the module's suite, not assumed. (2.3.2)
+fn _lens_eps15() { return 0x3CD203AF9EE75616; }
 fn _lens_inf() { return 0x7FF0000000000000; }
 
 # x^2 and x^3 matching Rust powi (square-and-multiply).
@@ -210,7 +213,10 @@ fn lens_field_of_view_diagonal(width, height, focal_length) {
 
 # ── MTF ────────
 
-fn _lens_two_over_pi() { return f64_div(F64_TWO, F64_PI); }
+# Literal, not a division: this ran `f64_div(F64_TWO, F64_PI)` on EVERY call, and it is read
+# from guard tests in hot paths. 0x3FE45F306DC9C883 is exactly what that expression
+# produced — asserted in the module's suite, not assumed. (2.3.2)
+fn _lens_two_over_pi() { return 0x3FE45F306DC9C883; }
 
 # Diffraction-limited cutoff frequency: 1 / (lambda * N).
 #must_use

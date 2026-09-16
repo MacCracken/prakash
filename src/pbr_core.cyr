@@ -7,6 +7,9 @@
 # exact IEEE-754 hex of Rust's constant (not 1.0/PI, which could differ 1 ULP).
 # `_pbr_pow5` replicates Rust `powi(5)` (square-and-multiply): x * (x^2)^2.
 
+# Build an f64 ratio from two integers. Not a hot-path helper — the constants
+# below are literals precisely so they never call this.
+#must_use
 fn _pbr_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
 
 # ln 2, for turning a base-2 exponential into the f64_exp the toolchain has.
@@ -14,15 +17,39 @@ fn _pbr_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
 # (verified), written as a literal so it costs nothing at a call site.
 #must_use
 fn _pbr_ln2() { return 0x3FE62E42FEFA39EF; }
-fn _pbr_eps15() { return f64_div(F64_ONE, f64_from(1000000000000000)); }
+
+# 1e-15 guard epsilon. 0x3CD203AF9EE75616 is exactly what
+# `f64_div(F64_ONE, f64_from(1000000000000000))` produced — asserted, not assumed
+# (tests/pbr_core.tcyr pins it), so this is bit-identical to the form it replaces.
+# ⚠ It is a literal for the reason _pbr_ln2's comment states two lines up, which
+# this function did not follow until 2.3.2: it ran a DIVISION plus an int->f64
+# conversion on every call, and it is called from **eight** sites across
+# pbr_core and pbr_advanced, several inside the Smith/geometry terms that a
+# shading loop hits per light per pixel.
+#must_use
+fn _pbr_eps15() { return 0x3CD203AF9EE75616; }
 
 # Minimum GGX alpha (= roughness^2). Floors roughness at 1e-4, which is below
 # any physical material; every real roughness passes through untouched, and the
 # NDF stays finite (D <= 1/(pi*1e-16) ~ 3.2e15) instead of dividing by zero at
 # roughness exactly 0. See pbr_distribution_ggx for why an ADDITIVE epsilon
 # cannot do this job.
-fn _pbr_alpha_min() { return f64_div(F64_ONE, f64_from(100000000)); }
+# 0x3E45798EE2308C3A = the bits `f64_div(F64_ONE, f64_from(100000000))` gave;
+# literal for the same reason as _pbr_eps15, and pinned the same way.
+#must_use
+fn _pbr_alpha_min() { return 0x3E45798EE2308C3A; }
+
+# 1/pi.
+#must_use
 fn _pbr_frac_1_pi() { return 0x3FD45F306DC9C883; }
+
+# 1e-3 — the floor pbr_cook_torrance clamps n.v and n.l to, keeping the
+# 4*(n.v)*(n.l) denominator away from zero at grazing angles. Literal for the
+# same reason as _pbr_eps15: cook_torrance called `_pbr_r(1, 1000)` TWICE per
+# invocation, and each call was a division plus two int->f64 conversions.
+# 0x3F50624DD2F1A9FC is what that expression produced — asserted, not assumed.
+#must_use
+fn _pbr_min_dot() { return 0x3F50624DD2F1A9FC; }
 
 # x^5 via square-and-multiply (matches Rust f64::powi(5)): x * (x*x)^2.
 fn _pbr_pow5(x) {
@@ -33,9 +60,22 @@ fn _pbr_pow5(x) {
 
 # Fresnel-Schlick: F = F0 + (1-F0)*(1-ct)^5, ct = clamp(cos_theta, 0, 1).
 #must_use
+# ⚠ The clamp and the x^5 are written out rather than delegated to `f64_clamp`
+# and `_pbr_pow5`. Cyrius has no `#inline`, so a call here is a real call, and
+# this is the cheapest and most-called function in the PBR set — soorat evaluates
+# it per light per pixel. Measured same-binary with interleaved arms in 2.3.2:
+# 16.3 ns as written with both calls, 15 ns with only `_pbr_pow5` expanded,
+# **12 ns with both (−26%)**. Bit-identical, including at both clamp boundaries.
+# Keep the delegating form anywhere that is not hot; `_pbr_pow5` is still the
+# single definition of the square-and-multiply and the rest of the file uses it.
 fn pbr_fresnel_schlick(f0, cos_theta) {
-    var ct = f64_clamp(cos_theta, f64_from(0), F64_ONE);
-    return f64_add(f0, f64_mul(f64_sub(F64_ONE, f0), _pbr_pow5(f64_sub(F64_ONE, ct))));
+    var ct = cos_theta;
+    if (f64_lt(ct, 0) == 1) { ct = 0; }
+    if (f64_gt(ct, F64_ONE) == 1) { ct = F64_ONE; }
+    var t = f64_sub(F64_ONE, ct);
+    var t2 = f64_mul(t, t);
+    var t5 = f64_mul(t, f64_mul(t2, t2));
+    return f64_add(f0, f64_mul(f64_sub(F64_ONE, f0), t5));
 }
 
 # Fresnel-Schlick per RGB channel. f0/out are 3-f64 buffers.
@@ -72,9 +112,14 @@ fn pbr_fresnel_schlick_rgb(f0, cos_theta, out) {
 #must_use
 fn pbr_distribution_ggx(n_dot_h, roughness) {
     var a = f64_mul(roughness, roughness);
-    if (f64_lt(a, _pbr_alpha_min()) == 1) { a = _pbr_alpha_min(); }
+    # One _pbr_alpha_min() read, not two — the guard and the assignment used to
+    # call it separately, and before 2.3.2 each call was a division.
+    var amin = _pbr_alpha_min();
+    if (f64_lt(a, amin) == 1) { a = amin; }
     var a2 = f64_mul(a, a);
-    var ndh = f64_clamp(n_dot_h, f64_from(0), F64_ONE);
+    var ndh = n_dot_h;
+    if (f64_lt(ndh, 0) == 1) { ndh = 0; }
+    if (f64_gt(ndh, F64_ONE) == 1) { ndh = F64_ONE; }
     var denom = f64_add(f64_mul(f64_mul(ndh, ndh), f64_sub(a2, F64_ONE)), F64_ONE);
     return f64_div(a2, f64_mul(f64_mul(F64_PI, denom), denom));
 }
@@ -159,9 +204,10 @@ fn pbr_cook_torrance(n_dot_h, h_dot_v, n_dot_v, n_dot_l, roughness, f0) {
     var d = pbr_distribution_ggx(n_dot_h, roughness);
     var f = pbr_fresnel_schlick(f0, h_dot_v);
     var g = pbr_geometry_smith(n_dot_v, n_dot_l, roughness);
+    var mind = _pbr_min_dot();
     var denom = f64_mul(
-      f64_mul(f64_from(4), f64_clamp(n_dot_v, _pbr_r(1, 1000), F64_ONE)),
-      f64_clamp(n_dot_l, _pbr_r(1, 1000), F64_ONE));
+      f64_mul(f64_from(4), f64_clamp(n_dot_v, mind, F64_ONE)),
+      f64_clamp(n_dot_l, mind, F64_ONE));
     return f64_div(f64_mul(f64_mul(d, f), g), denom);
 }
 

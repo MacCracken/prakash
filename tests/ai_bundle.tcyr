@@ -1,0 +1,72 @@
+# AI-bundle consumer link check — the one gate nothing else covers.
+#
+# ⚠ WHAT THIS EXISTS TO CATCH, AND WHY THE OTHER GATES CANNOT. prakash ships two
+# bundles. The core one is covered end to end: `examples/*.cyr` include
+# `dist/prakash.cyr` and CI RUNS them, failing on a non-zero exit. The AI bundle
+# had no equivalent. CI regenerates `dist/prakash-ai.cyr` and diffs it for drift
+# — which proves the bundler is deterministic, not that the result LINKS — and
+# `tests/ai.tcyr` includes `src/ai.cyr`, the source, not the shipped artifact. So
+# an AI bundle that assembled but did not link (a module dropped from [lib.ai], a
+# symbol that resolves in src/ but not in bundle order, a sandhi fold missing
+# from the sidecar) would pass every gate prakash had.
+#
+# Through 2.3.1 the only thing that compiled this bundle was an untracked
+# `_probe_ai_bundle.cyr` at the repo root: it asserted nothing, exited 0
+# unconditionally, and CI never ran it. Deleted in 2.3.2; this replaces it.
+#
+# This file therefore includes the BUNDLE, never `src/`. That is the whole point:
+# it is the surface a consumer gets.
+
+include "dist/prakash-ai.cyr"
+
+alloc_init();
+
+# ── The AI half links and behaves ────────
+test_group("ai_bundle_ai_surface");
+
+var _d = ai_daimon_config_default();
+assert(_d != 0, "ai_daimon_config_default allocates through the bundle");
+assert_eq(streq(DaimonConfig_endpoint(_d), "http://localhost:8090"), 1,
+  "bundled daimon default endpoint is localhost:8090");
+
+var _h = ai_hoosh_config_default();
+assert(_h != 0, "ai_hoosh_config_default allocates through the bundle");
+assert_eq(streq(HooshConfig_endpoint(_h), "http://localhost:8088"), 1,
+  "bundled hoosh default endpoint is localhost:8088");
+
+# The error channel survives bundling — this is the path 2.2.8 fixed, and it
+# reaches PK_ERR_* from error.cyr, so it also proves the error module is in the
+# bundle and not merely referenced.
+var _re = 0;
+var _rid = ai_register_agent(0, &_re);
+assert_eq(_re, PK_ERR_INVALID_PARAMETER,
+  "bundled ai_register_agent(null) reports PK_ERR_INVALID_PARAMETER");
+assert_eq(streq(_rid, "unknown"), 1,
+  "bundled ai_register_agent(null) returns the \"unknown\" sentinel");
+
+# ── The optics half is present in the SAME bundle ────────
+# [lib.ai] is [lib] + src/ai.cyr. If the profile ever regressed to shipping only
+# the AI client, the asserts above would still pass, so pin an optics value too.
+test_group("ai_bundle_optics_surface");
+
+var _err = 0;
+var _n = 0;
+# Snell at 45 deg from air into n=1.5 — the same contract ray_core pins.
+var _ang = f64_div(F64_PI, f64_from(4));
+var _t = ray_snell(F64_ONE, f64_div(f64_from(15), f64_from(10)), _ang, &_err);
+assert_eq(_err, PK_ERR_NONE, "bundled ray_snell reports success");
+assert(f64_lt(_t, _ang) == 1, "bundled ray_snell bends toward the normal");
+
+# A spectral value, to prove the CIE tables rode along rather than being pruned.
+var _rgb = wavelength_to_rgb(f64_from(550), &_err);
+assert_eq(_err, PK_ERR_NONE, "bundled wavelength_to_rgb reports success");
+assert(_rgb != 0, "bundled wavelength_to_rgb returns a handle");
+assert(f64_gt(Rgb_g(_rgb), Rgb_b(_rgb)) == 1,
+  "550nm is green-dominant through the bundle");
+
+# And an FFT-backed path, which reaches hisab through the bundle's own include
+# order — the dependency 2.3.0's Result migration moved.
+var _psf = psf_diffraction_limited(8, f64_from(100));
+assert(_psf != 0, "bundled psf_diffraction_limited returns a pattern");
+
+var r = assert_summary();

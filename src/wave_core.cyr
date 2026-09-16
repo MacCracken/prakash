@@ -8,7 +8,10 @@
 # is banker's), so _wave_round is used for the interference conditions.
 
 fn _wave_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
-fn _wave_eps10() { return f64_div(F64_ONE, f64_from(10000000000)); }
+# Literal, not a division: this ran `f64_div(F64_ONE, f64_from(10000000000))` on EVERY call, and it is read
+# from guard tests in hot paths. 0x3DDB7CDFD9D7BDBB is exactly what that expression
+# produced — asserted in the module's suite, not assumed. (2.3.2)
+fn _wave_eps10() { return 0x3DDB7CDFD9D7BDBB; }
 
 # Round half away from zero (matches Rust f64::round).
 fn _wave_round(x) {

@@ -7,7 +7,10 @@
 # `(power, reduced_thickness)` tuple becomes a ParaxSurf struct; String names are
 # cstr pointers (compared with streq). Vectors use the stdlib `vec`.
 
-fn _sys_eps15() { return f64_div(F64_ONE, f64_from(1000000000000000)); }
+# Literal, not a division: this ran `f64_div(F64_ONE, f64_from(1000000000000000))` on EVERY call, and it is read
+# from guard tests in hot paths. 0x3CD203AF9EE75616 is exactly what that expression
+# produced — asserted in the module's suite, not assumed. (2.3.2)
+fn _sys_eps15() { return 0x3CD203AF9EE75616; }
 
 # Positive-infinity bit pattern (flat-surface radius).
 fn _sys_inf() { return 0x7FF0000000000000; }

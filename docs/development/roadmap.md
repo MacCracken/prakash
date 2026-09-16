@@ -21,11 +21,30 @@ Prakash does NOT own:
 - **Math primitives** → hisab (vectors, geometry, calculus, Complex, FFT)
 - **Color science beyond spectral** → ranga (ICC profiles, gamut mapping)
 
-## Performance
+## How this file is organised
 
-Ranked by measured impact against the 2.0.1 Rust-vs-Cyrius baseline — see
-`docs/benchmarks-rust-v-cyrius.md`. Both remaining rows carry a caveat that cost
-a measurement to establish.
+Items are grouped by the **release class their change implies**, not by the order
+anyone intends to do them:
+
+| Bucket | Means | Rule |
+|---|---|---|
+| **2.3.x — patch** | no public API moves | internals, perf, tests, docs, tooling |
+| **2.4.x — minor** | adds public API | new entry points, new capability |
+| **2.x — demand-gated** | adds a subsystem | build when a consumer actually asks |
+| **Blocked** | not prakash's move | waiting on something external |
+
+⚠ **The bucket is a SemVer classification, not a queue.** Anything in 2.3.x can
+ship in any order, in any patch release, in any combination — the bucket only
+promises it will not force a minor bump. Same within 2.4.x. So reshuffling is
+free by construction, and the only thing that moves an item between buckets is a
+change in what it does to the public surface.
+
+**Nothing here has a dependency on anything else here.** If that ever stops being
+true, say so in the item itself rather than relying on list order.
+
+## 2.3.x — patch: no public API change
+
+### Performance
 
 - [ ] **`serialize/rgb_to_json` ~2×** (floor-corrected ~1,520 ns → ~3,400 ns).
       ⚠ **Not a regression to undo.** 85% of the cost is `bayan_json_v_build` and
@@ -41,16 +60,72 @@ a measurement to establish.
       arena is reused across calls, and `bayan_json_v_obj_new` / `_float_new` /
       `str_from` on the same path have no `_a` form to route through it. This is a
       question about allocator lifetime, not a find-and-replace.
-- [ ] **Inline expansion** of the tiny `f64_*` wrappers and `_pbr_*`/`_lens_*`
-      helpers — per-call overhead is the dominant term on the cheap ops
-      (`pbr/fresnel_schlick` is 16.3× Rust at 17 ns absolute).
-      ⚠ **There is no `#inline` in Cyrius**, and `cycc` silently accepts unknown
-      attributes, so writing one would compile, lint clean, and do nothing. This
-      means hand-expansion at every site: real churn against rows of 16–22 ns,
-      squarely inside this host's 40% sub-100 ns spread. Any attempt must be
-      measured **same-binary with interleaved arms**, never as a whole-suite delta.
 
-### Constraints established by measurement — read before optimizing
+### Housekeeping
+
+- [ ] **Benchmark parity with `rust-old/`** — 180 Rust benches against 36 here;
+      131 subjects uncovered. Mostly trivial scalar micro-benchmarks, and the
+      expensive composites are already covered. Bulk-porting them would add noise
+      to `bench-history.csv` without changing a decision — **do it only if a
+      specific regression needs the resolution.**
+
+## 2.4.x — minor: adds public API
+
+- [ ] `spd_from_function(f, start_nm, end_nm)` — build an SPD from a continuous
+      spectral function via hisab `calc_integral_gauss5`. **The one place hisab's
+      quadrature genuinely fits.** The other candidates were investigated and do
+      not: `_spd_integrate` is the CIE-defined weighted sum over the tabulated
+      81-entry CMFs (the standard's method, not an approximation to improve),
+      `huygens_fresnel_1d` integrates a caller-supplied discrete buffer with no
+      continuous integrand, and `spd_blackbody` samples rather than integrates.
+      `src/` contains **zero `fncall` sites**, so this is a new capability — it
+      would be prakash's first function taking a callable integrand.
+
+## 2.x — demand-gated: build when a consumer asks
+
+Each of these is a subsystem, not an afternoon. None is speculative work worth
+doing before someone needs it; all are listed so the scope boundary stays visible.
+
+### Optics capability
+
+- [ ] Gradient-index (GRIN) optics: curved ray paths through variable-n media
+- [ ] Diffractive optical elements (DOE): phase gratings, holographic elements
+- [ ] Vectorial diffraction (Richards-Wolf): high-NA focusing beyond scalar theory
+- [ ] Hermite-Gaussian / Laguerre-Gaussian beam modes; M² beam quality
+- [ ] Higher-order (5th-order Buchdahl) aberrations; wavefront coefficients (W_040, …) from Seidel sums
+- [ ] Aberrated MTF from generalized pupil-function autocorrelation
+
+### Advanced
+
+- [ ] Fluorescence (Stokes shift, excitation/emission spectra)
+- [ ] Non-linear optics (SHG, Kerr) — if joshua needs it
+- [ ] Orbital angular momentum (Laguerre-Gaussian modes)
+- [ ] Metamaterials / negative refractive index
+- [ ] Age-dependent CIE observer (CIE 2006)
+
+## Blocked — not prakash's move
+
+Blocked on the consumers, not on prakash.
+
+- [ ] soorat / kiran / ranga: consume `dist/prakash.cyr` directly once they move to Cyrius
+
+## Constraints established by measurement — read before optimizing
+
+- **Hand-inlining pays at this scale, and only same-binary A/B can show it.**
+  2.3.2 took `pbr/fresnel_schlick` 16.3 → 12 ns (−26%), `distribution_ggx`
+  22 → 17 (−23%) and `cook_torrance` 93 → 79.7 (−14%) by writing out `f64_clamp`
+  and `_pbr_pow5` at the hot sites and turning eighteen per-call constant
+  divisions into hex literals. Cyrius has no `#inline`, so a helper call is a real
+  call. ⚠ Two rules came out of it: **a constant helper must return a literal**
+  (`_pbr_ln2`'s comment has always said so), and **every such change must be
+  pinned by an assertion that recomputes the original expression bit-for-bit** —
+  `tests/constants.tcyr` exists for that. Expanding a helper anywhere that is not
+  measurably hot is churn; the delegating form stays the default.
+- **Test the source, not the bundle, when pinning something in `src/`.**
+  `tests/constants.tcyr` first included `dist/prakash.cyr` and would have happily
+  checked a stale artifact's digits after a `src/` edit — passing on exactly the
+  change it exists to catch. Bundle inclusion is right for one question only,
+  *does the shipped artifact link*, which is `tests/ai_bundle.tcyr`'s job.
 
 - **SIMD is exhausted.** `pattern2d_normalized` is the only loop in prakash the
   `simd` fold applies to. The typed `f64v2_*`/`f64v4_*` wrappers are **slower than
@@ -74,60 +149,6 @@ a measurement to establish.
   phase functions out of a per-channel loop; the roadmap row that had stood there
   for three releases blamed allocation, and `src/atmosphere.cyr` performs no
   allocation at all. Check the premise before optimizing against it.
-
-## Accuracy & completeness (demand-gated — build on request)
-
-- [ ] Gradient-index (GRIN) optics: curved ray paths through variable-n media
-- [ ] Diffractive optical elements (DOE): phase gratings, holographic elements
-- [ ] Vectorial diffraction (Richards-Wolf): high-NA focusing beyond scalar theory
-- [ ] Hermite-Gaussian / Laguerre-Gaussian beam modes; M² beam quality
-- [ ] Higher-order (5th-order Buchdahl) aberrations; wavefront coefficients (W_040, …) from Seidel sums
-- [ ] Aberrated MTF from generalized pupil-function autocorrelation
-- [ ] `spd_from_function(f, start_nm, end_nm)` — build an SPD from a continuous
-      spectral function via hisab `calc_integral_gauss5`. **The one place hisab's
-      quadrature genuinely fits.** The other candidates were investigated and do
-      not: `_spd_integrate` is the CIE-defined weighted sum over the tabulated
-      81-entry CMFs (the standard's method, not an approximation to improve),
-      `huygens_fresnel_1d` integrates a caller-supplied discrete buffer with no
-      continuous integrand, and `spd_blackbody` samples rather than integrates.
-      `src/` contains **zero `fncall` sites**, so this is a new capability — it
-      would be prakash's first function taking a callable integrand.
-
-## Advanced / demand-gated
-
-- [ ] Fluorescence (Stokes shift, excitation/emission spectra)
-- [ ] Non-linear optics (SHG, Kerr) — if joshua needs it
-- [ ] Orbital angular momentum (Laguerre-Gaussian modes)
-- [ ] Metamaterials / negative refractive index
-- [ ] Age-dependent CIE observer (CIE 2006)
-
-## Housekeeping
-
-- [ ] **Benchmark parity with `rust-old/`** — 180 Rust benches against 36 here;
-      131 subjects uncovered. Mostly trivial scalar micro-benchmarks, and the
-      expensive composites are already covered. Bulk-porting them would add noise
-      to `bench-history.csv` without changing a decision — **do it only if a
-      specific regression needs the resolution.**
-- [ ] **Tracked probe files in the repo root.** `_probe_ai_bundle.cyr`,
-      `_probe_bundle_fft.cyr` and `_probe_pow.tcyr` are committed at the top level,
-      which `CLAUDE.md` forbids. All three landed in `15d900c` (2026-09-11) during
-      the 2.2.9 toolchain bump. Triaged in 2.3.1 — **none is a test**: they print or
-      `SYS_EXIT(0)` and assert nothing, so they cannot fail and CI never runs them.
-      - `_probe_pow.tcyr` prints `_prk_pow` results beside Rust's hex. Fully
-        superseded — `tests/hardening.tcyr` asserts that entire table live (251
-        assertions). Safe to delete.
-      - `_probe_ai_bundle.cyr` / `_probe_bundle_fft.cyr` include the built bundles
-        and touch one symbol each, i.e. a *consumer-side link check* on
-        `dist/prakash-ai.cyr` and `dist/prakash.cyr`. That check has value the other
-        gates lack, but as written it proves nothing automatically. Either promote to
-        a real `tests/*.tcyr` with assertions and let CI run it, or delete.
-      Deleting is the maintainer's call, not a side effect of another release.
-
-## Consumer integration
-
-Blocked on the consumers, not on prakash.
-
-- [ ] soorat / kiran / ranga: consume `dist/prakash.cyr` directly once they move to Cyrius
 
 ## Consumers
 

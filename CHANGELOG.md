@@ -2,6 +2,114 @@
 
 ## [Unreleased]
 
+## [2.3.2] - 2026-09-15 — eighteen constants that were divisions, and the bundle nothing ever linked
+
+Works the 2.3.x bucket: the AI-bundle coverage hole, and the *Inline expansion*
+performance row. Suite **6498 → 6537 assertions across 31 suites** (two new), 0
+failed. `cyrius audit` exits 0.
+
+⭐ **Every performance number below is same-binary with interleaved arms and
+bit-identical output**, pinned by assertions that recompute the original
+expression. Nothing here changes a published optics value.
+
+### Performance
+
+- ⭐ **Eighteen constant helpers were running a division on every call.** Each
+  module carries its own guard epsilon — `_atm_eps15`, `_trace_eps15`,
+  `_fr_eps15`, `_cie_eps15`, … — because Cyrius globals are last-one-wins, and
+  fifteen of them were written `f64_div(F64_ONE, f64_from(1000000000000000))`,
+  evaluated **per call**, from guard tests inside hot paths (Fresnel, ray
+  tracing, Zernike, the CIE tables, the Smith geometry terms). Three more in
+  `pbr_core` did the same. All are now hex literals.
+
+  ⚠ **The file already said to do this.** `_pbr_ln2`'s comment reads *"written as
+  a literal so it costs nothing at a call site"* — and `_pbr_eps15` sat on the
+  very next line running a division. `_pbr_frac_1_pi`, two lines below
+  `_pbr_alpha_min`, was likewise already a literal. The convention existed and was
+  simply not applied.
+
+- ⭐ **`pbr/fresnel_schlick` 16.3 → 12 ns (−26%)**, **`pbr/distribution_ggx`
+  22 → 17 ns (−23%)**, **`pbr/cook_torrance` 93 → 79.7 ns (−14%)**. Three reps
+  per arm, interleaved, spread ~1 ns. Beyond the literals:
+  - `pbr_fresnel_schlick` writes out its clamp and its x⁵ instead of calling
+    `f64_clamp` and `_pbr_pow5`. Cyrius has no `#inline`, so each of those was a
+    real call in the cheapest and most-called function in the PBR set — soorat
+    evaluates it per light per pixel. Measured in stages: 16.3 ns → 15 ns with
+    `_pbr_pow5` expanded → 12 ns with both.
+  - `pbr_distribution_ggx` called `_pbr_alpha_min()` **twice** — once to test the
+    floor, once to assign it. Now read once.
+  - `pbr_cook_torrance` called `_pbr_r(1, 1000)` **twice per invocation**, each a
+    division plus two int→f64 conversions. Now the `_pbr_min_dot()` literal, read
+    once: that single change took the row from −8% to **−14%**.
+
+  ⚠ **This is the roadmap's *Inline expansion* row, and its warning held.** The
+  rows are 16–22 ns, inside this host's 40% sub-100 ns spread, so a whole-suite
+  comparison could not have established any of it. Every figure here comes from
+  old and new implementations compiled into ONE binary with the arms interleaved
+  three times.
+
+  ⭐ **The whole-suite CSV run then corroborated it independently, which it is not
+  usually able to do.** Recorded on a quiet box against the 2.3.1 rows: suite
+  median **+0.00%**, mean −1.99%, and the three targeted rows are the **three
+  largest movers in all 36** — `distribution_ggx` −26.09% (23 → 17 ns),
+  `fresnel_schlick` −25.00% (16 → 12), `cook_torrance` −16.48% (91 → 76). A median
+  of exactly zero is what makes the rest of that table readable: the only rows
+  moving are the ones that were changed. ⚠ The three *positive* rows
+  (`wavelength_to_rgb` +11.48%, `ray/v_number` +12.50% at 8 → 9 ns, `spd_at`
+  +6.67%) are **not** claimed as regressions — nothing on those paths changed, and
+  at 8–61 ns they sit squarely in the noise band. They are listed so the next
+  reader does not mistake them for signal.
+
+### Added
+
+- **tests/ai_bundle.tcyr** (12 assertions) — ⭐ **nothing had ever compiled
+  `dist/prakash-ai.cyr` the way a consumer does.** CI regenerates the AI bundle
+  and diffs it, which proves the bundler is deterministic, not that the result
+  links; `tests/ai.tcyr` includes `src/ai.cyr`, the source. So an AI bundle that
+  assembled but did not link — a module dropped from `[lib.ai]`, a symbol that
+  resolves in `src/` but not in bundle order — would have passed every gate. The
+  core bundle never had this hole, because `examples/*.cyr` include
+  `dist/prakash.cyr` and CI runs them. This closes it symmetrically, asserting on
+  both halves: the AI client's defaults and error channel, and optics values
+  (`ray_snell`, `wavelength_to_rgb`, the FFT-backed `psf_diffraction_limited`)
+  proving `[lib.ai]` really is `[lib]` + the client. Mutation-checked: pointed at
+  the core bundle, all three AI symbols come back undefined and it fails to
+  compile.
+  ⚠ Until 2.3.1 the only thing that compiled this bundle was an untracked
+  `_probe_ai_bundle.cyr` in the repo root. It asserted nothing, exited 0
+  unconditionally, and CI never ran it.
+- **tests/constants.tcyr** (21 assertions) — pins all eighteen literals by
+  recomputing the original expression and comparing bit-for-bit, plus two rows
+  asserting the 1e-15 and 1e-10 families agree across modules so a typo in one
+  module's digits fails twice. Mutation-checked on a single flipped nibble.
+  ⚠ **It includes `src/`, not `dist/`.** Including the bundle was the first
+  attempt and is the wrong instrument: the bundle is a build artifact, so a
+  constant edited in `src/` without a `cyrius distlib` would be checked against
+  the old digits and pass — the exact edit these rows exist to catch. That the
+  first version failed to compile against a stale bundle is what surfaced it.
+
+### Changed
+
+- **`#must_use` added to `_pbr_r`, `_pbr_eps15`, `_pbr_alpha_min` and
+  `_pbr_frac_1_pi`** — all pure, all missing it, each having been packed directly
+  beneath another function's doc block so the attribute above bound to its
+  neighbour. Same shape as the 2.3.1 near-miss, found by reading the block rather
+  than by any gate.
+- **docs/development/roadmap.md** — bucketed by the **release class a change
+  implies**: `2.3.x` (patch, no public API moves), `2.4.x` (minor, adds API),
+  `2.x` (demand-gated subsystems), and Blocked. ⚠ The buckets are a SemVer
+  classification, **not a queue** — anything within one can ship in any order or
+  combination, so reshuffling is free by construction and nothing here depends on
+  anything else here. Stated in the file so the property survives editing.
+- **Repo root cleaned.** `_probe_ai_bundle.cyr`, `_probe_bundle_fft.cyr` and
+  `_probe_pow.tcyr` deleted — all three landed in `15d900c` during the 2.2.9 bump,
+  none asserted anything, and CI never ran any of them. `_probe_pow.tcyr` was
+  fully superseded by `tests/hardening.tcyr`'s 251 live assertions; the two bundle
+  probes are replaced by `tests/ai_bundle.tcyr` above, which actually asserts. The
+  empty `_audit_probe/` directory is gone. The root now holds only the documented
+  structure.
+- **dist/** — both bundles regenerated at v2.3.2.
+
 ## [2.3.1] - 2026-09-15 — the docs gate that had never been green, and a three-release-old perf row whose premise was false
 
 Closes the `cyrius audit` failure 2.3.0 documented, lands the top open performance
