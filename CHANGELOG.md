@@ -2,6 +2,75 @@
 
 ## [Unreleased]
 
+## [2.3.8] - 2026-09-15 — the rest of 2.3.x: scratch caches, the last unchecked allocs, and what a call actually costs
+
+Closes every remaining 2.3.x item in one release. Suite **6608 → 6617 assertions
+across 31 suites**, 0 failed. `cyrius audit` exits 0.
+
+### Performance
+
+- ⭐ **The 2D diffraction path reuses its scratch buffers.**
+  `diffraction_pattern_2d(64×64)` **99,352 → 32,792 bytes/call (−67.0%)**,
+  `diffraction_pattern_circular(32)` **33,304 → 8,216 (−75.3%)**,
+  `psf_from_wavefront(32×32)` **25,112 → 8,216 (−67.3%)**. Bit-identical across
+  18 interleaved calls that force a cache grow.
+  ⚠ **No time change, and none is claimed** — this is a leak fix. Under an
+  allocator that never frees, the bytes are permanent.
+
+  ⛔ **THREE SEPARATE CACHES, AND THAT IS NOT A STYLE CHOICE.** `grid`, `aperture`
+  and `col_buf` are all simultaneously live at the bottom of
+  `psf_diffraction_limited → diffraction_pattern_circular → diffraction_pattern_2d
+  → _pat_fft2d`. Collapsing them into one pool was measured to corrupt **silently**:
+  993 of 1024 wrong cells with `col_buf` on `grid`, 1024 of 1024 with `aperture` on
+  `grid`, both returning `PK_ERR_NONE`. The two `grid` sites may share one cache —
+  they are never live together — and nothing beyond that may.
+  ⚠ Both zero-fill loops are kept and are load-bearing: the power-of-two pad and
+  unlit pupil cells come from the fill alone. Dropping them as "the cache is
+  already zero" passes call 1 (a fresh `alloc` is kernel-zeroed) and fails calls 2
+  and 3 — the 2.3.3 `pattern2d_new` shape again.
+  ⛔ **This narrows thread safety** and the narrowing is documented, not hidden: a
+  per-call `alloc()` was safe for concurrent callers because `_threads_active` is
+  process-wide, so a *consumer* spawning a thread arms `alloc()`'s lock. These
+  caches are not safe that way. See `docs/guides/allocation.md`.
+
+### Fixed
+
+- ⛔ **The last 10 unchecked `alloc()` stores are gone — `src/` now has zero.**
+  `var t = alloc(1944); store64(t + 0, …)` with no guard, in `spectral_cie.cyr`
+  (8) and `spectral_photometry.cyr` (2): the 2.0.2 class CLAUDE.md names by name.
+  All 85 alloc sites in `src/` are now guarded.
+- **And the callers propagate, so a guard does not merely relocate the crash.**
+  That objection is why 2.3.7 deferred this. `cie_cmf_at`, `luminous_flux` and
+  `luminous_flux_scotopic` indexed the returned table without checking it, so a 0
+  return would have faulted at the first index instead of at the store. Each now
+  returns the sentinel it already uses for a degenerate input — `xyz_new(0,0,0)`
+  and `0.0` respectively. `_spd_integrate` already guarded `cmf == 0`, so
+  `spd_to_xyz` was covered.
+
+### Added
+
+- ⭐ **`docs/guides/allocation.md`** — what every public entry point costs, and
+  the two ways to reclaim. ⚠ **prakash never frees and nothing in the docs said
+  so**, let alone what a call consumes permanently, so a consumer could not size
+  its own usage. Per-call bytes for 13 entry points, the exact retained formulas
+  (`8n² + 24` for both pattern builders), and the one trap that matters:
+  `alloc_reset()` **must** be followed by `prakash_reset_caches()` or every colour
+  value silently goes to zero. Every figure re-verified against the tree before
+  publishing — `trace_surface` 128 on a hit and **0** on a miss,
+  `diffraction_pattern_2d(64×64)` 32,792 against a predicted 32,792.
+- **tests/wave_pattern.tcyr** — a cache-reuse suite that runs the nested path, a
+  size change forcing a grow, and a repeat of the original input, then checks a
+  *previously returned* Pattern2D is untouched. ⚠ A test calling each entry point
+  once would pass with all three caches aliased, because the first call is the one
+  that cannot alias. Mutation-verified: collapsing the caches fails it.
+
+### Not done — and why
+
+- **Benchmark parity with `rust-old/`** stays open and stays gated. Its own text
+  says to port only if a specific regression needs the resolution; bulk-porting
+  138 scalar micro-benchmarks would add noise to `bench-history.csv` without
+  changing a decision. It is the only 2.3.x row left, and deliberately so.
+
 ## [2.3.7] - 2026-09-15 — the only way to reclaim memory silently corrupted every colour value
 
 Works the 2.3.x scratch-buffer row, and the investigation turned up two live

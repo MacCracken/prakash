@@ -68,6 +68,7 @@ var _cie1931_p = 0;
 fn _cie1931() {
     if (_cie1931_p != 0) { return _cie1931_p; }
     var t = alloc(1944);
+    if (t == 0) { return 0; }
     store64(t + 0, 0x3F5669CED0B30B5B);
     store64(t + 8, 0x3F04727DCBDDB984);
     store64(t + 16, 0x3F7A6B50B0F27BB3);
@@ -319,6 +320,7 @@ var _cie1964_p = 0;
 fn _cie1964() {
     if (_cie1964_p != 0) { return _cie1964_p; }
     var t = alloc(1944);
+    if (t == 0) { return 0; }
     store64(t + 0, 0x3F24F8B588E368F1);
     store64(t + 8, 0x3EF1D3671AC14C66);
     store64(t + 16, 0x3F4719F7F8CA8199);
@@ -570,6 +572,7 @@ var _cie2015_2_p = 0;
 fn _cie2015_2() {
     if (_cie2015_2_p != 0) { return _cie2015_2_p; }
     var t = alloc(1944);
+    if (t == 0) { return 0; }
     store64(t + 0, 0x0000000000000000);
     store64(t + 8, 0x0000000000000000);
     store64(t + 16, 0x0000000000000000);
@@ -821,6 +824,7 @@ var _cie2015_10_p = 0;
 fn _cie2015_10() {
     if (_cie2015_10_p != 0) { return _cie2015_10_p; }
     var t = alloc(1944);
+    if (t == 0) { return 0; }
     store64(t + 0, 0x0000000000000000);
     store64(t + 8, 0x0000000000000000);
     store64(t + 16, 0x0000000000000000);
@@ -1072,6 +1076,7 @@ var _illum_d65_p = 0;
 fn _illum_d65_data() {
     if (_illum_d65_p != 0) { return _illum_d65_p; }
     var t = alloc(648);
+    if (t == 0) { return 0; }
     store64(t + 0, 0x4048FD70A3D70A3D);
     store64(t + 8, 0x404A27AE147AE148);
     store64(t + 16, 0x404B533333333333);
@@ -1161,6 +1166,7 @@ var _illum_d50_p = 0;
 fn _illum_d50_data() {
     if (_illum_d50_p != 0) { return _illum_d50_p; }
     var t = alloc(648);
+    if (t == 0) { return 0; }
     store64(t + 0, 0x40387D70A3D70A3D);
     store64(t + 8, 0x403B2E147AE147AE);
     store64(t + 16, 0x403DDEB851EB851F);
@@ -1250,6 +1256,7 @@ var _illum_f2_p = 0;
 fn _illum_f2_data() {
     if (_illum_f2_p != 0) { return _illum_f2_p; }
     var t = alloc(648);
+    if (t == 0) { return 0; }
     store64(t + 0, 0x3FF2E147AE147AE1);
     store64(t + 8, 0x3FF7AE147AE147AE);
     store64(t + 16, 0x3FFD70A3D70A3D71);
@@ -1339,6 +1346,7 @@ var _illum_f11_p = 0;
 fn _illum_f11_data() {
     if (_illum_f11_p != 0) { return _illum_f11_p; }
     var t = alloc(648);
+    if (t == 0) { return 0; }
     store64(t + 0, 0x3FED1EB851EB851F);
     store64(t + 8, 0x3FE428F5C28F5C29);
     store64(t + 16, 0x3FDD70A3D70A3D71);
@@ -1600,6 +1608,11 @@ fn cie_cmf_at(wavelength_nm) {
         return xyz_new(f64_from(0), f64_from(0), f64_from(0));
     }
     var t = _cie1931();
+    # ⛔ 2.3.8: the lazy table builders now return 0 when their one-time
+    # allocation fails (they used to store through it and SIGSEGV). A 0 here
+    # must not be indexed — report the same degenerate answer this function
+    # already gives for an out-of-domain input, rather than faulting.
+    if (t == 0) { return xyz_new(f64_from(0), f64_from(0), f64_from(0)); }
     var idx_f = f64_div(f64_sub(wavelength_nm, f64_from(380)), f64_from(5));
     var idx = f64_to(idx_f);
     if (idx >= 80) {

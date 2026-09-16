@@ -199,6 +199,51 @@ fn pattern2d_normalized(p) {
     return out;
 }
 
+# ── Grow-only scratch caches ────────
+#
+# prakash's allocator never frees, so a per-call scratch buffer is permanent
+# consumption. These three hold the working buffers of the 2D diffraction path,
+# which is where the volume is: diffraction_pattern_2d(64x64) allocated 99,352
+# bytes per call, 66,560 of it scratch.
+#
+# ⛔ THREE SEPARATE CACHES, NOT ONE POOL. All three buffers are SIMULTANEOUSLY
+# LIVE at the bottom of psf_diffraction_limited -> diffraction_pattern_circular
+# -> diffraction_pattern_2d -> _pat_fft2d. Sharing one pool was measured to
+# corrupt silently: col_buf landing on grid gave 993 of 1024 wrong cells,
+# aperture on grid gave 1024 of 1024, and both calls returned PK_ERR_NONE. Never
+# collapse these into a generic _pat_scratch_get(n).
+#
+# ⚠ The two `grid` sites CAN share _pat_grid_c: diffraction_pattern_2d and
+# psf_from_wavefront never have a grid live at the same time (verified across a
+# cache grow with a retained result, 0 diffs). Nothing beyond that may share.
+#
+# ⚠ Grow-only, never shrink: a later smaller call reuses the larger block.
+#
+# ⛔ NOT THREAD-SAFE, and that is a real narrowing. A per-call alloc() was safe
+# for concurrent callers because _threads_active arms alloc()'s lock the moment a
+# CONSUMER spawns a thread. These caches are not. prakash makes no thread-safety
+# claim and never spawns a thread itself; a threaded consumer must serialise
+# calls into the 2D diffraction path. Stated in docs/guides/allocation.md.
+var _pat_grid_c = 0;
+var _pat_grid_n = 0;
+var _pat_apert_c = 0;
+var _pat_apert_n = 0;
+var _pat_col_c = 0;
+var _pat_col_n = 0;
+
+# Return a scratch block of at least `want` bytes from the cache at `cache_p` /
+# `size_p`, growing it if needed. Returns 0 if the allocation fails, leaving the
+# previous block intact.
+#must_use
+fn _pat_scratch(cache_p, size_p, want) {
+    if (load64(size_p) >= want) { return load64(cache_p); }
+    var b = alloc(want);
+    if (b == 0) { return 0; }
+    store64(cache_p, b);
+    store64(size_p, want);
+    return b;
+}
+
 # ── 2D FFT plumbing (row FFTs then column FFTs, hisab num_fft) ────────
 
 # Returns PK_ERR_NONE on success, PK_ERR_ALLOCATION if the column scratch
@@ -217,7 +262,7 @@ fn _pat_fft2d(grid, nw, nh) {
         var rt, rv = num_fft(grid + row * nw * 16, nw);
         if (is_err_result(rt) == 1) { return PK_ERR_INVALID_PARAMETER; }
     }
-    var col_buf = alloc(nh * 16);
+    var col_buf = _pat_scratch(&_pat_col_c, &_pat_col_n, nh * 16);
     if (col_buf == 0) { return PK_ERR_ALLOCATION; }
     for (var col = 0; col < nw; col = col + 1) {
         for (var rr = 0; rr < nh; rr = rr + 1) {
@@ -266,7 +311,7 @@ fn diffraction_pattern_2d(aperture, width, height) {
     if (nw == 0) { return 0; }
     if (nh == 0) { return 0; }
     if (_pat_dims_bad(nw, nh, 16) == 1) { return 0; }
-    var grid = alloc(nw * nh * 16);
+    var grid = _pat_scratch(&_pat_grid_c, &_pat_grid_n, nw * nh * 16);
     if (grid == 0) { return 0; }
     var total = nw * nh;
     for (var z = 0; z < total; z = z + 1) {
@@ -296,7 +341,7 @@ fn diffraction_pattern_circular(grid_size, radius) {
     var cx = f64_div(f64_from(n), F64_TWO);
     var cy = f64_div(f64_from(n), F64_TWO);
     var r2 = f64_mul(radius, radius);
-    var aperture = alloc(n * n * 8);
+    var aperture = _pat_scratch(&_pat_apert_c, &_pat_apert_n, n * n * 8);
     if (aperture == 0) { return 0; }
     for (var row = 0; row < n; row = row + 1) {
         for (var col = 0; col < n; col = col + 1) {
@@ -546,7 +591,7 @@ fn psf_from_wavefront(pupil, wavefront_error, width, height, wavelength) {
     if (nh == 0) { return 0; }
     if (_pat_dims_bad(nw, nh, 16) == 1) { return 0; }
     var k = f64_div(F64_TAU, wavelength);
-    var grid = alloc(nw * nh * 16);
+    var grid = _pat_scratch(&_pat_grid_c, &_pat_grid_n, nw * nh * 16);
     if (grid == 0) { return 0; }
     var total = nw * nh;
     for (var z = 0; z < total; z = z + 1) {

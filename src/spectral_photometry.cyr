@@ -18,6 +18,7 @@ var _vlambda_photopic_p = 0;
 fn _vlambda_photopic() {
     if (_vlambda_photopic_p != 0) { return _vlambda_photopic_p; }
     var t = alloc(648);
+    if (t == 0) { return 0; }
     store64(t + 0, 0x3F04727DCBDDB984);
     store64(t + 8, 0x3F10C6F7A0B5ED8D);
     store64(t + 16, 0x3F1F75104D551D69);
@@ -137,6 +138,7 @@ var _vlambda_scotopic_p = 0;
 fn _vlambda_scotopic() {
     if (_vlambda_scotopic_p != 0) { return _vlambda_scotopic_p; }
     var t = alloc(648);
+    if (t == 0) { return 0; }
     store64(t + 0, 0x3F434CE3DE6149C7);
     store64(t + 8, 0x3F522749F0E4DA0A);
     store64(t + 16, 0x3F62189BD8383ADA);
@@ -230,6 +232,11 @@ fn photometry_k_m() { return f64_from(683); }
 #must_use
 fn luminous_flux(spd) {
     var t = _vlambda_photopic();
+    # ⛔ 2.3.8: the lazy table builders now return 0 when their one-time
+    # allocation fails (they used to store through it and SIGSEGV). A 0 here
+    # must not be indexed — report the same degenerate answer this function
+    # already gives for an out-of-domain input, rather than faulting.
+    if (t == 0) { return f64_from(0); }
     var sum = f64_from(0);
     var i = 0;
     while (i < 81) {
@@ -262,6 +269,11 @@ fn luminous_efficacy(spd) {
 #must_use
 fn luminous_flux_scotopic(spd) {
     var t = _vlambda_scotopic();
+    # ⛔ 2.3.8: the lazy table builders now return 0 when their one-time
+    # allocation fails (they used to store through it and SIGSEGV). A 0 here
+    # must not be indexed — report the same degenerate answer this function
+    # already gives for an out-of-domain input, rather than faulting.
+    if (t == 0) { return f64_from(0); }
     var sum = f64_from(0);
     var i = 0;
     while (i < 81) {

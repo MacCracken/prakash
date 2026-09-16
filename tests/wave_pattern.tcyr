@@ -366,4 +366,56 @@ var pm = pattern2d_new(4, 4);
 pattern2d_set(pm, 2, 3, f64_from(42));
 _assert_near(pattern2d_max_intensity(pm), f64_from(42), EPS, "max intensity = 42");
 
+# ── Scratch caches: nesting, reuse, and the aliasing hazard ────────
+#
+# ⛔ 2.3.8 moved grid/aperture/col_buf onto grow-only module-scope caches. The
+# hazard that makes this dangerous is that all three are SIMULTANEOUSLY LIVE at
+# the bottom of psf_diffraction_limited -> diffraction_pattern_circular ->
+# diffraction_pattern_2d -> _pat_fft2d. Collapsing them into one pool was measured
+# to corrupt SILENTLY: 993 of 1024 wrong cells with col_buf on grid, 1024 of 1024
+# with aperture on grid, both returning PK_ERR_NONE.
+#
+# These rows exercise the nested path and the reuse path, and compare against
+# values computed BEFORE any cache reuse. A test that called each entry point once
+# would pass with all three caches aliased, because the first call is the one that
+# cannot alias.
+test_group("scratch_cache_reuse");
+
+# Baselines, taken first so later calls have to reproduce them after reuse.
+var _sc_ap = alloc(6 * 6 * 8);
+for (var sk = 0; sk < 36; sk = sk + 1) { store64(_sc_ap + sk * 8, F64_ONE); }
+var _sc_base = diffraction_pattern_2d(_sc_ap, 6, 6);
+assert(_sc_base != 0, "baseline diffraction_pattern_2d built");
+var _sc_b00 = pattern2d_get(_sc_base, 0, 0);
+var _sc_b34 = pattern2d_get(_sc_base, 3, 4);
+
+# The NESTED path: psf_diffraction_limited has grid, aperture and col_buf all
+# live at once. Running it between the baseline and the repeat is what would
+# corrupt a shared pool.
+var _sc_psf = psf_diffraction_limited(8, f64_from(100));
+assert(_sc_psf != 0, "nested psf_diffraction_limited built");
+
+# A DIFFERENT size in between, to force a cache grow.
+var _sc_big = diffraction_pattern_circular(16, f64_from(5));
+assert(_sc_big != 0, "larger circular pattern built (forces a cache grow)");
+
+# The same input must still give the same answer, bit-for-bit.
+var _sc_again = diffraction_pattern_2d(_sc_ap, 6, 6);
+assert_eq(pattern2d_get(_sc_again, 0, 0), _sc_b00,
+  "diffraction_pattern_2d is bit-identical after nesting and a cache grow (0,0)");
+assert_eq(pattern2d_get(_sc_again, 3, 4), _sc_b34,
+  "diffraction_pattern_2d is bit-identical after nesting and a cache grow (3,4)");
+
+# ⚠ And the RETAINED earlier result must not have been rewritten underneath us —
+# the returned Pattern2D owns its own buffer and must not point into the scratch.
+assert_eq(pattern2d_get(_sc_base, 0, 0), _sc_b00,
+  "an earlier returned Pattern2D survives later calls (it does not alias scratch)");
+assert_eq(pattern2d_get(_sc_base, 3, 4), _sc_b34,
+  "an earlier returned Pattern2D survives a cache grow");
+
+# A smaller call after a larger one reuses the big block rather than shrinking.
+var _sc_small = diffraction_pattern_circular(4, f64_from(1));
+assert(_sc_small != 0, "smaller call reuses the grown cache");
+assert_eq(pattern2d_get(_sc_base, 0, 0), _sc_b00, "baseline still intact after the small call");
+
 var r = assert_summary();
