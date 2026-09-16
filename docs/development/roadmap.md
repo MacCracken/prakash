@@ -23,16 +23,16 @@ Prakash does NOT own:
 
 ## Open work at a glance
 
-**13 items. ⭐ 2.3.x is COMPLETE — everything left is 2.4.x, demand-gated, or waiting on a consumer.**
+**12 items. ⭐ Nothing is scheduled. Every item is demand-gated or waiting on a consumer —
+build one only when someone asks for it.**
 
 | # | Bucket | Item | State |
 |---|---|---|---|
-| 1 | 2.4.x | `spd_from_function(f, start_nm, end_nm)` | ready; one semantics question open |
-| 2–7 | 2.x | GRIN, DOE, Richards-Wolf, HG/LG beams, Buchdahl, aberrated MTF | demand-gated |
-| 8–12 | 2.x | Fluorescence, non-linear, OAM, metamaterials, CIE 2006 observer | demand-gated |
-| 13 | Blocked | soorat / kiran / ranga consume `dist/prakash.cyr` | waiting on the consumers |
+| 1–6 | 2.x | GRIN, DOE, Richards-Wolf, HG/LG beams, Buchdahl, aberrated MTF | demand-gated |
+| 7–11 | 2.x | Fluorescence, non-linear, OAM, metamaterials, CIE 2006 observer | demand-gated |
+| 12 | Blocked | soorat / kiran / ranga consume `dist/prakash.cyr` | waiting on the consumers |
 
-⚠ **Items 2–12 are not a backlog anyone is working through.** Each is a subsystem,
+⚠ **Items 1–11 are not a backlog anyone is working through.** Each is a subsystem,
 listed so the scope boundary stays visible. Do not start one without a consumer
 asking for it.
 
@@ -56,21 +56,6 @@ promises it will not force a minor bump. Reshuffling is free by construction.
 item 2. ⚠ **Keep rows SHORT.** A row says what the work is and what would block
 it. Measurements belong in `CHANGELOG.md`; a row that grows past ~8 lines has
 started duplicating the release history and should be cut back.
-
-## 2.4.x — minor: adds public API
-
-- [ ] **`spd_from_function(f, start_nm, end_nm)`** — build an SPD from a continuous
-      spectral function via hisab's `calc_integral_gauss5`. **The one place hisab's
-      quadrature genuinely fits**; the other candidates were investigated and do
-      not (`_spd_integrate` is the CIE-defined weighted sum, `huygens_fresnel_1d`
-      takes a discrete buffer, `spd_blackbody` samples rather than integrates).
-      ⭐ **Readiness checked:** `calc_integral_gauss5` is one of the few integral
-      forms hisab 3.x did **not** move onto `Result`, and it links from prakash's
-      existing include set. It would be prakash's first `fncall` site.
-      ⛔ **Open question before any code:** does an SPD sample mean the *average
-      over its bin* or a *point sample at its wavelength*? Integrating when the CIE
-      convention wants point samples is wrong by about the step width — roughly
-      **5×** at 5 nm. Settle that first.
 
 ## 2.x — demand-gated: build when a consumer asks
 
@@ -99,6 +84,20 @@ someone needs it; all are listed so the scope boundary stays visible.
 - [ ] soorat / kiran / ranga: consume `dist/prakash.cyr` directly once they move to Cyrius
 
 ## Constraints established by measurement — read before optimizing
+
+- **An `Spd` holds POINT SAMPLES, not bin averages or bin integrals.**
+  `_spd_integrate` is `sum(power[i] * cmf[i]) * 5` — a rectangle rule where the
+  `* 5` is the bin width, so the consumer applies the integral once and the stored
+  values are the function's value AT each wavelength. `spd_blackbody` and
+  `spd_from_function` both point-sample. ⛔ **Do not integrate when building an
+  Spd.** A bin integral over 5 nm is ~5x a point sample, and because `spd_to_xyz`
+  normalises by X+Y+Z the chromaticity would still look right while every absolute
+  photometric value was 5x wrong. The roadmap specified this incorrectly for six
+  releases; see the [2.4.0] CHANGELOG entry.
+- **hisab's quadrature applies to no prakash path.** 2.1.2 established that for
+  `_spd_integrate`, `huygens_fresnel_1d` and `spd_blackbody`; 2.4.0 closed the last
+  candidate, `spd_from_function`. `calc_integral_gauss5` is not used and there is
+  no known place for it.
 
 - **The small fixed-size scratch allocations are not worth converting, measured.**
   `alloc(16)` costs 6.4–7.5 ns on this host, so removing one or two only registers

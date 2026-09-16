@@ -391,4 +391,62 @@ assert_eq(cri_special(illuminant_f2(), 0), Z, "cri_special rejects sample index 
 assert_eq(cri_special(illuminant_f2(), 9), Z, "cri_special rejects sample index 9");
 assert_eq(color_rendering_index(0), Z, "color_rendering_index rejects a null SPD");
 
+# ── spd_from_function ────────
+#
+# ⛔ THE POINT OF THIS SUITE IS THE SEMANTICS, NOT THE PLUMBING. The roadmap
+# carried this feature for six releases as "build an SPD via hisab's
+# calc_integral_gauss5". It point-samples instead, and these rows are what proves
+# that is the right convention rather than a shortcut: a quadrature-built SPD over
+# a 5 nm step is about 5x a point-sampled one, and `spd_to_xyz` normalises by
+# X+Y+Z, so the CHROMATICITY would still have looked correct while every absolute
+# photometric value was 5x wrong.
+# Callbacks for the spd_from_function suite. Planck at 5000 K in the same units
+# spd_blackbody uses (wavelength converted nm -> m), and a flat 2.0 spectrum.
+fn _sff_planck5000(wl_nm) {
+    return planck_radiance(f64_mul(wl_nm, _cie_r(1, 1000000000)), f64_from(5000));
+}
+fn _sff_const_two(wl_nm) { return F64_TWO; }
+
+test_group("spd_from_function");
+
+# 1. It must reproduce spd_blackbody EXACTLY. spd_blackbody is prakash's existing
+#    "SPD from a continuous function", so any disagreement means one of the two is
+#    using the wrong convention.
+var _sff_e = 0;
+var _sff_bb = spd_blackbody(f64_from(5000));
+var _sff_fn = spd_from_function(&_sff_planck5000, f64_from(380), f64_from(780), 81, &_sff_e);
+assert_eq(_sff_e, PK_ERR_NONE, "spd_from_function reports success");
+assert(_sff_fn != 0, "spd_from_function returns a handle");
+assert_eq(Spd_len(_sff_fn), 81, "81 samples");
+assert_eq(Spd_start_nm(_sff_fn), f64_from(380), "start_nm preserved");
+assert_eq(Spd_step_nm(_sff_fn), f64_from(5), "step derived as (end-start)/(n-1) = 5");
+assert_eq(spd_end_nm(_sff_fn), f64_from(780), "last sample lands exactly on end_nm");
+for (var _sf = 0; _sf < 81; _sf = _sf + 1) {
+    assert_eq(load64(Spd_values(_sff_fn) + _sf * 8), load64(Spd_values(_sff_bb) + _sf * 8),
+      "sample matches spd_blackbody bit-for-bit");
+}
+
+# 2. And the colour it produces must match, which is the consumer-visible claim.
+var _sff_x1 = spd_to_xyz(_sff_bb);
+var _sff_x2 = spd_to_xyz(_sff_fn);
+assert_eq(Xyz_x(_sff_x2), Xyz_x(_sff_x1), "spd_to_xyz X matches spd_blackbody");
+assert_eq(Xyz_y(_sff_x2), Xyz_y(_sff_x1), "spd_to_xyz Y matches spd_blackbody");
+assert_eq(Xyz_z(_sff_x2), Xyz_z(_sff_x1), "spd_to_xyz Z matches spd_blackbody");
+
+# 3. ⚠ The 5x trap, pinned. A quadrature-built SPD would carry the bin INTEGRAL,
+#    which over a 5 nm step is ~5x the point sample. Assert the value we store is
+#    the POINT sample — f(lambda) itself — not f(lambda)*step.
+var _sff_one = spd_from_function(&_sff_const_two, f64_from(400), f64_from(500), 21, &_sff_e);
+assert_eq(load64(Spd_values(_sff_one)), F64_TWO,
+  "a constant-2 spectrum stores 2.0 per sample, NOT 2.0*step (the quadrature error)");
+assert_eq(load64(Spd_values(_sff_one) + 20 * 8), F64_TWO, "last sample is also the point value");
+
+# 4. Error contract.
+assert_eq(spd_from_function(0, f64_from(380), f64_from(780), 81, &_sff_e), 0, "null fp returns 0");
+assert_eq(_sff_e, PK_ERR_INVALID_PARAMETER, "null fp reports INVALID_PARAMETER");
+assert_eq(spd_from_function(&_sff_const_two, f64_from(380), f64_from(780), 1, &_sff_e), 0, "n<2 returns 0");
+assert_eq(_sff_e, PK_ERR_INVALID_PARAMETER, "n<2 reports INVALID_PARAMETER");
+assert_eq(spd_from_function(&_sff_const_two, f64_from(780), f64_from(380), 81, &_sff_e), 0, "end<=start returns 0");
+assert_eq(_sff_e, PK_ERR_INVALID_PARAMETER, "end<=start reports INVALID_PARAMETER");
+
 var r = assert_summary();

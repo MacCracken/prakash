@@ -1,4 +1,75 @@
 # spectral_cie.cyr -- CIE color science: CMF tables, XYZ, SPD, illuminants, CRI
+# Build an Spd by SAMPLING a continuous spectral function at `n` wavelengths from
+# `start_nm` to `end_nm` inclusive.
+#
+# `fp` is the address of a one-argument function taking a wavelength in nm and
+# returning spectral power as an f64 — `&my_spectrum`. The step is
+# (end_nm - start_nm) / (n - 1), so the last sample lands exactly on `end_nm`,
+# matching `spd_end_nm`.
+#
+# ⛔ THIS POINT-SAMPLES. IT DOES NOT INTEGRATE, AND THAT IS THE WHOLE DESIGN
+# DECISION. The roadmap carried this item for six releases as "build an SPD via
+# hisab's calc_integral_gauss5 — the one place hisab's quadrature genuinely fits".
+# That premise is wrong, and implementing it would have silently produced wrong
+# colour values for every SPD built this way:
+#
+#   - `_spd_integrate` — the CIE method prakash implements — computes
+#     `sum(power[i] * cmf[i]) * 5`. That is a rectangle rule whose `power[i]` is
+#     the value AT 380 + 5i nm and whose trailing `* 5` IS the bin width. The
+#     samples are points; the integral is applied by the consumer, once.
+#   - `spd_blackbody`, directly below, already builds an Spd from a continuous
+#     function (`planck_radiance`) and point-samples it at 81 wavelengths. An
+#     integrating `spd_from_function` would disagree with the function beside it.
+#   - Empirically: D65 reads exactly 100.0 at 560 nm, its definitional
+#     normalisation point, and `spd_to_xyz(D65)` gives (0.3127, 0.3290) against
+#     the published chromaticity. Both hold only under point sampling.
+#
+# A bin INTEGRAL over a 5 nm step is about 5x a point sample, so quadrature here
+# would have produced an SPD ~5x too bright that still looked plausible — and
+# `spd_to_xyz` normalises by X+Y+Z, so the chromaticity would have looked RIGHT
+# while every absolute photometric quantity was wrong.
+#
+# ⚠ The cost of point sampling is real and worth stating: structure narrower than
+# the step is aliased, not averaged. A laser line between two sample points is
+# missed entirely. Sample finely enough for the spectrum you have; that choice is
+# the caller's, which is why `n` is a parameter.
+#
+# Sets err_out to PK_ERR_INVALID_PARAMETER for a null `fp`, n < 2, or
+# end_nm <= start_nm; PK_ERR_ALLOCATION if the sample buffer cannot be allocated.
+# Returns 0 on any error.
+#must_use
+fn spd_from_function(fp, start_nm, end_nm, n, err_out) {
+    store64(err_out, PK_ERR_NONE);
+    _prk_trace("spd_from_function");
+    if (fp == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
+    if (n < 2) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
+    if (f64_le(end_nm, start_nm) == 1) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
+    var values = alloc(n * 8);
+    if (values == 0) {
+        store64(err_out, PK_ERR_ALLOCATION);
+        return 0;
+    }
+    var step = f64_div(f64_sub(end_nm, start_nm), f64_from(n - 1));
+    for (var i = 0; i < n; i = i + 1) {
+        store64(values + i * 8, fncall1(fp, f64_add(start_nm, f64_mul(f64_from(i), step))));
+    }
+    var s = spd_new(start_nm, step, values, n);
+    if (s == 0) {
+        store64(err_out, PK_ERR_ALLOCATION);
+        return 0;
+    }
+    return s;
+}
+
 # Usage: include "lib/spectral_cie.cyr"  (requires error.cyr, spectral_core.cyr)
 #
 # Ported from the Rust `spectral/cie.rs`. The four 81x3 color-matching-function

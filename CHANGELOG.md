@@ -2,6 +2,64 @@
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-09-15 — spd_from_function, and the roadmap's implementation for it was wrong
+
+First minor since 2.3.0: one new public entry point. Suite **6617 → 6715
+assertions across 31 suites**, 0 failed. Reference coverage **414/414**.
+`cyrius audit` exits 0.
+
+### Added
+
+- ⭐ **`spd_from_function(fp, start_nm, end_nm, n, err_out)`** — build an `Spd` by
+  sampling a continuous spectral function at `n` wavelengths from `start_nm` to
+  `end_nm` inclusive. `fp` is the address of a one-argument function taking a
+  wavelength in nm; the step is `(end_nm - start_nm) / (n - 1)`, so the last
+  sample lands exactly on `end_nm` and `spd_end_nm` agrees. This is **prakash's
+  first `fncall` site** — no function in `src/` previously took a callback.
+
+### Fixed — a design error in the roadmap, caught before it shipped
+
+- ⛔ **The roadmap specified this feature wrongly for six releases, and building it
+  as written would have produced silently wrong photometry.** The row read: *"build
+  an SPD from a continuous spectral function via hisab `calc_integral_gauss5` —
+  the one place hisab's quadrature would genuinely fit."* **It does not fit. This
+  function point-samples and must not integrate.** Three independent lines of
+  evidence, each checked against the tree rather than reasoned about:
+
+  1. `_spd_integrate` — the CIE method prakash implements — computes
+     `sum(power[i] * cmf[i]) * 5`. That is a rectangle rule whose `power[i]` is the
+     value **at** 380 + 5i nm and whose trailing `* 5` **is** the bin width. The
+     samples are points; the integral is applied once, by the consumer.
+  2. `spd_blackbody` already builds an `Spd` from a continuous function
+     (`planck_radiance`) and **point-samples** it at 81 wavelengths. An integrating
+     `spd_from_function` would have disagreed with the function directly beside it.
+  3. Measured: D65 reads exactly **100.0** at 560 nm — its definitional
+     normalisation point — and `spd_to_xyz(D65)` gives **(0.3127, 0.3290)** against
+     the published chromaticity. Both hold only under point sampling.
+
+  ⚠ **Why this would have been hard to notice.** A bin integral over a 5 nm step is
+  about **5×** a point sample, and `spd_to_xyz` normalises by X+Y+Z — so the
+  CHROMATICITY of a quadrature-built SPD would have looked **correct** while every
+  absolute photometric quantity was 5× wrong. Colour right, brightness wrong, no
+  error reported.
+
+### Added — tests
+
+- **tests/spectral_cie.tcyr** — 98 assertions, aimed at the semantics rather than
+  the plumbing. `spd_from_function` with a Planck callback must reproduce
+  `spd_blackbody` **bit-for-bit across all 81 samples**, and `spd_to_xyz` of both
+  must agree exactly. ⚠ Plus the 5× trap pinned directly: a constant-2.0 spectrum
+  must store **2.0** per sample, not `2.0 * step`. Mutation-verified — multiplying
+  by the step (the quadrature error) fails the bit-identity rows immediately.
+  Full error contract covered: null `fp`, `n < 2`, `end_nm <= start_nm`.
+
+### Changed
+
+- **docs/development/roadmap.md** — the `spd_from_function` row is closed, and the
+  quadrature premise is recorded as refuted rather than silently dropped. hisab's
+  `calc_integral_gauss5` remains unused by prakash; the 2.1.2 finding that hisab's
+  quadrature does not apply to any prakash path now holds for **all** of them.
+
 ## [2.3.9] - 2026-09-15 — benchmark parity: 39 rows to 138, and the item was overstated by a third
 
 Closes the last 2.3.x row. Suite **6617 assertions**, 0 failed. `cyrius audit`
