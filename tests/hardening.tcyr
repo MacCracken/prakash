@@ -635,6 +635,32 @@ assert(_h_bits(spec_visible_min_nm(), f64_from(380)) == 1,
   "changing the log level does not perturb computation");
 var _lvl2 = prakash_set_log_level(3);
 
+# ── trace_surface null handles ────────
+#
+# ⛔ Until 2.3.5 `trace_surface(0, 0, &e)` SIGSEGVed — exit 139, core dumped —
+# because it read TraceRay_pos(0) before any validation. It is the funnel the
+# whole tracing stack runs through (trace_sequential, trace_sequential_polarized
+# and the recursive tracer all call it in a loop), so ONE null surface in a
+# caller-built list took the process down instead of reporting. 2.0.2 swept seven
+# public entry points for exactly this and 2.2.8 found four more; this one was
+# missed by both, and `cyrius coverage` could not see it because every other test
+# calls it with valid handles.
+var _ns_err = 0;
+var _ns_ray = trace_ray_new(ray_vec3(f64_from(0), f64_from(0), f64_from(0)),
+  ray_vec3(f64_from(0), f64_from(0), F64_ONE), F64_ONE);
+var _ns_surf = surface_plane(f64_from(10), f64_div(f64_from(15), f64_from(10)), f64_from(25));
+
+assert_eq(trace_surface(0, _ns_surf, &_ns_err), 0, "trace_surface(null ray) returns 0");
+assert_eq(_ns_err, PK_ERR_INVALID_PARAMETER, "trace_surface(null ray) reports INVALID_PARAMETER");
+assert_eq(trace_surface(_ns_ray, 0, &_ns_err), 0, "trace_surface(null surface) returns 0");
+assert_eq(_ns_err, PK_ERR_INVALID_PARAMETER, "trace_surface(null surface) reports INVALID_PARAMETER");
+assert_eq(trace_surface(0, 0, &_ns_err), 0, "trace_surface(both null) returns 0");
+assert_eq(_ns_err, PK_ERR_INVALID_PARAMETER, "trace_surface(both null) reports INVALID_PARAMETER");
+# A valid call still works after the guards — the guard must not shadow the path.
+var _ns_ok = trace_surface(_ns_ray, _ns_surf, &_ns_err);
+assert(_ns_ok != 0, "trace_surface still traces a valid ray/surface pair");
+assert_eq(_ns_err, PK_ERR_NONE, "a valid trace_surface call still reports PK_ERR_NONE");
+
 # ── The trace gate, in BOTH directions ────────
 #
 # ⚠ 2.3.4 put a level test in front of `_prk_trace`'s `strlen`, and NOTHING in

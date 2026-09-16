@@ -2,6 +2,121 @@
 
 ## [Unreleased]
 
+## [2.3.5] - 2026-09-15 — the remaining six serializers, and why 2.3.4's number was the small one
+
+Finishes what 2.3.4 started: all seven `*_to_json` functions now emit straight
+into a `str_builder` instead of building a bayan value tree. Suite
+**6576 → 6589 assertions across 31 suites**, 0 failed. `cyrius audit` exits 0.
+
+### Performance
+
+- ⭐ **All six remaining serializers rewritten, measured same-binary with
+  interleaved arms:**
+
+  | function | tree | str_builder | Δ |
+  |---|---|---|---|
+  | `lens_type_to_json` | 463 ns | **41 ns** | **−91.2%** |
+  | `prescription_to_json` (6 surfaces) | 32.075 µs | **21.019 µs** | −34.5% |
+  | `medium_to_json` | 1.665 µs | **1.094 µs** | −34.3% |
+  | `rgb_to_json` | 2.943 µs | **2.341 µs** | −20.5% |
+  | `sellmeier_to_json` | 6.845 µs | **5.586 µs** | −18.4% |
+  | `polarization_to_json` | 3.973 µs | **3.241 µs** | −18.4% |
+
+  `prescription_to_json` also drops **4,376 → 1,480 bytes/call (−66%)**, which
+  under a never-freeing bump allocator is permanent consumption reclaimed.
+  `lens_type_to_json` was 5 allocations and 463 ns to produce one of **two
+  constant strings**; it is now a single `str_from` of a literal.
+
+  ⭐ **The CSV suite corroborated it on a verified-quiet box** (load 0.91): suite
+  median **+0.50%**, mean +1.21%, and `serialize/rgb_to_json` **2,894 → 2,325 ns
+  (−19.66%)** against the same-binary figure of −20.5%.
+  ⚠ **An earlier run of this same comparison was DISCARDED, not recorded.** It was
+  taken while five verification agents were still compiling — load average 2.97 —
+  and read median **+8.85%** with 11 rows past ±10%, nearly all of them POSITIVE
+  and on paths 2.3.5 never touched (`interference_pattern` +16%,
+  `coating_reflectance` +13.7%). That is the uniform-upward-shift signature of a
+  contaminated sample, and it would have entered `bench-history.csv` as a baseline.
+  Checking the load before benchmarking is now part of the routine.
+  ⚠ `spectral/wavelength_to_rgb` reads **+19.05%** (42 → 50 ns) in the clean run
+  and is **not** claimed as a regression: nothing in 2.3.5 touches
+  `spectral_core.cyr`, and at 8 ns of movement on a sub-100 ns row it sits inside
+  the 40% spread this host is documented to have. Listed so it is not mistaken for
+  signal later.
+
+- ⭐ **AND THE 2.3.4 NUMBER WAS THE OUTLIER, FOR A REASON WORTH WRITING DOWN.**
+  2.3.4 measured this same lever at **−5.8%** on `spd_to_json` and I recorded the
+  gap against an earlier −19.6% estimate as unexplained. The explanation is that
+  **bayan's `_jb_append_string` appends string content ONE BYTE AT A TIME** —
+  `str_builder_add_cstr_a` with a 2-byte buffer, i.e. a strlen, a grow-check and a
+  memcpy call per character, for every key and every string value. Allocation
+  count explains only ~11–25% of the time recovered; the rest is that loop.
+  ⚠ So the win tracks **string content**, not object complexity: `spd_to_json` has
+  3 short keys against 81 floats (−5.8%), `medium_to_json` has 10 string bytes
+  (−34.3%), a 6-surface prescription emits 255 string bytes (−34.5%). Recorded in
+  the roadmap so the next document's win can be predicted rather than guessed.
+
+### Fixed
+
+- ⛔ **`trace_surface(0, …)` SIGSEGVed — a null handle in the funnel the entire
+  tracing stack runs through.** It read `TraceRay_pos(0)` before any validation;
+  verified at exit **139** with a core dump. `trace_sequential`,
+  `trace_sequential_polarized` and the recursive tracer all call it in a loop, so
+  **one null surface in a caller-built list took the process down instead of
+  reporting**. Now guarded, returning 0 with `PK_ERR_INVALID_PARAMETER` to match
+  the aperture and geometry rejects beside it.
+  ⚠ **2.0.2 swept seven public entry points for exactly this class and 2.2.8 found
+  four more; `trace_surface` was missed by both.** `cyrius coverage` cannot see it
+  — the function is at 100% reference coverage because every test calls it with
+  valid handles. Found this release only because an investigation into an
+  unrelated allocation question happened to poke it. Mutation-checked: deleting
+  the guards restores the crash.
+
+- ⛔ **The wire format of all seven serializers is now pinned to exact bytes.**
+  Before 2.3.4 nothing pinned any of them; a round-trip test structurally cannot,
+  because prakash's own decoder would accept a format only prakash emits. The
+  format is a published contract that consumers and other languages parse.
+  Byte-identity against faithful clones of the tree forms was verified across
+  **20 fixtures** — ordinary values, `+inf` / `-inf` / NaN, negative zero, every
+  JSON escape class, empty names, and empty / one / six-surface prescriptions,
+  plus all five null sentinels — **0 mismatches**. That harness was a throwaway;
+  the assertions in `tests/serialize.tcyr` are what guards the format from here.
+- **Escaping now goes through the stdlib's `str_builder_add_json_str`**, verified
+  byte-identical to bayan's `_jb_append_string` across **all 255 reachable byte
+  values** (0 mismatches) before the swap. The two differ only in mechanism —
+  `putc` against a per-character `add_cstr` — which is precisely the cost above.
+
+### Added
+
+- **`serialize/prescription_to_json` benchmark row** (21.4 µs) — the only other
+  serializer with a loop and the second-heaviest, previously unmeasured.
+
+### Changed
+
+- **docs/development/roadmap.md** — the `trace_surface` row rewritten from
+  measurement; see *Not implemented* below. Three constraints recorded:
+  bayan's per-byte string cost and how to predict the win from string content;
+  that `str_builder_add_json_str` is a safe drop-in; and that CLAUDE.md's
+  "write into a caller buffer" rule carries an unstated precondition.
+
+### Not implemented — designed, measured, and deliberately deferred
+
+- ⚠ **`trace_surface`'s boxing.** Designed and measured this release but NOT
+  changed, because it is a bite of its own and 2.3.5 already rewrote seven
+  functions. Three corrections to what the roadmap claimed, all now recorded there:
+  ⛔ **The fix it proposed is illegal.** "A caller-supplied flat buffer" aliases:
+  `trace_sequential` retains every hit in a returned vec and
+  `_trace_recursive_inner` leaks `best_hit`'s hit_point into long-lived
+  `TraceSegment`s. Demonstrated — both entries of the returned vec became the same
+  pointer and hit[0]'s data was destroyed. **CLAUDE.md's caller-buffer rule only
+  holds when the caller owns the lifetime.**
+  ⛔ **Its rationale was wrong: allocation volume does not move at all** — 128 B
+  per call, 11,304 B per `spot_diagram`, identical either way. The change buys
+  time, not the leak reduction the serialize work is about.
+  ⛔ **Its projections were 1.6–1.8× optimistic**, taken from an unfaithful clone.
+  Measured on the real functions: `trace_surface` plane **−25.7%**, sphere
+  **−18.6%**, `trace_sequential` **−14.4%**, `spot_diagram` **−8.4%** — real, but
+  not the −36% / −23% / −15% the row promised.
+
 ## [2.3.4] - 2026-09-15 — the disabled trace path was never free, and the serialize backlog was aimed at the wrong row
 
 Two 2.3.x items, both of which turned out to rest on a false belief written in a

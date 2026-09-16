@@ -46,80 +46,65 @@ true, say so in the item itself rather than relying on list order.
 
 ### Performance
 
-- [ ] **`serialize/rgb_to_json` ~2×** (floor-corrected ~1,520 ns → ~3,400 ns).
-      ⚠ **Not a regression to undo.** 85% of the cost is `bayan_json_v_build` and
-      ~720 ns of that is *per float*, because bayan 1.2.1 replaced a 6-decimal
-      renderer with round-trip-correct Grisu2. That bought bit-exact f64
-      round-trips and fixed a real data-loss bug (the old encoder flushed any
-      |x| < 5e-7 to zero). **Do not "fix" the float path.** The remaining lever is
-      the 14% spent on object construction.
-      ⚠ **2.3.2's note on this row was WRONG and is corrected here.** It claimed
-      `bayan_json_v_obj_new` / `_float_new` "have no `_a` form to route through"
-      an arena. They do. bayan ships **15** `_a` variants covering every
-      constructor this path uses — `bayan_json_v_obj_new_a`,
-      `bayan_json_v_float_new_a`, `bayan_json_v_obj_set_a`, `bayan_json_v_build_a`
-      — and each plain form is literally a wrapper passing `default_alloc()`.
-      **Nothing is missing upstream; there is no bayan issue to file.** This is an
-      internal repair.
-      ⛔ **MEASURED IN 2.3.3, AND THE ARENA IS NOT WORTH TAKING. Do not attempt it
-      again without new evidence.** Two independent measurements agreed:
-      construction is **10.9–11.1%** of the row (not 14%), an arena captures only
-      ~28% of that, and the whole prize is **−1.8% to −4.4%** — at or below the
-      per-arm jitter. Even if construction were FREE the ceiling is **−11%**.
-      ⛔ **An intermediate claim of mine was also wrong and is retracted here.** I
-      wrote that `alloc()` "takes a LOCK on every call". It does not:
-      `_alloc_lock_acquire` (lib/alloc.cyr) early-returns while
-      `_threads_active == 0`, and prakash never arms threads — `src/` contains no
-      `thread_create`. There is no lock to remove, and the per-allocation delta
-      between `alloc()` and `arena_alloc` is ~1–3 ns. Going through an allocator
-      *handle* (`alloc_via`, an indirect `fncall2`) is measurably **worse** than
-      calling `alloc()` directly.
-      ⛔ **And the arena breaks the lifetime contract.** Reproduced, not theorised:
-      `bayan_json_v_build_a` puts BOTH the `Str` header and its byte buffer in the
-      passed allocator, so an `arena_reset` at the top of the next call hands back
-      the identical pointers and a previously returned string silently becomes the
-      new result. Silent corruption, no crash — and the existing benchmark discards
-      its result, so it cannot see it. `tests/serialize.tcyr` already holds one
-      `to_json` result across a later `to_json` call.
-      ⭐ **The lever that IS large was never costed: skip the bayan value tree.**
-      Emitting the same bytes straight through a `str_builder` measured **−19.6%**,
-      and hand-assembling into a stack buffer **−28.4%** — the floor with Grisu2
-      untouched. That is the shape any future attempt on this row should take.
-      ⭐ **"Do not fix the float path" is now proven rather than asserted:**
-      `bayan_f64_to_json` is 671 ns against 66 ns for the 6-decimal `fmt_float_buf`
-      it replaced, same binary — 3 floats × ~605 ns IS the ~1.9× step, and that
-      renderer is what makes f64 round-trips bit-exact.
+- [ ] **`trace_surface` boxes 5 structs per call — designed and measured in 2.3.5,
+      not yet implemented.** Exactly 5 boxed structs / **128 bytes** per successful
+      call (TIR 80 B; an aperture reject or geometric miss allocates **0**, and any
+      fix must preserve that). It runs 2× per `trace_sequential` and 38× per
+      `spot_diagram`. **4 of the 5 can go with ZERO public API change**, so this is
+      a 2.3.x patch, not a 2.4.x minor.
+      ⛔ **This row's previous fix was ILLEGAL and is retracted.** It said "a
+      caller-supplied flat buffer", per CLAUDE.md's rule. That aliases:
+      `trace_sequential` retains every hit in a returned vec and
+      `_trace_recursive_inner` leaks `best_hit`'s hit_point into long-lived
+      `TraceSegment`s. Demonstrated — both entries of the returned vec became the
+      same pointer and hit[0]'s data was destroyed, silently, with no error code.
+      **CLAUDE.md's caller-buffer rule only holds when the caller owns the
+      lifetime, and here no caller in `src/` does.**
+      ⭐ **The legal form:** sub-allocate ONE block holding the `TraceHit` plus the
+      three `RayVec3` and the `TraceRay` it points at, and give Snell's law a
+      no-allocation form (`_ray_snell_3d_out`, answering through stack locals) so
+      the block can be sized before it is allocated. Passing the normal as three
+      scalars rather than a pointer is what lets the TIR decision precede the
+      allocation. Public `ray_snell_3d` stays a wrapper; its signature does not move.
+      ⛔ **And this row's rationale was wrong: allocation VOLUME DOES NOT MOVE.**
+      128 B/call, 408 B per `trace_sequential`, 11,304 B per `spot_diagram` —
+      identical in both arms. It buys TIME, not the leak reduction the serialize
+      work was about. Do not sell it as memory work.
+      ⚠ **Measured on the REAL functions**, 5 interleaved rounds in one binary with
+      the control arm validated against the shipped bench row: `trace_surface`
+      plane **186.6 → 138.6 ns (−25.7%)**, sphere **234.2 → 190.6 ns (−18.6%)**,
+      `trace_sequential` **552.6 → 473.2 ns (−14.4%)**, `spot_diagram`
+      **16.670 → 15.275 µs (−8.4%)**, `trace_recursive` **2.031 → 1.894 µs
+      (−6.7%)**. Bit-exact on all five geometry cases.
+      ⚠ The **−36% / −23% / −15%** this row used to promise were **1.6–1.8×
+      optimistic**, taken from an unfaithful clone. Replaced with the above.
 
-- [ ] **`trace_surface` boxes 5 structs per call** (128 bytes/call, measured), and
-      it runs **2× per `trace_sequential`** (635 ns) and **38× per `spot_diagram`**
-      (19.0 µs). A controlled same-binary A/B on a faithful clone: `alloc()` 206 ns
-      (control, matching the shipped 210 ns), a caller-supplied flat buffer
-      **132 ns (−36%)** — projecting to roughly **−23% on `trace_sequential`** and
-      **−15% on `spot_diagram`**. This is CLAUDE.md's "write into a caller buffer"
-      rule applied to the hottest allocating path in the tracer.
-      ⚠ It changes an internal calling convention, so it is a bite of its own, and
-      the projections above are projections — re-measure on the real functions.
-- [ ] **Four sites allocate a per-call scratch buffer**, which CLAUDE.md's DO-NOT
-      list calls a leak under a bump allocator that never frees. Identified during
-      the 2.3.3 investigation; each needs its own look, since the fix is either a
-      caller buffer or a stack local depending on lifetime.
-- [ ] ⭐ **`serialize/spd_to_json` is 71.7 µs — 25× `rgb_to_json`, and the
-      serialize backlog has been aimed at the wrong row for three releases.**
-      Benchmarked for the first time in 2.3.4: **71.748 µs** against
-      `rgb_to_json`'s **2.861 µs**. Same code shape, but it allocates *inside a
-      loop* — one bayan float node plus one array push per sample, ~81 for a
-      standard SPD against rgb's 3.
-      ⚠ Roughly **68% of it is Grisu2 float rendering** (81 × ~605 ns ≈ 49 µs),
-      which stays off-limits for the reason proven in 2.3.3. That still leaves
-      **~23 µs of construction** — two orders of magnitude more absolute headroom
-      than the ~0.3 µs that the whole `rgb_to_json` arena debate was about.
-      ⭐ Apply the lever 2.3.3 identified and never tried: **skip the bayan value
-      tree**, emitting through a `str_builder` (−19.6% measured on rgb) or
-      hand-assembling (−28.4%). On this row the tree overhead is proportionally
-      larger, so re-measure rather than assuming the rgb percentages carry.
-      ⛔ Do NOT start from the arena: 2.3.3 measured that at −1.8% to −4.4% and
-      found it corrupts returned strings.
-
+- [ ] **Ten per-call scratch allocations, not four — in two tiers wanting opposite
+      fixes.** Measured in 2.3.5 with `alloc_used()` deltas.
+      ⭐ **Tier 1 — large, variable-size, all in `wave_pattern.cyr`** (`grid` at
+      :269 and :549, `aperture` at :299, `col_buf` at :220). Scratch is the
+      MAJORITY of these functions' allocation: `diffraction_pattern_2d(64×64)`
+      hands out 99,352 B/call of which **66,560 B (67%)** is scratch;
+      `diffraction_pattern_circular(32)` **75%**; `psf_from_wavefront(32×32)`
+      **67%**. A grow-only module-scope cache cut those to 536 / 32,792 / 8,216
+      B/call, bit-identical across every cell.
+      ⚠ **And bought NO measurable time** — 3 interleaved same-binary rounds, all
+      inside noise. **These are leak fixes, not speed fixes**; justify them as
+      memory or not at all.
+      ⭐ **Tier 2 — small, fixed-size** (`pbr_advanced.cyr:428/436`,
+      `spectral_cie.cyr:3117/3126/3127` and `:3156/3157`,
+      `wave_diffraction.cyr:497/501`, `wave_pattern.cyr:493` and `:517`). Only
+      `multilayer_rt` moved measurably: **493 → 462 ns (−6.3%)**, reproduced 3/3.
+      ⭐ **The stack-local budget is 122,880 BYTES**, bisected under cyrius 6.6.4:
+      `var b[N]` compiles clean at N = 122,864 and trips *"oversized array local
+      kept in shared global"* at N = 122,872 — so `var X[N]` is N **bytes**, not N
+      slots. Every Tier 2 site is at 0.04% of budget, so stack locals are
+      unconditionally safe there. `col_buf` is safe only for nh ≤ 7,679 while
+      `_pat_dims_bad` admits nh up to 8,192, so it does **not** cover the domain;
+      `grid` and `aperture` are never stack-eligible.
+      ⚠ **Correction:** `trace_surface`'s 5 boxed structs are **not** scratch — all
+      five escape through the returned `TraceHit`. That is the row above, and no
+      stack local can fix it.
 
 ### Housekeeping
 
@@ -179,6 +164,25 @@ Blocked on the consumers, not on prakash.
 - [ ] soorat / kiran / ranga: consume `dist/prakash.cyr` directly once they move to Cyrius
 
 ## Constraints established by measurement — read before optimizing
+
+- **Bayan's value tree costs far more in STRING bytes than in allocations.**
+  `_jb_append_string` appends string content **one byte at a time** through
+  `str_builder_add_cstr_a` with a 2-byte buffer — a strlen, grow-check and memcpy
+  call per character, for every key and every string value. That, not the node
+  allocations, is the dominant cost: allocation count explains only ~11–25% of the
+  time 2.3.5 recovered. It is why the win tracked string content almost exactly —
+  `spd_to_json` (3 short keys, 81 floats) −5.8%, `rgb_to_json` (3 one-char keys)
+  −20.5%, `medium_to_json` (10 string bytes) −34.3%, `prescription_to_json`
+  (255 string bytes at 6 surfaces) −34.5%. ⭐ If a future document is
+  string-heavy, expect a large win; if it is float-heavy, expect a small one.
+- **`str_builder_add_json_str` is byte-identical to bayan's escaping** — verified
+  across all 255 reachable byte values, 0 mismatches. Use it rather than
+  hand-rolling escapes.
+- **CLAUDE.md's "write into a caller buffer" rule has a precondition the rule does
+  not state: the caller must own the lifetime.** Applying it to `trace_surface`
+  produces aliasing corruption, because `trace_sequential` retains hits in a
+  returned vec. Check where the pointer ends up before reaching for a caller
+  buffer.
 
 - **Hand-inlining pays at this scale, and only same-binary A/B can show it.**
   2.3.2 took `pbr/fresnel_schlick` 16.3 → 12 ns (−26%), `distribution_ggx`

@@ -87,6 +87,24 @@ struct TraceHit { hit_point; normal; ray_after; reflectance; }
 fn trace_surface(ray, surface, err_out) {
     _prk_trace("trace_surface");
     store64(err_out, PK_ERR_NONE);
+    # ⛔ 2.3.5: a null `ray` or `surface` read straight off address 0 and SIGSEGVed
+    # — `TraceRay_pos(0)` on the next line. Verified: `trace_surface(0, 0, &e)`
+    # exited 139 with a core dump. This is the defect class 2.0.2 swept seven
+    # public entry points for and 2.2.8 found four more of; trace_surface was
+    # missed by both, and `cyrius coverage` cannot see it because every test calls
+    # it with valid handles. The whole tracing stack funnels through here —
+    # trace_sequential, trace_sequential_polarized and the recursive tracer all
+    # call it in a loop — so one null surface in a caller-built list took the
+    # process down rather than reporting. PK_ERR_INVALID_PARAMETER and a 0 return
+    # match what the aperture and geometry rejects below already do.
+    if (ray == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
+    if (surface == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
     var pos = TraceRay_pos(ray);
     var dir = TraceRay_dir(ray);
     var px = RayVec3_x(pos);

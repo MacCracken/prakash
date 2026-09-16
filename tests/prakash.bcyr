@@ -80,6 +80,7 @@ var _theta = 0;
 var _na = 0;
 var _x = 0;
 var _slit = 0;
+var _presc = 0;
 
 # ── Ray ────────
 # Unpolarized Fresnel reflectance at one incidence angle.
@@ -148,6 +149,10 @@ fn b_sky_color() { atm_sky_color_rgb(_sunz, _scat, _out3); return 0; }
 fn b_stellar_rgb() { br_stellar_temperature_to_rgb(_temp, _out3); return 0; }
 # Composite: serialize an RGB triple to JSON (bayan Grisu2 float rendering dominates).
 fn b_rgb_to_json() { var r = rgb_to_json(_rgb); return 0; }
+# Composite: serialize a 6-surface lens prescription to JSON. The only other
+# serializer with a loop, and the second-heaviest; added in 2.3.5 when the
+# str_builder rewrite took it 32.1 -> 21.0 us.
+fn b_prescription_to_json() { var r = prescription_to_json(_presc); return 0; }
 # Composite: serialize a full 81-sample SPD to JSON — the HEAVIEST serializer and
 # the one the roadmap's serialize row was never actually about. rgb_to_json emits
 # 3 floats; this emits 81 plus an array, allocating inside the loop. Added in
@@ -191,6 +196,10 @@ fn main() {
     _aperture = alloc(64 * 8);
     for (var i = 0; i < 64; i = i + 1) {
         store64(_aperture + i * 8, F64_ONE);
+    }
+    _presc = prescription_new("bench lens");
+    for (var pk = 0; pk < 6; pk = pk + 1) {
+        var _pa = prescription_add_surface(_presc, f64_from(50 + pk), f64_from(pk), F64_ONE, f64_from(12));
     }
     _wl_nm = f64_from(550);
     _wl_m = _bf(55, 100000000);
@@ -278,6 +287,7 @@ fn main() {
     # ── bridge / serialize ──
     bench("bridge/stellar_temperature_to_rgb", &b_stellar_rgb, 100000);
     bench("serialize/rgb_to_json", &b_rgb_to_json, 50000);
+    bench("serialize/prescription_to_json", &b_prescription_to_json, 20000);
     bench("serialize/spd_to_json", &b_spd_to_json, 20000);
     # ── composites (2.1.1) ──
     bench("spectral/spd_to_xyz", &b_spd_to_xyz, 20000);

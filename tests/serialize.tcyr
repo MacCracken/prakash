@@ -129,6 +129,64 @@ if (dback != 0) {
     _assert_near(Spd_start_nm(dback), Spd_start_nm(d65), TOL, "spd start_nm roundtrip");
 }
 
+# ── Every wire format, pinned to exact bytes ────────
+#
+# ⚠ 2.3.5 rewrote the remaining six *_to_json functions off bayan's value tree
+# onto a str_builder (2.3.4 did spd). Byte-identity was verified against faithful
+# clones of the tree forms across 20 fixtures — ordinary values, non-finite
+# floats, every JSON escape class, empty names, empty/one/six-surface
+# prescriptions and all five null sentinels, 0 mismatches — but that harness was a
+# throwaway. THESE assertions are what survives to guard the format from here on.
+#
+# The wire format is a published contract: consumers and other languages parse it.
+# A round-trip test cannot guard it, because prakash's own decoder would happily
+# accept a format only prakash emits.
+assert_eq(streq(str_data(rgb_to_json(rgb_new(_fd(1, 10), _fd(2, 10), _fd(3, 10)))),
+    "{\"r\":0.1,\"g\":0.2,\"b\":0.3}"), 1, "rgb wire format");
+assert_eq(streq(str_data(medium_to_json(medium_glass())),
+    "{\"n\":1.52,\"name\":\"glass\"}"), 1, "medium wire format");
+var w_sell = str_builder_new();
+str_builder_add_cstr(w_sell, "{\"b1\":1.03961212,\"c1\":0.00600069867,");
+str_builder_add_cstr(w_sell, "\"b2\":0.231792344,\"c2\":0.0200179144,");
+str_builder_add_cstr(w_sell, "\"b3\":1.01046945,\"c3\":103.560653}");
+assert_eq(streq(str_data(sellmeier_to_json(sellmeier_bk7())),
+    str_data(str_builder_build(w_sell))), 1, "sellmeier wire format");
+assert_eq(streq(str_data(lens_type_to_json(LENS_DIVERGING)), "\"Diverging\""), 1,
+  "lens_type diverging wire format");
+assert_eq(streq(str_data(polarization_to_json(polarization_new(F64_ONE, f64_from(0), f64_div(F64_PI, f64_from(2))))),
+    "{\"ex\":1.0,\"ey\":0.0,\"phase\":1.5707963267948966}"), 1, "polarization wire format");
+
+var wpr = prescription_new("test lens");
+var _wa = prescription_add_surface(wpr, f64_from(50), f64_from(3), _fd(152, 100), _fd(125, 10));
+var w_pre = str_builder_new();
+str_builder_add_cstr(w_pre, "{\"name\":\"test lens\",\"surfaces\":[");
+str_builder_add_cstr(w_pre, "{\"radius\":50.0,\"thickness\":3.0,");
+str_builder_add_cstr(w_pre, "\"n_after\":1.52,\"aperture_radius\":12.5}");
+str_builder_add_cstr(w_pre, "],\"n_initial\":1.0}");
+assert_eq(streq(str_data(prescription_to_json(wpr)),
+    str_data(str_builder_build(w_pre))), 1, "prescription wire format");
+# An empty surfaces array still emits [] and keeps the trailing key.
+assert_eq(streq(str_data(prescription_to_json(prescription_new("empty"))),
+    "{\"name\":\"empty\",\"surfaces\":[],\"n_initial\":1.0}"), 1,
+  "prescription with no surfaces emits an empty array");
+
+# Escaping goes through the stdlib's str_builder_add_json_str rather than bayan's
+# per-character appender. Verified byte-identical across all 255 reachable byte
+# values before the swap; this pins the classes that actually appear in a name.
+var escn = alloc(16);
+store8(escn, 34); store8(escn + 1, 92); store8(escn + 2, 10); store8(escn + 3, 9);
+store8(escn + 4, 1); store8(escn + 5, 65); store8(escn + 6, 0);
+assert_eq(streq(str_data(medium_to_json(_medium_mk(F64_ONE, escn))),
+    "{\"n\":1.0,\"name\":\"\\\"\\\\\\n\\t\\u0001A\"}"), 1,
+  "medium name escapes quote, backslash, newline, tab and a control char");
+
+# Null handles keep their 0 sentinel through the rewrite.
+assert_eq(rgb_to_json(0), 0, "rgb_to_json(null) = 0");
+assert_eq(medium_to_json(0), 0, "medium_to_json(null) = 0");
+assert_eq(sellmeier_to_json(0), 0, "sellmeier_to_json(null) = 0");
+assert_eq(polarization_to_json(0), 0, "polarization_to_json(null) = 0");
+assert_eq(prescription_to_json(0), 0, "prescription_to_json(null) = 0");
+
 # ── The Spd wire format, pinned to exact bytes ────────
 #
 # ⚠ 2.3.4 rewrote spd_to_json off bayan's value tree and onto a str_builder. Up
