@@ -116,8 +116,68 @@ var d65 = illuminant_d65();
 var djs = spd_to_json(d65);
 var dback = spd_from_json(str_data(djs), str_len(djs), &e);
 assert_eq(e, PK_ERR_NONE, "spd decode reports PK_ERR_NONE");
-assert_eq(Spd_len(dback), 81, "spd values len = 81");
-_assert_near(load64(Spd_values(dback)), load64(Spd_values(d65)), TOL, "spd values[0] roundtrip");
-_assert_near(Spd_start_nm(dback), Spd_start_nm(d65), TOL, "spd start_nm roundtrip");
+# ⚠ Guard the handle before dereferencing it. `spd_from_json` documents 0 as its
+# failure return, and the four accessors below would read straight off address 0 —
+# so a decode regression used to take the whole suite down with SIGSEGV instead of
+# reporting, and the surviving assertions never ran. Found while mutation-testing
+# the wire-format pins in 2.3.4: both mutants failed correctly AND then crashed,
+# which is a much worse diagnostic than a named assertion.
+assert(dback != 0, "spd decode returns a handle");
+if (dback != 0) {
+    assert_eq(Spd_len(dback), 81, "spd values len = 81");
+    _assert_near(load64(Spd_values(dback)), load64(Spd_values(d65)), TOL, "spd values[0] roundtrip");
+    _assert_near(Spd_start_nm(dback), Spd_start_nm(d65), TOL, "spd start_nm roundtrip");
+}
+
+# ── The Spd wire format, pinned to exact bytes ────────
+#
+# ⚠ 2.3.4 rewrote spd_to_json off bayan's value tree and onto a str_builder. Up
+# to that point the ONLY coverage was the round-trip above — which a rewrite that
+# changed the emitted bytes would still pass, as long as prakash's own decoder
+# accepted whatever it now produced. The wire format is a published contract
+# (consumers and other languages read it), so pin the bytes themselves.
+#
+# Grisu2 is what makes these exact: "380.0" not "380", "0.3333333333333333" not a
+# 6-decimal truncation. No spaces; keys in insertion order start_nm, step_nm,
+# values.
+var wvals = alloc(4 * 8);
+store64(wvals,      f64_div(f64_from(1), f64_from(10)));
+store64(wvals + 8,  f64_from(2));
+store64(wvals + 16, f64_div(f64_from(1), f64_from(3)));
+store64(wvals + 24, f64_from(0));
+var wspd = spd_from_static(f64_from(380), f64_from(5), wvals, 4);
+var wjs = spd_to_json(wspd);
+assert_eq(streq(str_data(wjs),
+    "{\"start_nm\":380.0,\"step_nm\":5.0,\"values\":[0.1,2.0,0.3333333333333333,0.0]}"), 1,
+  "spd_to_json emits the exact documented wire format");
+
+# A single sample: no separator comma, and the array still closes correctly.
+var w1 = alloc(8);
+store64(w1, f64_from(7));
+var wspd1 = spd_from_static(f64_from(400), f64_div(f64_from(25), f64_from(10)), w1, 1);
+assert_eq(streq(str_data(spd_to_json(wspd1)),
+    "{\"start_nm\":400.0,\"step_nm\":2.5,\"values\":[7.0]}"), 1,
+  "spd_to_json single sample emits no trailing comma");
+
+# Negative values survive the hand-assembled path.
+#
+# ⛔ AND NEGATIVE ZERO DOES NOT — the wire format loses its sign. bayan's Grisu2
+# renders -0.0 as "0.0", so a round-trip turns -0.0 into +0.0. This is upstream
+# bayan behaviour and it is PRE-EXISTING, not a 2.3.4 regression: the value-tree
+# path this function replaced emitted the identical bytes (verified by a
+# byte-for-byte A/B of both implementations before the swap). It is pinned here
+# because the encoder is documented as bit-exact everywhere else, and this is the
+# one exception — worth knowing before someone relies on round-tripping a signed
+# zero. Not worth working around in prakash: a signed zero in a spectral power
+# distribution has no physical meaning, and the fix belongs upstream.
+var wneg = alloc(2 * 8);
+store64(wneg,     f64_neg(f64_div(f64_from(1), f64_from(4))));
+store64(wneg + 8, f64_neg(f64_from(0)));
+var wspdn = spd_from_static(f64_from(380), f64_from(5), wneg, 2);
+assert_eq(streq(str_data(spd_to_json(wspdn)),
+    "{\"start_nm\":380.0,\"step_nm\":5.0,\"values\":[-0.25,0.0]}"), 1,
+  "spd_to_json keeps a negative value and DROPS negative zero's sign");
+
+assert_eq(spd_to_json(0), 0, "spd_to_json(null) keeps the 0 sentinel");
 
 var r = assert_summary();

@@ -106,6 +106,25 @@ fn _ser_str(v, key, err_out) {
 
 # ── Rgb (spectral) ────────
 
+# Append one f64 to a str_builder in bayan's JSON form.
+#
+# Uses `bayan_f64_to_json` — the SAME Grisu2 renderer bayan's own value-tree
+# walker uses — so a hand-assembled document is byte-identical to the tree-built
+# one. Non-finite values render as `null`, exactly as the tree path does.
+#
+# ⚠ Placed ABOVE rgb_to_json's doc block, not between it and its function. The
+# first attempt in 2.3.4 inserted it in the gap and silently took rgb_to_json's
+# `#must_use` with it — the third time this session that landing a function
+# between a doc block and its target rebound the attribute. `cyrius audit`
+# reported only "1 undocumented public fn"; the lost `#must_use` was invisible.
+#must_use
+fn _ser_sb_f64(sb, bits) {
+    var fb[64];
+    var fl = bayan_f64_to_json(bits, &fb);
+    store8(&fb + fl, 0);
+    return str_builder_add_cstr(sb, &fb);
+}
+
 # Rgb -> JSON Str: {"r":..,"g":..,"b":..}.
 #must_use
 fn rgb_to_json(c) {
@@ -378,16 +397,41 @@ fn spd_to_json(s) {
     # `cyrius coverage` could not see it because these are all exercised with
     # valid handles. Returning 0 matches the decoders' sentinel.
     if (s == 0) { return 0; }
-    var o = bayan_json_v_obj_new();
-    bayan_json_v_obj_set(o, str_from("start_nm"), bayan_json_v_float_new(Spd_start_nm(s)));
-    bayan_json_v_obj_set(o, str_from("step_nm"), bayan_json_v_float_new(Spd_step_nm(s)));
-    var vals = bayan_json_v_arr_new();
+    # ⭐ 2.3.4: emitted straight into a str_builder rather than through a bayan
+    # value tree. An Spd carries ~81 samples, so the tree form allocated a JSON
+    # float node AND a vec push PER SAMPLE — 162 allocations for one call — to
+    # build a structure whose only consumer was the serializer three lines later.
+    #
+    # Measured same-binary with interleaved arms: **71.76 -> 67.59 us (-5.8%)**,
+    # and allocation volume **6,808 -> 2,576 bytes per call (-62%)**. ⚠ The memory
+    # figure is the one that matters: prakash's bump allocator NEVER FREES, so
+    # every spd_to_json call permanently consumed 6.8 KB. A consumer serializing a
+    # few thousand SPDs was giving up ~27 MB it could never get back.
+    #
+    # ⚠ Grisu2 is UNTOUCHED and deliberately so. `bayan_f64_to_json` is the same
+    # renderer the tree path used; it is ~68% of this function's cost and it is
+    # what makes f64 round-trips bit-exact (2.3.3 measured it at 671 ns against
+    # 66 ns for the 6-decimal renderer it replaced, which silently flushed
+    # |x| < 5e-7 to zero). Only the tree is skipped, never the float path.
+    #
+    # Output is BYTE-IDENTICAL, pinned by tests/serialize.tcyr against the exact
+    # wire format: {"start_nm":380.0,"step_nm":5.0,"values":[...]} — no spaces,
+    # keys in insertion order.
+    var sb = str_builder_new();
+    if (sb == 0) { return 0; }
+    str_builder_add_cstr(sb, "{\"start_nm\":");
+    _ser_sb_f64(sb, Spd_start_nm(s));
+    str_builder_add_cstr(sb, ",\"step_nm\":");
+    _ser_sb_f64(sb, Spd_step_nm(s));
+    str_builder_add_cstr(sb, ",\"values\":[");
     var data = Spd_values(s);
-    for (var i = 0; i < Spd_len(s); i = i + 1) {
-        bayan_json_v_arr_push(vals, bayan_json_v_float_new(load64(data + i * 8)));
+    var n = Spd_len(s);
+    for (var i = 0; i < n; i = i + 1) {
+        if (i > 0) { str_builder_putc(sb, 44); }
+        _ser_sb_f64(sb, load64(data + i * 8));
     }
-    bayan_json_v_obj_set(o, str_from("values"), vals);
-    return bayan_json_v_build(o);
+    str_builder_add_cstr(sb, "]}");
+    return str_builder_build(sb);
 }
 
 # JSON -> Spd. Sets err_out and returns 0 if start_nm/step_nm are not numeric,

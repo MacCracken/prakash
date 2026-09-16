@@ -99,21 +99,27 @@ true, say so in the item itself rather than relying on list order.
       rule applied to the hottest allocating path in the tracer.
       ⚠ It changes an internal calling convention, so it is a bite of its own, and
       the projections above are projections — re-measure on the real functions.
-- [ ] **`_prk_trace` runs `strlen` on a compile-time literal**, 29 ns per traced
-      entry (20 ns of it `strlen`) across **32 call sites** — about **14% of
-      `trace_surface`**. The label is always a literal, so the length is known at
-      the call site. ⚠ sakshi's `sakshi_trace(name, len)` already takes the length;
-      the waste is entirely on prakash's side of the wrapper.
 - [ ] **Four sites allocate a per-call scratch buffer**, which CLAUDE.md's DO-NOT
       list calls a leak under a bump allocator that never frees. Identified during
       the 2.3.3 investigation; each needs its own look, since the fix is either a
       caller buffer or a stack local depending on lifetime.
-- [ ] **`spd_to_json` has no benchmark row and is the heaviest serializer.** It
-      allocates *inside a loop* — one bayan float node plus one array push per
-      sample, so ~81 for a standard SPD against `rgb_to_json`'s 3, on the same
-      pattern the whole `rgb_to_json` row is about. Measured arena footprint 6,808
-      bytes/call and unbounded in `Spd_len`. Bench it before optimising anything
-      else in `serialize`; the row that is measured is not the row that costs.
+- [ ] ⭐ **`serialize/spd_to_json` is 71.7 µs — 25× `rgb_to_json`, and the
+      serialize backlog has been aimed at the wrong row for three releases.**
+      Benchmarked for the first time in 2.3.4: **71.748 µs** against
+      `rgb_to_json`'s **2.861 µs**. Same code shape, but it allocates *inside a
+      loop* — one bayan float node plus one array push per sample, ~81 for a
+      standard SPD against rgb's 3.
+      ⚠ Roughly **68% of it is Grisu2 float rendering** (81 × ~605 ns ≈ 49 µs),
+      which stays off-limits for the reason proven in 2.3.3. That still leaves
+      **~23 µs of construction** — two orders of magnitude more absolute headroom
+      than the ~0.3 µs that the whole `rgb_to_json` arena debate was about.
+      ⭐ Apply the lever 2.3.3 identified and never tried: **skip the bayan value
+      tree**, emitting through a `str_builder` (−19.6% measured on rgb) or
+      hand-assembling (−28.4%). On this row the tree overhead is proportionally
+      larger, so re-measure rather than assuming the rgb percentages carry.
+      ⛔ Do NOT start from the arena: 2.3.3 measured that at −1.8% to −4.4% and
+      found it corrupts returned strings.
+
 
 ### Housekeeping
 

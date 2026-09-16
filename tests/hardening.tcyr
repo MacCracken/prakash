@@ -635,4 +635,44 @@ assert(_h_bits(spec_visible_min_nm(), f64_from(380)) == 1,
   "changing the log level does not perturb computation");
 var _lvl2 = prakash_set_log_level(3);
 
+# ── The trace gate, in BOTH directions ────────
+#
+# ⚠ 2.3.4 put a level test in front of `_prk_trace`'s `strlen`, and NOTHING in
+# the tree could have told us if the predicate went in backwards: tracing would
+# have silently stopped emitting and every assertion above would still pass.
+# The only prior coverage was the three lines above, which check that changing
+# the level does not perturb a computation — it would not notice a trace path
+# that had gone permanently dark.
+#
+# sakshi's ring buffer makes the emission observable, so assert the gate OPENS at
+# SK_TRACE and CLOSES below it. A test that only checked the suppressed direction
+# would pass on `return 0;` as the whole function body.
+sakshi_output_buffer();
+
+prakash_set_log_level(SK_TRACE);
+var _c0 = sakshi_ring_event_count();
+_prk_trace("gate_open_probe");
+var _c1 = sakshi_ring_event_count();
+assert(_c1 > _c0, "at SK_TRACE the trace gate OPENS and sakshi receives the event");
+
+prakash_set_log_level(SK_INFO);
+var _c2 = sakshi_ring_event_count();
+_prk_trace("gate_closed_probe");
+var _c3 = sakshi_ring_event_count();
+assert_eq(_c3, _c2, "below SK_TRACE the gate CLOSES and nothing is emitted");
+
+# And a real traced operation, not just the wrapper — trace_surface calls
+# _prk_trace at entry, so the whole path from public API to sakshi is covered.
+prakash_set_log_level(SK_TRACE);
+var _c4 = sakshi_ring_event_count();
+var _tr_err = 0;
+var _tr_ray = trace_ray_new(ray_vec3(f64_from(0), f64_from(0), f64_from(0)),
+  ray_vec3(f64_from(0), f64_from(0), F64_ONE), F64_ONE);
+var _tr_surf = surface_plane(f64_from(10), f64_div(f64_from(15), f64_from(10)), f64_from(25));
+var _tr_hit = trace_surface(_tr_ray, _tr_surf, &_tr_err);
+var _c5 = sakshi_ring_event_count();
+assert(_c5 > _c4, "a real traced operation reaches sakshi at SK_TRACE");
+
+prakash_set_log_level(SK_INFO);
+
 var r = assert_summary();

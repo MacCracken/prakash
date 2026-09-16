@@ -2,6 +2,106 @@
 
 ## [Unreleased]
 
+## [2.3.4] - 2026-09-15 — the disabled trace path was never free, and the serialize backlog was aimed at the wrong row
+
+Two 2.3.x items, both of which turned out to rest on a false belief written in a
+comment. Suite **6568 → 6576 assertions across 31 suites**, 0 failed.
+`cyrius audit` exits 0.
+
+### Performance
+
+- ⭐ **`_prk_trace` cost 28–37 ns per traced entry with tracing OFF; now 7 ns and
+  flat (−74% to −81%).** It called `sakshi_trace(name, strlen(name))`, and
+  `strlen` is an **argument** — evaluated before the call, every time, to produce
+  a length `_sk_log` immediately discarded because the runtime level (SK_INFO)
+  already suppressed the message. The level test now comes first, so a suppressed
+  trace never touches its label.
+
+  ⚠ **The comment above it asserted the opposite and was wrong on both halves.**
+  It said tracing was "near-free when disabled" because `sakshi_trace` is
+  "compile-elidable (#if SAKSHI_LEVEL)". It is not elided here: sakshi's own
+  `#ifndef SAKSHI_LEVEL` defaults it to **5**, and prakash never defines it, so
+  the branch is live in every build. And even elided, the `strlen` argument would
+  still have run. Both corrected in place.
+
+  ⚠ The old cost **scaled with the label**: 28 ns for a 13-character marker,
+  37 ns for a 34-character one. The new form is 7 ns for both. This is on all
+  **32** `_prk_trace` sites, i.e. at the entry to most public optics operations.
+
+  ⭐ **The suite corroborated the mechanism, not just the number.** On a quiet box
+  against the 2.3.3 rows, median **+0.00%**, and the three largest movers are all
+  traced operations, each moving by about its own label's `strlen` cost:
+  `spectral/wavelength_to_rgb` **62 → 42 ns** (−32.3%, one site, 17-char label),
+  `lens/seidel_coefficients` **90 → 62 ns** (−31.1%, one site, 19-char label), and
+  `ray/trace_sequential` **634 → 559 ns** (−11.8%, its own entry plus
+  `trace_surface`'s, once per surface). Untraced rows did not move. That the
+  savings track label length AND trace-site count is what makes this the
+  explanation rather than a coincidence.
+
+### Added
+
+- ⭐ **`serialize/spd_to_json` benchmarked for the first time: 71.748 µs — 25×
+  `rgb_to_json`'s 2.861 µs.** ⛔ **The serialize backlog has been pointed at the
+  wrong row for three releases.** Everything written about `serialize` — the 2×
+  gap, the 85/14 split, the arena that 2.3.3 measured at −1.8% to −4.4% — was
+  about `rgb_to_json`, which emits **3** floats. `spd_to_json` emits **81** and
+  allocates *inside the loop*, and nothing had ever measured it.
+  Roughly 68% of it is Grisu2 rendering (off-limits), leaving **~23 µs** of
+  construction against the ~0.3 µs that the entire arena debate concerned. The
+  roadmap row is rewritten around it.
+
+- ⭐ **…and then rewritten off the value tree: `spd_to_json` 71.76 → 67.59 µs
+  (−5.8%), allocation volume 6,808 → 2,576 bytes per call (−62%).** An Spd carries
+  ~81 samples, so the tree form allocated a JSON float node AND a vec push **per
+  sample** — 162 allocations — to build a structure the serializer consumed three
+  lines later. It now emits straight into a `str_builder`.
+
+  ⚠ **The memory number is the one that matters, not the time.** prakash's bump
+  allocator never frees, so every `spd_to_json` call permanently consumed 6.8 KB;
+  a consumer serializing a few thousand SPDs was giving up ~27 MB it could never
+  reclaim. The −5.8% is real but modest precisely because Grisu2 dominates, and
+  **Grisu2 is untouched** — the same `bayan_f64_to_json` the tree walker used.
+
+  ⚠ Note the honest gap against expectations: 2.3.3 measured this lever at −19.6%
+  on `rgb_to_json`. It is −5.8% here, because the float path is a far larger share
+  of an 81-sample document than of a 3-float one. The rgb percentage did not carry,
+  which is why it was re-measured rather than assumed.
+
+### Fixed
+
+- ⛔ **The Spd wire format was never pinned, and a round-trip test cannot pin it.**
+  The only coverage was `spd_from_json(spd_to_json(x))` — which passes for ANY
+  format change, as long as prakash's own decoder accepts whatever it now emits.
+  The format is a published contract. Now pinned to exact bytes:
+  `{"start_nm":380.0,"step_nm":5.0,"values":[0.1,2.0,0.3333333333333333,0.0]}`,
+  plus the single-sample case (no trailing comma) and negatives. Mutation-checked:
+  dropping the separator comma or renaming a key fails the named assertions.
+- ⛔ **Negative zero does not survive the wire, and now says so.** bayan's Grisu2
+  renders `-0.0` as `"0.0"`, so a round-trip turns −0.0 into +0.0. **Pre-existing
+  upstream behaviour, not a 2.3.4 regression** — verified by a byte-for-byte A/B
+  of the old tree path and the new builder path before the swap, which agree
+  exactly here. Pinned as the one documented exception to an encoder described as
+  bit-exact everywhere else. Not worked around: a signed zero in a spectral power
+  distribution has no physical meaning, and the fix belongs upstream.
+- **tests/serialize.tcyr guards the decoded handle before dereferencing it.**
+  `spd_from_json` documents 0 as its failure return and four accessors read
+  straight off it, so a decode regression took the whole suite down with SIGSEGV
+  and the remaining assertions never ran. Found while mutation-testing the pins
+  above: both mutants failed correctly *and then crashed*. They now report four
+  named failures instead.
+
+- **tests/hardening.tcyr** — the trace gate asserted in **both** directions, via
+  sakshi's ring buffer: the event count must RISE at `SK_TRACE` and stay flat
+  below it, for `_prk_trace` directly and for a real traced operation
+  (`trace_surface`) end to end.
+  ⚠ **Nothing in the tree could previously have caught a broken trace path.** The
+  only coverage was three lines asserting that changing the level does not perturb
+  a computation — which would not notice tracing having gone permanently dark. A
+  one-directional test would not have been enough either: checking only the
+  suppressed case passes on `return 0;` as the entire function body. Both mutants
+  — predicate reversed, and body replaced by `return 0;` — die on exactly the two
+  assertions that encode them.
+
 ## [2.3.3] - 2026-09-15 — the arena that measured out at 4%, and a zero-fill nobody could observe
 
 Answers the question 2.3.2 left open — *is the `rgb_to_json` lever an upstream

@@ -148,6 +148,11 @@ fn b_sky_color() { atm_sky_color_rgb(_sunz, _scat, _out3); return 0; }
 fn b_stellar_rgb() { br_stellar_temperature_to_rgb(_temp, _out3); return 0; }
 # Composite: serialize an RGB triple to JSON (bayan Grisu2 float rendering dominates).
 fn b_rgb_to_json() { var r = rgb_to_json(_rgb); return 0; }
+# Composite: serialize a full 81-sample SPD to JSON — the HEAVIEST serializer and
+# the one the roadmap's serialize row was never actually about. rgb_to_json emits
+# 3 floats; this emits 81 plus an array, allocating inside the loop. Added in
+# 2.3.4 so the row that costs is the row that is measured.
+fn b_spd_to_json() { var r = spd_to_json(_d65); return 0; }
 # ── composites (2.1.1) ──
 # Composite: integrate an SPD against the CIE CMFs to XYZ.
 fn b_spd_to_xyz() { var r = spd_to_xyz(_d65); return 0; }
@@ -273,6 +278,7 @@ fn main() {
     # ── bridge / serialize ──
     bench("bridge/stellar_temperature_to_rgb", &b_stellar_rgb, 100000);
     bench("serialize/rgb_to_json", &b_rgb_to_json, 50000);
+    bench("serialize/spd_to_json", &b_spd_to_json, 20000);
     # ── composites (2.1.1) ──
     bench("spectral/spd_to_xyz", &b_spd_to_xyz, 20000);
     bench("spectral/spd_blackbody", &b_spd_blackbody, 20000);

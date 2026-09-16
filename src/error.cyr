@@ -260,9 +260,21 @@ fn _prk_pow(base, exp) {
 # ── Logging (sakshi) ────────
 # Ports the Rust `tracing::trace!` diagnostics. Consumers set the level with
 # prakash_set_log_level(SK_TRACE) to see operation-entry traces; the default
-# (SK_INFO) leaves them off. `_prk_trace` is a thin wrapper the optics modules
-# call at operation entry — sakshi_trace is compile-elidable (#if SAKSHI_LEVEL)
-# and runtime-guarded, so it is near-free when trace is disabled.
+# (SK_INFO) leaves them off.
+#
+# ⚠ THIS BLOCK USED TO CLAIM THE DISABLED PATH WAS "NEAR-FREE" AND IT WAS NOT.
+# Two things it got wrong, both measured in 2.3.4:
+#   1. `sakshi_trace` is NOT compile-elided here. Its body is `#if SAKSHI_LEVEL
+#      >= 5`, and sakshi's own `#ifndef SAKSHI_LEVEL` defaults it to **5** —
+#      prakash never defines it, so the branch is live in every build.
+#   2. Even if it were elided, `strlen(name)` is an ARGUMENT, so it is evaluated
+#      before the call either way. Every traced operation entry walked its label
+#      to compute a length that `_sk_log` then discarded, because the runtime
+#      level (SK_INFO) already suppressed the message.
+# Measured cost per entry with tracing OFF: **28 ns** for a 13-char label and
+# **37 ns** for a 34-char one — i.e. it scaled with the label. Reading the level
+# first makes it **7 ns and flat**: −74% and −81%. Across the 32 `_prk_trace`
+# sites this is the whole of what the disabled path costs.
 
 # Set the global log level (SK_OFF/ERROR/WARN/INFO/DEBUG/TRACE from sakshi).
 fn prakash_set_log_level(level) {
@@ -270,7 +282,14 @@ fn prakash_set_log_level(level) {
 }
 
 # Emit a TRACE-level operation marker (the Rust trace!("op") equivalent).
+#
+# The level test comes FIRST and is the point: `strlen` must not run when the
+# message is going to be dropped. `_sk_log` suppresses when `SK_TRACE >
+# _sk_log_level`, so `sakshi_get_level() < SK_TRACE` is the same predicate,
+# evaluated before the label is touched. Tracing enabled behaves exactly as
+# before — same label, same length, same sakshi call.
 fn _prk_trace(name) {
+    if (sakshi_get_level() < SK_TRACE) { return 0; }
     sakshi_trace(name, strlen(name));
     return 0;
 }

@@ -95,7 +95,18 @@ soorat (PBR shading), kiran (lighting), ranga (lens effects)
   `lib/` is vendored (ganita, hisab, sakshi, sandhi, bayan, ...) — never edit it; a defect
   there is fixed upstream or worked around in `src/` with the reason written down.
 - **No magic.** Every operation is measurable, auditable, traceable.
-- **`#must_use`** on all pure functions (417 uses — the load-bearing attribute here).
+- **`#must_use`** on all pure functions — the load-bearing attribute here.
+  Count it, do not quote it: `grep -rhoE '^\s*#must_use' src/*.cyr | wc -l`
+  (424 at 2.3.4). ⚠ A hard-coded figure here has gone stale at three separate
+  releases; the command is the source of truth.
+- ⚠ **Inserting a function directly above another one STEALS its attributes.**
+  A `#doc` + `#must_use` block binds to whatever declaration follows it, so a new
+  function landed in the gap silently takes the attribute and leaves the original
+  bare. This has happened **three times in one release cycle** (2.3.1
+  `atm_sky_radiance_single_scatter`, 2.3.4 `rgb_to_json`). `cyrius audit` reports
+  only the lost DOC comment — the lost `#must_use` is invisible to every gate.
+  After inserting a function, check the declaration below it still has its own
+  attributes, or place the insertion above the target's doc block entirely.
 - **`#derive(accessors)`** for struct field accessors rather than hand-written `load64`.
 - ⚠ **`cycc` SILENTLY IGNORES UNKNOWN ATTRIBUTES** — `#definitely_not_real` compiles and
   lints clean, exactly like `#inline` does. Cyrius has no `#inline` and no enums, so the
