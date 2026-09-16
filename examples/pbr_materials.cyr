@@ -13,9 +13,12 @@
 include "dist/prakash.cyr"
 
 fn _pm_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+# Write a cstring to stdout with no trailing newline.
 fn say(s) { print(s, strlen(s)); return 0; }
+# Write a cstring to stdout followed by a newline.
 fn say_line(s) { say(s); say("\n"); return 0; }
 
+# Write a signed integer right-aligned in a field `width` wide.
 fn say_i_pad(n, width) {
     var b = alloc(32);
     if (b == 0) { return 0; }
@@ -25,6 +28,7 @@ fn say_i_pad(n, width) {
     return 0;
 }
 
+# Write an f64 with `decimals` places, right-aligned in `width`.
 fn say_f_pad(val, decimals, width) {
     var buf = alloc(64);
     if (buf == 0) { return 0; }
@@ -34,6 +38,7 @@ fn say_f_pad(val, decimals, width) {
     return 0;
 }
 
+# Demonstrate the PBR surface model across a table of common materials.
 fn main() {
     alloc_init();
     say_line("prakash — PBR material preview");

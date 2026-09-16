@@ -164,6 +164,27 @@ for (var si = 0; si < 4; si = si + 1) {
 assert(f64_gt(atm_sky_radiance_single_scatter(BLUE, _fd(3, 10), F64_PI_2),
     atm_sky_radiance_single_scatter(RED, _fd(3, 10), F64_PI_2)), "blue dominates at 90deg");
 
+# 2.3.1 hoisted _prk_cos and both phase functions out of atm_sky_color_rgb's
+# per-channel loop, where they were recomputed three times for the same three
+# answers. atm_sky_radiance_single_scatter still evaluates them per call, so it
+# is the UNHOISTED reference: every channel must match it BIT-FOR-BIT, not to a
+# tolerance. A tolerance-based check would pass on an approximation; the claim
+# being made is exactness, so the assertion has to be exact. Swept over the same
+# 4x5 zenith/scattering grid used above, both endpoints and the interior.
+for (var hi = 0; hi < 4; hi = hi + 1) {
+    for (var hj = 0; hj < 5; hj = hj + 1) {
+        var hz = load64(sunz4 + hi * 8);
+        var ha = load64(scat5 + hj * 8);
+        atm_sky_color_rgb(hz, ha, RGB);
+        assert_eq(load64(RGB),
+          atm_sky_radiance_single_scatter(_atm_rgb_wl(0), hz, ha), "hoist bit-exact: R");
+        assert_eq(load64(RGB + 8),
+          atm_sky_radiance_single_scatter(_atm_rgb_wl(1), hz, ha), "hoist bit-exact: G");
+        assert_eq(load64(RGB + 16),
+          atm_sky_radiance_single_scatter(_atm_rgb_wl(2), hz, ha), "hoist bit-exact: B");
+    }
+}
+
 # ── Sunlight color ────────
 test_group("sunlight");
 

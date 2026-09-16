@@ -27,6 +27,7 @@ include "src/serialize.cyr"
 
 fn _bf(num, den) { return f64_div(f64_from(num), f64_from(den)); }
 
+# Run one benchmark: build a harness for `name`, drive `fp` for `n` iterations, report.
 fn bench(name, fp, n) {
     var b = bench_new(name);
     bench_run(b, fp, n);
@@ -81,63 +82,100 @@ var _x = 0;
 var _slit = 0;
 
 # ── Ray ────────
+# Unpolarized Fresnel reflectance at one incidence angle.
 fn b_fresnel_unpolarized() { var r = fresnel_unpolarized(_n1, _n2, _ang, _err); return 0; }
+# Numerical aperture of a step-index fiber from its core/cladding indices.
 fn b_fiber_na() { var r = fiber_na(_n2, _n1, _err); return 0; }
+# Fiber V-number (normalized frequency) from diameter, NA and wavelength.
 fn b_v_number() { var r = v_number(_diam, _na, _wl_m); return 0; }
+# Sellmeier dispersion: refractive index of BK7 at one wavelength.
 fn b_sellmeier_n_at() { var r = sellmeier_n_at(_bk7, _rho); return 0; }
 
 # ── Spectral ────────
+# CIE 1931 wavelength -> sRGB conversion at one wavelength.
 fn b_wavelength_to_rgb() { var r = wavelength_to_rgb(_wl_nm, _err); return 0; }
+# Planck spectral radiance at one wavelength and temperature.
 fn b_planck_radiance() { var r = planck_radiance(_wl_m, _temp); return 0; }
+# Single-wavelength lookup into a tabulated SPD (D65).
 fn b_spd_at() { var r = spd_at(_d65, _wl_nm); return 0; }
 
 # ── Wave ────────
+# Single-slit diffraction intensity at one angle.
 fn b_single_slit() { var r = single_slit_intensity(_wl_m, _slit, _ang, _i0); return 0; }
+# Malus's law: transmitted intensity through a polarizer at one angle.
 fn b_malus_law() { var r = malus_law(_i0, _theta); return 0; }
+# First-order Bessel function J1 — the Airy pattern kernel.
 fn b_bessel_j1() { var r = bessel_j1(_x); return 0; }
+# Airy diffraction intensity at one angle for a circular aperture.
 fn b_airy_pattern() { var r = airy_pattern(_wl_m, _diam, _ang, _i0); return 0; }
+# Fresnel cosine integral C(x) — the Cornu spiral coordinate.
 fn b_fresnel_integral_c() { var r = fresnel_integral_c(_x); return 0; }
+# Single-layer thin-film coating reflectance at one wavelength.
 fn b_coating_reflectance() { var r = coating_reflectance(_wl_nm, _n1, _nc, _ns, _thick); return 0; }
+# Zernike polynomial Z(4,0) — spherical aberration — at one pupil point.
 fn b_zernike_poly() { var r = zernike_poly(4, 0, _rho, _theta); return 0; }
+# Composite: full 8x8 2D Fraunhofer diffraction, FFT path included.
 fn b_diffraction_2d() { var r = diffraction_pattern_2d(_aperture, 8, 8); return 0; }
 
 # ── PBR ────────
+# Schlick approximation to the Fresnel term — the cheapest PBR row.
 fn b_fresnel_schlick() { var r = pbr_fresnel_schlick(_f0, _ct); return 0; }
+# GGX/Trowbridge-Reitz normal distribution term.
 fn b_distribution_ggx() { var r = pbr_distribution_ggx(_ndh, _rough); return 0; }
+# Full Cook-Torrance specular BRDF (D, G and F combined).
 fn b_cook_torrance() { var r = pbr_cook_torrance(_ndh, _hdv, _ndv, _ndl, _rough, _f0); return 0; }
+# Thin-film iridescent Fresnel reflectance at one wavelength.
 fn b_iridescence() { var r = pbr_iridescence_fresnel(_n1, _nc, _ns, _film_th, _wl_nm, _ct); return 0; }
+# Henyey-Greenstein phase function at one scattering angle.
 fn b_henyey_greenstein() { var r = pbr_henyey_greenstein(_ct, _g); return 0; }
 
 # ── Lens ────────
+# Diffraction-limited MTF at one spatial frequency.
 fn b_mtf() { var r = lens_mtf_diffraction_limited(_freq, _cutoff); return 0; }
+# The five Seidel aberration coefficients for one singlet prescription.
 fn b_seidel() { var r = lens_seidel_coefficients(_sn, _sf, _sp, _sp); return 0; }
 
 # ── Atmosphere ────────
+# Rayleigh scattering cross-section at one wavelength.
 fn b_rayleigh_cross() { var r = atm_rayleigh_cross_section(_wl_m); return 0; }
+# Cornette-Shanks approximation to the Mie phase function.
 fn b_mie_phase() { var r = atm_mie_phase_cornette_shanks(_ct, _g); return 0; }
+# Composite: full atmospheric sky colour — the worst scalar row, and the only one that allocates.
 fn b_sky_color() { atm_sky_color_rgb(_sunz, _scat, _out3); return 0; }
 
 # ── Bridge / serialize ────────
+# Stellar blackbody temperature -> sRGB via the bridge layer.
 fn b_stellar_rgb() { br_stellar_temperature_to_rgb(_temp, _out3); return 0; }
+# Composite: serialize an RGB triple to JSON (bayan Grisu2 float rendering dominates).
 fn b_rgb_to_json() { var r = rgb_to_json(_rgb); return 0; }
 # ── composites (2.1.1) ──
+# Composite: integrate an SPD against the CIE CMFs to XYZ.
 fn b_spd_to_xyz() { var r = spd_to_xyz(_d65); return 0; }
+# Composite: build an 81-sample blackbody SPD at 5000 K (transcendental-bound).
 fn b_spd_blackbody() { var r = spd_blackbody(f64_from(5000)); return 0; }
+# Composite: photopic luminous flux of D65 over the tabulated CMFs.
 fn b_luminous_flux() { var r = luminous_flux(_d65); return 0; }
+# Composite: CIE 13.3 colour rendering index of D65 — the slowest row in the suite.
 fn b_cri() { var r = color_rendering_index(_d65); return 0; }
+# Single ray-surface intersection with refraction.
 fn b_trace_surface() { var r = trace_surface(_ray0, _plane, _err); return 0; }
+# Composite: trace one ray through a full sequential surface list.
 fn b_trace_sequential() { var r = trace_sequential(_ray0, _surfaces, _err); return 0; }
+# Composite: spot diagram over a ray fan — allocation- and branch-heavy.
 fn b_spot_diagram() {
     var r = spot_diagram(_surfaces, _bf(5, 1), 3, 6, f64_from(0), f64_from(0), f64_from(50));
     return 0;
 }
+# Composite: normalize a 64x64 Pattern2D (the one SIMD path in prakash).
 fn b_pattern_normalized() { var r = pattern2d_normalized(_bigpat); return 0; }
+# Composite: 16x16 two-source interference field — the most expensive wave row.
 fn b_interference_pattern() {
     var r = interference_pattern(_srcs, 3, _wl_m, F64_ONE,
       f64_neg(F64_ONE), F64_ONE, f64_neg(F64_ONE), F64_ONE, 16, 16);
     return 0;
 }
 
+# Allocate the shared fixtures, then run every benchmark above in order.
 fn main() {
     alloc_init();
     _err = alloc(8);

@@ -13,9 +13,12 @@
 include "dist/prakash.cyr"
 
 fn _cl_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+# Write a cstring to stdout with no trailing newline.
 fn say(s) { print(s, strlen(s)); return 0; }
+# Write a cstring to stdout followed by a newline.
 fn say_line(s) { say(s); say("\n"); return 0; }
 
+# Write a signed integer to stdout.
 fn say_i(n) {
     var b = alloc(32);
     if (b == 0) { return 0; }
@@ -24,6 +27,7 @@ fn say_i(n) {
     return 0;
 }
 
+# Write an f64 to stdout with `decimals` places.
 fn say_f(val, decimals) {
     var buf = alloc(64);
     if (buf == 0) { return 0; }
@@ -32,6 +36,7 @@ fn say_f(val, decimals) {
     return 0;
 }
 
+# Write an f64 with `decimals` places, right-aligned in `width`.
 fn say_f_pad(val, decimals, width) {
     var buf = alloc(64);
     if (buf == 0) { return 0; }
@@ -41,6 +46,7 @@ fn say_f_pad(val, decimals, width) {
     return 0;
 }
 
+# Demonstrate a camera-lens prescription: cardinal points, MTF and depth of field.
 fn main() {
     alloc_init();
     var err = alloc(8);

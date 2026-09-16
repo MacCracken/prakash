@@ -15,13 +15,17 @@ var TOL6 = f64_div(F64_ONE, f64_from(1000000));   # 1e-6
 var Z = f64_from(0);
 var N15 = f64_div(f64_from(15), f64_from(10));      # 1.5
 
+# A symmetric biconvex BK7-like singlet (R = +/-100, 5 thick, n = 1.5,
+# semi-diameter 25) used as the shared fixture for the tracing tests below.
 fn biconvex_lens() {
     var s = vec_new();
     vec_push(s, surface_sphere(f64_from(100), Z, N15, f64_from(25)));
     vec_push(s, surface_sphere(f64_neg(f64_from(100)), f64_from(5), F64_ONE, f64_from(25)));
     return s;
 }
+# A ray on the optical axis at height 0, launched from z along +z.
 fn on_axis_ray(z) { return trace_ray_new(ray_vec3(Z, Z, z), ray_vec3(Z, Z, F64_ONE), F64_ONE); }
+# A ray parallel to the axis at height y, launched from z along +z.
 fn off_axis_ray(y, z) { return trace_ray_new(ray_vec3(Z, y, z), ray_vec3(Z, Z, F64_ONE), F64_ONE); }
 fn _spot(x, y) {
     var s = alloc(sizeof(SpotPoint));

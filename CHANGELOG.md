@@ -2,6 +2,118 @@
 
 ## [Unreleased]
 
+## [2.3.1] - 2026-09-15 — the docs gate that had never been green, and a three-release-old perf row whose premise was false
+
+Closes the `cyrius audit` failure 2.3.0 documented, lands the top open performance
+item, and rewrites the roadmap to be forward-facing. Suite **6438 → 6498
+assertions across 29 suites**, 0 failed. `cyrius audit` exits **0** — verified by
+its exit code, which is how 2.3.0 got this wrong.
+
+### Fixed
+
+- ⭐ **`cyrius audit` exits 0 for the first time since the docs stage began
+  covering `tests/`.** 2.3.0 reported the failure without closing it: **33
+  undocumented public fns**, 3 in `tests/ray_simulate.tcyr` and 30 in
+  `tests/prakash.bcyr`. All 33 now carry a real one-line doc.
+
+  ⚠ **Eight more were "documented" only by accident, and the gate could not tell.**
+  `cyrius doc --check` accepts any `#` comment on the line above a declaration — so
+  a section rule like `# ── Ray ────────` silently documented whichever benchmark
+  happened to sit under it, while its neighbours counted as bare. Those eight now
+  have descriptions of their own; the section rules stay as section rules.
+
+  ⚠ **The sweep in `CLAUDE.md` is wider than audit's and was also failing.** Audit
+  scopes `src tests`; the documented Work Loop runs `doc --check` over
+  `examples/*.cyr` as well, where **21** further functions were undocumented. Fixed
+  too, so both gates now agree. All four examples still compile, run, and format
+  clean.
+
+### Performance
+
+- ⭐ **`atmosphere/sky_color_rgb`: 1,013 ns → 871 ns (−14%)**, bit-identical.
+  The per-channel loop called `atm_sky_radiance_single_scatter` once per RGB
+  channel, and that function re-evaluates `_prk_cos` plus **both** phase
+  functions — Rayleigh, and Cornette-Shanks with its `f64_sqrt` and two divisions
+  — none of which depends on wavelength. Three identical evaluations per call,
+  every call. They are now computed once above the loop and passed into a new
+  `_atm_sky_radiance_with_phase`; `atm_sky_radiance_single_scatter` keeps its
+  signature and behaviour and is now a thin wrapper over the same core.
+
+  ⚠ **The extraction silently stole the public function's `#must_use`, and the
+  docs gate is what caught it.** Inserting the new helper directly above
+  `atm_sky_radiance_single_scatter` placed it between that function and the
+  `# doc` + `#must_use` pair written for it, so the attribute bound to the new
+  private helper and the public function lost it — while the helper ended up
+  carrying two. `cyrius lint` was clean either way; `cyrius audit` flagged it only
+  as *1 undocumented public fn*, and the missing `#must_use` was visible only by
+  reading the diff. This is the same defect hisab recorded in its own `vec2`/`vec3`
+  helpers, where an inserted private function had held a public one's `#must_use`
+  since 2.17.0. Both restored; count 416 → 417.
+
+  **Measured same-binary, arms interleaved OLD/NEW three times** — the method
+  `CLAUDE.md` requires and the only one this host supports at this magnitude:
+  OLD 1.014 / 1.007 / 1.017 µs against NEW 867 / 871 / 876 ns. Within-arm spread
+  is ~1% against a 14% separation, so the result does not depend on the 40%
+  run-to-run spread that makes whole-suite deltas meaningless here.
+
+  ⚠ **The roadmap row this closes had a false premise, and it had stood for three
+  releases.** It read "the worst scalar row (19.7×) **and the only one that
+  allocates**", filed under *Arena allocation*. `atm_sky_color_rgb` does not
+  allocate — it writes into a caller-supplied `out` buffer — and
+  `src/atmosphere.cyr` contains **zero `alloc(` sites**. An arena would have
+  bought nothing.
+
+  ⭐ **`atm_sunset_gradient`, forty lines below it, already did this hoist** —
+  same three terms, lifted above its own loop. The defect was that one function
+  disagreed with its immediate neighbour, which is the kind of thing a
+  measured-impact row pointed at allocation will never surface.
+
+### Added
+
+- **tests/atmosphere.tcyr** — a 60-assertion bit-exactness sweep over the 4×5
+  zenith/scattering grid the suite already uses. Each channel of
+  `atm_sky_color_rgb` must equal `atm_sky_radiance_single_scatter` for that
+  wavelength **bit-for-bit**, not to a tolerance: the claim being made is
+  exactness, so a tolerance check would pass on an approximation and prove
+  nothing. The unhoisted function is deliberately kept as the reference. Mutation
+  -checked — swapping the two phase arguments fails all three channels with
+  distinct bit patterns.
+
+### Changed
+
+- **docs/development/roadmap.md** — rewritten to be **forward-facing**; 219 → 142
+  lines, **0** completed items, 17 open. The Completed release table, the met
+  V2.0 exit criteria, the finished cross-crate bridges and three fully-`[x]`
+  backlog sections are gone — that history is what `CHANGELOG.md` is for, and
+  ~70 lines of closed items were burying the handful of things actually open.
+  ⚠ What a finished item *leaves behind* is kept: the measurements that say an
+  approach does not pay are folded into the open item they govern, under
+  *Constraints established by measurement* — SIMD being exhausted, `hvec3_*`
+  costing 2–11% internally, and the new rule to check a row's premise before
+  optimizing against it. The file's header now states the policy so it does not
+  silently refill.
+- **CLAUDE.md** — the `roadmap.md` line in *Documentation Structure* described the
+  old shape ("completed items, backlog, …"); it now states the forward-facing
+  policy. `#must_use` count corrected 399 → **417** (measured, alongside a check
+  that prakash uses **only** `#must_use` and `#derive` — no silently-ignored
+  attributes, the hazard `CLAUDE.md` warns about since `cycc` accepts unknown ones).
+- **src/atmosphere.cyr** — `_atm_sky_radiance_with_phase` extracted as described
+  above; `atm_sky_color_rgb` hoists, with the wavelength-independence argument
+  written down at the loop.
+- **dist/** — both bundles regenerated at v2.3.1.
+
+### Not attempted — checked rather than assumed
+
+- **The `rgb_to_json` arena.** The roadmap's remaining lever is the 14% of that
+  row spent on object construction, via bayan's `_a` allocator variants. Both
+  (`bayan_json_v_obj_set_a`, `bayan_json_v_build_a`) do exist in the vendored
+  bayan, so the swap looks mechanical — but prakash allocates through a **bump
+  allocator that never frees**, so "pass an arena" is meaningless unless the arena
+  is reused across calls, and `bayan_json_v_obj_new` / `_float_new` / `str_from`
+  on the same path have no `_a` form to route through one. That is a question
+  about allocator lifetime, not a find-and-replace, and it gets its own bite
+  rather than riding along here. Recorded in the roadmap row.
+
 ## [2.3.0] - 2026-09-15 — hisab 3.x: the FFT grew an error channel, and discarding it still compiled
 
 Toolchain **6.6.2 → 6.6.4**, hisab **2.11.2 → 3.1.1**, sakshi **2.4.11 → 2.5.2**, and the

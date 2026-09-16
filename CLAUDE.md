@@ -95,7 +95,7 @@ soorat (PBR shading), kiran (lighting), ranga (lens effects)
   `lib/` is vendored (ganita, hisab, sakshi, sandhi, bayan, ...) — never edit it; a defect
   there is fixed upstream or worked around in `src/` with the reason written down.
 - **No magic.** Every operation is measurable, auditable, traceable.
-- **`#must_use`** on all pure functions (399 uses — the load-bearing attribute here).
+- **`#must_use`** on all pure functions (417 uses — the load-bearing attribute here).
 - **`#derive(accessors)`** for struct field accessors rather than hand-written `load64`.
 - ⚠ **`cycc` SILENTLY IGNORES UNKNOWN ATTRIBUTES** — `#definitely_not_real` compiles and
   lints clean, exactly like `#inline` does. Cyrius has no `#inline` and no enums, so the
@@ -149,7 +149,9 @@ docs/ (required):
     overview.md      — module map, data flow, consumers, dependency stack
     math.md          — (if applicable) mathematical reference for algorithms/formulas
   development/
-    roadmap.md       — completed items, backlog, future features (demand-gated), v1.0 criteria
+    roadmap.md       — FORWARD-FACING ONLY: open backlog, demand-gated features,
+                       and the measured constraints that govern them. Completed work is
+                       deleted from it and lives in CHANGELOG.md; nothing in it is [x]
 
 docs/ (when earned — not scaffolded empty):
   adr/

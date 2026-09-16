@@ -14,8 +14,10 @@ include "dist/prakash.cyr"
 # Cyrius has no formatted print; fmt_float_buf(val, buf, decimals) renders into
 # a caller buffer and returns the length.
 fn _ex_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+# Write a cstring to stdout with no trailing newline.
 fn say(s) { print(s, strlen(s)); return 0; }
 
+# Write an f64 to stdout with `decimals` places.
 fn say_f(val, decimals) {
     var buf = alloc(64);
     if (buf == 0) { return 0; }
@@ -24,8 +26,10 @@ fn say_f(val, decimals) {
     return 0;
 }
 
+# Write a cstring to stdout followed by a newline.
 fn say_line(s) { say(s); say("\n"); return 0; }
 
+# Demonstrate the core ray, lens and spectral entry points end to end.
 fn main() {
     alloc_init();
     var err = alloc(8);

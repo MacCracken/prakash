@@ -26,9 +26,12 @@ fn say_i(n) {
     print(b, k);
     return 0;
 }
+# Write a cstring to stdout with no trailing newline.
 fn say(s) { print(s, strlen(s)); return 0; }
+# Write a cstring to stdout followed by a newline.
 fn say_line(s) { say(s); say("\n"); return 0; }
 
+# Write an f64 to stdout with `decimals` places.
 fn say_f(val, decimals) {
     var buf = alloc(64);
     if (buf == 0) { return 0; }
@@ -47,6 +50,7 @@ fn say_f_pad(val, decimals, width) {
     return 0;
 }
 
+# Write a cstring left-aligned in a field `width` wide.
 fn say_pad(s, width) {
     var n = strlen(s);
     print(s, n);
@@ -74,6 +78,8 @@ fn min_deviation(n) {
     return min_dev;
 }
 
+# Print one table row: colour name, wavelength, and the rainbow angle
+# that `water` gives at that wavelength.
 fn row(name, wl_nm, water) {
     var wl_um = f64_div(wl_nm, f64_from(1000));
     var n = sellmeier_n_at(water, wl_um);
@@ -89,6 +95,7 @@ fn row(name, wl_nm, water) {
     return 0;
 }
 
+# Demonstrate dispersion: compute the primary rainbow angle per wavelength.
 fn main() {
     alloc_init();
     say_line("prakash — rainbow simulation");
