@@ -2,6 +2,93 @@
 
 ## [Unreleased]
 
+## [2.3.6] - 2026-09-15 — the tracer stops boxing, and a four-times-repeated mistake becomes a gate
+
+Implements the `trace_surface` change 2.3.5 designed. Suite **6597 assertions
+across 31 suites**, 0 failed. `cyrius audit` exits 0.
+
+### Performance
+
+- ⭐ **`trace_surface` makes ONE allocation instead of five.** It built the
+  normal, the refracted direction, the hit point, the after-ray and the `TraceHit`
+  header separately — 128 bytes across five calls, twice per `trace_sequential`
+  and 38 times per `spot_diagram`. They now share a single carved block:
+  `[TraceHit][hit_point][normal][after dir][after ray]`.
+
+  Measured same-binary, arms interleaved, 3 rounds: **plane 183 → 139 ns
+  (−24.0%)**, **sphere 232 → 187 ns (−19.5%)**. `trace_sequential` 470 ns and
+  `spot_diagram` 14.6 µs on the new path.
+
+  ⚠ **This buys TIME, not memory.** The block is the same 128 bytes the five
+  objects occupied, so allocation VOLUME is unchanged — 128 B/call, 11,304 B per
+  `spot_diagram`, identical either way. The roadmap row used to argue this as leak
+  reduction; it is not, and now says so.
+
+- ⭐ **TIR allocates 80 bytes rather than 128**, because a totally-internally-
+  reflecting hit has no transmitted ray. Knowing that *before* allocating is what
+  required splitting Snell's law: **`_ray_snell_3d_out`** answers through caller
+  slots, taking the normal as three scalars rather than a boxed `RayVec3`, so the
+  block can be sized after the TIR decision. Public `ray_snell_3d` is unchanged —
+  it is now a wrapper that boxes what the new form returns through slots.
+
+  ⛔ **The fix the roadmap originally prescribed was ILLEGAL and would have
+  corrupted silently.** It said "a caller-supplied flat buffer", per CLAUDE.md's
+  rule — but `trace_sequential` retains every hit in the vec it returns and
+  `_trace_recursive_inner` hands `best_hit`'s hit_point to `TraceSegment`s that
+  outlive the trace. A reused buffer aliases them: demonstrated, both entries of
+  the returned vec became the same pointer and the first surface's hit was
+  destroyed, with no error code. **CLAUDE.md's caller-buffer rule assumes the
+  caller owns the lifetime, and no caller in `src/` does.** A fresh block per call
+  keeps lifetimes bit-for-bit what they were.
+
+  ⚠ **Bit-exactness verified over 167 dumped values**, comparing raw f64 bits
+  against the old implementation: 140 `trace_surface` cases (4 surface types × 7
+  ray heights × 5 angles), a 9-point TIR sweep, 5 `trace_sequential` composites
+  and all 19 of `spot_diagram`'s SpotPoints — **0 differences**. The aperture
+  reject and geometric miss still allocate **0 bytes**, which any fix had to
+  preserve.
+
+  ⭐ **The suite corroborated all three tracer rows, in the predicted direction and
+  magnitude.** Clean box, suite median **−0.77%**: `ray/trace_surface`
+  **187 → 148 ns (−20.9%)**, `ray/trace_sequential` **554 → 465 ns (−16.1%)**,
+  `ray/spot_diagram` **16.7 → 15.1 µs (−10.0%)**. The design predicted −25.7% /
+  −14.4% / −8.4% from a same-binary A/B; the realised figures bracket those. Rows
+  off the tracer path did not move.
+
+  ⭐ **And a noise call from 2.3.5 was vindicated.** That release recorded
+  `spectral/wavelength_to_rgb` at **+19.05%** (42 → 50 ns) and explicitly declined
+  to call it a regression, on the grounds that nothing had touched
+  `spectral_core.cyr` and 8 ns sits inside this host's documented spread. It reads
+  **−16.00% (50 → 42 ns)** this release — oscillating between the same two values,
+  which is what noise does and what a regression does not. Left unclaimed in both
+  directions.
+
+### Added
+
+- ⭐ **`scripts/check-must-use.sh` — a gate for a mistake I made four times.**
+  `#must_use` binds to the declaration that FOLLOWS it, so inserting a function
+  between an existing one and its doc block rebinds the attribute and leaves the
+  original bare. It happened in 2.3.1 (`atm_sky_radiance_single_scatter`), 2.3.4
+  (`rgb_to_json`) and again here (`ray_snell_3d`) — **twice after the hazard was
+  written into CLAUDE.md as a rule.**
+
+  ⛔ **Nothing else detects it.** `cyrius lint` is clean either way; `cyrius audit`
+  notices only when the DOC comment happens to travel with the attribute, and
+  reports it as *"undocumented"*, never as a lost attribute. ⚠ And a COUNT is not
+  enough — add one function while another loses its marker and the total is
+  unchanged — so the script compares the **set of names** against a base ref. It
+  ships with a `--selftest` that includes a negative control: a function inserted
+  into the gap must NOT be reported as carrying the attribute. Wired into CI, and
+  mutation-verified by reproducing the exact 2.3.6 mistake, which it names.
+
+  A rule violated four times is not a control. This is.
+
+### Changed
+
+- **CLAUDE.md** — the insertion hazard now points at the gate rather than asking
+  the reader to remember. **docs/development/roadmap.md** — the `trace_surface`
+  row closed.
+
 ## [2.3.5] - 2026-09-15 — the remaining six serializers, and why 2.3.4's number was the small one
 
 Finishes what 2.3.4 started: all seven `*_to_json` functions now emit straight

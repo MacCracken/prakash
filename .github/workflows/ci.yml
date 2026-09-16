@@ -130,6 +130,19 @@ jobs:
       - name: Vet
         run: cyrius vet src/main.cyr
 
+      - name: "#must_use is not silently lost"
+        # `#must_use` binds to the declaration that FOLLOWS it, so inserting a
+        # function between an existing one and its doc block rebinds the attribute
+        # and leaves the original bare. That happened four times in the 2.3.x
+        # cycle, twice AFTER it was written into CLAUDE.md as a rule. No other gate
+        # sees it: lint is clean either way, and audit reports it only as
+        # "undocumented", and only when the doc comment happened to travel with it.
+        # Compares the SET OF NAMES against the base commit, not the count — adding
+        # one function while another loses its marker leaves the count unchanged.
+        run: |
+          ./scripts/check-must-use.sh --selftest
+          ./scripts/check-must-use.sh "${{ github.event.pull_request.base.sha || 'HEAD^' }}"
+
       - name: Verify dist bundles are in sync with lib/
         # prakash ships TWO bundles: `cyrius distlib` -> dist/prakash.cyr
         # (math-only) and `cyrius distlib ai` -> dist/prakash-ai.cyr (+ AI

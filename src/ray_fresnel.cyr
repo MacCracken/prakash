@@ -210,15 +210,23 @@ fn beer_lambert(intensity, alpha, distance) {
 # refl_out and the error code to err_out. `direction` and outward `normal`
 # should be normalized.
 #must_use
-fn ray_snell_3d(direction, normal, n1, n2, refl_out, err_out) {
+# Snell refraction in 3D, answering through caller slots instead of allocating.
+#
+# Split out of ray_snell_3d in 2.3.6 so trace_surface can learn whether the ray
+# totally-internally-reflects BEFORE it allocates — the TIR case needs 80 bytes
+# where a refracting hit needs 128, and a single block cannot be sized until that
+# is known. The normal arrives as three SCALARS rather than a RayVec3 pointer for
+# the same reason: at the call site the normal's components are already in hand
+# and boxing them only to read them back is the cost being removed.
+#
+# The arithmetic and its order are IDENTICAL to the wrapper below; only the
+# delivery changes, so both produce bit-identical results.
+fn _ray_snell_3d_out(direction, nx, ny, nz, n1, n2, rx_out, ry_out, rz_out, refl_out, err_out) {
     store64(err_out, PK_ERR_NONE);
     store64(refl_out, f64_from(0));
     var dx = RayVec3_x(direction);
     var dy = RayVec3_y(direction);
     var dz = RayVec3_z(direction);
-    var nx = RayVec3_x(normal);
-    var ny = RayVec3_y(normal);
-    var nz = RayVec3_z(normal);
     var dot = f64_add(f64_add(f64_mul(dx, nx), f64_mul(dy, ny)), f64_mul(dz, nz));
     var cos_i = f64_neg(dot);
     var ratio = f64_div(n1, n2);
@@ -229,12 +237,30 @@ fn ray_snell_3d(direction, normal, n1, n2, refl_out, err_out) {
     }
     var cos_t = f64_sqrt(f64_sub(F64_ONE, sin2_t));
     var factor = f64_sub(f64_mul(ratio, cos_i), cos_t);
-    var refr = ray_vec3(
-      f64_add(f64_mul(ratio, dx), f64_mul(factor, nx)),
-      f64_add(f64_mul(ratio, dy), f64_mul(factor, ny)),
-      f64_add(f64_mul(ratio, dz), f64_mul(factor, nz)));
+    store64(rx_out, f64_add(f64_mul(ratio, dx), f64_mul(factor, nx)));
+    store64(ry_out, f64_add(f64_mul(ratio, dy), f64_mul(factor, ny)));
+    store64(rz_out, f64_add(f64_mul(ratio, dz), f64_mul(factor, nz)));
     var rs = fresnel_s(n1, n2, cos_i, cos_t);
     var rp = fresnel_p(n1, n2, cos_i, cos_t);
     store64(refl_out, f64_mul(F64_HALF, f64_add(rs, rp)));
-    return refr;
+    return 0;
+}
+
+# Compute the refracted direction and unpolarized Fresnel reflectance for a 3D
+# ray. Returns the refracted RayVec3 (0 on TIR); writes the reflectance to
+# refl_out and the error code to err_out. `direction` and outward `normal`
+# should be normalized.
+#
+# A thin wrapper over _ray_snell_3d_out since 2.3.6 — it boxes the result the
+# caller-slot form answers through. Callers on a hot path should use that form
+# directly; this one preserves the public signature.
+#must_use
+fn ray_snell_3d(direction, normal, n1, n2, refl_out, err_out) {
+    var rx = f64_from(0);
+    var ry = f64_from(0);
+    var rz = f64_from(0);
+    var _r = _ray_snell_3d_out(direction, RayVec3_x(normal), RayVec3_y(normal), RayVec3_z(normal),
+      n1, n2, &rx, &ry, &rz, refl_out, err_out);
+    if (prakash_is_err(load64(err_out)) == 1) { return 0; }
+    return ray_vec3(rx, ry, rz);
 }

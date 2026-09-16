@@ -46,39 +46,6 @@ true, say so in the item itself rather than relying on list order.
 
 ### Performance
 
-- [ ] **`trace_surface` boxes 5 structs per call — designed and measured in 2.3.5,
-      not yet implemented.** Exactly 5 boxed structs / **128 bytes** per successful
-      call (TIR 80 B; an aperture reject or geometric miss allocates **0**, and any
-      fix must preserve that). It runs 2× per `trace_sequential` and 38× per
-      `spot_diagram`. **4 of the 5 can go with ZERO public API change**, so this is
-      a 2.3.x patch, not a 2.4.x minor.
-      ⛔ **This row's previous fix was ILLEGAL and is retracted.** It said "a
-      caller-supplied flat buffer", per CLAUDE.md's rule. That aliases:
-      `trace_sequential` retains every hit in a returned vec and
-      `_trace_recursive_inner` leaks `best_hit`'s hit_point into long-lived
-      `TraceSegment`s. Demonstrated — both entries of the returned vec became the
-      same pointer and hit[0]'s data was destroyed, silently, with no error code.
-      **CLAUDE.md's caller-buffer rule only holds when the caller owns the
-      lifetime, and here no caller in `src/` does.**
-      ⭐ **The legal form:** sub-allocate ONE block holding the `TraceHit` plus the
-      three `RayVec3` and the `TraceRay` it points at, and give Snell's law a
-      no-allocation form (`_ray_snell_3d_out`, answering through stack locals) so
-      the block can be sized before it is allocated. Passing the normal as three
-      scalars rather than a pointer is what lets the TIR decision precede the
-      allocation. Public `ray_snell_3d` stays a wrapper; its signature does not move.
-      ⛔ **And this row's rationale was wrong: allocation VOLUME DOES NOT MOVE.**
-      128 B/call, 408 B per `trace_sequential`, 11,304 B per `spot_diagram` —
-      identical in both arms. It buys TIME, not the leak reduction the serialize
-      work was about. Do not sell it as memory work.
-      ⚠ **Measured on the REAL functions**, 5 interleaved rounds in one binary with
-      the control arm validated against the shipped bench row: `trace_surface`
-      plane **186.6 → 138.6 ns (−25.7%)**, sphere **234.2 → 190.6 ns (−18.6%)**,
-      `trace_sequential` **552.6 → 473.2 ns (−14.4%)**, `spot_diagram`
-      **16.670 → 15.275 µs (−8.4%)**, `trace_recursive` **2.031 → 1.894 µs
-      (−6.7%)**. Bit-exact on all five geometry cases.
-      ⚠ The **−36% / −23% / −15%** this row used to promise were **1.6–1.8×
-      optimistic**, taken from an unfaithful clone. Replaced with the above.
-
 - [ ] **Ten per-call scratch allocations, not four — in two tiers wanting opposite
       fixes.** Measured in 2.3.5 with `alloc_used()` deltas.
       ⭐ **Tier 1 — large, variable-size, all in `wave_pattern.cyr`** (`grid` at

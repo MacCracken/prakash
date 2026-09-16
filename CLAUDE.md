@@ -102,11 +102,13 @@ soorat (PBR shading), kiran (lighting), ranga (lens effects)
 - ⚠ **Inserting a function directly above another one STEALS its attributes.**
   A `#doc` + `#must_use` block binds to whatever declaration follows it, so a new
   function landed in the gap silently takes the attribute and leaves the original
-  bare. This has happened **three times in one release cycle** (2.3.1
-  `atm_sky_radiance_single_scatter`, 2.3.4 `rgb_to_json`). `cyrius audit` reports
-  only the lost DOC comment — the lost `#must_use` is invisible to every gate.
-  After inserting a function, check the declaration below it still has its own
-  attributes, or place the insertion above the target's doc block entirely.
+  bare. This happened **four times in the 2.3.x cycle** (2.3.1
+  `atm_sky_radiance_single_scatter`, 2.3.4 `rgb_to_json`, 2.3.6 `ray_snell_3d`) —
+  **twice after this very rule was written down**, which is why it is now a gate
+  and not just a rule: **`scripts/check-must-use.sh`**, run in CI, compares the
+  set of `#must_use`-bearing function NAMES against the base commit and fails on
+  any loss. Run it locally before committing. `cyrius lint` is clean either way
+  and `cyrius audit` reports only the lost DOC comment, so nothing else sees it.
 - **`#derive(accessors)`** for struct field accessors rather than hand-written `load64`.
 - ⚠ **`cycc` SILENTLY IGNORES UNKNOWN ATTRIBUTES** — `#definitely_not_real` compiles and
   lints clean, exactly like `#inline` does. Cyrius has no `#inline` and no enums, so the

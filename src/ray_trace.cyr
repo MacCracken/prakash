@@ -1,4 +1,14 @@
 # ray_trace.cyr -- sequential ray tracing through optical surfaces
+# Size of the single block trace_surface carves a hit out of:
+# [TraceHit][hit_point RayVec3][normal RayVec3][after dir RayVec3][after TraceRay].
+#must_use
+fn _trace_hit_block() { return sizeof(TraceHit) + 3 * sizeof(RayVec3) + sizeof(TraceRay); }
+
+# The TIR variant. A totally-internally-reflecting hit has no transmitted ray, so
+# the after-direction and after-ray are never carved and the block is shorter.
+#must_use
+fn _trace_hit_block_tir() { return sizeof(TraceHit) + 2 * sizeof(RayVec3); }
+
 # Usage: include "lib/ray_trace.cyr"  (requires error.cyr, ray_core.cyr, ray_fresnel.cyr)
 #
 # Ported from the Rust `ray/trace.rs`. The Rust `SurfaceShape` enum
@@ -223,10 +233,32 @@ fn trace_surface(ray, surface, err_out) {
     }
 
     # Refract through the surface.
-    var normal = ray_vec3(nx, ny, nz);
+    #
+    # ⭐ 2.3.6: Snell answers through stack locals and the five objects below share
+    # ONE allocation. This function used to make FIVE separate ones per hit —
+    # normal, the refracted direction, hit_point, the after-ray and the TraceHit
+    # header, 128 bytes total — and it runs twice per trace_sequential and 38
+    # times per spot_diagram.
+    #
+    # ⚠ The obvious fix is illegal here and was measured to corrupt. CLAUDE.md says
+    # "write into a caller buffer, not a fresh allocation", but that rule assumes
+    # the CALLER owns the lifetime, and no caller in src/ does: trace_sequential
+    # retains every hit in the vec it returns, and _trace_recursive_inner hands
+    # best_hit's hit_point to TraceSegments that outlive the trace. A reused buffer
+    # aliases them — demonstrated, both entries of the returned vec became the same
+    # pointer and the first surface's hit was destroyed, silently and with no error
+    # code. Sub-allocating one FRESH block per call keeps lifetimes bit-for-bit
+    # what they are today while paying for one alloc instead of five.
+    #
+    # ⚠ This buys TIME, not memory: the block is the same 128 bytes the five
+    # separate objects occupied, so allocation VOLUME is unchanged.
     var refl = f64_from(0);
     var serr = 0;
-    var refr_dir = ray_snell_3d(dir, normal, TraceRay_n(ray), OpticalSurface_n_after(surface), &refl, &serr);
+    var rx = f64_from(0);
+    var ry = f64_from(0);
+    var rz = f64_from(0);
+    var _sr = _ray_snell_3d_out(dir, nx, ny, nz, TraceRay_n(ray),
+      OpticalSurface_n_after(surface), &rx, &ry, &rz, &refl, &serr);
     # ⚠ 2.2.8: TOTAL INTERNAL REFLECTION IS A HIT, NOT A MISS. This returned 0
     # for TIR exactly as it does for a geometric miss, and trace_recursive's
     # candidate filter is `prakash_is_err(e) == 0` — so a totally-internally-
@@ -250,15 +282,36 @@ fn trace_surface(ray, surface, err_out) {
         refl = F64_ONE;
     }
 
-    var hit_point = ray_vec3(hit_x, hit_y, hit_z);
-    var ray_after = 0;
-    if (tir == 0) {
-        ray_after = trace_ray_new(hit_point, refr_dir, OpticalSurface_n_after(surface));
-    }
-    var hit = alloc(sizeof(TraceHit));
+    # One block: [TraceHit][hit_point][normal][after dir][after ray]. TIR needs
+    # only the first three — there is no transmitted ray — so it takes 80 bytes
+    # where a refracting hit takes 128. Knowing `tir` before this point is exactly
+    # what the _ray_snell_3d_out split above bought. Every offset is a multiple of
+    # 8 and alloc returns 16-byte aligned memory.
+    var size = _trace_hit_block();
+    if (tir == 1) { size = _trace_hit_block_tir(); }
+    var hit = alloc(size);
     if (hit == 0) {
         store64(err_out, PK_ERR_ALLOCATION);
         return 0;
+    }
+    var hit_point = hit + sizeof(TraceHit);
+    RayVec3_set_x(hit_point, hit_x);
+    RayVec3_set_y(hit_point, hit_y);
+    RayVec3_set_z(hit_point, hit_z);
+    var normal = hit_point + sizeof(RayVec3);
+    RayVec3_set_x(normal, nx);
+    RayVec3_set_y(normal, ny);
+    RayVec3_set_z(normal, nz);
+    var ray_after = 0;
+    if (tir == 0) {
+        var after_dir = normal + sizeof(RayVec3);
+        RayVec3_set_x(after_dir, rx);
+        RayVec3_set_y(after_dir, ry);
+        RayVec3_set_z(after_dir, rz);
+        ray_after = after_dir + sizeof(RayVec3);
+        TraceRay_set_pos(ray_after, hit_point);
+        TraceRay_set_dir(ray_after, after_dir);
+        TraceRay_set_n(ray_after, OpticalSurface_n_after(surface));
     }
     TraceHit_set_hit_point(hit, hit_point);
     TraceHit_set_normal(hit, normal);
