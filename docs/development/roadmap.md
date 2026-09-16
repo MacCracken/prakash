@@ -53,13 +53,67 @@ true, say so in the item itself rather than relying on list order.
       round-trips and fixed a real data-loss bug (the old encoder flushed any
       |x| < 5e-7 to zero). **Do not "fix" the float path.** The remaining lever is
       the 14% spent on object construction.
-      ⚠ **The obvious version of that lever does not work.** The `_a` allocator
-      variants (`bayan_json_v_obj_set_a` / `_build_a`) do exist in the vendored
-      bayan, so the swap looks mechanical — but prakash allocates through a **bump
-      allocator that never frees**, so "pass an arena" means nothing unless the
-      arena is reused across calls, and `bayan_json_v_obj_new` / `_float_new` /
-      `str_from` on the same path have no `_a` form to route through it. This is a
-      question about allocator lifetime, not a find-and-replace.
+      ⚠ **2.3.2's note on this row was WRONG and is corrected here.** It claimed
+      `bayan_json_v_obj_new` / `_float_new` "have no `_a` form to route through"
+      an arena. They do. bayan ships **15** `_a` variants covering every
+      constructor this path uses — `bayan_json_v_obj_new_a`,
+      `bayan_json_v_float_new_a`, `bayan_json_v_obj_set_a`, `bayan_json_v_build_a`
+      — and each plain form is literally a wrapper passing `default_alloc()`.
+      **Nothing is missing upstream; there is no bayan issue to file.** This is an
+      internal repair.
+      ⛔ **MEASURED IN 2.3.3, AND THE ARENA IS NOT WORTH TAKING. Do not attempt it
+      again without new evidence.** Two independent measurements agreed:
+      construction is **10.9–11.1%** of the row (not 14%), an arena captures only
+      ~28% of that, and the whole prize is **−1.8% to −4.4%** — at or below the
+      per-arm jitter. Even if construction were FREE the ceiling is **−11%**.
+      ⛔ **An intermediate claim of mine was also wrong and is retracted here.** I
+      wrote that `alloc()` "takes a LOCK on every call". It does not:
+      `_alloc_lock_acquire` (lib/alloc.cyr) early-returns while
+      `_threads_active == 0`, and prakash never arms threads — `src/` contains no
+      `thread_create`. There is no lock to remove, and the per-allocation delta
+      between `alloc()` and `arena_alloc` is ~1–3 ns. Going through an allocator
+      *handle* (`alloc_via`, an indirect `fncall2`) is measurably **worse** than
+      calling `alloc()` directly.
+      ⛔ **And the arena breaks the lifetime contract.** Reproduced, not theorised:
+      `bayan_json_v_build_a` puts BOTH the `Str` header and its byte buffer in the
+      passed allocator, so an `arena_reset` at the top of the next call hands back
+      the identical pointers and a previously returned string silently becomes the
+      new result. Silent corruption, no crash — and the existing benchmark discards
+      its result, so it cannot see it. `tests/serialize.tcyr` already holds one
+      `to_json` result across a later `to_json` call.
+      ⭐ **The lever that IS large was never costed: skip the bayan value tree.**
+      Emitting the same bytes straight through a `str_builder` measured **−19.6%**,
+      and hand-assembling into a stack buffer **−28.4%** — the floor with Grisu2
+      untouched. That is the shape any future attempt on this row should take.
+      ⭐ **"Do not fix the float path" is now proven rather than asserted:**
+      `bayan_f64_to_json` is 671 ns against 66 ns for the 6-decimal `fmt_float_buf`
+      it replaced, same binary — 3 floats × ~605 ns IS the ~1.9× step, and that
+      renderer is what makes f64 round-trips bit-exact.
+
+- [ ] **`trace_surface` boxes 5 structs per call** (128 bytes/call, measured), and
+      it runs **2× per `trace_sequential`** (635 ns) and **38× per `spot_diagram`**
+      (19.0 µs). A controlled same-binary A/B on a faithful clone: `alloc()` 206 ns
+      (control, matching the shipped 210 ns), a caller-supplied flat buffer
+      **132 ns (−36%)** — projecting to roughly **−23% on `trace_sequential`** and
+      **−15% on `spot_diagram`**. This is CLAUDE.md's "write into a caller buffer"
+      rule applied to the hottest allocating path in the tracer.
+      ⚠ It changes an internal calling convention, so it is a bite of its own, and
+      the projections above are projections — re-measure on the real functions.
+- [ ] **`_prk_trace` runs `strlen` on a compile-time literal**, 29 ns per traced
+      entry (20 ns of it `strlen`) across **32 call sites** — about **14% of
+      `trace_surface`**. The label is always a literal, so the length is known at
+      the call site. ⚠ sakshi's `sakshi_trace(name, len)` already takes the length;
+      the waste is entirely on prakash's side of the wrapper.
+- [ ] **Four sites allocate a per-call scratch buffer**, which CLAUDE.md's DO-NOT
+      list calls a leak under a bump allocator that never frees. Identified during
+      the 2.3.3 investigation; each needs its own look, since the fix is either a
+      caller buffer or a stack local depending on lifetime.
+- [ ] **`spd_to_json` has no benchmark row and is the heaviest serializer.** It
+      allocates *inside a loop* — one bayan float node plus one array push per
+      sample, so ~81 for a standard SPD against `rgb_to_json`'s 3, on the same
+      pattern the whole `rgb_to_json` row is about. Measured arena footprint 6,808
+      bytes/call and unbounded in `Spd_len`. Bench it before optimising anything
+      else in `serialize`; the row that is measured is not the row that costs.
 
 ### Housekeeping
 
@@ -70,6 +124,15 @@ true, say so in the item itself rather than relying on list order.
       specific regression needs the resolution.**
 
 ## 2.4.x — minor: adds public API
+
+⚠ **Readiness checked in 2.3.3.** `calc_integral_gauss5` is **ready**: it is one of
+the few integral forms hisab 3.x did **not** move onto `Result<T,E>`, and it links
+from prakash's existing include set (compiled and run). So the plumbing is not the
+gap. ⛔ **The real gap is a semantics question this row never asked:** whether an
+SPD sample means the *average over its bin* or a *point sample at its wavelength*.
+Integrating when the CIE convention wants point samples is wrong by a factor of
+about the step width — roughly **5×** at 5 nm. Settle that before writing code.
+
 
 - [ ] `spd_from_function(f, start_nm, end_nm)` — build an SPD from a continuous
       spectral function via hisab `calc_integral_gauss5`. **The one place hisab's

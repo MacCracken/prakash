@@ -2970,6 +2970,16 @@ fn _cri_tcs_xyz(spd, i) {
     var y = f64_from(0);
     var z = f64_from(0);
     var aligned = 0;
+    # ⚠ The two `==` below are RAW BIT COMPARISONS and are meant to be. `cycc`
+    # warns "comparison mixes f64 and integer operands" on both (measured:
+    # `cyrius check --with-deps` flags src/spectral_cie.cyr:2974 and :2975), because
+    # a `#derive(accessors)` getter's return type is untracked and reads as a
+    # tagged integer while `f64_from` yields an f64. ⛔ `cyrius lint` cannot see
+    # this class at all, so the warning appears only under `check` — which is why
+    # it sat unremarked. Do NOT "fix" it to `f64_eq`: this is an exact-alignment
+    # test for the fast path (81 samples, 380 nm start, 5 nm step), where anything
+    # other than bit-identical must take the interpolating path. hisab records the
+    # identical false positive in its own suite for the same reason.
     if (Spd_len(spd) == 81) {
         if (Spd_start_nm(spd) == f64_from(380)) {
             if (Spd_step_nm(spd) == f64_from(5)) { aligned = 1; }

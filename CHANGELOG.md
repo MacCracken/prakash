@@ -2,6 +2,99 @@
 
 ## [Unreleased]
 
+## [2.3.3] - 2026-09-15 — the arena that measured out at 4%, and a zero-fill nobody could observe
+
+Answers the question 2.3.2 left open — *is the `rgb_to_json` lever an upstream
+bayan issue or an internal repair?* — and the answer turned out to be neither
+worth doing. What replaced it is a −27% win on a different row. Suite
+**6537 → 6568 assertions across 31 suites**, 0 failed. `cyrius audit` exits 0.
+
+### Fixed
+
+- ⛔ **RETRACTION: 2.3.2's roadmap note on `rgb_to_json` was wrong twice, and so
+  was my correction to it.** The released note said bayan's `_a` allocator
+  variants did not cover `bayan_json_v_obj_new` / `_float_new`. **They do** —
+  bayan ships **15** `_a` variants covering every constructor that path uses, and
+  has since the first vendoring. There was never an upstream issue to file.
+  ⛔ The correction I then wrote claimed `alloc()` "takes a LOCK on every call".
+  **It does not.** `_alloc_lock_acquire` early-returns while
+  `_threads_active == 0`, and prakash never arms threads — `src/` contains no
+  `thread_create`. There is no lock to remove. Both are corrected in the roadmap;
+  the released 2.3.2 entry is left as written, with the correction recorded here
+  rather than by rewriting history.
+
+### Performance
+
+- ⭐ **`wave/pattern2d_normalized_64x64` 15.32 → 11.13 µs (−27.4%)**, every one of
+  4096 cells bit-identical. `pattern2d_new` zero-fills `width * height` cells, and
+  its three internal callers overwrite every one of them before reading any. A
+  private `_pattern2d_new_uninit` now serves those three; each call site carries a
+  comment naming the loop that makes it safe. Confirmed in the suite proper:
+  the benchmark row reads **11.696 µs** against 16.08 before.
+
+  ⚠ **The public constructor keeps its fill.** `pattern2d_new` is API that soorat,
+  kiran and ranga consume, and dropping the fill there would change what a
+  consumer sees with no signal. The win costs the public path nothing because the
+  internal callers no longer take it.
+
+  ⚠ **Hoisting `f64_from(0)` out of the fill loop was tried first and is NOT the
+  win** — measured *slower*, 6.26 µs against 6.02. `f64_from(0)` already costs
+  nothing; the stores are the cost. Recorded in the source so it is not retried.
+
+  ⭐ **The CSV suite then reproduced the A/B almost exactly, on a quiet box:**
+  **16,081 → 11,675 ns, −27.40%** against the same-binary figure of −27.4%. Suite
+  median **+0.00%**, mean −0.61%, and **1 of 36** rows past ±10% — that one row
+  being the one that changed. Every other mover is ≤ 8.8% on a sub-100 ns or
+  low-µs row, i.e. noise, and none is claimed.
+
+### Changed
+
+- ⛔ **The `rgb_to_json` arena is measured, rejected, and written down so it is not
+  attempted again.** Two independent measurements agreed: construction is
+  **10.9–11.1%** of the row, an arena captures ~28% of that, and the whole prize is
+  **−1.8% to −4.4%** — at or below per-arm jitter. Even with construction FREE the
+  ceiling is **−11%**. Going through an allocator *handle* (`alloc_via`, an
+  indirect `fncall2`) measured **worse** than calling `alloc()` directly.
+  ⛔ **And it breaks the lifetime contract — reproduced, not theorised.**
+  `bayan_json_v_build_a` puts both the `Str` header and its byte buffer in the
+  passed allocator, so `arena_reset` at the top of the next call hands back the
+  identical pointers and a previously returned string silently becomes the new
+  result. Silent corruption, no crash — and `tests/prakash.bcyr`'s row discards its
+  result, so the benchmark cannot see it, while `tests/serialize.tcyr` already
+  holds one `to_json` result across a later `to_json` call.
+  ⭐ The lever that IS large was never costed: **skipping the bayan value tree** —
+  a `str_builder` emitting the same bytes measured **−19.6%**, hand-assembly into
+  a stack buffer **−28.4%**. Recorded in the roadmap as the shape a future attempt
+  should take.
+  ⭐ *"Do not fix the float path"* is now **proven** rather than asserted:
+  `bayan_f64_to_json` is 671 ns against 66 ns for the 6-decimal `fmt_float_buf` it
+  replaced, same binary. Three floats × ~605 ns IS the ~1.9× step, and that
+  renderer is what makes f64 round-trips bit-exact.
+- **src/spectral_cie.cyr** — the two raw `==` bit comparisons that gate the CIE
+  fast path now say why they are raw. `cycc` warns *"comparison mixes f64 and
+  integer operands"* on both, because a `#derive(accessors)` getter's return type
+  is untracked; ⛔ **`cyrius lint` cannot see this class at all**, so it surfaces
+  only under `cyrius check` and had gone unremarked. The comparison is the intended
+  bit-exact one — anything but bit-identical must take the interpolating path — and
+  the comment says not to "fix" it into `f64_eq`.
+
+### Added
+
+- **tests/wave_pattern.tcyr** — 31 assertions on `pattern2d_new`'s zero-fill.
+  ⛔ **They cannot fail today, and the block says so.** Deleting the fill entirely
+  leaves the suite green at 606/606 — mutation-verified, not assumed: `alloc()`
+  carves from freshly `mmap`'d pages the kernel has already zeroed, and prakash's
+  bump allocator never frees and so never returns dirty memory. A fresh pattern
+  reads as zero whether or not anything writes the zeros. The assertions are kept
+  as a **tripwire**, not a proof — they are the only statement in the tree that the
+  fill is a contract rather than an accident of the allocator, and they begin
+  failing the day that allocator reuses memory. Per CLAUDE.md, a test that only
+  samples the points a bug survives is worse than none, so this one does not get to
+  claim it guards the fill.
+  ⚠ Stated plainly as a consequence: the fill in the public constructor is
+  currently **dead work** on this allocator. It was kept because the alternative
+  couples a public guarantee to an allocator implementation detail.
+
 ## [2.3.2] - 2026-09-15 — eighteen constants that were divisions, and the bundle nothing ever linked
 
 Works the 2.3.x bucket: the AI-bundle coverage hole, and the *Inline expansion*

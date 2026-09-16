@@ -319,6 +319,39 @@ assert(f64_lt(pattern2d_max_intensity(psf_aberr), pattern2d_max_intensity(psf_pe
 # ── Pattern2D ────────
 test_group("pattern2d");
 
+# The public zero-fill contract.
+#
+# ⛔ THESE ASSERTIONS CANNOT FAIL TODAY, AND SAYING SO IS THE POINT. Deleting the
+# fill from `pattern2d_new` entirely leaves this suite green at 606/606 —
+# mutation-verified in 2.3.3, not assumed. `alloc()` carves from freshly mmap'd
+# pages, which the kernel has already zeroed, and prakash's bump allocator never
+# frees and so never hands back dirty memory. A fresh pattern therefore reads as
+# zero whether or not anything writes the zeros.
+#
+# They are kept anyway, as a TRIPWIRE rather than a proof: they are the only
+# statement in the tree that `pattern2d_new` zero-fills BY CONTRACT rather than by
+# an accident of the current allocator, and they start failing the day that
+# allocator reuses memory. CLAUDE.md's rule is that a test which only samples the
+# points a bug survives is worse than none — so this block does not get to claim
+# it guards the fill. It marks the contract; the comment on
+# `_pattern2d_new_uninit` carries the reasoning.
+#
+# ⚠ Consequence worth stating plainly: the fill in the public constructor is
+# currently DEAD WORK on this allocator. It was kept in 2.3.3 because the
+# alternative couples a public guarantee to an allocator implementation detail,
+# not because anything observable depends on it.
+var pfill = pattern2d_new(5, 3);
+assert(pfill != 0, "pattern2d_new(5,3) allocates");
+for (var fy = 0; fy < 3; fy = fy + 1) {
+    for (var fx = 0; fx < 5; fx = fx + 1) {
+        assert_eq(pattern2d_get(pfill, fx, fy), 0, "fresh pattern cell is +0.0");
+    }
+}
+# and the raw buffer, not just the accessor
+for (var fi = 0; fi < 15; fi = fi + 1) {
+    assert_eq(load64(Pattern2D_data(pfill) + fi * 8), 0, "fresh pattern buffer word is zero");
+}
+
 var pp = pattern2d_new(4, 4);
 pattern2d_set(pp, 0, 0, f64_from(10));
 pattern2d_set(pp, 1, 1, f64_from(5));
