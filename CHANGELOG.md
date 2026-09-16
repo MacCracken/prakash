@@ -2,6 +2,69 @@
 
 ## [Unreleased]
 
+## [2.3.9] - 2026-09-15 — benchmark parity: 39 rows to 138, and the item was overstated by a third
+
+Closes the last 2.3.x row. Suite **6617 assertions**, 0 failed. `cyrius audit`
+exits 0.
+
+### Added
+
+- ⭐ **99 new benchmark rows — `tests/prakash.bcyr` goes 39 → 138.** Every live
+  prakash function that the pre-port Rust suite benchmarked now has one. Written
+  per module with real fixtures, each row run before it was accepted.
+  Coverage by module: wave 27, pbr 26, ray 25, spectral 23, lens 22,
+  atmosphere 11, serialize 3, bridge 1.
+
+  **Baseline recorded on a quiet box: 138 rows, 100 of them new.** Of the 38 that
+  existed before, median **+0.00%** and one past ±10% —
+  `atmosphere/rayleigh_cross_section` at 9 → 11 ns, a two-nanosecond move on the
+  smallest row in the suite, which read 8 → 9 last release. ⚠ Oscillating, not
+  drifting, and claimed as nothing. A median of exactly zero is the expected
+  result: 2.3.9 adds rows and removes one attribute, and changes no code path.
+
+  ⚠ **The roadmap's framing of this item was wrong, and the correction is the
+  useful part.** It said "180 Rust benches against 42 here; 131 subjects
+  uncovered", treating every Rust bench NAME as a missing subject. Resolved
+  against the current tree: **21** were already covered under a different name,
+  **~58** no longer map to anything — removed features, or input-variants of a row
+  that already exists (`bessel_j1_large` is `bessel_j1` at a different x,
+  `air_mass_horizon` is `atm_air_mass` at the horizon) — and **101** were real
+  gaps. Overstated by about a third, the same way the serialize row was.
+
+- ⭐ **`wave_polarization` and `wave_coherence` were never included in the
+  benchmark file at all**, so the entire Mueller calculus and every coherence
+  function were unbenchmarkable — not merely unbenchmarked. Found because the new
+  rows would not link. Both now included.
+
+### Fixed
+
+- ⛔ **`_ser_sb_f64` carried `#must_use` while all 15 of its call sites discard
+  the result.** cycc warns at every one; ⚠ **`cyrius lint` does not report that
+  class**, so it only appears under `cyrius build`/`bench` and went unnoticed
+  through 2.3.4 and 2.3.5. The attribute was also inconsistent with its
+  neighbours — none of the 26 `str_builder_add_cstr` calls in the same file checks
+  its return either, and the failure mode is OOM inside a str_builder, which
+  nothing on that path handles. Attribute removed.
+  ⚠ **`scripts/check-must-use.sh` flagged this removal, exactly as designed**, and
+  this entry is the re-baselining its error message asks for. It is the first
+  intentional removal since the gate landed in 2.3.6.
+
+### Notes on method
+
+- ⚠ **Two mistakes in assembling this, both mine, both caught before they shipped.**
+  Splicing the per-module fixture initialisers immediately after `alloc_init()`
+  put them **before** the existing fixtures they derive from — `linear_srgb_to_xyz(_rgb)`
+  ran against a null `_rgb` and SIGSEGVed the whole suite. Bisected by adding one
+  module group at a time; the agents' code was correct, the placement was not.
+  And splicing the new bench functions immediately before `fn main()` landed them
+  between `main`'s doc comment and `main` — **the fifth instance of the insertion
+  hazard this cycle**, caught in seconds this time because 2.3.6's gate and the
+  docs stage both fire on it.
+- Every new row was checked for the failure mode that matters here: a benchmark
+  whose arguments trip an error guard measures the guard, returns early, and still
+  prints a plausible time. **No row reads below 5 ns**, which is the floor an
+  early return would sit at on this host.
+
 ## [2.3.8] - 2026-09-15 — the rest of 2.3.x: scratch caches, the last unchecked allocs, and what a call actually costs
 
 Closes every remaining 2.3.x item in one release. Suite **6608 → 6617 assertions

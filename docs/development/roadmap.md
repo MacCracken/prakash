@@ -23,17 +23,16 @@ Prakash does NOT own:
 
 ## Open work at a glance
 
-**14 items. 2.3.x is finished except one gated row; everything else waits on demand or on a consumer.**
+**13 items. ⭐ 2.3.x is COMPLETE — everything left is 2.4.x, demand-gated, or waiting on a consumer.**
 
 | # | Bucket | Item | State |
 |---|---|---|---|
-| 1 | 2.3.x | Benchmark parity with `rust-old/` | **the only 2.3.x row left**; gated — port only if a regression needs it |
-| 2 | 2.4.x | `spd_from_function(f, start_nm, end_nm)` | ready; one semantics question open |
-| 3–8 | 2.x | GRIN, DOE, Richards-Wolf, HG/LG beams, Buchdahl, aberrated MTF | demand-gated |
-| 9–13 | 2.x | Fluorescence, non-linear, OAM, metamaterials, CIE 2006 observer | demand-gated |
-| 14 | Blocked | soorat / kiran / ranga consume `dist/prakash.cyr` | waiting on the consumers |
+| 1 | 2.4.x | `spd_from_function(f, start_nm, end_nm)` | ready; one semantics question open |
+| 2–7 | 2.x | GRIN, DOE, Richards-Wolf, HG/LG beams, Buchdahl, aberrated MTF | demand-gated |
+| 8–12 | 2.x | Fluorescence, non-linear, OAM, metamaterials, CIE 2006 observer | demand-gated |
+| 13 | Blocked | soorat / kiran / ranga consume `dist/prakash.cyr` | waiting on the consumers |
 
-⚠ **Items 3–13 are not a backlog anyone is working through.** Each is a subsystem,
+⚠ **Items 2–12 are not a backlog anyone is working through.** Each is a subsystem,
 listed so the scope boundary stays visible. Do not start one without a consumer
 asking for it.
 
@@ -57,18 +56,6 @@ promises it will not force a minor bump. Reshuffling is free by construction.
 item 2. ⚠ **Keep rows SHORT.** A row says what the work is and what would block
 it. Measurements belong in `CHANGELOG.md`; a row that grows past ~8 lines has
 started duplicating the release history and should be cut back.
-
-## 2.3.x — patch: no public API change
-
-### Performance
-
-### Housekeeping
-
-- [ ] **Benchmark parity with `rust-old/`** — 180 Rust benches against 42 here.
-      Mostly trivial scalar micro-benchmarks; the expensive composites are covered.
-      ⚠ **Gated: do it only if a specific regression needs the resolution.**
-      Bulk-porting would add noise to `bench-history.csv` without changing a
-      decision.
 
 ## 2.4.x — minor: adds public API
 

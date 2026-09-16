@@ -14,6 +14,10 @@ include "src/ray_simulate.cyr"
 include "src/spectral_cie.cyr"
 include "src/spectral_photometry.cyr"
 include "src/wave_core.cyr"
+# 2.3.9: wave_polarization and wave_coherence were never included here, so the
+# Mueller calculus and the coherence functions could not be benchmarked at all.
+include "src/wave_polarization.cyr"
+include "src/wave_coherence.cyr"
 include "src/wave_airy.cyr"
 include "src/wave_diffraction.cyr"
 include "src/wave_zernike.cyr"
@@ -82,6 +86,77 @@ var _x = 0;
 var _slit = 0;
 var _layers = 0;
 var _presc = 0;
+
+# spectral_cie / spectral_core rows (2.3.9)
+var _xyz = 0;
+var _cx = 0;
+var _cy = 0;
+var _lin = 0;
+var _freq_hz = 0;
+
+var _f0rgb = 0;
+var _alb3 = 0;
+var _alb = 0;
+var _rx = 0;
+var _ry = 0;
+var _vdx = 0;
+var _vdy = 0;
+var _xi1 = 0;
+var _xi2 = 0;
+var _sigt = 0;
+var _dist = 0;
+var _sscat = 0;
+var _cc = 0;
+var _ccr = 0;
+var _bbrdf = 0;
+var _cbrdf = 0;
+var _sheen = 0;
+
+# lens geometry / photography fixtures (2.3.9 lens sweep)
+var _r1 = 0;
+var _r2 = 0;
+var _lth = 0;
+var _fnum = 0;
+var _fmm = 0;
+var _fm = 0;
+var _apd = 0;
+var _obj = 0;
+var _img = 0;
+var _coc = 0;
+var _subj = 0;
+var _f2 = 0;
+var _abbe = 0;
+var _sens_w = 0;
+var _sens_h = 0;
+var _elems = 0;
+
+# ── wave / polarization / coherence coverage fill (2.3.9) ────────
+var _pol = 0;
+var _stokes = 0;
+var _mm_pol = 0;
+var _mm_ret = 0;
+var _dir = 0;
+var _norm = 0;
+var _cos_i = 0;
+var _cos_t = 0;
+var _pathd = 0;
+var _spacing = 0;
+var _bw = 0;
+var _alpha = 0;
+var _dist = 0;
+
+var _cauchy = 0;
+var _schott = 0;
+var _apex = 0;
+var _wl_um = 0;
+var _wl_s_um = 0;
+var _wl_l_um = 0;
+var _dir2 = 0;
+var _nrm2 = 0;
+var _dir3 = 0;
+var _nrm3 = 0;
+var _presc_bx = 0;
+var _img_z = 0;
 
 # ── Ray ────────
 # Unpolarized Fresnel reflectance at one incidence angle.
@@ -190,6 +265,229 @@ fn b_interference_pattern() {
     return 0;
 }
 
+# Wavelength (nm) -> frequency (Hz).
+fn b_wavelength_to_frequency() { var r = wavelength_to_frequency(_wl_nm); return 0; }
+# Frequency (Hz) -> wavelength (nm).
+fn b_frequency_to_wavelength() { var r = frequency_to_wavelength(_freq_hz); return 0; }
+# Photon energy in Joules at one wavelength.
+fn b_photon_energy() { var r = photon_energy(_wl_nm); return 0; }
+# Photon energy in electron-volts at one wavelength.
+fn b_photon_energy_ev() { var r = photon_energy_ev(_wl_nm); return 0; }
+# Wien's displacement law: blackbody peak wavelength at one temperature.
+fn b_wien_peak() { var r = wien_peak(_temp); return 0; }
+# Rec. 709 relative luminance of one RGB triple.
+fn b_rgb_luminance() { var r = rgb_luminance(_rgb); return 0; }
+# Clamp plus saturating cast of an RGB triple to 8-bit channels.
+fn b_rgb_to_u8() { var r = rgb_to_u8(_rgb); return 0; }
+# XYZ -> xyY chromaticity.
+fn b_xyz_to_xyy() { var r = xyz_to_xyy(_xyz); return 0; }
+# CIE xy chromaticity -> correlated colour temperature (McCamy's fit).
+fn b_cct_from_xy() { var r = cct_from_xy(_cx, _cy); return 0; }
+# Linear sRGB -> XYZ through the forward 3x3 matrix.
+fn b_linear_srgb_to_xyz() { var r = linear_srgb_to_xyz(_rgb); return 0; }
+# XYZ -> linear sRGB through the inverse 3x3 matrix.
+fn b_xyz_to_linear_srgb() { var r = xyz_to_linear_srgb(_xyz); return 0; }
+# Interpolated CIE 1931 colour-matching functions at one wavelength.
+fn b_cie_cmf_at() { var r = cie_cmf_at(_wl_nm); return 0; }
+# sRGB encoding gamma for one linear channel value (the pow branch).
+fn b_linear_to_srgb_gamma() { var r = linear_to_srgb_gamma(_lin); return 0; }
+# XYZ -> gamma-encoded, clamped sRGB — three allocations and three pow calls.
+fn b_xyz_to_srgb() { var r = xyz_to_srgb(_xyz); return 0; }
+# Composite: integrate D65 to XYZ, normalize to Y=1 and gamma-encode to sRGB.
+fn b_spd_to_srgb() { var r = spd_to_srgb(_d65); return 0; }
+# Composite: one CIE 13.3 special colour rendering index (R4) for D65 — the
+# per-sample cost color_rendering_index pays eight times over one shared context.
+fn b_cri_special() { var r = cri_special(_d65, 4); return 0; }
+
+# ── PBR core (2.3.9) ────────
+# Beckmann NDF at one half-vector angle — the exp-bound alternative to GGX.
+fn b_distribution_beckmann() { var r = pbr_distribution_beckmann(_ndh, _rough); return 0; }
+# Fresnel-Schlick per RGB channel into a 3-f64 buffer (copper F0).
+fn b_fresnel_schlick_rgb() { var r = pbr_fresnel_schlick_rgb(_f0rgb, _ct, _out3); return 0; }
+# Schlick-GGX geometry term for a single direction (direct-lighting k remap).
+fn b_geometry_schlick_ggx() { var r = pbr_geometry_schlick_ggx(_ndv, _rough); return 0; }
+# Smith geometry: the two-direction product of the Schlick-GGX term.
+fn b_geometry_smith() { var r = pbr_geometry_smith(_ndv, _ndl, _rough); return 0; }
+# Refractive index -> normal-incidence reflectance F0.
+fn b_ior_to_f0() { var r = pbr_ior_to_f0(_n2); return 0; }
+# Lambertian diffuse: albedo/pi — the cheapest function in the library.
+fn b_lambert_diffuse() { var r = pbr_lambert_diffuse(_alb); return 0; }
+# Lambertian diffuse per RGB channel into a 3-f64 buffer.
+fn b_lambert_diffuse_rgb() { var r = pbr_lambert_diffuse_rgb(_alb3, _out3); return 0; }
+
+# ── PBR advanced (2.3.9) ────────
+# Energy-conserving blend of a base BRDF with a clearcoat lobe.
+fn b_clearcoat_blend() { var r = pbr_clearcoat_blend(_bbrdf, _cbrdf, _cc, _hdv); return 0; }
+# Full clearcoat BRDF: D*F*G at the fixed 1.5 coat IOR.
+fn b_clearcoat_brdf() { var r = pbr_clearcoat_brdf(_ndh, _ndv, _ndl, _hdv, _ccr); return 0; }
+# Anisotropic Smith geometry term for one direction (Heitz).
+fn b_geometry_ggx_aniso() { var r = pbr_geometry_ggx_aniso(_ndv, _vdx, _vdy, _rx, _ry); return 0; }
+# Thin-film iridescence at 650/550/450 nm — three Airy evaluations into an RGB buffer.
+fn b_iridescence_rgb() { var r = pbr_iridescence_rgb(_n1, _nc, _ns, _film_th, _ct, _out3); return 0; }
+# Rayleigh phase function at one scattering angle.
+fn b_phase_rayleigh() { var r = pbr_phase_rayleigh(_ct); return 0; }
+# PDF of a cosine-weighted hemisphere sample.
+fn b_sample_cosine_pdf() { var r = pbr_sample_cosine_pdf(_ndl); return 0; }
+# GGX importance-sampled half-vector into a 3-f64 buffer (sin+cos bound).
+fn b_sample_ggx() { var r = pbr_sample_ggx(_rough, _xi1, _xi2, _out3); return 0; }
+# PDF of the GGX-sampled half-vector: D*n.h / (4*h.v).
+fn b_sample_ggx_pdf() { var r = pbr_sample_ggx_pdf(_ndh, _hdv, _rough); return 0; }
+# Ashikhmin sheen lobe at one view angle.
+fn b_sheen_ashikhmin() { var r = pbr_sheen_ashikhmin(_ct, _sheen); return 0; }
+# Charlie sheen BRDF — the pow() inside the distribution dominates.
+fn b_sheen_charlie() { var r = pbr_sheen_charlie(_ndh, _ndl, _ndv, _rough); return 0; }
+# Single-scattering in-scattered radiance: sigma_s * phase * transmittance * L.
+fn b_inscattering() {
+    var r = pbr_single_scatter_inscattering(_sscat, _ct, _g, _sigt, _dist, _i0);
+    return 0;
+}
+# Karis analytic split-sum (scale, bias) into a 2-f64 buffer.
+fn b_split_sum_scale_bias() { var r = pbr_split_sum_scale_bias(_ndv, _rough, _out3); return 0; }
+# Burley subsurface diffuse term.
+fn b_subsurface_diffuse() { var r = pbr_subsurface_diffuse(_ndl, _ndv, _rough); return 0; }
+# Beer-Lambert volume transmittance over one path length.
+fn b_volume_transmittance() { var r = pbr_volume_transmittance(_sigt, _dist); return 0; }
+
+# ── Lens (2.3.9 sweep) ────────
+# Thin-lens magnification M = -di/do — one negate and one divide.
+fn b_magnification() { var r = lens_magnification(_obj, _img); return 0; }
+# Lensmaker's equation: focal length of an equiconvex singlet from n and both radii.
+fn b_lensmaker_focal_length() { var r = lens_lensmaker_focal_length(_n2, _r1, _r2, _err); return 0; }
+# Optical power in diopters from a focal length in metres.
+fn b_optical_power() { var r = lens_optical_power(_fm, _err); return 0; }
+# Mirror focal length f = R/2 — the cheapest row in the module.
+fn b_mirror_focal_length() { var r = lens_mirror_focal_length(_r1); return 0; }
+# Two thin lenses in contact: 1/f = 1/f1 + 1/f2.
+fn b_combined_focal_length() { var r = lens_combined_focal_length(_sf, _f2, _err); return 0; }
+# Depth of field: near/far limits written through the out pointer (finite-far branch).
+fn b_depth_of_field() { lens_depth_of_field(_fmm, _fnum, _coc, _subj, _out3); return 0; }
+# Composite: the five cardinal points of a thick lens — traces and allocates a struct.
+fn b_cardinal_points() { var r = lens_cardinal_points(_n2, _r1, _r2, _lth, _err); return 0; }
+# F-number N = f/D.
+fn b_f_number() { var r = lens_f_number(_fmm, _apd); return 0; }
+# Aperture diameter from focal length and f-number.
+fn b_aperture_from_f_number() { var r = lens_aperture_from_f_number(_fmm, _fnum); return 0; }
+# Numerical aperture NA = n*sin(half_angle) — one transcendental.
+fn b_numerical_aperture() { var r = lens_numerical_aperture(_n2, _theta); return 0; }
+# Paraxial NA from f-number: NA = 1/(2N).
+fn b_na_from_f_number() { var r = lens_na_from_f_number(_fnum); return 0; }
+# Rayleigh diffraction limit theta = 1.22*lambda/D.
+fn b_diffraction_limit() { var r = lens_diffraction_limit(_wl_m, _diam); return 0; }
+# Airy disk radius r = 1.22*lambda*N.
+fn b_airy_disk_radius() { var r = lens_airy_disk_radius(_wl_m, _fnum); return 0; }
+# Full-angle field of view across the 36 mm sensor dimension — one atan2.
+fn b_field_of_view() { var r = lens_field_of_view(_sens_w, _fmm); return 0; }
+# Diagonal field of view of a 36x24 mm sensor — a hypot on top of the atan2.
+fn b_field_of_view_diagonal() { var r = lens_field_of_view_diagonal(_sens_w, _sens_h, _fmm); return 0; }
+# Diffraction-limited MTF cutoff frequency 1/(lambda*N).
+fn b_mtf_cutoff_frequency() { var r = lens_mtf_cutoff_frequency(_wl_m, _fnum); return 0; }
+# Coddington shape factor q of the singlet.
+fn b_shape_factor() { var r = lens_shape_factor(_r1, _r2); return 0; }
+# Conjugate (position) factor p from the object/image distances.
+fn b_conjugate_factor() { var r = lens_conjugate_factor(_obj, _img); return 0; }
+# Longitudinal chromatic aberration LCA = f/V for BK7.
+fn b_chromatic_aberration() { var r = lens_chromatic_aberration(_sf, _abbe); return 0; }
+# Petzval sum over a 3-element (n, f) list — the module's only loop row.
+fn b_petzval_sum() { var r = lens_petzval_sum(_elems, 3); return 0; }
+
+# ── wave_core / polarization / diffraction / coherence (2.3.9) ────────
+# Double-slit intensity: single-slit envelope times the two-slit cosine term.
+fn b_double_slit() { var r = double_slit_intensity(_wl_m, _slit, _spacing, _ang, _i0); return 0; }
+# Constructive-interference test for one path difference.
+fn b_is_constructive() { var r = is_constructive(_pathd, _wl_m); return 0; }
+# Destructive-interference test for one path difference.
+fn b_is_destructive() { var r = is_destructive(_pathd, _wl_m); return 0; }
+# Path difference -> phase difference (2*pi*path/lambda).
+fn b_path_to_phase() { var r = path_to_phase(_wl_m, _pathd); return 0; }
+# Thin-film reflectance at near-normal incidence (sin^2 of the half phase).
+fn b_thin_film_reflectance() { var r = thin_film_reflectance(_wl_nm, _film_th, _n2); return 0; }
+# Total intensity of a Jones polarization state (ex^2 + ey^2).
+fn b_polarization_intensity() { var r = polarization_intensity(_pol); return 0; }
+# Malus transmission of a Jones state through a linear polarizer (atan2-bound).
+fn b_polarization_polarizer() { var r = polarization_through_polarizer(_pol, _theta); return 0; }
+# Build the 4x4 Mueller matrix of a linear polarizer at one angle (allocates 128 B).
+fn b_mueller_polarizer() { var r = mueller_polarizer(_theta); return 0; }
+# Build the 4x4 Mueller matrix of a linear retarder (allocates 128 B).
+fn b_mueller_retarder() { var r = mueller_retarder(F64_PI_2); return 0; }
+# 4x4 Mueller matrix product — 64 multiply-adds through the bounds-checked getter.
+fn b_mueller_multiply() { var r = mueller_multiply(_mm_pol, _mm_ret); return 0; }
+# Apply a Mueller matrix to a Stokes vector (allocates the result Stokes vector).
+fn b_mueller_apply() { var r = mueller_apply(_mm_pol, _stokes); return 0; }
+# Fraunhofer intensity for a rectangular aperture — two single-slit sincs.
+fn b_fraunhofer_rect() { var r = fraunhofer_rect(_wl_m, _slit, _slit, _ang, _ang, _i0); return 0; }
+# Fresnel sine integral S(x) — the Cornu spiral's other coordinate.
+fn b_fresnel_integral_s() { var r = fresnel_integral_s(_x); return 0; }
+# Straight-edge diffraction intensity — both Fresnel integrals in one pass.
+fn b_fresnel_edge_intensity() { var r = fresnel_edge_intensity(_x); return 0; }
+# Temporal coherence length from centre wavelength and bandwidth.
+fn b_coherence_length() { var r = coherence_length(_wl_m, _bw); return 0; }
+# Temporal coherence time (coherence length over c).
+fn b_coherence_time() { var r = coherence_time(_wl_m, _bw); return 0; }
+# Beer-Lambert attenuation over a path (exp-bound).
+fn b_beer_lambert() { var r = beer_lambert(_i0, _alpha, _dist); return 0; }
+# Brewster's angle for an air/glass interface (atan2-bound).
+fn b_brewster_angle() { var r = brewster_angle(_n1, _n2); return 0; }
+# Fresnel reflectance at normal incidence.
+fn b_fresnel_normal() { var r = fresnel_normal(_n1, _n2); return 0; }
+# Fresnel reflectance for p-polarized light at 30 degrees incidence.
+fn b_fresnel_p() { var r = fresnel_p(_n1, _n2, _cos_i, _cos_t); return 0; }
+# Fresnel reflectance for s-polarized light at 30 degrees incidence.
+fn b_fresnel_s() { var r = fresnel_s(_n1, _n2, _cos_i, _cos_t); return 0; }
+# 3D Snell refraction plus unpolarized reflectance (boxes a RayVec3 per call).
+fn b_snell_3d() { var r = ray_snell_3d(_dir, _norm, _n1, _n2, _out3, _err); return 0; }
+
+# ── Atmosphere (2.3.9) ────────
+# Kasten-Young relative air mass at one solar zenith angle.
+fn b_air_mass() { var r = atm_air_mass(_sunz); return 0; }
+# Total atmospheric transmittance (Rayleigh + Mie) along one slant path.
+fn b_atm_transmittance() { var r = atm_atmospheric_transmittance(_wl_m, _sunz); return 0; }
+# King depolarization correction factor at one wavelength.
+fn b_king_factor() { var r = atm_king_factor(_wl_m); return 0; }
+# Zenith Rayleigh optical depth at one wavelength.
+fn b_optical_depth_rayleigh() { var r = atm_optical_depth_rayleigh(_wl_m); return 0; }
+# Sea-level Rayleigh scattering coefficient at one wavelength.
+fn b_rayleigh_beta() { var r = atm_rayleigh_scattering_coefficient(_wl_m); return 0; }
+# Sun-to-view scattering angle from the two zenith angles and the azimuth difference.
+fn b_scattering_angle() { var r = atm_scattering_angle(_sunz, _theta, _rho); return 0; }
+# Composite: direct-sunlight RGB transmittance colour into a 3-f64 buffer.
+fn b_sunlight_color() { atm_sunlight_color(_sunz, _out3); return 0; }
+# Composite: sunset/sunrise sky gradient RGB into a 3-f64 buffer.
+fn b_sunset_gradient() { atm_sunset_gradient(_sunz, _theta, _rho, _out3); return 0; }
+
+# ── Ray: dispersion (2.3.9) ────────
+# Abbe number of BK7 — three Sellmeier evaluations at the Fraunhofer d/F/C lines.
+fn b_abbe_number() { var r = abbe_number(_bk7); return 0; }
+# Cauchy two-term refractive index at one wavelength.
+fn b_cauchy_n_at() { var r = cauchy_n_at(_cauchy, _wl_um); return 0; }
+# Schott six-term refractive index at one wavelength.
+fn b_schott_n_at() { var r = schott_n_at(_schott, _wl_um); return 0; }
+# Minimum-deviation angle of a 60-degree prism at a fixed index.
+fn b_prism_deviation() { var r = prism_deviation(_apex, _n2, _err); return 0; }
+# Prism deviation with the index taken from the BK7 Sellmeier fit.
+fn b_prism_dispersion() { var r = prism_dispersion(_apex, _bk7, _wl_um, _err); return 0; }
+# Angular spread of a BK7 prism across the 450-650 nm band (two deviations).
+fn b_prism_angular_spread() {
+    var r = prism_angular_spread(_apex, _bk7, _wl_s_um, _wl_l_um, _err);
+    return 0;
+}
+
+# ── Ray: core (2.3.9) ────────
+# Critical angle for total internal reflection at a glass-to-air boundary.
+fn b_critical_angle() { var r = ray_critical_angle(_n2, _n1, _err); return 0; }
+# Specular reflection of a 2D direction about a surface normal.
+fn b_reflect_2d() { var r = ray_reflect_2d(_dir2, _nrm2); return 0; }
+# Specular reflection of a 3D direction about a surface normal.
+fn b_reflect_3d() { var r = ray_reflect_3d(_dir3, _nrm3); return 0; }
+# Vector-form Snell refraction of a 3D direction across an air-to-glass boundary.
+fn b_refract_3d() { var r = ray_refract_3d(_dir3, _nrm3, _n1, _n2, _err); return 0; }
+
+# ── Ray: system / simulate (2.3.9) ────────
+# Composite: cardinal points (EFL/BFD/FFD) of a biconvex prescription — forward
+# and reverse paraxial traces, both of which build vecs.
+fn b_find_system_properties() { var r = find_system_properties(_presc_bx, _err); return 0; }
+# Composite: optical path length of one ray through the surface list to the image plane.
+fn b_optical_path_length() { var r = optical_path_length(_ray0, _surfaces, _img_z, _err); return 0; }
+
 # Allocate the shared fixtures, then run every benchmark above in order.
 fn main() {
     alloc_init();
@@ -263,6 +561,87 @@ fn main() {
     var _s1 = point_source_set(_srcs, 1, f64_from(0), f64_from(0), F64_ONE, f64_from(0));
     var _s2 = point_source_set(_srcs, 2, _bf(1, 1000), f64_from(0), F64_ONE, f64_from(0));
 
+    # spectral_cie / spectral_core fixtures (2.3.9)
+    _xyz = linear_srgb_to_xyz(_rgb);
+    _cx = _bf(3127, 10000);
+    _cy = _bf(329, 1000);
+    _lin = _bf(5, 10);
+    _freq_hz = wavelength_to_frequency(_wl_nm);
+    # ── pbr fixtures (2.3.9) ──
+    _f0rgb = alloc(24);
+    if (_f0rgb == 0) { return 1; }
+    store64(_f0rgb, _bf(95, 100));
+    store64(_f0rgb + 8, _bf(64, 100));
+    store64(_f0rgb + 16, _bf(54, 100));
+    _alb3 = alloc(24);
+    if (_alb3 == 0) { return 1; }
+    store64(_alb3, _bf(8, 10));
+    store64(_alb3 + 8, _bf(6, 10));
+    store64(_alb3 + 16, _bf(4, 10));
+    _alb = _bf(8, 10);
+    _rx = _bf(3, 10);
+    _ry = _bf(1, 10);
+    _vdx = _bf(48, 100);
+    _vdy = _bf(36, 100);
+    _xi1 = F64_HALF;
+    _xi2 = _bf(3, 10);
+    _sigt = _bf(5, 10);
+    _dist = F64_TWO;
+    _sscat = _bf(3, 10);
+    _cc = _bf(8, 10);
+    _ccr = _bf(1, 10);
+    _bbrdf = _bf(5, 10);
+    _cbrdf = _bf(2, 10);
+    _sheen = _bf(5, 10);
+    # ── lens (2.3.9): a 50 mm f/2.8 equiconvex BK7 singlet, 35 mm format ──
+    _r1 = f64_from(50);
+    _r2 = f64_neg(f64_from(50));
+    _lth = f64_from(5);
+    _fnum = _bf(28, 10);
+    _fmm = f64_from(50);
+    _fm = _bf(5, 100);
+    _apd = _bf(17857, 1000);
+    _obj = f64_from(300);
+    _img = f64_from(150);
+    _coc = _bf(3, 100);
+    _subj = f64_from(2000);
+    _f2 = f64_from(200);
+    _abbe = _bf(6417, 100);
+    _sens_w = f64_from(36);
+    _sens_h = f64_from(24);
+    # three interleaved (n, f) elements: crown, flint, crown
+    _elems = alloc(3 * 16);
+    store64(_elems, _bf(15, 10));       store64(_elems + 8, f64_from(100));
+    store64(_elems + 16, _bf(162, 100)); store64(_elems + 24, f64_neg(f64_from(150)));
+    store64(_elems + 32, _bf(152, 100)); store64(_elems + 40, f64_from(200));
+    # ── wave / polarization / coherence coverage fill (2.3.9) ──
+    # Place AFTER `_theta = _bf(5, 10);` / `_slit = _bf(1, 1000);` — _mm_pol reads _theta.
+    _spacing = _bf(5, 1000);
+    _pathd = _bf(1375, 1000000000);
+    _bw = _bf(1, 1000000000);
+    _alpha = _bf(5, 10);
+    _dist = F64_TWO;
+    _cos_i = f64_div(f64_sqrt(f64_from(3)), F64_TWO);
+    _cos_t = f64_sqrt(_bf(8, 9));
+    _pol = polarization_new(_bf(6, 10), _bf(8, 10), F64_PI_4);
+    _stokes = stokes_new(F64_ONE, _bf(5, 10), _bf(3, 10), _bf(2, 10));
+    _mm_pol = mueller_polarizer(_theta);
+    _mm_ret = mueller_retarder(F64_PI_2);
+    _dir = ray_vec3(_bf(5, 10), f64_from(0), _cos_i);
+    _norm = ray_vec3(f64_from(0), f64_from(0), f64_neg(F64_ONE));
+    _cauchy = cauchy_bk7();
+    _schott = schott_bk7();
+    _apex = f64_div(F64_PI, f64_from(3));
+    _wl_um = _bf(55, 100);
+    _wl_s_um = _bf(45, 100);
+    _wl_l_um = _bf(65, 100);
+    _dir2 = ray_vec2(_bf(6, 10), f64_neg(_bf(8, 10)));
+    _nrm2 = ray_vec2(f64_from(0), F64_ONE);
+    _dir3 = ray_vec3(_bf(6, 10), f64_from(0), f64_neg(_bf(8, 10)));
+    _nrm3 = ray_vec3(f64_from(0), f64_from(0), F64_ONE);
+    _presc_bx = prescription_biconvex(f64_from(100), _bf(15, 10), f64_from(12), f64_from(5));
+    _img_z = f64_from(50);
+
     bench("ray/fresnel_unpolarized", &b_fresnel_unpolarized, 500000);
     bench("ray/fiber_na", &b_fiber_na, 500000);
     bench("ray/v_number", &b_v_number, 500000);
@@ -311,6 +690,113 @@ fn main() {
     bench("wave/pattern2d_normalized_64x64", &b_pattern_normalized, 20000);
 
     println("=== done ===");
+    bench("spectral/wavelength_to_frequency", &b_wavelength_to_frequency, 500000);
+    bench("spectral/frequency_to_wavelength", &b_frequency_to_wavelength, 500000);
+    bench("spectral/photon_energy", &b_photon_energy, 500000);
+    bench("spectral/photon_energy_ev", &b_photon_energy_ev, 500000);
+    bench("spectral/wien_peak", &b_wien_peak, 500000);
+    bench("spectral/rgb_luminance", &b_rgb_luminance, 500000);
+    bench("spectral/rgb_to_u8", &b_rgb_to_u8, 200000);
+    bench("spectral/xyz_to_xyy", &b_xyz_to_xyy, 500000);
+    bench("spectral/cct_from_xy", &b_cct_from_xy, 500000);
+    bench("spectral/linear_srgb_to_xyz", &b_linear_srgb_to_xyz, 200000);
+    bench("spectral/xyz_to_linear_srgb", &b_xyz_to_linear_srgb, 200000);
+    bench("spectral/cie_cmf_at", &b_cie_cmf_at, 200000);
+    bench("spectral/linear_to_srgb_gamma", &b_linear_to_srgb_gamma, 200000);
+    bench("spectral/xyz_to_srgb", &b_xyz_to_srgb, 100000);
+    bench("spectral/spd_to_srgb", &b_spd_to_srgb, 20000);
+    bench("spectral/cri_special", &b_cri_special, 2000);
+    # ── pbr core (2.3.9) ──
+    bench("pbr/distribution_beckmann", &b_distribution_beckmann, 200000);
+    bench("pbr/fresnel_schlick_rgb", &b_fresnel_schlick_rgb, 500000);
+    bench("pbr/geometry_schlick_ggx", &b_geometry_schlick_ggx, 500000);
+    bench("pbr/geometry_smith", &b_geometry_smith, 200000);
+    bench("pbr/ior_to_f0", &b_ior_to_f0, 500000);
+    bench("pbr/lambert_diffuse", &b_lambert_diffuse, 500000);
+    bench("pbr/lambert_diffuse_rgb", &b_lambert_diffuse_rgb, 500000);
+    # ── pbr advanced (2.3.9) ──
+    bench("pbr/clearcoat_blend", &b_clearcoat_blend, 200000);
+    bench("pbr/clearcoat_brdf", &b_clearcoat_brdf, 200000);
+    bench("pbr/geometry_ggx_aniso", &b_geometry_ggx_aniso, 500000);
+    bench("pbr/iridescence_rgb", &b_iridescence_rgb, 100000);
+    bench("pbr/phase_rayleigh", &b_phase_rayleigh, 500000);
+    bench("pbr/sample_cosine_pdf", &b_sample_cosine_pdf, 500000);
+    bench("pbr/sample_ggx", &b_sample_ggx, 200000);
+    bench("pbr/sample_ggx_pdf", &b_sample_ggx_pdf, 200000);
+    bench("pbr/sheen_ashikhmin", &b_sheen_ashikhmin, 500000);
+    bench("pbr/sheen_charlie", &b_sheen_charlie, 200000);
+    bench("pbr/single_scatter_inscattering", &b_inscattering, 200000);
+    bench("pbr/split_sum_scale_bias", &b_split_sum_scale_bias, 200000);
+    bench("pbr/subsurface_diffuse", &b_subsurface_diffuse, 200000);
+    bench("pbr/volume_transmittance", &b_volume_transmittance, 200000);
+    # ── lens (2.3.9 sweep) ──
+    bench("lens/magnification", &b_magnification, 500000);
+    bench("lens/lensmaker_focal_length", &b_lensmaker_focal_length, 500000);
+    bench("lens/optical_power", &b_optical_power, 500000);
+    bench("lens/mirror_focal_length", &b_mirror_focal_length, 500000);
+    bench("lens/combined_focal_length", &b_combined_focal_length, 500000);
+    bench("lens/depth_of_field", &b_depth_of_field, 500000);
+    bench("lens/cardinal_points", &b_cardinal_points, 200000);
+    bench("lens/f_number", &b_f_number, 500000);
+    bench("lens/aperture_from_f_number", &b_aperture_from_f_number, 500000);
+    bench("lens/numerical_aperture", &b_numerical_aperture, 200000);
+    bench("lens/na_from_f_number", &b_na_from_f_number, 500000);
+    bench("lens/diffraction_limit", &b_diffraction_limit, 500000);
+    bench("lens/airy_disk_radius", &b_airy_disk_radius, 500000);
+    bench("lens/field_of_view", &b_field_of_view, 200000);
+    bench("lens/field_of_view_diagonal", &b_field_of_view_diagonal, 200000);
+    bench("lens/mtf_cutoff_frequency", &b_mtf_cutoff_frequency, 500000);
+    bench("lens/shape_factor", &b_shape_factor, 500000);
+    bench("lens/conjugate_factor", &b_conjugate_factor, 500000);
+    bench("lens/chromatic_aberration", &b_chromatic_aberration, 500000);
+    bench("lens/petzval_sum", &b_petzval_sum, 500000);
+    # ── coverage fill (2.3.9) ──
+    bench("wave/double_slit_intensity", &b_double_slit, 200000);
+    bench("wave/is_constructive", &b_is_constructive, 500000);
+    bench("wave/is_destructive", &b_is_destructive, 500000);
+    bench("wave/path_to_phase", &b_path_to_phase, 500000);
+    bench("wave/thin_film_reflectance", &b_thin_film_reflectance, 500000);
+    bench("wave/polarization_intensity", &b_polarization_intensity, 500000);
+    bench("wave/polarization_through_polarizer", &b_polarization_polarizer, 200000);
+    bench("wave/mueller_polarizer", &b_mueller_polarizer, 200000);
+    bench("wave/mueller_retarder", &b_mueller_retarder, 200000);
+    bench("wave/mueller_multiply", &b_mueller_multiply, 100000);
+    bench("wave/mueller_apply", &b_mueller_apply, 200000);
+    bench("wave/fraunhofer_rect", &b_fraunhofer_rect, 200000);
+    bench("wave/fresnel_integral_s", &b_fresnel_integral_s, 500000);
+    bench("wave/fresnel_edge_intensity", &b_fresnel_edge_intensity, 200000);
+    bench("wave/coherence_length", &b_coherence_length, 500000);
+    bench("wave/coherence_time", &b_coherence_time, 500000);
+    bench("ray/beer_lambert", &b_beer_lambert, 500000);
+    bench("ray/brewster_angle", &b_brewster_angle, 500000);
+    bench("ray/fresnel_normal", &b_fresnel_normal, 500000);
+    bench("ray/fresnel_p", &b_fresnel_p, 500000);
+    bench("ray/fresnel_s", &b_fresnel_s, 500000);
+    bench("ray/snell_3d", &b_snell_3d, 200000);
+    # ── atmosphere (2.3.9) ──
+    bench("atmosphere/king_factor", &b_king_factor, 500000);
+    bench("atmosphere/optical_depth_rayleigh", &b_optical_depth_rayleigh, 500000);
+    bench("atmosphere/rayleigh_scattering_coefficient", &b_rayleigh_beta, 500000);
+    bench("atmosphere/air_mass", &b_air_mass, 200000);
+    bench("atmosphere/atmospheric_transmittance", &b_atm_transmittance, 200000);
+    bench("atmosphere/scattering_angle", &b_scattering_angle, 200000);
+    bench("atmosphere/sunlight_color", &b_sunlight_color, 20000);
+    bench("atmosphere/sunset_gradient", &b_sunset_gradient, 20000);
+    # ── ray: dispersion (2.3.9) ──
+    bench("ray/cauchy_n_at", &b_cauchy_n_at, 500000);
+    bench("ray/schott_n_at", &b_schott_n_at, 500000);
+    bench("ray/abbe_number", &b_abbe_number, 200000);
+    bench("ray/prism_deviation", &b_prism_deviation, 200000);
+    bench("ray/prism_dispersion", &b_prism_dispersion, 200000);
+    bench("ray/prism_angular_spread", &b_prism_angular_spread, 100000);
+    # ── ray: core (2.3.9) ──
+    bench("ray/critical_angle", &b_critical_angle, 200000);
+    bench("ray/reflect_2d", &b_reflect_2d, 200000);
+    bench("ray/reflect_3d", &b_reflect_3d, 200000);
+    bench("ray/refract_3d", &b_refract_3d, 200000);
+    # ── ray: system / simulate (2.3.9) ──
+    bench("ray/find_system_properties", &b_find_system_properties, 20000);
+    bench("ray/optical_path_length", &b_optical_path_length, 100000);
     return 0;
 }
 
