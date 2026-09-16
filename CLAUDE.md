@@ -9,7 +9,7 @@
   (math-only) and `dist/prakash-ai.cyr` (adds the sandhi HTTP/TLS AI client)
 - **License**: GPL-3.0
 - **Toolchain pin**: cyrius 6.6.4 — single source of truth is `cyrius = "..."` in `cyrius.cyml`
-- **Version**: SemVer, currently 2.3.x. `VERSION` is the single source; `cyrius.cyml`
+- **Version**: SemVer, currently 2.4.x. `VERSION` is the single source; `cyrius.cyml`
   reads it via `${file:VERSION}` and the release workflow fails if the tag disagrees
 
 ⚠ **The Rust original is a FIDELITY reference, not a CORRECTNESS one.** 2.2.6 found six
@@ -82,7 +82,12 @@ soorat (PBR shading), kiran (lighting), ranga (lens effects)
   ⚠ This host's run-to-run spread reaches 40% on sub-100 ns benchmarks. A whole-suite
   delta below ~10% is NOT a signal — put both versions in ONE binary and bench them
   against each other before claiming any movement.
-- **Tests + benchmarks are the way.** Minimum 80%+ coverage target. ⚠ `cyrius coverage`
+- **Tests + benchmarks are the way.** Minimum 80%+ coverage target.
+  ⚠ **Counting assertions: `cyrius tests` emits a per-suite line AND a suite-level
+  line, and a naive sum adds them together.** Totalling with
+  `grep -E '^[0-9]+ passed'` inflates the count by the number of suites — that error
+  ran through every entry from 2.3.0 to 2.4.0. Require the parenthesised total:
+  `cyrius tests tests/ | grep -E '^[0-9]+ passed, [0-9]+ failed \([0-9]+ total\)$' | awk '{s+=$1} END {print s}'` ⚠ `cyrius coverage`
   reports *reference* coverage — whether a function is called at all. It is a floor,
   not a correctness proof.
 - **A test that samples only the points a bug survives is worse than no test.** 2.2.6's
@@ -97,7 +102,7 @@ soorat (PBR shading), kiran (lighting), ranga (lens effects)
 - **No magic.** Every operation is measurable, auditable, traceable.
 - **`#must_use`** on all pure functions — the load-bearing attribute here.
   Count it, do not quote it: `grep -rhoE '^\s*#must_use' src/*.cyr | wc -l`
-  (424 at 2.3.4). ⚠ A hard-coded figure here has gone stale at three separate
+  (428 at 2.4.0). ⚠ A hard-coded figure here has gone stale at three separate
   releases; the command is the source of truth.
 - ⚠ **Inserting a function directly above another one STEALS its attributes.**
   A `#doc` + `#must_use` block binds to whatever declaration follows it, so a new
@@ -109,6 +114,12 @@ soorat (PBR shading), kiran (lighting), ranga (lens effects)
   set of `#must_use`-bearing function NAMES against the base commit and fails on
   any loss. Run it locally before committing. `cyrius lint` is clean either way
   and `cyrius audit` reports only the lost DOC comment, so nothing else sees it.
+  ⚠ **The gate baselines against a COMMIT, so a loss that PREDATES it is invisible.**
+  `pattern2d_new` lost its attribute in 2.3.3; the gate arrived in 2.3.6 and
+  inherited that as normal. It surfaced in 2.4.0 only by reconciling the gate's
+  count against `grep -rhoE '^\s*#must_use' src/*.cyr | wc -l`. **If those two
+  numbers disagree, investigate** — they should be equal, and a gap means an
+  orphaned attribute or a function the gate cannot see.
 - **`#derive(accessors)`** for struct field accessors rather than hand-written `load64`.
 - ⚠ **`cycc` SILENTLY IGNORES UNKNOWN ATTRIBUTES** — `#definitely_not_real` compiles and
   lints clean, exactly like `#inline` does. Cyrius has no `#inline` and no enums, so the

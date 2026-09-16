@@ -4,9 +4,23 @@
 
 ## [2.4.0] - 2026-09-15 — spd_from_function, and the roadmap's implementation for it was wrong
 
-First minor since 2.3.0: one new public entry point. Suite **6617 → 6715
+First minor since 2.3.0: one new public entry point. Suite **6586 → 6684
 assertions across 31 suites**, 0 failed. Reference coverage **414/414**.
 `cyrius audit` exits 0.
+
+⛔ **CORRECTION, AND IT REACHES BACK THROUGH THE WHOLE 2.3.x LINE.** Every
+assertion count reported in entries 2.3.0 through 2.4.0 was **inflated by the
+number of suites**. `cyrius tests` prints a per-suite line
+(`N passed, 0 failed (N total)`) and then one suite-level line
+(`31 passed, 0 failed`) with no `(N total)`; the command used to total them,
+`grep -E '^[0-9]+ passed' | awk '{s+=$1}'`, matched both and added the suite count
+to the assertion count. So each figure in those entries is **too high by the suite
+count at the time** — 29, 30 or 31. The true count today is **6684 across 31
+suites**, not 6715. Corrected here; the released entries are left as written, with
+this note as the record. The right filter requires the total in parentheses:
+`grep -E '^[0-9]+ passed, [0-9]+ failed \([0-9]+ total\)$'`.
+⚠ Found by a documentation audit that re-measured the README's own claim rather
+than reading it, which is the only reason a number nobody doubted got checked.
 
 ### Added
 
@@ -52,6 +66,80 @@ assertions across 31 suites**, 0 failed. Reference coverage **414/414**.
   must store **2.0** per sample, not `2.0 * step`. Mutation-verified — multiplying
   by the step (the quadrature error) fails the bit-identity rows immediately.
   Full error contract covered: null `fp`, `n < 2`, `end_nm <= start_nm`.
+
+### Changed — documentation audit
+
+Every document verified against the tree rather than read for plausibility. Three
+were actively wrong, not merely stale.
+
+- ⛔ **README's quick-start did not build.** Its `[deps] stdlib` list omitted
+  `sakshi`, `bayan`, `syscalls` and `io`, so a consumer following the front door
+  got `undefined variable 'SK_TRACE'` and a failed link. Replaced with
+  `dist/prakash.deps` verbatim and confirmed: the README's own example now
+  compiles, `OK (969120 bytes)`. Also added the `[deps.hisab]` block with a note
+  that it is needed **only** for the four 2D-FFT entry points — without it the
+  bundle still builds and everything else links.
+- ⛔ **CONTRIBUTING documented a gate that does not gate.** It told contributors
+  `cyrius lint "$f"` "fails on a `warn` line". **It exits 0** — verified at 6.6.4
+  against a file with two warnings — so the documented local loop passed code CI
+  then rejects, the exact hazard `CLAUDE.md` flags. Rewritten to grep stdout the
+  way CI does, plus the five CI steps it was missing (`deny`, `doc --check`,
+  `check-must-use.sh`, the TLS-free grep, `cyrius audit`). Also corrected: CI runs
+  on `main` and PRs, **not** on every push.
+- ⛔ **`docs/development/cyrius-port-plan.md` deleted.** A finished plan whose
+  status still read *"planning complete, scaffolding underway"* four minors after
+  the port closed, carrying 23 current claims about an API prakash does not have —
+  `ganita_mat_svd`, hisab's `cx_*`, `sandhi_http_post`, `sakshi_info`, bayan
+  value-tree encoding, `src/constants.cyr` — and advice to prefer `hvec3_*` that
+  `ray_core.cyr` explicitly documents against with measurements. Recover with
+  `git show 2.4.0^:docs/development/cyrius-port-plan.md`. Its citation in
+  `cyrius.cyml` was replaced with the load-bearing fact that comment should have
+  carried: the `[lib]` order IS the concatenation order, because nothing in `src/`
+  includes anything.
+
+- **docs/architecture/overview.md** — eleven current claims corrected. ⛔ *"Every
+  module includes `error.cyr`"* was **flatly false**: no file under `src/` contains
+  an `include` at all, only `src/main.cyr`. The CIE tables were described as
+  precomputed static data when they are 21 lazily-built memoised allocations —
+  the very thing `prakash_reset_caches()` exists to manage. Bit-fidelity to Rust
+  was stated unqualified despite 2.2.6 deliberately diverging at six sites. Counts
+  and the serialize row updated; the ai `.deps` inference re-measured at **26**
+  (was 25 at 2.3.0 — the extra leaf is `fnptr`, from `spd_from_function`'s
+  `fncall1`). The dated 6.5.33 measurements are history and were left alone.
+- **docs/research/physics-completeness-audit.md** — a re-verification banner
+  replaces a status header that was five months and four minors out of date.
+  Thirteen capabilities it lists as missing have shipped. ⛔ Three claims describe
+  things prakash does not have in any form (the bijli Gaussian-beam/ABCD
+  re-exports and Mie solver, removed in 1.2.0). ⛔ And two are **worse** than it
+  says: §13 is marked IMPLEMENTED though the 3×3 polarization matrix was never
+  built — what shipped uses the **real** Fresnel coefficients, not the complex
+  ones — and `lens_mtf_polychromatic` is a real weighted mean carrying no phase,
+  not the coherent vector sum §5 specifies.
+- ⭐ **`docs/architecture/math.md` needed no correction.** All ~90 formulas were
+  checked against the functions implementing them and every one matches, including
+  the two subtle cases: the GGX importance-sampling arctan form is equivalent to
+  the code's cos-θ form, and the iridescence OPD is consistent with the code's
+  half-phase plus cos(2d). The 2.2.6/2.2.8 physics repairs are all reflected.
+
+### Fixed — the gate that was not watching what it claimed
+
+- ⛔ **`pattern2d_new` lost its `#must_use` in 2.3.3 and nothing noticed for six
+  releases.** A public constructor returning a handle callers must check. It was
+  stranded when `_pattern2d_new_uninit` was inserted above it.
+  ⚠ **`scripts/check-must-use.sh` could not have caught it: the gate baselines
+  against a COMMIT, so a loss predating the gate (2.3.6) is inherited as normal.**
+  It surfaced only by reconciling the gate's count against a raw grep — they read
+  425 and 428. That reconciliation is now documented in `CLAUDE.md` as the check.
+- ⛔ **And the gate had a blind spot that made it wrong about three more.** It
+  matched `#must_use` only on the line immediately above a function, but the
+  attribute binds **across comments and blank lines** — verified against cycc,
+  which warns on a discarded result in every such form. `pbr_fresnel_schlick`,
+  `_ray_snell_3d_out` and `_pattern2d_new_uninit` were therefore untracked: the
+  gate would not have reported them losing the attribute either. Lookback widened;
+  the selftest gained four cases including a negative control (a real statement
+  between attribute and function DOES end the run). Grep and gate now agree at
+  **428** for the first time.
+- A duplicate `#must_use` on `_pattern2d_new_uninit`, from the same 2.3.3 edit.
 
 ### Changed
 

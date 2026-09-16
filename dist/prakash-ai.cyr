@@ -8004,9 +8004,6 @@ fn _pat_dims_bad(width, height, elem_bytes) {
     return 0;
 }
 
-# New zero-filled pattern (width x height, row-major). Returns 0 if the
-# dimensions are unusable or the allocation fails.
-#must_use
 # Allocate a Pattern2D and its buffer WITHOUT initialising the cells.
 #
 # ⚠ Every cell is garbage on return. This exists only for callers that write all
@@ -8038,9 +8035,20 @@ fn _pattern2d_new_uninit(width, height) {
     return p;
 }
 
-# Allocate a zero-filled Pattern2D. Public: a fresh pattern reads as zero, and
-# consumers may depend on that. Internal callers that overwrite every cell should
-# use `_pattern2d_new_uninit` instead — see its header.
+# New zero-filled pattern (width x height, row-major). Returns 0 if the
+# dimensions are unusable or the allocation fails.
+#
+# Public: a fresh pattern reads as zero and consumers may depend on that. Internal
+# callers that overwrite every cell should use `_pattern2d_new_uninit` instead —
+# see its header.
+#
+# ⚠ This function's `#must_use` was silently lost in 2.3.3, when
+# `_pattern2d_new_uninit` was inserted above it and took this doc block and the
+# attribute with it. It went unnoticed for six releases because
+# `scripts/check-must-use.sh` did not exist until 2.3.6 and baselines against the
+# previous commit — a loss that PREDATES the gate is invisible to it. Restored in
+# 2.4.0, found by reconciling the gate's count against a raw grep.
+#must_use
 fn pattern2d_new(width, height) {
     var p = _pattern2d_new_uninit(width, height);
     if (p == 0) { return 0; }

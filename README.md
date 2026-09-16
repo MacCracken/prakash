@@ -2,9 +2,9 @@
 
 > **Prakash** (Sanskrit: प्रकाश — light, illumination) — optics and light simulation for AGNOS
 
-Physics of light: ray optics, wave optics, spectral math, lens geometry, atmospheric scattering, and physically-based rendering primitives. Written in [Cyrius](https://github.com/MacCracken/cyrius), ported from Rust (2.0.0). Math foundations (Complex + FFT) come from [hisab](https://github.com/MacCracken/hisab).
+Physics of light: ray optics, wave optics, spectral math, lens geometry, atmospheric scattering, and physically-based rendering primitives. Written in [Cyrius](https://github.com/MacCracken/cyrius), ported from Rust (2.0.0). The 2D FFT behind `wave_pattern` comes from [hisab](https://github.com/MacCracken/hisab) — `num_fft` is prakash's single hisab entry point, and the rest, complex arithmetic included, is prakash's own.
 
-Consumed by [soorat](https://github.com/MacCracken/soorat) (PBR shading), [kiran](https://github.com/MacCracken/kiran) (lighting), and [ranga](https://github.com/MacCracken/ranga) (lens effects) — still Rust for now; the `dist/prakash*.cyr` bundle is the interop surface until they port.
+Consumed by [ranga](https://github.com/MacCracken/ranga) (spectral/colour — **already on Cyrius**, pulling `dist/prakash.cyr` as a git dep), [soorat](https://github.com/MacCracken/soorat) (PBR shading) and [kiran](https://github.com/MacCracken/kiran) (lighting). The latter two are still on the 1.x Rust crate; `dist/prakash*.cyr` is the interop surface as they port.
 
 ## Modules
 
@@ -17,7 +17,7 @@ Consumed by [soorat](https://github.com/MacCracken/soorat) (PBR shading), [kiran
 | **pbr** | pbr_core, pbr_advanced | Cook-Torrance, GGX/Beckmann NDF, Smith geometry, Fresnel-Schlick, Lambert; anisotropy, sheen, clearcoat, SSS, iridescence, volumetric scattering, importance sampling, split-sum IBL |
 | **atmosphere** | atmosphere | Rayleigh/Mie scattering, King factor, sky color, air mass (Kasten-Young), optical depth, sunset gradient |
 | **bridge** | bridge | Primitive-value cross-crate hooks: bijli (EM ↔ wavelength/index), tara (stellar temp → RGB), badal (density/humidity → scattering) |
-| **serialize** | serialize | JSON roundtrips (via bayan) for rgb, medium, sellmeier, lens type, polarization, prescription, SPD |
+| **serialize** | serialize | JSON roundtrips for rgb, medium, sellmeier, lens type, polarization, prescription, SPD. Emit goes straight into a `str_builder` (bayan only for round-trip-correct float rendering); parse goes through bayan's value tree |
 | **ai** *(opt-in)* | ai | Daimon/Hoosh AI client — blocking HTTP POST via sandhi. **Not in the core bundle** (pulls the TLS stack); ships in `dist/prakash-ai.cyr` |
 | **error** | error | `PK_ERR_*` codes + `prakash_set_log_level` / trace logging (sakshi) |
 
@@ -34,11 +34,31 @@ cyrius   = "6.6.4"
 [deps]
 # ganita provides the transcendentals (acos/asin/atan2/pow/sinh/…) and subsumes
 # matrix/linalg. math stays for comparisons/clamp/lerp/min/max + polyfills.
-stdlib = ["string", "fmt", "alloc", "vec", "str", "math", "ganita", "tagged", "fnptr"]
+# This is dist/prakash.deps verbatim — the stdlib folds the core bundle needs in
+# scope. ⚠ A shorter list does NOT build: without sakshi the bundle fails on
+# SK_TRACE/sakshi_trace, without bayan on the JSON surface, without syscalls/io
+# on bayan's own dependencies.
+stdlib = [
+    "syscalls", "string", "alloc", "str", "fmt", "vec", "io", "args",
+    "assert", "result", "math", "simd", "ganita", "tagged", "fnptr",
+    "bench", "callback", "bayan", "sakshi",
+]
+# The ai bundle additionally needs:
+#   net http tls async random fdlopen dynlib chrono sandhi
+
+[deps.hisab]
+# ⚠ Only needed if you call the 2D-FFT surface — diffraction_pattern_2d,
+# diffraction_pattern_circular, psf_from_wavefront, psf_diffraction_limited.
+# Without it the bundle still builds and every other entry point works; you get
+# one `undefined function 'num_fft'` warning and those four functions are
+# unlinked. Everything else in prakash is self-contained.
+git     = "https://github.com/MacCracken/hisab.git"
+tag     = "3.1.1"
+modules = ["dist/hisab.cyr"]
 
 [deps.prakash]
 git     = "https://github.com/MacCracken/prakash.git"
-tag     = "2.2.8"
+tag     = "2.4.0"
 modules = ["dist/prakash.cyr"]        # math-only core (no TLS)
 # For the AI client instead, pull the ai bundle (adds the sandhi HTTP/TLS stack):
 # modules = ["dist/prakash-ai.cyr"]
@@ -94,10 +114,10 @@ prakash (Cyrius)
 
 ```sh
 cyrius deps                 # resolve the hisab git dep
-for f in tests/*.tcyr; do cyrius test "$f"; done   # 6378 assertions, 29 suites
+for f in tests/*.tcyr; do cyrius test "$f"; done   # 6684 assertions, 31 suites
 cyrius distlib              # regenerate dist/prakash.cyr
 cyrius distlib ai           # regenerate dist/prakash-ai.cyr
-cyrius bench tests/prakash.bcyr                     # 36 benchmarks
+cyrius bench tests/prakash.bcyr                     # 138 benchmarks
 ./scripts/bench-history.sh  # append to the CSV history + benchmarks.md
 ```
 

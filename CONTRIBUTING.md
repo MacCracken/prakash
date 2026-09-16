@@ -25,8 +25,9 @@ cyrius deps
 
 ## Local CI gate
 
-CI runs on every push (`.github/workflows/ci.yml`). Reproduce it locally before
-pushing:
+⚠ **CI runs on pushes to `main` and on PRs targeting `main`**
+(`.github/workflows/ci.yml`) — **not** on a feature-branch push. Nothing runs
+until you open the PR, so reproduce the gate locally first:
 
 ```bash
 # Dependency hashes must match the committed cyrius.lock
@@ -37,13 +38,29 @@ cyrius deps --verify
 # ⚠ `cyrius fmt <f>` REWRITES IN PLACE as of cyrius 6.5.28 (it was stdout-only
 # before). To fix drift run `cyrius fmt "$f"` — never `cyrius fmt "$f" > tmp`,
 # which captures zero bytes and truncates the file.
+# ⛔ `cyrius lint` EXITS 0 EVEN WITH WARNINGS — verified at 6.6.4, a file with two
+# `warn` lines still returns rc=0. Running it bare, as this block used to, gives a
+# green local gate over code CI then rejects. CI greps stdout instead; so must you.
+fail=0
 for f in src/*.cyr tests/*.tcyr tests/*.bcyr examples/*.cyr; do
-  cyrius lint "$f"          # fails on a `warn` line
-  cyrius fmt "$f" --check   # fails on format drift (writes nothing in check mode)
+  out=$(cyrius lint "$f" 2>&1)
+  if [ $? -ne 0 ] || printf '%s' "$out" | grep -qE '^[[:space:]]*warn '; then
+    printf '%s\n' "$out" | grep -E '^[[:space:]]*warn '
+    echo "lint: $f"; fail=1
+  fi
+  cyrius fmt "$f" --check >/dev/null 2>&1 || { echo "fmt drift: $f"; fail=1; }
+  cyrius doc --check "$f" >/dev/null 2>&1 || { echo "undocumented fns: $f"; fail=1; }
 done
+[ $fail -eq 0 ] || echo "cleanliness gate FAILED"
 
-# Vet the build entry
+# Vet the build entry, and enforce the project policies CI enforces
 cyrius vet src/main.cyr
+cyrius deny src/main.cyr
+
+# ⚠ `#must_use` binds to the declaration that FOLLOWS it, so inserting a function
+# above another silently steals its attribute and NO other gate reports it.
+scripts/check-must-use.sh --selftest
+scripts/check-must-use.sh
 
 # Bundles must match lib/ (regenerate + commit if they drift).
 # Sync the .deps sidecars after distlib: `cyrius distlib` gets them backwards
@@ -57,6 +74,22 @@ git diff --quiet dist/ || echo "dist/ stale — commit it"
 # Tests + benchmarks
 for f in tests/*.tcyr; do cyrius test "$f"; done
 cyrius bench tests/prakash.bcyr
+
+# The core bundle must stay free of the TLS stack — CI greps for exactly this.
+grep -nE '\bsandhi_|\btls_[a-z]|\bhttp_[a-z]|\btcp_|\bdynlib_|\brand_[a-z]' \
+  dist/prakash.cyr && echo "TLS leaked into the math-only bundle"
+
+# Or run the whole project sweep in one command — it must exit 0.
+cyrius audit
+```
+
+⚠ **Counting assertions:** `cyrius tests` prints a per-suite line *and* a
+suite-level line, so a naive `grep -E '^[0-9]+ passed'` sum overcounts by the
+number of suites. Require the parenthesised total:
+
+```bash
+cyrius tests tests/ | grep -E '^[0-9]+ passed, [0-9]+ failed \([0-9]+ total\)$' \
+  | awk '{s+=$1} END {print s}'
 ```
 
 ## Pull Request Process

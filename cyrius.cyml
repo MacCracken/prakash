@@ -20,8 +20,14 @@ output = "build/prakash"
 # deliberately NOT bundled here (it pulls sandhi/TLS) — it ships as an opt-in
 # module, mirroring the old `ai` cargo feature.
 #
-# Modules are appended as the Rust→Cyrius port lands them (see
-# docs/development/cyrius-port-plan.md). Only ported modules are listed.
+# The module list below IS the bundle's concatenation order, and it is
+# load-bearing: no file in src/ contains an `include`, so every module resolves at
+# file scope against whatever precedes it. error.cyr is first because every module
+# uses PK_ERR_*/_prk_trace; serialize is last because it reads accessors from the
+# ray/spectral/wave/lens types.
+# (The Rust→Cyrius port plan this note used to cite was deleted in 2.4.0 — the port
+# completed at 2.0.0 and the document had drifted into describing an API prakash
+# does not have. Recover it with `git show 2.4.0^:docs/development/cyrius-port-plan.md`.)
 [lib]
 modules = [
     "src/error.cyr",

@@ -14,15 +14,15 @@ after the port-completeness review; recover it with
 | `ray` | ray_core, ray_fresnel, ray_trace, ray_simulate, ray_system, ray_dispersion, ray_fiber | 593 | `Medium`, `ComplexMedium`, `*Coefficients`, `TraceRay`, `OpticalSurface`, `PolarizedTraceHit`, `ParaxialRay`, `Prescription` | Geometric optics: Snell, Fresnel (real + complex), dispersion (Sellmeier/Cauchy/Herzberger/Schott/Conrady), chromatic aberration, fiber optics, sequential/recursive tracing with polarization, ray fans, spot diagrams, OPD |
 | `spectral` | spectral_core, spectral_cie, spectral_photometry | 1691 | `Rgb`, `Xyz`, `Spd`, `Observer` (tag constants) | Color science: wavelength↔RGB, Planck (numerically stable), Wien, CIE 1931/1964/2015 XYZ, SPD, illuminants, CRI, photometry (V(λ), luminous flux/efficacy) |
 | `wave` | wave_core, wave_polarization, wave_coherence, wave_airy, wave_fabry_perot, wave_diffraction, wave_zernike, wave_pattern | 1568 | `Polarization`, `StokesVector`, `MuellerMatrix` (16-f64 buffer), `Pattern2D`, `ZernikeWavefront`, `ThinFilmResult` | Wave optics: interference, coherence, Airy/Bessel, Fabry-Pérot, Fraunhofer/Fresnel diffraction, TMM (oblique s/p), AR coatings, Jones/Stokes/Mueller, Zernike polynomials, 2D FFT patterns, PSF |
-| `lens` | lens.cyr | 145 | `CardinalPoints`, `SeidelCoefficients` | Lens/mirror geometry: thin/thick lens, aberrations, MTF (mono + poly + through-focus), DoF, Petzval, multi-element |
+| `lens` | lens.cyr | 234 | `CardinalPoints`, `SeidelCoefficients` | Lens/mirror geometry: thin/thick lens, aberrations, MTF (mono + poly + through-focus), DoF, Petzval, multi-element |
 | `pbr` | pbr_core, pbr_advanced | 865 | (free functions) | PBR shading: Cook-Torrance, GGX, sheen, clearcoat, SSS, iridescence, volumetric, importance sampling, split-sum IBL |
-| `atmosphere` | atmosphere.cyr | 313 | (free functions + constants) | Rayleigh/Mie scattering, King correction, sky color, air mass, optical depth, sunset model |
+| `atmosphere` | atmosphere.cyr | 373 | (free functions + constants) | Rayleigh/Mie scattering, King correction, sky color, air mass, optical depth, sunset model |
 | `bridge` | bridge.cyr | 28 | (free functions) | Primitive-value cross-crate hooks (bijli/tara/badal) — no dependency on sibling crates |
-| `serialize` | serialize.cyr | 31 | (free functions) | JSON roundtrips (bayan) for the seven serde-tested types; floats are bit-exact (Grisu2) since bayan 1.2.1; every `*_from_json` reports via `err_out` |
-| `ai` | ai.cyr | 24 | `DaimonClient`, `DaimonConfig`, `HooshConfig` | AI-assisted optics queries via sandhi HTTP POST — **not in the core bundle** |
+| `serialize` | serialize.cyr | 49 | (free functions) | JSON roundtrips for the seven serde-tested types. ⚠ **Encode goes straight into a `str_builder`** since 2.3.4/2.3.5 — bayan is used only for Grisu2 float rendering; **decode** still walks a bayan value tree. Floats are bit-exact; every `*_from_json` reports via `err_out`; every wire format is pinned to exact bytes |
+| `ai` | ai.cyr | 30 | `DaimonClient`, `DaimonConfig`, `HooshConfig` | AI-assisted optics queries via sandhi HTTP POST — **not in the core bundle** |
 
-**Total**: 25 science modules + error, **6378 test assertions across 29 suites**,
-36 benchmarks. (`tests/hardening.tcyr` is the cross-module regression suite for the
+**Total**: 25 science modules + error, **6684 test assertions across 31 suites**,
+138 benchmarks. (`tests/hardening.tcyr` is the cross-module regression suite for the
 2.0.2 audit repairs and the 2.1.0 error channels — see those CHANGELOG entries.)
 
 ## Design Principles
@@ -34,10 +34,19 @@ after the port-completeness review; recover it with
 - **Bit-fidelity to the Rust original** — constants encoded as exact ratios or
   IEEE-754 hex; `powi` replicated as square-and-multiply; left-associative fold
   order preserved so results match to the ULP.
+  ⚠ **Deliberately NOT bit-faithful at six sites.** 2.2.6 found six wrong physics
+  formulas, five character-for-character identical in the Rust archive, and fixed
+  them — GGX at low roughness, both Fresnel-integral branches, the sphere vertex
+  cap, the doublet prescription, third-order spherical, and `atm_air_mass` past
+  the horizon. 2.2.8 added four more. Fidelity is the default, not the rule: the
+  Rust original is a fidelity reference, never a correctness one.
 - `#must_use` on pure functions.
 - Errors are `PK_ERR_*` codes returned via an `err_out` pointer — never
   `unwrap`/`panic` in library code.
-- Precomputed constants where possible (Rayleigh prefactor, 1/π, CIE tables).
+- Precomputed constants where possible (Rayleigh prefactor, 1/π).
+  ⚠ The CIE tables are **not** static data — they are 21 lazily-built memoised
+  allocations, which is why `prakash_reset_caches()` exists and why it MUST follow
+  any `alloc_reset()`. See `docs/guides/allocation.md`.
 - Optional cost is opt-in: the AI client (and its TLS stack) lives in a separate
   bundle so math-only consumers pay nothing for it.
 
@@ -64,7 +73,11 @@ bridge ──> primitive-value cross-crate hooks (bijli/tara/badal)
 error ──> PK_ERR_* codes + logging, shared by all modules
 ```
 
-Every module includes `error.cyr` (for `PK_ERR_*` and `_prk_trace`). Within the
+⚠ **No module includes another — `src/*.cyr` contains no `include` statement at
+all** (only `src/main.cyr`, the build entry, has any). The bundler concatenates
+the `[lib]` list in dependency order and everything resolves at file scope, which
+is why that order is load-bearing. Every module *uses* `error.cyr`'s `PK_ERR_*`
+and `_prk_trace`, which is why it is bundled first. Within the
 ray and wave groups, later files build on earlier ones (ray_trace/simulate/system
 on ray_core+ray_fresnel; wave_polarization on wave_core; pbr_advanced on pbr_core).
 Across module groups there are two cross-dependencies: `serialize`, which reads
@@ -109,7 +122,9 @@ sidecar under-reports.
 keeps moving and the defect does not.** Through 6.5.20 the pruned inference
 yielded literally `syscalls io`. At 6.5.33 it yielded ten folds — `string alloc
 str vec math ganita tagged bayan sandhi sakshi`. At **6.6.4** (measured for 2.3.0)
-it yields **25**, and the generator now reports its own patching — `sidecar:
+it yielded **25** at 2.3.0 and yields **26** at 2.4.0 (the extra leaf is `fnptr`,
+pulled in by `spd_from_function`'s `fncall1` — prakash's first callback site), and
+the generator now reports its own patching — `sidecar:
 re-added 15 leaf(s) the inference missed (compile-verified)` — but the inversion
 survives all of it: the same run emits **29** leaves for the math-only base
 against those 25 for ai, i.e. the narrow bundle is still advertised as the wider

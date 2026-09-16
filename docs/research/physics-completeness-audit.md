@@ -5,11 +5,46 @@
 > Goal: identify every gap between prakash's current implementation and
 > what a world-class, 100%-accurate optics library must contain.
 >
-> **Implementation status** (updated 2026-03-25):
-> - Section 1 (Complex Fresnel): **IMPLEMENTED** -- `ComplexMedium`, `fresnel_s_complex`, `fresnel_p_complex`, metal presets
-> - Section 10 (Planck stability): **IMPLEMENTED** -- `exp_m1()`, Wien branch, T<=0 guard
-> - Section 13 (Polarization ray tracing): **IMPLEMENTED** -- `trace_sequential_polarized` with s/p tracking
-> - Section 15 (Zernike polynomials): **IMPLEMENTED** -- `wave::zernike` module, Noll indexing, wavefront analysis
+> ⚠ **THIS IS A DATED RESEARCH REPORT, NOT A CURRENT GAP LIST.** It was written
+> against prakash 1.x in Rust. Re-verified section by section against **2.4.0**
+> on 2026-09-15; the body below is left as the original record, and this banner
+> is the correction. Where the two disagree, believe the banner.
+>
+> **Shipped since the report was written** (its "missing" lists are wrong about
+> all of these): the dispersion models Herzberger, Schott and Conrady
+> (`src/ray_dispersion.cyr`); oblique-incidence TMM with separate s/p and
+> transmittance (`multilayer_rt`); lateral chromatic aberration, secondary
+> spectrum and partial dispersion; polychromatic and through-focus MTF; the
+> **entire fiber module** (`src/ray_fiber.cyr` — NA, V-number, mode count,
+> single-mode predicate, mode-field diameter); the **entire photometry module**
+> (`src/spectral_photometry.cyr` — photopic and scotopic V(λ), luminous flux);
+> the CIE 1964 and 2015 2°/10° observers; the King correction factor; and the
+> grating equation. Sections 1, 10, 13 and 15 remain implemented.
+>
+> ⛔ **Three claims describe things prakash does NOT have and never will in this
+> form.** The bijli Gaussian-beam / ABCD re-exports and the bijli Mie solver were
+> **removed in 1.2.0**, so §6 describes a capability prakash has in no form and
+> §12's headline recommendation — "promote the bijli full Mie solver" — is
+> unachievable as written. The report's "Rust ecosystem" competitive framing is
+> also obsolete: prakash is Cyrius, and `rust-old/` was deleted in 2.2.3.
+>
+> ⛔ **Two things are WORSE than this report implies, and they are the findings
+> that matter most here:**
+> - **§13 is marked IMPLEMENTED but the 3×3 polarization ray-tracing matrix it
+>   recommends was never built.** What shipped (`trace_sequential_polarized`)
+>   tracks scalar s/p Fresnel transmittance using the **real** coefficients, not
+>   the complex ones §1 provides. The header overstates it.
+> - **`lens_mtf_polychromatic` is a real weighted mean**, `Σ(wᵢ·MTFᵢ) / Σwᵢ`, not
+>   the coherent vector sum with the `exp(j·Phase)` term §5 specifies. It carries
+>   no phase, so it cannot show the contrast reversals a true polychromatic MTF
+>   does.
+>
+> **Still genuinely open**, and these are the only entries worth mining for work:
+> complex refractive indices in the TMM (the layer buffer is `(n, d)` at a
+> 16-byte stride, so admitting `k` is a layout change), fiber dispersion, and
+> Gaussian-beam support from scratch. Everything else is either shipped or
+> superseded. The forward-looking list is `docs/development/roadmap.md`, not this
+> file.
 
 ---
 
