@@ -117,4 +117,41 @@ assert(
   f64_gt(luminous_flux_scotopic(blue), luminous_flux(blue)),
   "scotopic more sensitive to blue than photopic");
 
+# ── prakash_reset_caches, and the corruption it exists to prevent ────────
+#
+# ⛔ REPRODUCES A REAL, SILENT DEFECT. prakash never frees and exposes no
+# teardown, so a long-running consumer's only reclaim is the stdlib's
+# `alloc_reset()`. That scrubs the heap while prakash's 21 lazily-built tables
+# keep pointers into it, and every one then reads as ZEROS — no error, no crash.
+# Measured at the public API before the fix: `cie_cmf_at(555)` gave y_bar = 1.0,
+# and 0.0 after a reset. 555 nm is the photopic peak, which is 1.0 BY DEFINITION,
+# so spd_to_xyz, luminous_flux and the entire CRI computation silently produced
+# garbage for any consumer that tried to reclaim memory.
+#
+# This test deliberately performs the corruption and then asserts the recovery,
+# because asserting only the happy path would pass with prakash_reset_caches
+# deleted entirely.
+test_group("cache_invalidation");
+
+var _ci_fresh = load64(cie_cmf_at(f64_from(555)) + 8);
+assert_eq(_ci_fresh, F64_ONE, "y_bar(555) is exactly 1.0 — the photopic peak, by definition");
+
+alloc_reset();
+var _ci_stale = load64(cie_cmf_at(f64_from(555)) + 8);
+assert_eq(_ci_stale, 0, "alloc_reset alone leaves the CIE table reading zeros (the defect)");
+
+alloc_reset();
+var _ci_r = prakash_reset_caches();
+assert_eq(load64(cie_cmf_at(f64_from(555)) + 8), F64_ONE,
+  "prakash_reset_caches restores y_bar(555) to exactly 1.0");
+
+# The photometry tables are the other half — they live in a different module and
+# a fix that only cleared the CIE side would still pass everything above.
+assert_eq(load64(_vlambda_photopic() + 35 * 8), F64_ONE,
+  "photopic V(555) is exactly 1.0 after reset + forget");
+alloc_reset();
+var _ci_r2 = prakash_reset_caches();
+assert_eq(load64(_vlambda_scotopic()), load64(_vlambda_scotopic()),
+  "scotopic table rebuilds without faulting after reset + forget");
+
 var r = assert_summary();

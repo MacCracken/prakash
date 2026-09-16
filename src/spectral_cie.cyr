@@ -27,6 +27,43 @@ fn _spd_val(t, i) { return load64(t + i * 8); }
 # ── CIE tables (generated: exact IEEE-754 hex from rust-old/src/spectral/cie.rs) ──
 # CMF tables: 81 rows x 3 (x,y,z) = 1944 bytes. Illuminants: 81 f64 = 648 bytes.
 
+# Drop every lazily-built CIE table so the next call rebuilds it.
+#
+# ⛔ THIS EXISTS BECAUSE THE ONLY RECLAIM PATH A CONSUMER HAS SILENTLY CORRUPTS
+# PRAKASH. prakash never frees — the bump allocator has no free — and exposes no
+# teardown, so a long-running consumer's only option is the stdlib's
+# `alloc_reset()`. That scrubs the heap while these 19 pointers keep pointing into
+# it, and every table then reads as zeros. Reproduced at the public API:
+# `cie_cmf_at(555)` returns y_bar = 1.0 before `alloc_reset()` and **0.0** after,
+# with no error and no crash. 555 nm is the photopic peak, which is 1.0 by
+# definition, so every downstream colour value — spd_to_xyz, luminous_flux, the
+# whole CRI computation — silently becomes garbage.
+#
+# Call this immediately after `alloc_reset()`. It is not a free; it only forgets,
+# so the next use rebuilds from the compiled-in constants.
+fn _cie_reset_caches() {
+    _cie1931_p = 0;
+    _cie1964_p = 0;
+    _cie2015_2_p = 0;
+    _cie2015_10_p = 0;
+    _illum_d65_p = 0;
+    _illum_d50_p = 0;
+    _illum_f2_p = 0;
+    _illum_f11_p = 0;
+    _cri_tcs1_p = 0;
+    _cri_tcs2_p = 0;
+    _cri_tcs3_p = 0;
+    _cri_tcs4_p = 0;
+    _cri_tcs5_p = 0;
+    _cri_tcs6_p = 0;
+    _cri_tcs7_p = 0;
+    _cri_tcs8_p = 0;
+    _cri_s0_p = 0;
+    _cri_s1_p = 0;
+    _cri_s2_p = 0;
+    return 0;
+}
+
 var _cie1931_p = 0;
 fn _cie1931() {
     if (_cie1931_p != 0) { return _cie1931_p; }

@@ -80,6 +80,7 @@ var _theta = 0;
 var _na = 0;
 var _x = 0;
 var _slit = 0;
+var _layers = 0;
 var _presc = 0;
 
 # ── Ray ────────
@@ -113,6 +114,10 @@ fn b_airy_pattern() { var r = airy_pattern(_wl_m, _diam, _ang, _i0); return 0; }
 fn b_fresnel_integral_c() { var r = fresnel_integral_c(_x); return 0; }
 # Single-layer thin-film coating reflectance at one wavelength.
 fn b_coating_reflectance() { var r = coating_reflectance(_wl_nm, _n1, _nc, _ns, _thick); return 0; }
+# Full transfer-matrix s/p reflectance+transmittance through a layer stack — the
+# function 2.3.7 took 480 -> 448 ns, which had no row to show it. Added so the
+# row that was optimised is the row that is measured.
+fn b_multilayer_rt() { var r = multilayer_rt(_wl_nm, _ang, _n1, _ns, _layers, 3); return 0; }
 # Zernike polynomial Z(4,0) — spherical aberration — at one pupil point.
 fn b_zernike_poly() { var r = zernike_poly(4, 0, _rho, _theta); return 0; }
 # Composite: full 8x8 2D Fraunhofer diffraction, FFT path included.
@@ -201,6 +206,10 @@ fn main() {
     for (var pk = 0; pk < 6; pk = pk + 1) {
         var _pa = prescription_add_surface(_presc, f64_from(50 + pk), f64_from(pk), F64_ONE, f64_from(12));
     }
+    _layers = alloc(3 * 16);
+    store64(_layers, _bf(138, 100));      store64(_layers + 8, f64_from(100));
+    store64(_layers + 16, _bf(23, 10));   store64(_layers + 24, f64_from(55));
+    store64(_layers + 32, _bf(152, 100)); store64(_layers + 40, f64_from(200));
     _wl_nm = f64_from(550);
     _wl_m = _bf(55, 100000000);
     _diam = _bf(1, 100);
@@ -269,6 +278,7 @@ fn main() {
     bench("wave/airy_pattern", &b_airy_pattern, 200000);
     bench("wave/fresnel_integral_c", &b_fresnel_integral_c, 500000);
     bench("wave/coating_reflectance", &b_coating_reflectance, 200000);
+    bench("wave/multilayer_rt", &b_multilayer_rt, 100000);
     bench("wave/zernike_poly", &b_zernike_poly, 200000);
     bench("wave/diffraction_pattern_2d_8x8", &b_diffraction_2d, 2000);
     # ── pbr ──

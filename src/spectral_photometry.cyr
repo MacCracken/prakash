@@ -270,3 +270,24 @@ fn luminous_flux_scotopic(spd) {
     }
     return f64_mul(f64_mul(f64_from(1700), sum), f64_from(5));
 }
+
+# Drop every lazily-built table in prakash so the next call rebuilds it.
+#
+# ⛔ Call this IMMEDIATELY AFTER the stdlib's `alloc_reset()`, or prakash returns
+# silent zeros. See `_cie_reset_caches` for the reproduction: the photopic peak
+# reads 1.0 before a reset and 0.0 after, with no error reported.
+#
+# ⚠ Placement is forced by bundle order, not by taste. All 21 cached tables live
+# in spectral_cie (19) and this module (2), and `cyrius distlib` concatenates
+# spectral_cie BEFORE spectral_photometry — so this is the earliest module that
+# can see both sets. If a third module ever caches a table, give it its own
+# `_*_reset_caches` and call it from here, keeping this the single public entry.
+#
+# This is a forget, not a free: prakash's allocator cannot free, and that is the
+# whole reason a consumer reaches for `alloc_reset()` in the first place.
+fn prakash_reset_caches() {
+    var _c = _cie_reset_caches();
+    _vlambda_photopic_p = 0;
+    _vlambda_scotopic_p = 0;
+    return 0;
+}

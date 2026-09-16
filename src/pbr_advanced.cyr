@@ -425,26 +425,40 @@ fn pbr_integrate_brdf_lut(n_dot_v, roughness, num_samples, out) {
         return PK_ERR_INVALID_PARAMETER;
     }
     var ndv = f64_clamp(n_dot_v, _pbr_r(1, 1000), F64_ONE);
-    var v = alloc(24);
-    if (v == 0) { return 0; }
-    store64(v, f64_sqrt(f64_sub(F64_ONE, f64_mul(ndv, ndv))));
-    store64(v + 8, f64_from(0));
-    store64(v + 16, ndv);
+    # ⛔ 2.3.7: these two 24-byte vectors were `alloc`ed per call, and BOTH failure
+    # paths read `if (v == 0) { return 0; }` — returning 0, which IS `PK_ERR_NONE`.
+    # An allocation failure therefore reported SUCCESS, and did so WITHOUT writing
+    # `out`, so the caller read stale memory as a valid split-sum result. That is
+    # the exact inversion of CLAUDE.md's "report, don't fabricate" rule, in a
+    # function whose other guards return PK_ERR_INVALID_PARAMETER correctly.
+    #
+    # They are stack locals now, which deletes the failure path rather than fixing
+    # its return code: there is no allocation left to fail. 24 bytes each against a
+    # measured 122,880-byte per-function budget, so neither can trip cycc's
+    # "oversized array local kept in shared global" warning. Also removes 48 bytes
+    # of per-call permanent consumption. ⚠ Per CALL, not per sample — both were
+    # hoisted outside the sample loop already; the function itself is what runs
+    # once per LUT texel, so a 128x128 LUT leaked ~786 KB under a bump allocator
+    # that never frees. Measured 48 -> 0 B/call and NO time change (8.03 vs
+    # 8.03 us): this is a leak and correctness fix, not a speed one.
+    var v[24];
+    store64(&v, f64_sqrt(f64_sub(F64_ONE, f64_mul(ndv, ndv))));
+    store64(&v + 8, f64_from(0));
+    store64(&v + 16, ndv);
     var scale = f64_from(0);
     var bias = f64_from(0);
     var inv_samples = f64_div(F64_ONE, f64_from(num_samples));
-    var h = alloc(24);
-    if (h == 0) { return 0; }
+    var h[24];
     for (var i = 0; i < num_samples; i = i + 1) {
         var xi1 = f64_mul(f64_from(i), inv_samples);
-        pbr_sample_ggx(roughness, xi1, _pbr_radvdc(i), h);
+        pbr_sample_ggx(roughness, xi1, _pbr_radvdc(i), &h);
         var vdh = f64_max(f64_add(
-            f64_add(f64_mul(load64(v), load64(h)), f64_mul(load64(v + 8), load64(h + 8))),
-            f64_mul(load64(v + 16), load64(h + 16))), f64_from(0));
+            f64_add(f64_mul(load64(&v), load64(&h)), f64_mul(load64(&v + 8), load64(&h + 8))),
+            f64_mul(load64(&v + 16), load64(&h + 16))), f64_from(0));
         var n_dot_l = f64_max(
-          f64_sub(f64_mul(f64_mul(F64_TWO, vdh), load64(h + 16)), load64(v + 16)),
+          f64_sub(f64_mul(f64_mul(F64_TWO, vdh), load64(&h + 16)), load64(&v + 16)),
           f64_from(0));
-        var n_dot_h = f64_max(load64(h + 16), f64_from(0));
+        var n_dot_h = f64_max(load64(&h + 16), f64_from(0));
         if (f64_gt(n_dot_l, f64_from(0)) == 1) {
             # 2.2.7: was pbr_geometry_smith, the DIRECT-lighting remapping
             # k = (r+1)^2/8. The split-sum integral is image-based lighting and

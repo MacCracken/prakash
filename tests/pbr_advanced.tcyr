@@ -396,4 +396,33 @@ pbr_integrate_brdf_lut(F64_HALF, _fd(3, 10), 64, sb2b);
 assert(f64_lt(f64_abs(f64_sub(load64(sb2), load64(sb2b))), EPS), "lut deterministic scale");
 assert(f64_lt(f64_abs(f64_sub(load64(sb2 + 8), load64(sb2b + 8))), EPS), "lut deterministic bias");
 
+# ── pbr_integrate_brdf_lut's error contract ────────
+#
+# ⛔ Until 2.3.7 this function returned 0 — which IS PK_ERR_NONE — when either of
+# its two 24-byte scratch allocations failed, and returned it WITHOUT writing
+# `out`. A caller under heap pressure got "success" plus stale memory read as a
+# split-sum result. The scratch is stack-local now so the path cannot arise, but
+# pin the contract that made it wrong: SUCCESS is 0 and every failure is a
+# negative PK_ERR_*, so "0 means it wrote out" must hold.
+test_group("brdf_lut_error_contract");
+var _lut_out = alloc(16);
+store64(_lut_out, f64_from(7));
+store64(_lut_out + 8, f64_from(7));
+
+assert_eq(pbr_integrate_brdf_lut(F64_ONE, F64_HALF, 0, _lut_out), PK_ERR_INVALID_PARAMETER,
+  "zero samples reports INVALID_PARAMETER, not success");
+assert_eq(pbr_integrate_brdf_lut(F64_ONE, F64_HALF, 32, 0), PK_ERR_INVALID_PARAMETER,
+  "null out reports INVALID_PARAMETER, not success");
+
+# A success really does write both slots, so 0 cannot mean "untouched".
+store64(_lut_out, f64_from(7));
+store64(_lut_out + 8, f64_from(7));
+assert_eq(pbr_integrate_brdf_lut(f64_div(f64_from(8), f64_from(10)), f64_div(f64_from(3), f64_from(10)), 32, _lut_out),
+  PK_ERR_NONE, "a valid call reports PK_ERR_NONE");
+assert(load64(_lut_out) != f64_from(7), "a successful call overwrote scale");
+assert(load64(_lut_out + 8) != f64_from(7), "a successful call overwrote bias");
+
+# The split-sum scale is a directional albedo: it cannot exceed 1 (the 2.2.8 check).
+assert(f64_le(load64(_lut_out), F64_ONE) == 1, "split-sum scale stays <= 1");
+
 var r = assert_summary();

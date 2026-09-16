@@ -46,32 +46,51 @@ true, say so in the item itself rather than relying on list order.
 
 ### Performance
 
-- [ ] **Ten per-call scratch allocations, not four — in two tiers wanting opposite
-      fixes.** Measured in 2.3.5 with `alloc_used()` deltas.
-      ⭐ **Tier 1 — large, variable-size, all in `wave_pattern.cyr`** (`grid` at
-      :269 and :549, `aperture` at :299, `col_buf` at :220). Scratch is the
-      MAJORITY of these functions' allocation: `diffraction_pattern_2d(64×64)`
-      hands out 99,352 B/call of which **66,560 B (67%)** is scratch;
-      `diffraction_pattern_circular(32)` **75%**; `psf_from_wavefront(32×32)`
-      **67%**. A grow-only module-scope cache cut those to 536 / 32,792 / 8,216
-      B/call, bit-identical across every cell.
-      ⚠ **And bought NO measurable time** — 3 interleaved same-binary rounds, all
-      inside noise. **These are leak fixes, not speed fixes**; justify them as
-      memory or not at all.
-      ⭐ **Tier 2 — small, fixed-size** (`pbr_advanced.cyr:428/436`,
-      `spectral_cie.cyr:3117/3126/3127` and `:3156/3157`,
-      `wave_diffraction.cyr:497/501`, `wave_pattern.cyr:493` and `:517`). Only
-      `multilayer_rt` moved measurably: **493 → 462 ns (−6.3%)**, reproduced 3/3.
-      ⭐ **The stack-local budget is 122,880 BYTES**, bisected under cyrius 6.6.4:
-      `var b[N]` compiles clean at N = 122,864 and trips *"oversized array local
-      kept in shared global"* at N = 122,872 — so `var X[N]` is N **bytes**, not N
-      slots. Every Tier 2 site is at 0.04% of budget, so stack locals are
-      unconditionally safe there. `col_buf` is safe only for nh ≤ 7,679 while
-      `_pat_dims_bad` admits nh up to 8,192, so it does **not** cover the domain;
-      `grid` and `aperture` are never stack-eligible.
-      ⚠ **Correction:** `trace_surface`'s 5 boxed structs are **not** scratch — all
-      five escape through the returned `TraceHit`. That is the row above, and no
-      stack local can fix it.
+- [ ] **Tier 1 scratch caches in `wave_pattern.cyr` — works, measured, deferred
+      from 2.3.7 on purpose.** `grid` (:269, :549), `aperture` (:299), `col_buf`
+      (:220). A grow-only cache cuts `diffraction_pattern_2d(64×64)` 99,352 →
+      32,792 B/call (−67%), `circular(32)` −75.3%, `psf(32×32)` −67.3%,
+      bit-identical. Exact formulas: `d2d/psf(n,n) = 24n² + 16n + 24`,
+      `circ(n) = 32n² + 16n + 24`, retained `= 8n² + 24`.
+      ⛔ **But the process still dies, only 3× later.** The returned `Pattern2D` is
+      never freed either, so this removes 67–75% of the volume and nothing else.
+      Under a 2 GiB limit `diffraction_pattern_2d(128,128)` survives **4,752 calls
+      today, 14,326 cached — 3.01×**. Justify it on a specific workload or not at
+      all. ⚠ **It buys NO measurable time** (3 interleaved rounds, all noise).
+      ⛔ **Three guards are mandatory, two proven by making a clone corrupt:**
+      (1) **three distinct caches**, never one pool — the buffers are
+      simultaneously live at the bottom of `psf_diffraction_limited`; sharing gave
+      993/1024 wrong cells (`col_buf` on `grid`) and 1024/1024 (`aperture` on
+      `grid`), both returning `PK_ERR_NONE`. The two `grid` sites MAY share one
+      cache (verified across a grow, 0 diffs).
+      (2) **keep both zero-fill loops** — they are load-bearing for the
+      power-of-two pad and unlit pupil cells. Removing them: call 1 differs in 0
+      cells (fresh alloc is kernel-zeroed, hiding it), calls 2–3 differ in 64/64.
+      A single-call test passes. Same shape as 2.3.3's `pattern2d_new`.
+      (3) it adds **read-write shared state to a library**. prakash's existing
+      module-scope state is write-once memos where a race is benign; this is not.
+      `_threads_active` is process-wide, so a *consumer* spawning a thread arms
+      `alloc()`'s lock — today's per-call allocation is thread-safe exactly where
+      a cache would not be.
+
+- [ ] **10 lazy caches store through an unchecked `alloc()`** — `var t =
+      alloc(1944); store64(t + 0, …)` with no guard, in `spectral_cie.cyr` (8) and
+      `spectral_photometry.cyr` (2). The 2.0.2 class CLAUDE.md names by name; 76 of
+      90 alloc sites in `src/` already guard.
+      ⚠ **A guard alone RELOCATES the crash.** Callers do not check the returned
+      table either (`var cmf = _cie1931();` then index it), so returning 0 from the
+      builder faults at the first index instead of at the store. The real fix is
+      caller-side propagation across the CIE surface — a bite of its own, and the
+      reason this was not swept into 2.3.7.
+
+- [ ] **The remaining small-scratch sites are NOT worth changing, and that is
+      measured.** `alloc(16)` costs 6.4–7.5 ns on this host, so removing one or two
+      only registers on a row whose baseline is a few hundred ns. The five
+      `spectral_cie` CRI sites are the biggest byte win left (1,528 → 1,224 B/call,
+      −19.9% of CRI's allocation volume) and measured **+0.04% / +0.24%** on the
+      clock — the stack-local arm was marginally *slower*. `spectrum_strip` −0.68%
+      at 24 B/call. Revisit only if the bytes matter for a named consumer.
+
 
 ### Housekeeping
 

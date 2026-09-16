@@ -2,6 +2,104 @@
 
 ## [Unreleased]
 
+## [2.3.7] - 2026-09-15 — the only way to reclaim memory silently corrupted every colour value
+
+Works the 2.3.x scratch-buffer row, and the investigation turned up two live
+defects that mattered more than the leak it was about. Suite **6603 → 6608
+assertions across 31 suites**, 0 failed. `cyrius audit` exits 0.
+
+### Fixed
+
+- ⛔ **`alloc_reset()` silently zeroed every cached optics table, and it is the
+  ONLY reclaim path a consumer has.** prakash never frees — the bump allocator
+  has no free — and exposes no teardown, so a long-running consumer's only option
+  is the stdlib's `alloc_reset()`. That scrubs the heap while prakash's **21**
+  lazily-built tables keep pointers into it.
+
+  Reproduced at the public API: **`cie_cmf_at(555)` returns y_bar = 1.0 before
+  `alloc_reset()` and 0.0 after** — no error, no crash. ⚠ 555 nm is the photopic
+  peak, which is **1.0 by definition**, so `spd_to_xyz`, `luminous_flux` and the
+  whole CRI computation silently produced garbage for any consumer that tried to
+  reclaim memory. The trap was invisible: the correct move (reset, then keep
+  using prakash) is exactly what breaks it.
+
+  **`prakash_reset_caches()`** now forgets all 21 so the next call rebuilds from
+  the compiled-in constants. It is a forget, not a free — prakash cannot free, and
+  that is why a consumer reaches for `alloc_reset()` in the first place.
+  ⚠ Its placement in `spectral_photometry.cyr` is forced by bundle order, not
+  taste: 19 tables live in `spectral_cie` and 2 here, and `distlib` concatenates
+  cie first, so this is the earliest module that can see both sets. Noted in the
+  source so a later reader does not "tidy" it somewhere more obvious and break the
+  build.
+
+- ⛔ **`pbr_integrate_brdf_lut` reported SUCCESS on allocation failure.** Both its
+  24-byte scratch allocations were guarded `if (v == 0) { return 0; }` — in a
+  function whose success code **is** 0. A failed allocation returned `PK_ERR_NONE`
+  **without writing `out`**, so the caller read stale memory as a valid split-sum
+  result. Every other guard in the same function returns
+  `PK_ERR_INVALID_PARAMETER` correctly.
+  The scratch is stack-local now, which deletes the failure path rather than
+  correcting its return code — there is no allocation left to fail. Bit-identical
+  across 110 LUT points and both error paths; **48 → 0 bytes/call**.
+  ⚠ **No time change** (8.03 vs 8.03 µs). This is a correctness and leak fix. It
+  matters because the function runs once per LUT texel, so a 128×128 LUT leaked
+  ~786 KB under an allocator that never frees.
+
+### Performance
+
+- **`multilayer_rt` 480 → 448 ns (−6.8%)**, 80 → 48 bytes/call — its two 16-byte
+  s/p scratch slots are stack locals. Bit-identical across 36 layer/angle
+  configurations and both error paths.
+  ⚠ **It is the only small-scratch site that moves the clock, and that is now
+  measured rather than assumed.** `alloc(16)` costs 6.4–7.5 ns here, so removing
+  one or two can only register on a row whose baseline is a few hundred ns. The
+  five CRI sites are the biggest *byte* win available (1,528 → 1,224 B/call,
+  −19.9%) and measured **+0.04% / +0.24%** on the clock — i.e. the stack-local arm
+  was marginally slower. Left alone.
+
+### Added
+
+- **`wave/multilayer_rt` benchmark row** (894 ns at a 3-layer stack). ⚠ The
+  function optimised above **had no row**, so the suite could show nothing for it —
+  the same measurement gap 2.3.4 found on `spd_to_json`. Added so the row that was
+  optimised is the row that is measured.
+  ⚠ For the record, the suite comparison for this release is **median +2.26% with
+  one row past ±10%** — `atmosphere/rayleigh_cross_section` 8 → 9 ns, a one-nanosecond
+  move on an eight-nanosecond row, claimed as nothing. That flatness is the
+  expected result: 2.3.7 is correctness and leak work, and its one timing change
+  was in a function the suite did not cover.
+
+### Not done — measured, and deliberately deferred
+
+- ⚠ **The Tier 1 wave_pattern caches are NOT shipped**, though they work. A
+  grow-only cache cuts `diffraction_pattern_2d(64×64)` from 99,352 to 32,792
+  B/call (−67%), bit-identical. Three reasons to wait, all measured:
+  ⛔ **The leak is only 3× better, and the process still dies.** The returned
+  `Pattern2D` is never freed either, so caching removes 67–75% of the volume and
+  nothing else. Under a 2 GiB limit, `diffraction_pattern_2d(128,128)` survives
+  **4,752 calls today and 14,326 cached — exactly 3.01×**.
+  ⛔ **One shared cache corrupts, and three buffers are simultaneously live.**
+  Demonstrated: 993 of 1024 cells wrong with `col_buf` on `grid`, 1024 of 1024
+  with `aperture` on `grid` — both returning `PK_ERR_NONE`. It needs three
+  distinct caches, or two if the `grid` sites share.
+  ⛔ **The existing zero-fill is load-bearing and a single-call test cannot see
+  it.** Removing it as "the cache is already zero": call 1 differs in 0 cells
+  (a fresh alloc is kernel-zeroed, hiding it), calls 2 and 3 differ in 64 of 64.
+  The same shape as 2.3.3's `pattern2d_new`.
+  ⚠ **And it would add read-write shared state to a library.** prakash already
+  keeps module-scope state, but those are write-once memos where a race is benign;
+  a per-call scratch cache is not. `_threads_active` is process-wide, so a
+  *consumer* spawning a thread arms `alloc()`'s lock — making today's per-call
+  allocation thread-safe exactly where a cache would not be.
+
+- ⚠ **10 lazy caches still store through an unchecked `alloc()`** — the 2.0.2
+  class CLAUDE.md names by name (`var t = alloc(1944); store64(t + 0, …)` with no
+  guard; 76 of 90 alloc sites in `src/` do guard). Not fixed here because a guard
+  alone **relocates** the crash rather than removing it: the callers do not check
+  the returned table either, so `_cie1931()` returning 0 faults at the first index
+  instead of at the store. The real fix is caller-side propagation across the CIE
+  surface, which is its own bite. Filed with that finding attached.
+
 ## [2.3.6] - 2026-09-15 — the tracer stops boxing, and a four-times-repeated mistake becomes a gate
 
 Implements the `trace_surface` change 2.3.5 designed. Suite **6597 assertions
