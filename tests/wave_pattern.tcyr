@@ -42,7 +42,8 @@ test_group("fft");
 var d1 = alloc(1 * 16);
 store64(d1, f64_from(5));
 store64(d1 + 8, Z);
-num_fft(d1, 1);
+var t1, v1 = num_fft(d1, 1);
+assert_eq(is_ok(t1), 1, "fft n=1 returns Ok");
 _assert_near(load64(d1), f64_from(5), EPS, "fft single element");
 
 # two elements: fft([1,1]) -> DC=2, Nyquist=0
@@ -51,7 +52,8 @@ store64(d2, F64_ONE);
 store64(d2 + 8, Z);
 store64(d2 + 16, F64_ONE);
 store64(d2 + 24, Z);
-num_fft(d2, 2);
+var t2, v2 = num_fft(d2, 2);
+assert_eq(is_ok(t2), 1, "fft n=2 returns Ok");
 _assert_near(load64(d2), F64_TWO, EPS, "fft DC = sum");
 assert(f64_lt(_pat_norm_sq(d2, 1), EPS), "fft Nyquist = 0");
 
@@ -64,8 +66,10 @@ for (var i = 0; i < 4; i = i + 1) {
     store64(o4 + i * 16, f64_from(i + 1));
     store64(o4 + i * 16 + 8, Z);
 }
-num_fft(d4, 4);
-num_ifft(d4, 4);
+var t4, v4 = num_fft(d4, 4);
+assert_eq(is_ok(t4), 1, "fft n=4 returns Ok");
+var ti4, vi4 = num_ifft(d4, 4);
+assert_eq(is_ok(ti4), 1, "ifft n=4 returns Ok");
 for (var j = 0; j < 4; j = j + 1) {
     assert(f64_lt(f64_abs(f64_sub(load64(d4 + j * 16), load64(o4 + j * 16))), EPS), "roundtrip re");
     assert(f64_lt(f64_abs(f64_sub(load64(d4 + j * 16 + 8), load64(o4 + j * 16 + 8))), EPS), "roundtrip im");
@@ -85,12 +89,63 @@ var et = Z;
 for (var pi = 0; pi < 4; pi = pi + 1) {
     et = f64_add(et, _pat_norm_sq(dp, pi));
 }
-num_fft(dp, 4);
+var tp, vp = num_fft(dp, 4);
+assert_eq(is_ok(tp), 1, "fft Parseval returns Ok");
 var ef = Z;
 for (var pj = 0; pj < 4; pj = pj + 1) {
     ef = f64_add(ef, _pat_norm_sq(dp, pj));
 }
 _assert_near(f64_mul(et, f64_from(4)), ef, EPS, "Parseval");
+
+# Err path: hisab 3.0.0 returns Err(HSB_ERR_INVALID_INPUT) for a non-power-of-2
+# n. Until 2.3.0 nothing here exercised it — the suite sampled n = 1, 2, 4, all
+# of which succeed, so a migration that dropped the error channel entirely would
+# have passed. Pin the tag, the code, AND the promise num_ifft's own header
+# makes: a rejected call leaves the caller's buffer bit-identical, because the
+# conjugate pass would otherwise negate every imaginary part on the way out.
+var d3 = alloc(3 * 16);
+for (var q = 0; q < 3; q = q + 1) {
+    store64(d3 + q * 16, f64_from(q + 1));
+    store64(d3 + q * 16 + 8, f64_from(q + 7));
+}
+var te, ve = num_fft(d3, 3);
+assert_eq(is_err_result(te), 1, "fft n=3 returns Err");
+assert_eq(ve, HSB_ERR_INVALID_INPUT, "fft n=3 err code is HSB_ERR_INVALID_INPUT");
+var tie, vie = num_ifft(d3, 3);
+assert_eq(is_err_result(tie), 1, "ifft n=3 returns Err");
+assert_eq(vie, HSB_ERR_INVALID_INPUT, "ifft n=3 err code is HSB_ERR_INVALID_INPUT");
+for (var qq = 0; qq < 3; qq = qq + 1) {
+    assert_eq(load64(d3 + qq * 16), f64_from(qq + 1), "rejected fft left re untouched");
+    assert_eq(load64(d3 + qq * 16 + 8), f64_from(qq + 7), "rejected fft left im untouched");
+}
+
+# _pat_fft2d propagates that Err rather than returning a half-transformed grid.
+# The public entry points (fraunhofer/psf) size every dimension through
+# _pat_next_pow2, so this path is unreachable THROUGH them — which is exactly
+# why it is called directly here. Without these two rows, deleting the error
+# check inside _pat_fft2d leaves the whole suite green (verified by mutation:
+# 572/572 with the check removed). Row branch = bad nw, column branch = bad nh.
+var g31 = alloc(3 * 1 * 16);
+for (var gz = 0; gz < 3; gz = gz + 1) {
+    store64(g31 + gz * 16, f64_from(gz));
+    store64(g31 + gz * 16 + 8, Z);
+}
+assert_eq(_pat_fft2d(g31, 3, 1), PK_ERR_INVALID_PARAMETER, "_pat_fft2d rejects non-pow2 width");
+
+var g13 = alloc(1 * 3 * 16);
+for (var gy = 0; gy < 3; gy = gy + 1) {
+    store64(g13 + gy * 16, f64_from(gy));
+    store64(g13 + gy * 16 + 8, Z);
+}
+assert_eq(_pat_fft2d(g13, 1, 3), PK_ERR_INVALID_PARAMETER, "_pat_fft2d rejects non-pow2 height");
+
+# A power-of-2 grid still reports success through the same return path.
+var g22 = alloc(2 * 2 * 16);
+for (var gw = 0; gw < 4; gw = gw + 1) {
+    store64(g22 + gw * 16, f64_from(gw));
+    store64(g22 + gw * 16 + 8, Z);
+}
+assert_eq(_pat_fft2d(g22, 2, 2), PK_ERR_NONE, "_pat_fft2d accepts a pow2 grid");
 
 # ── 2D diffraction ────────
 test_group("diffraction_2d");

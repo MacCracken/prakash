@@ -171,10 +171,20 @@ fn pattern2d_normalized(p) {
 # ── 2D FFT plumbing (row FFTs then column FFTs, hisab num_fft) ────────
 
 # Returns PK_ERR_NONE on success, PK_ERR_ALLOCATION if the column scratch
-# buffer cannot be allocated.
+# buffer cannot be allocated, PK_ERR_INVALID_PARAMETER if hisab's FFT rejects a
+# dimension.
+#
+# hisab 3.0.0 moved num_fft onto the stdlib Result: it is Ok(0) on success and
+# Err(HSB_ERR_INVALID_INPUT) for any n that is not a power of two, and it
+# carries #must_use. Both callers size nw/nh through _pat_next_pow2, so the Err
+# path is defensive rather than reachable — it is propagated anyway because a
+# discarded Err hands back a HALF-TRANSFORMED grid that _pat_fftshift_to_pattern
+# would then square into a plausible-looking diffraction pattern. Reporting beats
+# fabricating; a wrong intensity map is worse than a returned error code.
 fn _pat_fft2d(grid, nw, nh) {
     for (var row = 0; row < nh; row = row + 1) {
-        num_fft(grid + row * nw * 16, nw);
+        var rt, rv = num_fft(grid + row * nw * 16, nw);
+        if (is_err_result(rt) == 1) { return PK_ERR_INVALID_PARAMETER; }
     }
     var col_buf = alloc(nh * 16);
     if (col_buf == 0) { return PK_ERR_ALLOCATION; }
@@ -183,13 +193,14 @@ fn _pat_fft2d(grid, nw, nh) {
             store64(col_buf + rr * 16, load64(grid + (rr * nw + col) * 16));
             store64(col_buf + rr * 16 + 8, load64(grid + (rr * nw + col) * 16 + 8));
         }
-        num_fft(col_buf, nh);
+        var ct, cv = num_fft(col_buf, nh);
+        if (is_err_result(ct) == 1) { return PK_ERR_INVALID_PARAMETER; }
         for (var rw = 0; rw < nh; rw = rw + 1) {
             store64(grid + (rw * nw + col) * 16, load64(col_buf + rw * 16));
             store64(grid + (rw * nw + col) * 16 + 8, load64(col_buf + rw * 16 + 8));
         }
     }
-    return 0;
+    return PK_ERR_NONE;
 }
 
 # |E|^2 with fftshift (DC to center) into a fresh Pattern2D.

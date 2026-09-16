@@ -5,7 +5,7 @@ description = "prakash — optics and light simulation (ray optics, wave optics,
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/prakash"
 language = "cyrius"
-cyrius = "6.6.2"
+cyrius = "6.6.4"
 
 [build]
 src = "src/main.cyr"
@@ -122,14 +122,23 @@ stdlib = [
 # also exercises num_ifft); the rest of hisab's modules ride along in the bundle
 # unused. 2.6.8 was the collision-hardening patch (FLOAT_RENDER_BUF stack-array
 # -> alloc; ERR_* -> HSB_ERR_) that let hisab co-compile with the sandhi/TLS
-# stack pulled by [lib.ai]; both properties still hold in 2.11.2, which pins
-# sakshi 2.4.11 to match the 6.5.33 stdlib.
+# stack pulled by [lib.ai]; both properties still hold in 3.1.1, which pins
+# sakshi 2.5.2 and ganita 1.2.5 to match the 6.6.4 stdlib.
 #
-# ⚠ 2.11.2 is the release that absorbed this same cyrius 6.5.18 -> 6.5.33 bump
-# upstream, so it carries the ganita 1.1.4 `f64_pow` domain change described in
-# src/error.cyr's shim block. prakash re-measured that change here rather than
-# inheriting the claim — see the 2.2.4 CHANGELOG entry.
+# ⚠ 3.0.0 IS A BREAKING RELEASE AND THE BREAK REACHES prakash. hisab replaced
+# the integer-error-code convention with the stdlib `Result<T, E>` across 48
+# functions, and `num_fft` / `num_ifft` are among them: they now answer Ok(0) or
+# Err(HSB_ERR_INVALID_INPUT) and carry #must_use. Discarding that Result still
+# COMPILES — it is not a build error — so the migration was driven by grepping
+# the call sites, not by waiting for the compiler. prakash's four sites moved in
+# 2.3.0; see `_pat_fft2d` in src/wave_pattern.cyr and the [2.3.0] CHANGELOG entry.
+#
+# ⚠ The ganita `f64_pow` domain change described in src/error.cyr's shim block
+# dates from 1.1.4 and prakash re-measured it at 2.2.4 rather than inheriting the
+# claim. Re-measured again at 1.2.5 for this release: ganita still answers
+# 0.0 / 1.0 / +inf for a zero base, bit-for-bit, so the shim's zero-base branch
+# stays a redundant pin rather than a live repair.
 [deps.hisab]
 git = "https://github.com/MacCracken/hisab.git"
-tag = "2.11.2"
+tag = "3.1.1"
 modules = ["dist/hisab.cyr"]

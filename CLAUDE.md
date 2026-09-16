@@ -8,8 +8,8 @@
 - **Type**: Cyrius library — `src/` modules bundled by `cyrius distlib` into `dist/prakash.cyr`
   (math-only) and `dist/prakash-ai.cyr` (adds the sandhi HTTP/TLS AI client)
 - **License**: GPL-3.0
-- **Toolchain pin**: cyrius 6.5.33 — single source of truth is `cyrius = "..."` in `cyrius.cyml`
-- **Version**: SemVer, currently 2.2.x. `VERSION` is the single source; `cyrius.cyml`
+- **Toolchain pin**: cyrius 6.6.4 — single source of truth is `cyrius = "..."` in `cyrius.cyml`
+- **Version**: SemVer, currently 2.3.x. `VERSION` is the single source; `cyrius.cyml`
   reads it via `${file:VERSION}` and the release workflow fails if the tag disagrees
 
 ⚠ **The Rust original is a FIDELITY reference, not a CORRECTNESS one.** 2.2.6 found six

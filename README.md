@@ -29,7 +29,7 @@ Consumed by [soorat](https://github.com/MacCracken/soorat) (PBR shading), [kiran
 name     = "your-project"
 version  = "${file:VERSION}"
 language = "cyrius"
-cyrius   = "6.5.33"
+cyrius   = "6.6.4"
 
 [deps]
 # ganita provides the transcendentals (acos/asin/atan2/pow/sinh/…) and subsumes
@@ -83,7 +83,7 @@ var transmitted = malus_law(F64_ONE, F64_PI_4);
 
 ```
 prakash (Cyrius)
-  ├── hisab   (git dep, tag 2.11.2) — FFT (num_fft) for wave_pattern
+  ├── hisab   (git dep, tag 3.1.1) — FFT (num_fft) for wave_pattern
   ├── ganita  (stdlib) — transcendentals + linear algebra
   ├── bayan   (stdlib) — JSON (serialize module)
   ├── sakshi  (stdlib) — logging (trace diagnostics)

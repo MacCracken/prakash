@@ -1,5 +1,134 @@
 # Changelog
 
+## [Unreleased]
+
+## [2.3.0] - 2026-09-15 — hisab 3.x: the FFT grew an error channel, and discarding it still compiled
+
+Toolchain **6.6.2 → 6.6.4**, hisab **2.11.2 → 3.1.1**, sakshi **2.4.11 → 2.5.2**, and the
+vendored `lib/` re-synced to the 6.6.4 stdlib snapshot (which carries ganita **1.2.5**).
+Suite **6420 → 6438 assertions across 29 suites**, 0 failed. Reference coverage holds at
+**412/412 (100%)**. `cyrius fmt --check`, `lint`, `vet` and `deny` are clean and
+`deps --verify` reads **111/111**.
+
+⚠ **`cyrius audit` exits 1, and it did so before this release too.** Its `── docs ──` stage
+reports **33 undocumented public fns** — 3 in `tests/ray_simulate.tcyr` (`biconvex_lens`,
+`on_axis_ray`, `off_axis_ray`) and 30 in `tests/prakash.bcyr`, almost all of them one-line
+`b_*` benchmark wrappers. Neither file is touched by this release, and the counts are
+**identical with 2.3.0's changes stashed**, so this is inherited debt rather than a
+regression. It is recorded here rather than quietly fixed because audit's scope is
+`src tests` while the per-file `doc --check` sweep this project's process describes covers
+`src/*.cyr` — which is why the gap sat unreported through several releases that claimed the
+gate was green.
+
+⚠ **hisab 3.0.0 IS A BREAKING RELEASE AND THE COMPILER NEVER SAID SO.** hisab replaced the
+integer-error-code convention with the stdlib `Result<T, E>` across 48 functions, and
+`num_fft` / `num_ifft` — prakash's entire hisab surface — are among them. They now answer
+`Ok(0)` or `Err(HSB_ERR_INVALID_INPUT)`. prakash's four call sites all used the *discarding*
+shape `num_fft(data, n);`, and **discarding a `Result` compiles clean**: the 2.11.2 → 3.1.1
+bump built, linked and passed all 6420 existing assertions with the error channel silently
+dropped on the floor. Nothing in the gate would have caught it. The migration was found by
+reading hisab's changelog and grepping the call sites, not by a build error.
+
+⭐ **prakash was spared the trap that shape usually springs.** hisab's own migration guide
+records that a `Result` in *argument* position degrades silently to its tag — `Ok` = 0,
+`Err` = 1, and `HSB_ERR_NONE` = 0 — so any `assert_eq(num_fft(...), HSB_ERR_NONE, ...)` would
+have become `assert_eq(0, 0)` and kept passing while testing nothing. Grepped across `src/`,
+`tests/` and `examples/`: prakash had **zero** hisab calls in argument position. The exposure
+was the discarded return, not a vacuous assertion.
+
+### Fixed
+
+- ⭐ **`_pat_fft2d` discarded every FFT error and its doc comment claimed otherwise.** The
+  function's header promised `PK_ERR_NONE` / `PK_ERR_ALLOCATION`, while both `num_fft` calls —
+  the row pass and the column pass — threw their return away. Under 2.x that was a dropped
+  integer code; under 3.x it is a dropped `Result`. Either way a rejected transform left a
+  **half-transformed grid** that `_pat_fftshift_to_pattern` would then square into a
+  plausible-looking intensity map, which is the exact "report, don't fabricate" failure this
+  project's own rules name. Both passes now bind the `Result` and return
+  `PK_ERR_INVALID_PARAMETER`; the tail returns the named `PK_ERR_NONE` rather than a bare `0`.
+
+  ⚠ **The Err path is unreachable through the public API, which is why it had no test and
+  nearly got none again.** `pattern2d_fraunhofer_*` and the PSF entry points size every
+  dimension through `_pat_next_pow2`, so no public caller can hand `num_fft` a non-power-of-2
+  `n`. The first repair was therefore **mutation-invisible**: deleting the new error check
+  left the whole suite green at 572/572. The tests below call `_pat_fft2d` directly for that
+  reason, and both mutants now die on exactly the assertion that encodes them —
+  row check removed → *"rejects non-pow2 width"* fails; column check removed → *"rejects
+  non-pow2 height"* fails.
+
+### Added
+
+- **tests/wave_pattern.tcyr** — 18 assertions (14 lines) covering the migration: `is_ok` on
+  every success path at n = 1, 2, 4; the Err path at n = 3 pinning **both** the tag and the
+  `HSB_ERR_INVALID_INPUT` code for `num_fft` and `num_ifft`; a bit-identity check that a
+  rejected call leaves the caller's buffer untouched (num_ifft's header promises this — its
+  conjugate pass would otherwise negate every imaginary part on the way out); and the three
+  direct `_pat_fft2d` rows described above. The suite previously sampled only n = 1, 2 and 4,
+  every one of which succeeds, so **it had no coverage of the rejection path at all**.
+
+### Changed
+
+- **cyrius.cyml** — `cyrius = "6.6.4"`, `[deps.hisab]` `tag = "3.1.1"`. The comment block
+  above `[deps.hisab]` described hisab 2.11.2 / sakshi 2.4.11 / the 6.5.33 stdlib and is
+  rewritten for 3.1.1, including the breaking-change note and why the compiler is not the
+  migration tool here.
+- **lib/** — re-vendored against the 6.6.4 snapshot. `cyrius deps` brought the 95 files of the
+  declared `[deps] stdlib` contract; a `cyrius lib sync --full` then moved the remaining 15
+  (niyama, yukti, patra, vani, mabda, sankoch, yantra, audit_walk, hashmap_fast, regression,
+  sys, ws_server and three `unicode/` tables), which were tracked but stale — none is named in
+  `[deps] stdlib` and none is referenced by any `src/` module. This clears the
+  `./lib/ shadows version-pinned .../6.6.4/lib — 7 bundled lib(s) differ` warning at source
+  rather than under `CYRIUS_NO_WARN_SHADOW_LIB`.
+- **cyrius.lock** — 111 deps locked, 2 commit-pinned (hisab `50d2589` @ 3.1.1, sakshi
+  `119698f` @ 2.5.2), and the lock now carries the trailing `cyrius	6.6.4` line 6.6.4 added
+  as its guard against silently re-locking under an unchanged pin.
+- **dist/** — both bundles regenerated at v2.3.0 (`prakash.cyr` 10106 lines, `prakash-ai.cyr`
+  10346). The core bundle is still TLS-free under CI's own grep. The `.deps` sidecars were
+  re-synced with `scripts/sync-deps-sidecar.sh` after `distlib`, as they must be: at 6.6.4
+  `cyrius distlib` still infers the layout **backwards** for prakash's inverted two-bundle
+  scheme, emitting 29 leaves for the math-only base (advertising the sandhi/TLS stack it never
+  touches) against 25 for ai. The script restores the truth — **19 folds base, 28 ai**.
+
+### Not exposed — checked rather than assumed
+
+- **The ganita `f64_pow` zero-base pin still holds.** `src/error.cyr` keeps a deliberately
+  redundant zero-base branch in `_prk_pow`, documented as a pin against a silent upstream
+  revert. `tests/hardening.tcyr` cannot see through it — it asserts `_prk_pow`, whose own
+  branch answers first — so ganita 1.2.5 was measured **directly** through a throwaway probe:
+  `f64_pow(0, 2) = +0.0`, `f64_pow(0, 0) = 1.0`, `f64_pow(0, -2) = +inf`, bit-for-bit what
+  1.1.4 gave. The probe was mutation-checked (a wrong expectation fails loudly) and deleted.
+- **sakshi's tracing contract.** `sakshi_set_level` / `sakshi_trace` are unchanged across
+  2.4.11 → 2.5.2; the vendored `lib/sakshi.cyr` byte-matches the 2.5.2 dep artifact, which is
+  why `cyrius deps`' *"refusing to overwrite stdlib leaf 'sakshi'"* warning is benign — it
+  reports a structural overlap (sakshi is both a declared stdlib fold and a transitive package),
+  not a version conflict.
+- **6.6.4's own repairs** — the 64 KB string-literal fix, `#deprecated` on tail calls,
+  `public impl`, and the `public enum` visibility leak — touch no prakash source: prakash
+  declares no `#deprecated` function, has no `impl` blocks, and (having no enums at all) cannot
+  sit in the leaking position.
+
+### Performance
+
+**No change is claimed.** 36 rows recorded on a quiet box against the 2026-08-22 `772a033`
+run: median **−0.99%**, mean −6.17%, **12 of 36** rows past ±10% **with mixed signs**
+(`spectral/wavelength_to_rgb` −37.8%, `lens/mtf_diffraction_limited` +18.8%). That is not a
+result — the movers are overwhelmingly sub-100 ns rows, the band where this host's documented
+run-to-run spread reaches 40%, and the comparison crosses three weeks and a different commit.
+The only source change on any measured path adds **one predictable-branch test per FFT row and
+column**. Establishing a real delta would require both versions in one binary, which this
+release does not do and therefore does not claim.
+
+## [2.2.9] - 2026-09-11 — toolchain 6.5.33 → 6.6.2
+
+⚠ **This entry was appended below the `0.1.0` notes at the foot of the file rather than at its
+head, so the changelog's most recent release was invisible from the top for four commits.**
+Moved into reverse-chronological order in 2.3.0; the text is unchanged.
+
+### Changed
+
+- **Toolchain `6.5.33` → `6.6.2`.** No source change; the value form needed none.
+  Build, tests, and any bench/fuzz/distlib target the repo ships re-verified at the new pin.
+
 ## [2.2.8] - 2026-08-21 — A P(-1) review of the last three releases, which found that four of the fixes were wrong
 
 Eight reviewers over the whole tree, then batched adversarial verification:
@@ -1783,12 +1912,3 @@ self-contained Cyrius bundle. soorat, kiran, and ranga remain Rust for now; the
 - lens: thin lens equation, magnification, lensmaker's equation, optical power, mirrors, combined focal length, lens classification, depth of field
 - pbr: Fresnel-Schlick (scalar/RGB), GGX and Beckmann NDF, Schlick-GGX geometry, Smith geometry, Cook-Torrance specular BRDF, Lambert diffuse (scalar/RGB), IOR→F0
 - error: PrakashError with #[non_exhaustive], 7 variants
-
-## [Unreleased]
-
-## [2.2.9] - 2026-09-11
-
-### Changed
-
-- **Toolchain `6.5.33` → `6.6.2`.** No source change; the value form needed none.
-  Build, tests, and any bench/fuzz/distlib target the repo ships re-verified at the new pin.
