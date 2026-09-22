@@ -27,6 +27,7 @@ fn _sys_is_inf(x) {
 #derive(accessors)
 struct ParaxialRay { y; nu; }
 
+# ParaxialRay at height y with reduced slope nu = n*u; 0 on allocation failure.
 #must_use
 fn paraxial_ray_new(y, nu) {
     var r = alloc(sizeof(ParaxialRay));
@@ -67,6 +68,7 @@ fn paraxial_transfer(ray, reduced_thickness) {
 #derive(accessors)
 struct ParaxSurf { power; reduced_t; }
 
+# ParaxSurf {power, reduced_t = thickness/n to the next surface}; 0 on allocation failure.
 #must_use
 fn paraxsurf_new(power, reduced_t) {
     var p = alloc(sizeof(ParaxSurf));
@@ -108,6 +110,7 @@ struct PrescriptionSurface { radius; thickness; n_after; aperture_radius; }
 #derive(accessors)
 struct Prescription { name; surfaces; n_initial; }
 
+# Empty Prescription called `name`, n_initial = 1 (air/vacuum); 0 on allocation failure.
 #must_use
 fn prescription_new(name) {
     var p = alloc(sizeof(Prescription));
@@ -138,9 +141,11 @@ fn prescription_add_surface(p, radius, thickness, n_after, aperture_radius) {
     return p;
 }
 
+# Number of surfaces in the prescription.
 #must_use
 fn prescription_len(p) { return vec_len(Prescription_surfaces(p)); }
 
+# 1 if the prescription has no surfaces, else 0.
 #must_use
 fn prescription_is_empty(p) {
     if (vec_len(Prescription_surfaces(p)) == 0) { return 1; }

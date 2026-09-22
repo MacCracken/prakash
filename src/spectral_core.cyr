@@ -10,14 +10,19 @@
 fn _r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
 
 # ── Physical constants ────────
+# Lower edge of the visible band used by the spectral tables: 380 nm.
 #must_use
 fn spec_visible_min_nm() { return f64_from(380); }
+# Upper edge of the visible band used by the spectral tables: 780 nm.
 #must_use
 fn spec_visible_max_nm() { return f64_from(780); }
+# Speed of light c = 299792458 m/s (exact).
 #must_use
 fn spec_speed_of_light() { return f64_from(299792458); }        # m/s
+# Planck constant h = 6.62607015e-34 J*s (exact, 2019 SI), stored as its IEEE-754 bit pattern.
 #must_use
 fn spec_planck_h() { return 0x390B860BDE023111; }               # 6.62607015e-34 J*s
+# Boltzmann constant k = 1.380649e-23 J/K (exact, 2019 SI), stored as its IEEE-754 bit pattern.
 #must_use
 fn spec_boltzmann_k() { return 0x3B30B0E6D55E647C; }            # 1.380649e-23 J/K
 
@@ -34,6 +39,7 @@ fn _planck_c2() {
 #derive(accessors)
 struct Rgb { r; g; b; }
 
+# Heap Rgb {r, g, b} (linear, nominally 0-1, unclamped); 0 on allocation failure.
 #must_use
 fn rgb_new(r, g, b) {
     var c = alloc(sizeof(Rgb));
@@ -44,8 +50,10 @@ fn rgb_new(r, g, b) {
     return c;
 }
 
+# Rgb (0, 0, 0).
 #must_use
 fn rgb_black() { return rgb_new(f64_from(0), f64_from(0), f64_from(0)); }
+# Rgb (1, 1, 1).
 #must_use
 fn rgb_white() { return rgb_new(F64_ONE, F64_ONE, F64_ONE); }
 
@@ -73,6 +81,7 @@ fn _r_sat_u8(ch) {
     return f64_to(v);
 }
 
+# Clamp to [0, 1] and quantise to 8-bit channels (RgbU8; NaN -> 0); 0 on allocation failure.
 #must_use
 fn rgb_to_u8(c) {
     var cc = rgb_clamp(c);

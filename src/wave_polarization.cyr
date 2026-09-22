@@ -15,18 +15,25 @@ fn _wp_eps15() { return 0x3CD203AF9EE75616; }
 
 # ── Stokes vector constructors & angles ────────
 
+# Unpolarised light of intensity I: (I, 0, 0, 0).
 #must_use
 fn stokes_unpolarized(intensity) { return stokes_new(intensity, f64_from(0), f64_from(0), f64_from(0)); }
+# Horizontal linear polarisation: (I, I, 0, 0).
 #must_use
 fn stokes_horizontal(intensity) { return stokes_new(intensity, intensity, f64_from(0), f64_from(0)); }
+# Vertical linear polarisation: (I, -I, 0, 0).
 #must_use
 fn stokes_vertical(intensity) { return stokes_new(intensity, f64_neg(intensity), f64_from(0), f64_from(0)); }
+# +45 degree linear polarisation: (I, 0, I, 0).
 #must_use
 fn stokes_diagonal_plus(intensity) { return stokes_new(intensity, f64_from(0), intensity, f64_from(0)); }
+# -45 degree linear polarisation: (I, 0, -I, 0).
 #must_use
 fn stokes_diagonal_minus(intensity) { return stokes_new(intensity, f64_from(0), f64_neg(intensity), f64_from(0)); }
+# Right-circular polarisation: (I, 0, 0, I).
 #must_use
 fn stokes_circular_right(intensity) { return stokes_new(intensity, f64_from(0), f64_from(0), intensity); }
+# Left-circular polarisation: (I, 0, 0, -I).
 #must_use
 fn stokes_circular_left(intensity) { return stokes_new(intensity, f64_from(0), f64_from(0), f64_neg(intensity)); }
 
@@ -109,6 +116,7 @@ fn _mm(m00, m01, m02, m03, m10, m11, m12, m13, m20, m21, m22, m23, m30, m31, m32
     return m;
 }
 
+# 4x4 identity Mueller matrix (no element).
 #must_use
 fn mueller_identity() {
     return _mm(
@@ -118,6 +126,7 @@ fn mueller_identity() {
       f64_from(0), f64_from(0), f64_from(0), F64_ONE);
 }
 
+# Ideal linear polarizer, transmission axis horizontal (mueller_polarizer(0)).
 #must_use
 fn mueller_polarizer_horizontal() {
     return _mm(
@@ -127,6 +136,7 @@ fn mueller_polarizer_horizontal() {
       f64_from(0), f64_from(0), f64_from(0), f64_from(0));
 }
 
+# Ideal linear polarizer, transmission axis vertical (mueller_polarizer(pi/2)).
 #must_use
 fn mueller_polarizer_vertical() {
     return _mm(
@@ -150,6 +160,7 @@ fn mueller_polarizer(angle) {
       f64_from(0), f64_from(0), f64_from(0), f64_from(0));
 }
 
+# Quarter-wave plate, fast axis horizontal (mueller_retarder(pi/2)).
 #must_use
 fn mueller_quarter_wave_horizontal() {
     return _mm(
@@ -159,6 +170,7 @@ fn mueller_quarter_wave_horizontal() {
       f64_from(0), f64_from(0), f64_neg(F64_ONE), f64_from(0));
 }
 
+# Half-wave plate, fast axis horizontal (mueller_retarder(pi)): diag(1, 1, -1, -1).
 #must_use
 fn mueller_half_wave_horizontal() {
     return _mm(
@@ -283,12 +295,16 @@ fn _biref_mk(n_o, n_e, name) {
     return b;
 }
 
+# Calcite (negative uniaxial): n_o = 1.6584, n_e = 1.4864.
 #must_use
 fn biref_calcite() { return _biref_mk(_wp_r(16584, 10000), _wp_r(14864, 10000), "calcite"); }
+# Crystalline quartz (positive uniaxial): n_o = 1.5443, n_e = 1.5534.
 #must_use
 fn biref_quartz() { return _biref_mk(_wp_r(15443, 10000), _wp_r(15534, 10000), "quartz"); }
+# Rutile (positive uniaxial): n_o = 2.616, n_e = 2.903.
 #must_use
 fn biref_rutile() { return _biref_mk(_wp_r(2616, 1000), _wp_r(2903, 1000), "rutile"); }
+# Mica (muscovite, treated as uniaxial): n_o = 1.5601, n_e = 1.5936.
 #must_use
 fn biref_mica() { return _biref_mk(_wp_r(15601, 10000), _wp_r(15936, 10000), "mica"); }
 

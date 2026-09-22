@@ -38,6 +38,7 @@ struct RayVec3 { x; y; z; }
 #derive(accessors)
 struct RayVec2 { x; y; }
 
+# Heap RayVec3 {x, y, z}; 0 on allocation failure.
 #must_use
 fn ray_vec3(x, y, z) {
     var v = alloc(sizeof(RayVec3));
@@ -48,6 +49,7 @@ fn ray_vec3(x, y, z) {
     return v;
 }
 
+# Heap RayVec2 {x, y}; 0 on allocation failure.
 #must_use
 fn ray_vec2(x, y) {
     var v = alloc(sizeof(RayVec2));
@@ -72,28 +74,40 @@ fn _medium_mk(n, name) {
     return m;
 }
 
+# Vacuum: n = 1 exactly.
 #must_use
 fn medium_vacuum() { return _medium_mk(F64_ONE, "vacuum"); }
+# Air (STP): n = 1.000293.
 #must_use
 fn medium_air() { return _medium_mk(f64_div(f64_from(1000293), f64_from(1000000)), "air"); }
+# Water: n = 1.333.
 #must_use
 fn medium_water() { return _medium_mk(f64_div(f64_from(1333), f64_from(1000)), "water"); }
+# Generic glass: n = 1.52.
 #must_use
 fn medium_glass() { return _medium_mk(f64_div(f64_from(152), f64_from(100)), "glass"); }
+# Crown glass: n = 1.523.
 #must_use
 fn medium_crown_glass() { return _medium_mk(f64_div(f64_from(1523), f64_from(1000)), "crown glass"); }
+# Flint glass: n = 1.62.
 #must_use
 fn medium_flint_glass() { return _medium_mk(f64_div(f64_from(162), f64_from(100)), "flint glass"); }
+# Diamond: n = 2.417.
 #must_use
 fn medium_diamond() { return _medium_mk(f64_div(f64_from(2417), f64_from(1000)), "diamond"); }
+# Ice: n = 1.31.
 #must_use
 fn medium_ice() { return _medium_mk(f64_div(f64_from(131), f64_from(100)), "ice"); }
+# Crystalline quartz (ordinary ray): n = 1.544.
 #must_use
 fn medium_quartz() { return _medium_mk(f64_div(f64_from(1544), f64_from(1000)), "quartz"); }
+# Sapphire (ordinary ray): n = 1.77.
 #must_use
 fn medium_sapphire() { return _medium_mk(f64_div(f64_from(177), f64_from(100)), "sapphire"); }
+# Acrylic (PMMA): n = 1.49.
 #must_use
 fn medium_acrylic() { return _medium_mk(f64_div(f64_from(149), f64_from(100)), "acrylic"); }
+# Polycarbonate: n = 1.585.
 #must_use
 fn medium_polycarbonate() { return _medium_mk(f64_div(f64_from(1585), f64_from(1000)), "polycarbonate"); }
 

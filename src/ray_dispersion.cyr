@@ -15,8 +15,10 @@ fn _disp_eps15() { return 0x3CD203AF9EE75616; }
 # Fraunhofer reference wavelengths (micrometers).
 #must_use
 fn fraunhofer_d() { return _disp_r(58756, 100000); }   # 0.58756 (He yellow)
+# Fraunhofer F line (hydrogen H-beta, blue): 0.48613 um.
 #must_use
 fn fraunhofer_f() { return _disp_r(48613, 100000); }   # 0.48613 (H blue)
+# Fraunhofer C line (hydrogen H-alpha, red): 0.65627 um.
 #must_use
 fn fraunhofer_c() { return _disp_r(65627, 100000); }   # 0.65627 (H red)
 
@@ -33,8 +35,10 @@ fn _cauchy_mk(b, c) {
     return x;
 }
 
+# Cauchy coefficients for BK7: b = 1.5046, c = 0.00420 um^2.
 #must_use
 fn cauchy_bk7() { return _cauchy_mk(_disp_r(15046, 10000), _disp_r(420, 100000)); }
+# Cauchy coefficients for fused silica: b = 1.4580, c = 0.00354 um^2.
 #must_use
 fn cauchy_fused_silica() { return _cauchy_mk(_disp_r(14580, 10000), _disp_r(354, 100000)); }
 
@@ -62,6 +66,7 @@ fn _sellmeier_mk(b1, c1, b2, c2, b3, c3) {
     return s;
 }
 
+# Sellmeier coefficients (b1,c1,b2,c2,b3,c3; c in um^2) for Schott N-BK7.
 #must_use
 fn sellmeier_bk7() {
     return _sellmeier_mk(
@@ -69,6 +74,7 @@ fn sellmeier_bk7() {
       _disp_r(231792344, 1000000000), _disp_r(200179144, 10000000000),
       _disp_r(101046945, 100000000), _disp_r(103560653, 1000000));
 }
+# Sellmeier coefficients for Schott SF11 dense flint.
 #must_use
 fn sellmeier_sf11() {
     return _sellmeier_mk(
@@ -76,6 +82,7 @@ fn sellmeier_sf11() {
       _disp_r(313747346, 1000000000), _disp_r(623068142, 10000000000),
       _disp_r(189878101, 100000000), _disp_r(15523629, 100000));
 }
+# Sellmeier coefficients for fused silica (Malitson 1965).
 #must_use
 fn sellmeier_fused_silica() {
     return _sellmeier_mk(
@@ -83,6 +90,7 @@ fn sellmeier_fused_silica() {
       _disp_r(4079426, 10000000), _disp_r(13512063, 1000000000),
       _disp_r(8974794, 10000000), _disp_r(979340025, 10000000));
 }
+# Sellmeier coefficients for sapphire, ordinary ray.
 #must_use
 fn sellmeier_sapphire() {
     return _sellmeier_mk(
@@ -90,6 +98,7 @@ fn sellmeier_sapphire() {
       _disp_r(65054713, 100000000), _disp_r(1421826, 100000000),
       _disp_r(53414822, 10000000), _disp_r(32501783, 100000));
 }
+# Sellmeier coefficients for water, three-term visible fit.
 #must_use
 fn sellmeier_water() {
     return _sellmeier_mk(
@@ -97,6 +106,7 @@ fn sellmeier_water() {
       _disp_r(17262926, 100000000), _disp_r(1818000, 100000000),
       _disp_r(2062460, 100000000), _disp_r(2625000, 100000000));
 }
+# Sellmeier coefficients for diamond, two-term fit (b3 = 0, c3 = 1).
 #must_use
 fn sellmeier_diamond() {
     # two-term fit: b3 = 0, c3 = 1.0
@@ -206,6 +216,7 @@ fn _herzberger_mk(a, b, c, d, e) {
     return h;
 }
 
+# Herzberger index at wavelength_um: a + b*L + c*L^2 + d*l^2 + e*l^4, L = 1/(l^2 - 0.028).
 #must_use
 fn herzberger_n_at(coef, wavelength_um) {
     var l2 = f64_mul(wavelength_um, wavelength_um);
@@ -235,6 +246,7 @@ fn _schott_mk(a0, a1, a2, a3, a4, a5) {
     return s;
 }
 
+# Schott power-series coefficients a0..a5 for BK7 (wavelength in um).
 #must_use
 fn schott_bk7() {
     return _schott_mk(
@@ -243,6 +255,7 @@ fn schott_bk7() {
       f64_neg(_disp_r(76472538, 10000000000000)), _disp_r(49240991, 100000000000000));
 }
 
+# Schott power-series index: sqrt(a0 + a1*l^2 + a2/l^2 + a3/l^4 + a4/l^6 + a5/l^8); 1 if n^2 <= 0.
 #must_use
 fn schott_n_at(coef, wavelength_um) {
     var l2 = f64_mul(wavelength_um, wavelength_um);
@@ -275,6 +288,7 @@ fn _conrady_mk(n0, a, b) {
     return c;
 }
 
+# Conrady index at wavelength_um: n0 + a/l + b/l^3.5.
 #must_use
 fn conrady_n_at(coef, wavelength_um) {
     var term_a = f64_div(ConradyCoefficients_a(coef), wavelength_um);

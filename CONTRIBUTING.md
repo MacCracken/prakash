@@ -38,7 +38,7 @@ cyrius deps --verify
 # ⚠ `cyrius fmt <f>` REWRITES IN PLACE as of cyrius 6.5.28 (it was stdout-only
 # before). To fix drift run `cyrius fmt "$f"` — never `cyrius fmt "$f" > tmp`,
 # which captures zero bytes and truncates the file.
-# ⛔ `cyrius lint` EXITS 0 EVEN WITH WARNINGS — verified at 6.6.4, a file with two
+# ⛔ `cyrius lint` EXITS 0 EVEN WITH WARNINGS — verified at 6.6.4 and again at 6.6.6, a file with two
 # `warn` lines still returns rc=0. Running it bare, as this block used to, gives a
 # green local gate over code CI then rejects. CI greps stdout instead; so must you.
 fail=0

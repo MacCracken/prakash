@@ -8,7 +8,7 @@
 - **Type**: Cyrius library — `src/` modules bundled by `cyrius distlib` into `dist/prakash.cyr`
   (math-only) and `dist/prakash-ai.cyr` (adds the sandhi HTTP/TLS AI client)
 - **License**: GPL-3.0
-- **Toolchain pin**: cyrius 6.6.4 — single source of truth is `cyrius = "..."` in `cyrius.cyml`
+- **Toolchain pin**: cyrius 6.6.6 — single source of truth is `cyrius = "..."` in `cyrius.cyml`
 - **Version**: SemVer, currently 2.4.x. `VERSION` is the single source; `cyrius.cyml`
   reads it via `${file:VERSION}` and the release workflow fails if the tag disagrees
 
@@ -102,7 +102,7 @@ soorat (PBR shading), kiran (lighting), ranga (lens effects)
 - **No magic.** Every operation is measurable, auditable, traceable.
 - **`#must_use`** on all pure functions — the load-bearing attribute here.
   Count it, do not quote it: `grep -rhoE '^\s*#must_use' src/*.cyr | wc -l`
-  (428 at 2.4.0). ⚠ A hard-coded figure here has gone stale at three separate
+  (428 at 2.4.1). ⚠ A hard-coded figure here has gone stale at three separate
   releases; the command is the source of truth.
 - ⚠ **Inserting a function directly above another one STEALS its attributes.**
   A `#doc` + `#must_use` block binds to whatever declaration follows it, so a new

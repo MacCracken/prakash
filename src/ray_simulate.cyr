@@ -54,6 +54,7 @@ fn _seg_new(origin, direction, n, path_length, optical_path, energy, depth, even
 #derive(accessors)
 struct TraceConfig { max_depth; min_energy; }
 
+# TraceConfig with a bounce limit and a minimum ray energy; 0 on allocation failure.
 #must_use
 fn trace_config_new(max_depth, min_energy) {
     var c = alloc(sizeof(TraceConfig));

@@ -1521,12 +1521,16 @@ fn observer_cmf(obs) {
 # Public CIE 1931 table pointer + fixed length (81 entries, 380-780nm @ 5nm).
 #must_use
 fn cie_1931_table() { return _cie1931(); }
+# CIE 1964 10-degree observer CMF table (81 rows, 380-780 nm @ 5 nm).
 #must_use
 fn cie_1964_table() { return _cie1964(); }
+# CIE 2015 (cone-fundamental-based) 2-degree observer CMF table (81 rows).
 #must_use
 fn cie_2015_2deg_table() { return _cie2015_2(); }
+# CIE 2015 (cone-fundamental-based) 10-degree observer CMF table (81 rows).
 #must_use
 fn cie_2015_10deg_table() { return _cie2015_10(); }
+# Row count shared by every CMF table: 81 (380-780 nm @ 5 nm).
 #must_use
 fn cie_cmf_len() { return 81; }
 
@@ -1535,6 +1539,7 @@ fn cie_cmf_len() { return 81; }
 #derive(accessors)
 struct Xyz { x; y; z; }
 
+# Heap Xyz tristimulus {x, y, z}; 0 on allocation failure.
 #must_use
 fn xyz_new(x, y, z) {
     var v = alloc(sizeof(Xyz));
@@ -1545,8 +1550,10 @@ fn xyz_new(x, y, z) {
     return v;
 }
 
+# D65 white point with Y = 1: (0.95047, 1, 1.08883).
 #must_use
 fn xyz_d65_white() { return xyz_new(_cie_r(95047, 100000), F64_ONE, _cie_r(108883, 100000)); }
+# D50 white point with Y = 1: (0.96422, 1, 0.82521).
 #must_use
 fn xyz_d50_white() { return xyz_new(_cie_r(96422, 100000), F64_ONE, _cie_r(82521, 100000)); }
 
@@ -1563,6 +1570,7 @@ fn _xyy_new(x, y, big_y) {
     return v;
 }
 
+# XYZ -> xyY chromaticity; (0, 0, 0) when X + Y + Z < 1e-15.
 #must_use
 fn xyz_to_xyy(xyz) {
     var sum = f64_add(f64_add(Xyz_x(xyz), Xyz_y(xyz)), Xyz_z(xyz));
@@ -1572,6 +1580,7 @@ fn xyz_to_xyy(xyz) {
     return _xyy_new(f64_div(Xyz_x(xyz), sum), f64_div(Xyz_y(xyz), sum), Xyz_y(xyz));
 }
 
+# xyY -> XYZ; (0, 0, 0) when y < 1e-15.
 #must_use
 fn xyz_from_xyy(cx, cy, big_y) {
     if (f64_lt(cy, _cie_eps15()) == 1) {
@@ -1702,6 +1711,8 @@ fn cie_cmf_at(wavelength_nm) {
 #derive(accessors)
 struct Spd { start_nm; step_nm; values; len; }
 
+# Spd of `len` samples from start_nm every step_nm. `values` is borrowed, not
+# copied — the caller keeps it alive. 0 on allocation failure.
 #must_use
 fn spd_new(start_nm, step_nm, values, len) {
     var s = alloc(sizeof(Spd));
@@ -1719,6 +1730,7 @@ fn spd_from_static(start_nm, step_nm, values, len) {
     return spd_new(start_nm, step_nm, values, len);
 }
 
+# Wavelength of the last sample: start + step*(len - 1); 0 for a null handle.
 #must_use
 fn spd_end_nm(s) {
     # 2.2.8: see spd_at below — null-guarded at the dereference site.
@@ -1796,15 +1808,18 @@ fn _spd_integrate(s, cmf) {
     return xyz_new(f64_mul(x, f64_from(5)), f64_mul(y, f64_from(5)), f64_mul(z, f64_from(5)));
 }
 
+# Integrate the SPD against the CIE 1931 2-degree CMFs -> Xyz.
 #must_use
 fn spd_to_xyz(s) {
     _prk_trace("spd_to_xyz");
     return _spd_integrate(s, _cie1931());
 }
 
+# Integrate the SPD against the CMFs of `observer` (an OBS_* tag) -> Xyz.
 #must_use
 fn spd_to_xyz_observer(s, observer) { return _spd_integrate(s, observer_cmf(observer)); }
 
+# SPD -> linear sRGB (D65), scaled so Y = 1 first (unscaled when Y < 1e-15).
 #must_use
 fn spd_to_srgb(s) {
     var xyz = spd_to_xyz(s);
@@ -1832,8 +1847,10 @@ fn spd_blackbody(temperature_k) {
 
 # ── Standard illuminants ────────
 
+# CIE standard illuminant D65 (daylight, ~6504 K): 81 samples, 380-780 nm @ 5 nm.
 #must_use
 fn illuminant_d65() { return spd_from_static(f64_from(380), f64_from(5), _illum_d65_data(), 81); }
+# CIE standard illuminant D50 (horizon daylight, ~5003 K): 81 samples, 380-780 nm @ 5 nm.
 #must_use
 fn illuminant_d50() { return spd_from_static(f64_from(380), f64_from(5), _illum_d50_data(), 81); }
 # ⚠ F2 AND F11 WERE BOTH WRONG UNTIL 2.2.7, AND THE PORT WAS NOT AT FAULT — the
@@ -1859,6 +1876,7 @@ fn illuminant_d50() { return spd_from_static(f64_from(380), f64_from(5), _illum_
 # which is what isolated the fault to these two tables in the first place.
 #must_use
 fn illuminant_f2() { return spd_from_static(f64_from(380), f64_from(5), _illum_f2_data(), 81); }
+# CIE fluorescent illuminant F11 (narrow-band tri-phosphor, ~4000 K): 81 samples @ 5 nm.
 #must_use
 fn illuminant_f11() { return spd_from_static(f64_from(380), f64_from(5), _illum_f11_data(), 81); }
 

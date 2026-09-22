@@ -89,18 +89,22 @@ fn _cm_mk(n, k, name) {
     return m;
 }
 
+# Gold at 550 nm: n = 0.43, k = 2.46.
 #must_use
 fn complex_gold_550nm() {
     return _cm_mk(f64_div(f64_from(43), f64_from(100)), f64_div(f64_from(246), f64_from(100)), "gold (550nm)");
 }
+# Silver at 550 nm: n = 0.059, k = 3.33.
 #must_use
 fn complex_silver_550nm() {
     return _cm_mk(f64_div(f64_from(59), f64_from(1000)), f64_div(f64_from(333), f64_from(100)), "silver (550nm)");
 }
+# Copper at 550 nm: n = 1.13, k = 2.60.
 #must_use
 fn complex_copper_550nm() {
     return _cm_mk(f64_div(f64_from(113), f64_from(100)), f64_div(f64_from(260), f64_from(100)), "copper (550nm)");
 }
+# Aluminum at 550 nm: n = 0.96, k = 6.69.
 #must_use
 fn complex_aluminum_550nm() {
     return _cm_mk(f64_div(f64_from(96), f64_from(100)), f64_div(f64_from(669), f64_from(100)), "aluminum (550nm)");

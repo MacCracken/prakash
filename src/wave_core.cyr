@@ -117,6 +117,8 @@ fn grating_maxima(wavelength, grating_spacing, max_order) {
 #derive(accessors)
 struct Polarization { ex; ey; phase; }
 
+# Polarization {ex, ey: field amplitudes; phase: ey relative to ex, radians};
+# 0 on allocation failure.
 #must_use
 fn polarization_new(ex, ey, phase) {
     var p = alloc(sizeof(Polarization));
@@ -127,14 +129,18 @@ fn polarization_new(ex, ey, phase) {
     return p;
 }
 
+# Linear horizontal: ex = 1, ey = 0.
 #must_use
 fn polarization_horizontal() { return polarization_new(F64_ONE, f64_from(0), f64_from(0)); }
+# Linear vertical: ex = 0, ey = 1.
 #must_use
 fn polarization_vertical() { return polarization_new(f64_from(0), F64_ONE, f64_from(0)); }
+# Right-circular: ex = ey = 1/sqrt(2), phase = -pi/2.
 #must_use
 fn polarization_circular_right() {
     return polarization_new(F64_FRAC_1_SQRT2, F64_FRAC_1_SQRT2, f64_neg(F64_PI_2));
 }
+# Left-circular: ex = ey = 1/sqrt(2), phase = +pi/2.
 #must_use
 fn polarization_circular_left() {
     return polarization_new(F64_FRAC_1_SQRT2, F64_FRAC_1_SQRT2, F64_PI_2);
@@ -162,6 +168,7 @@ fn polarization_intensity(p) {
 #derive(accessors)
 struct StokesVector { s0; s1; s2; s3; }
 
+# Heap StokesVector {s0 = I, s1 = Q, s2 = U, s3 = V}; 0 on allocation failure.
 #must_use
 fn stokes_new(s0, s1, s2, s3) {
     var s = alloc(sizeof(StokesVector));

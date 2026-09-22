@@ -29,7 +29,7 @@ Consumed by [ranga](https://github.com/MacCracken/ranga) (spectral/colour — **
 name     = "your-project"
 version  = "${file:VERSION}"
 language = "cyrius"
-cyrius   = "6.6.4"
+cyrius   = "6.6.6"
 
 [deps]
 # ganita provides the transcendentals (acos/asin/atan2/pow/sinh/…) and subsumes
@@ -53,12 +53,12 @@ stdlib = [
 # one `undefined function 'num_fft'` warning and those four functions are
 # unlinked. Everything else in prakash is self-contained.
 git     = "https://github.com/MacCracken/hisab.git"
-tag     = "3.1.1"
+tag     = "3.2.1"
 modules = ["dist/hisab.cyr"]
 
 [deps.prakash]
 git     = "https://github.com/MacCracken/prakash.git"
-tag     = "2.4.0"
+tag     = "2.4.1"
 modules = ["dist/prakash.cyr"]        # math-only core (no TLS)
 # For the AI client instead, pull the ai bundle (adds the sandhi HTTP/TLS stack):
 # modules = ["dist/prakash-ai.cyr"]
@@ -103,7 +103,7 @@ var transmitted = malus_law(F64_ONE, F64_PI_4);
 
 ```
 prakash (Cyrius)
-  ├── hisab   (git dep, tag 3.1.1) — FFT (num_fft) for wave_pattern
+  ├── hisab   (git dep, tag 3.2.1) — FFT (num_fft) for wave_pattern
   ├── ganita  (stdlib) — transcendentals + linear algebra
   ├── bayan   (stdlib) — JSON (serialize module)
   ├── sakshi  (stdlib) — logging (trace diagnostics)

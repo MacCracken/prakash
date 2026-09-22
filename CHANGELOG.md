@@ -2,6 +2,147 @@
 
 ## [Unreleased]
 
+## [2.4.1] - 2026-09-22 — cyrius 6.6.6, hisab 3.2.1, and a doc gate that had never read the CIE module
+
+Toolchain **6.6.4 → 6.6.6** (crossing 6.6.5), hisab **3.1.1 → 3.2.1**, sakshi **2.5.2**
+unchanged (still its latest tag), and the vendored `lib/` re-synced to the 6.6.6 stdlib
+snapshot (which carries ganita **1.2.5 → 1.2.6**). Suite **6684 assertions across 31
+suites**, 0 failed, and the assertion output is **byte-identical** between the two
+compilers — only the compiler's own bookkeeping lines differ. Reference coverage
+**414/414**. `cyrius audit` exits 0, `deps --verify` reads **112/112**, and the
+`#must_use` gate holds at **428** with the grep count agreeing.
+
+⛔ **90 PUBLIC FUNCTIONS HAD NO DOC COMMENT, AND EVERY RELEASE SINCE THE PORT REPORTED
+"docs complete".** Two independent defects in 6.6.4's `cyrdoc` hid them, and the pin bump
+is what surfaced both:
+
+1. **It took a `#must_use` line as the doc comment.** 6.6.5's changelog records that
+   cyrdoc "took a `#inline` / `#must_use` line above a fn for its doc comment". prakash
+   puts `#must_use` on every pure function — 428 of them — so under 6.6.4 the docs stage
+   was structurally unable to see an undocumented pure function. The shape it hid is the
+   run of one-line presets under a single group comment (`medium_*`, `sellmeier_*`,
+   `stokes_*`, `biref_*`, `illuminant_*`, `cie_*_table`, the physical constants): cyrdoc
+   credits only the function directly beneath the comment, and every sibling in the run
+   was bare. The 73 outside `spectral_cie.cyr` — presets, constructors (`rgb_new`,
+   `trace_ray_new`, `spd_new`, …) and the `*_n_at` evaluators alike — were all invisible
+   for this reason.
+2. **It read the first 64 KB of a file and stopped.** `src/spectral_cie.cyr` is 140,741
+   bytes; **34 of its 35 public functions sit past byte 65,536** — the entire XYZ / SPD /
+   illuminant / CRI API from `observer_cmf` (byte 66,349) onward — and 6.6.4's cyrdoc
+   never read one of them. All 17 of this file's undocumented functions are in that tail.
+   6.6.6's cyrdoc reads the whole file and now reports the tail clean.
+
+⚠ **The gate said "ok: docs complete" at 2.3.0, 2.3.x and 2.4.0, and each of those entries
+repeated it.** Every one of those claims was made by a tool that could not have found the
+gap. The count is reported here as measured — `cyrius doc --check` over `src/*.cyr` under
+6.6.6, before the fix — rather than inferred from what the gate used to say.
+
+### Fixed
+
+- **91 one-line doc comments** across 11 files (the 90 flagged, plus `spec_visible_min_nm`,
+  which had been credited only by the `# ── Physical constants` section header above it).
+  Presets state their value and units (`# Calcite (negative uniaxial): n_o = 1.6584,
+  n_e = 1.4864.`), dispersion evaluators state their formula (`# Conrady index at
+  wavelength_um: n0 + a/l + b/l^3.5.`), constructors state what they take and that they
+  return 0 on allocation failure. Every line went ABOVE the attribute block, never between
+  `#must_use` and its `fn` — the attribute-theft rule cuts both ways, and
+  `scripts/check-must-use.sh` confirms 0 lost. Five lines that ran past 100 columns were
+  wrapped into the two-line `#` form the files already use. `cyrius fmt --check`, `lint`
+  and `doc --check` are clean on every file; the assertion output did not move.
+
+### Changed
+
+- **cyrius.cyml** — `cyrius = "6.6.6"`, `[deps.hisab]` `tag = "3.2.1"`. The comment block
+  now records that 3.2.1 pins 6.6.6 / sakshi 2.5.2 / ganita 1.2.6 itself, and hisab's
+  newly stated floor — **hisab ≥ 3.1.0 needs cyrius ≥ 6.6.3** (`public struct` +
+  `#derive`), which 3.2.1 is the first release to say; prakash has satisfied it since
+  2.3.0 moved both pins at once.
+- **lib/** — re-vendored against the 6.6.6 snapshot: **28 files changed, 1 new**.
+  ⚠ **`lib/alloc_cx.cyr` is a NEW file** (the cx-backend allocator arm that `alloc.cyr`
+  now includes) and must be `git add`ed with this release — the lock already carries its
+  hash, so CI's `deps --verify` fails on it if it is left untracked. The 6.6.5 aarch64
+  syscall peer moved `SYS_UNLINKAT` 35 → 263, which is why 6.6.5 says re-run
+  `cyrius deps` at the bump — done. ⚠ **The re-vendoring sequence matters and the obvious
+  one leaves the lock wrong:** `cyrius deps` locks the declared `[deps] stdlib` set, then
+  `cyrius lib sync --full` also moves the six tracked-but-undeclared files (flags, mabda,
+  regex, regression, sankoch, sys) whose hashes the lock had just recorded at their OLD
+  contents — `deps --verify` read **106/112** at that point. A second `cyrius deps` re-locks
+  them; the sequence is `deps` → `lib sync --full` → `deps` → `deps --verify`.
+- **cyrius.lock** — 112 deps locked (was 111), 2 commit-pinned (hisab `4a06313` @ 3.2.1,
+  sakshi `119698f` @ 2.5.2 unchanged), trailing `cyrius	6.6.6`.
+- **dist/** — both bundles regenerated at v2.4.1 (`wc -l`: `prakash.cyr` 10786 → 10880,
+  `prakash-ai.cyr` 11030 → 11126); the only content change is the doc lines. `.deps` sidecars
+  re-synced after `distlib` — **19 folds base, 28 ai** — and unchanged; the raw inference
+  still emits the inverted 29 / 26 that `docs/architecture/overview.md` records. The core
+  bundle passes CI's TLS-free symbol grep.
+- **README / CLAUDE.md / CONTRIBUTING / overview.md / ci.yml** — pin and tag references
+  moved to 6.6.6 / 3.2.1 / 2.4.1; CONTRIBUTING's "lint exits 0 with warnings" note now
+  says it was re-verified at 6.6.6 (see below); the CI "Resolve dependencies" comment no
+  longer hard-codes a hisab tag (it still said 2.11.1, three hisab pins ago).
+- **roadmap** — the pre-bump "Moving the cyrius pin to 6.6.6" analysis is deleted (the
+  bump is done; its checks are recorded below), and one new patch-class item is filed:
+  the `sellmeier_diamond` defect found while documenting it (see *Found, not fixed*).
+
+### Not exposed — checked rather than assumed
+
+- **6.6.6's struct-shape refusals** (copying between different struct types; by-value
+  struct parameters over 8 B now deep-copied) and the **SIMD-return refusal** cannot fire:
+  every prakash struct is a heap layout — `alloc(sizeof(X))` + derived accessors — with
+  zero by-value struct parameters, initializers or struct-to-struct assignments, and the
+  one SIMD primitive in use (`f64v_scale`) is memory-form. Confirmed by building and
+  running the suite, not by the grep.
+- **6.6.6's new global-redeclaration error** — no global `var` in `src/` is declared twice.
+- **The 6.6.6 `O_APPEND` / `O_TRUNC` Windows fix** — prakash has no PE target and uses
+  neither flag outside vendored `lib/`. Non-event.
+- **ganita 1.2.6's `f64_pow`** — measured directly through a scratch probe (deleted):
+  `f64_pow(0, 2) = +0.0`, `f64_pow(0, 0) = 1.0`, `f64_pow(0, -2) = +inf`, bit-for-bit
+  what 1.2.5 gave, so `_prk_pow`'s zero-base branch stays a redundant pin. 1.2.6's new
+  `f64_cbrt` and restructured `ganita_mat_inv` are not called by prakash.
+- **hisab 3.2.1** — `num_fft` / `num_ifft` keep the 3.0 `Result` contract
+  (`tests/wave_pattern.tcyr` pins both arms); the `RayVec3` ≡ `HVec3` layout contract in
+  `tests/hisab_interop.tcyr` holds through 3.2.0's `m3_mul_vec3` / `hvec2_new` rewrites.
+  hisab's own record that "no live consumer has built a 3.x" was false because of prakash
+  (2.3.0, 2026-09-15); 3.2.1 corrects it.
+- **`cyrius lint` still exits 0 with warnings at 6.6.6** — re-verified against a file
+  producing two `warn` lines (`trailing whitespace`, `tab character`): rc 0. The stdout
+  grep in CI and CONTRIBUTING remains the load-bearing condition.
+- **The 6.6.5 bench harness's min-above-mean artefact** (hisab's 3.2.1 filing: fixed
+  `bench_batch` windows under the new resolution bar) — **0 of 138** prakash rows show
+  `min > avg`; prakash drives the harness through `bench_run`, which grows each window
+  from the measured per-op cost (`_bench_chunk_for`) until it clears the bar that a fixed
+  `bench_batch` window can sit under.
+- **The build's oversized-local diagnostic changed shape, not substance.** 6.6.4 printed
+  `note: oversized array local kept in shared global (not per-thread)`; 6.6.6 prints
+  `warning:lib/sigil.cyr:25118:12: array local over the per-fn frame budget gets STATIC
+  storage` — the same 256 KB `var buf[262144]` in vendored sigil (reached only through
+  `tls_native`, i.e. the ai bundle), now with a location. Upstream's; `lib/` is not edited.
+  The other two build diagnostics (`undefined function 'sys_uname'`, large static data) are
+  unchanged, and every test binary reports 56 more unreachable fns — stdlib growth.
+
+### Found, not fixed — filed in the roadmap
+
+- ⛔ **`sellmeier_diamond` ships the wrong coefficients.** Noticed while writing its doc
+  line: the resonance terms are stored **unsquared** (`c1 = 0.0106`, `c2 = 0.0175` are the
+  Peter 1923 resonance *wavelengths* 0.1060 / 0.1750 um, not their squares) and
+  `b2 = 0.3060` should be 0.3306. Measured: n_d = **2.4074** vs the literature 2.4175,
+  n_F 2.4228 vs 2.4355, n_C 2.4009 vs 2.4099 — an Abbe number of ~64 for a material whose
+  published value is ~55. The suite's one value assertion, `Diamond n_d ~ 2.417`, carries a
+  tolerance of **0.02** and passes the defect. Not fixed here: this release changes no
+  physics, and the fix wants its own bite with a tightened assertion and an Abbe pin.
+
+### Performance
+
+**No change is claimed.** 138 rows, same box, two runs 15 minutes apart, both in the
+`floor_subtracted` regime (timer floor 361 ns under 6.6.4, 339 ns under 6.6.6): median
+**+0.00%**, mean −0.48%, **13 rows past ±10% — every one of them a sub-100 ns row** where
+one nanosecond of quantisation is 10–20% (`spectral/wien_peak` 10 → 8 ns, `wave/coating_
+reflectance` 90 → 102 ns). That is the documented noise band, not a signal, and it matches
+hisab's own 6.6.4 → 6.6.6 measurement (+0.00% median over 80 rows). The 6.6.5 harness now
+prints its tick alongside the floor (`tick 340ns`); `scripts/bench-history.sh`'s regime
+detection keys on the floor banner and was unaffected. ⚠ Both runs sit in
+`bench-history.csv` against the same commit, `11eb34c` (the tree was uncommitted), and the
+CSV has no toolchain column: the **07:34:30Z** run is 6.6.4, the **07:49:29Z** run is 6.6.6.
+
 ## [2.4.0] - 2026-09-15 — spd_from_function, and the roadmap's implementation for it was wrong
 
 First minor since 2.3.0: one new public entry point. Suite **6586 → 6684

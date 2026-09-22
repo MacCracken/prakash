@@ -118,8 +118,8 @@ i.e. it assumes the base is widest. Left alone, the core sidecar therefore
 advertises the sandhi/TLS stack the math-only bundle never touches, and the ai
 sidecar under-reports.
 
-⚠ **The ai half of that was re-measured at 6.5.33 and again at 6.6.4; the figure
-keeps moving and the defect does not.** Through 6.5.20 the pruned inference
+⚠ **The ai half of that was re-measured at 6.5.33, at 6.6.4 and at 6.6.6; the
+figure keeps moving and the defect does not.** Through 6.5.20 the pruned inference
 yielded literally `syscalls io`. At 6.5.33 it yielded ten folds — `string alloc
 str vec math ganita tagged bayan sandhi sakshi`. At **6.6.4** (measured for 2.3.0)
 it yielded **25** at 2.3.0 and yields **26** at 2.4.0 (the extra leaf is `fnptr`,
@@ -128,7 +128,8 @@ the generator now reports its own patching — `sidecar:
 re-added 15 leaf(s) the inference missed (compile-verified)` — but the inversion
 survives all of it: the same run emits **29** leaves for the math-only base
 against those 25 for ai, i.e. the narrow bundle is still advertised as the wider
-one, complete with the sandhi/TLS stack it never touches. The generator still
+one, complete with the sandhi/TLS stack it never touches. At **6.6.6** (2.4.1) the
+same 29-for-base / 26-for-ai pair reproduces. The generator still
 under-reports for the wide profile; only the size of the shortfall moved. The core
 over-reporting reproduces unchanged. **`scripts/sync-deps-sidecar.sh`** regenerates
 both from the manifest — core = declared stdlib minus the AI-only folds
@@ -140,7 +141,7 @@ the check that actually has teeth.
 
 | Dependency | Kind | Purpose |
 |-----------|------|---------|
-| `hisab` | git dep (tag 3.1.1) | FFT (`num_fft`) for `wave_pattern` (the suite also exercises `num_ifft`). `RayVec3` is layout-identical to hisab's `HVec3`, so all 26 `hvec3_*` ops work on prakash vectors unconverted — contract pinned by `tests/hisab_interop.tcyr` |
+| `hisab` | git dep (tag 3.2.1) | FFT (`num_fft`) for `wave_pattern` (the suite also exercises `num_ifft`). `RayVec3` is layout-identical to hisab's `HVec3`, so all 26 `hvec3_*` ops work on prakash vectors unconverted — contract pinned by `tests/hisab_interop.tcyr` |
 | `ganita` | stdlib | Transcendentals (acos/asin/atan2/pow/sinh/…) + linear algebra |
 | `math` | stdlib | Comparisons, clamp/lerp/min/max, `F64_PI` etc., aarch64 polyfills |
 | `bayan` | stdlib | JSON (`serialize` module) |

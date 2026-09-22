@@ -46,6 +46,8 @@ fn _trace_eps10() { return 0x3DDB7CDFD9D7BDBB; }
 #derive(accessors)
 struct OpticalSurface { shape_tag; radius; z_position; n_after; aperture_radius; }
 
+# Spherical surface: vertex at z_position, signed radius (+ = centre to the right),
+# index n_after behind it; 0 on allocation failure.
 #must_use
 fn surface_sphere(radius, z_position, n_after, aperture_radius) {
     var s = alloc(sizeof(OpticalSurface));
@@ -58,6 +60,8 @@ fn surface_sphere(radius, z_position, n_after, aperture_radius) {
     return s;
 }
 
+# Plane surface at z_position (radius stored as 0), index n_after behind it;
+# 0 on allocation failure.
 #must_use
 fn surface_plane(z_position, n_after, aperture_radius) {
     var s = alloc(sizeof(OpticalSurface));
@@ -75,6 +79,8 @@ fn surface_plane(z_position, n_after, aperture_radius) {
 #derive(accessors)
 struct TraceRay { pos; dir; n; }
 
+# TraceRay at `pos` heading `dir` (both RayVec3, dir normalised) in a medium of
+# index n; 0 on allocation failure.
 #must_use
 fn trace_ray_new(pos, dir, n) {
     var r = alloc(sizeof(TraceRay));

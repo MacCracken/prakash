@@ -30,6 +30,7 @@ struct DaimonClient { config; }
 
 # ── DaimonConfig ────────
 
+# DaimonConfig for a daimon server at `endpoint` with `api_key` (0 = none); 0 on allocation failure.
 #must_use
 fn ai_daimon_config_new(endpoint, api_key) {
     var c = alloc(sizeof(DaimonConfig));
@@ -76,6 +77,7 @@ fn ai_daimon_config_default() {
 
 # ── HooshConfig ────────
 
+# HooshConfig for a hoosh server at `endpoint`; 0 on allocation failure.
 #must_use
 fn ai_hoosh_config_new(endpoint) {
     var c = alloc(sizeof(HooshConfig));

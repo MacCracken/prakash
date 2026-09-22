@@ -70,7 +70,7 @@ jobs:
           echo "toolchain $GOT matches pin; snapshot has $(ls "$HOME/.cyrius/versions/$PIN/lib" | wc -l) files"
 
       - name: Resolve dependencies
-        # Clones the hisab git dep (tag 2.11.1) and links lib/hisab.cyr; the
+        # Clones the hisab git dep at the tag cyrius.cyml pins and links lib/hisab.cyr; the
         # stdlib subset is committed under lib/, so no `cyrius lib sync` needed.
         run: cyrius deps
 

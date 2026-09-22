@@ -23,16 +23,17 @@ Prakash does NOT own:
 
 ## Open work at a glance
 
-**12 items. ⭐ Nothing is scheduled. Every item is demand-gated or waiting on a consumer —
-build one only when someone asks for it.**
+**13 items. ⭐ One is a known physics defect and can ship in any patch (item 1); the
+rest are demand-gated or waiting on a consumer — build one only when someone asks.**
 
 | # | Bucket | Item | State |
 |---|---|---|---|
-| 1–6 | 2.x | GRIN, DOE, Richards-Wolf, HG/LG beams, Buchdahl, aberrated MTF | demand-gated |
-| 7–11 | 2.x | Fluorescence, non-linear, OAM, metamaterials, CIE 2006 observer | demand-gated |
-| 12 | Blocked | soorat / kiran / ranga consume `dist/prakash.cyr` | waiting on the consumers |
+| 1 | 2.4.x patch | `sellmeier_diamond` coefficients are wrong (n_d 2.407, should be 2.417) | open — see below |
+| 2–7 | 2.x | GRIN, DOE, Richards-Wolf, HG/LG beams, Buchdahl, aberrated MTF | demand-gated |
+| 8–12 | 2.x | Fluorescence, non-linear, OAM, metamaterials, CIE 2006 observer | demand-gated |
+| 13 | Blocked | soorat / kiran / ranga consume `dist/prakash.cyr` | waiting on the consumers |
 
-⚠ **Items 1–11 are not a backlog anyone is working through.** Each is a subsystem,
+⚠ **Items 2–12 are not a backlog anyone is working through.** Each is a subsystem,
 listed so the scope boundary stays visible. Do not start one without a consumer
 asking for it.
 
@@ -43,12 +44,12 @@ anyone intends to do them:
 
 | Bucket | Means | Rule |
 |---|---|---|
-| **2.3.x — patch** | no public API moves | internals, perf, tests, docs, tooling |
+| **2.4.x — patch** | no public API moves | internals, perf, tests, docs, tooling, data fixes |
 | **2.4.x — minor** | adds public API | new entry points, new capability |
 | **2.x — demand-gated** | adds a subsystem | build when a consumer actually asks |
 | **Blocked** | not prakash's move | waiting on something external |
 
-⚠ **The bucket is a SemVer classification, not a queue.** Anything in 2.3.x can
+⚠ **The bucket is a SemVer classification, not a queue.** Anything in 2.4.x can
 ship in any order, in any patch release, in any combination — the bucket only
 promises it will not force a minor bump. Reshuffling is free by construction.
 
@@ -56,6 +57,19 @@ promises it will not force a minor bump. Reshuffling is free by construction.
 item 2. ⚠ **Keep rows SHORT.** A row says what the work is and what would block
 it. Measurements belong in `CHANGELOG.md`; a row that grows past ~8 lines has
 started duplicating the release history and should be cut back.
+
+## 2.4.x — patch: no public API moves
+
+- [ ] **`sellmeier_diamond` ships the wrong coefficients** (`src/ray_dispersion.cyr`).
+  The two resonance terms are stored UNSQUARED — `c1 = 0.0106`, `c2 = 0.0175` are the
+  Peter (1923) resonance *wavelengths* 0.1060 / 0.1750 um, not their squares
+  (0.011236 / 0.030625 um^2), and `b2 = 0.3060` should be 0.3306. Measured (2.4.1):
+  n_d = **2.4074** against the literature 2.4175, n_F = 2.4228 vs 2.4355, n_C = 2.4009
+  vs 2.4099, so the Abbe number comes out ~64 instead of ~55. The suite's only value
+  assertion, `Diamond n_d ~ 2.417` at tolerance **0.02**, is wide enough to pass the
+  defect — the 2.2.6 class exactly. Fix = three literals + a tightened assertion
+  (TOL 0.001) + an Abbe pin (55.3 ± 0.5); check the Rust archive first, since the
+  other five Sellmeier presets were not re-derived here and may share the source.
 
 ## 2.x — demand-gated: build when a consumer asks
 
