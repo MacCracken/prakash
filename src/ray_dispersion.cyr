@@ -106,13 +106,25 @@ fn sellmeier_water() {
       _disp_r(17262926, 100000000), _disp_r(1818000, 100000000),
       _disp_r(2062460, 100000000), _disp_r(2625000, 100000000));
 }
-# Sellmeier coefficients for diamond, two-term fit (b3 = 0, c3 = 1).
+# Sellmeier coefficients for diamond (Peter 1923), two-term fit (b3 = 0, c3 = 1).
+# Fit validity 0.225-0.665 um, so all three Fraunhofer lines sit inside it.
+# ⚠ c1 AND c2 ARE RESONANCE WAVELENGTHS **SQUARED** — 0.1060^2 = 0.011236 and
+# 0.1750^2 = 0.030625 um^2 — which is this file's convention everywhere else
+# (fused silica stores 0.0684043^2 as 0.0046791482, sapphire 0.0726631^2). Through
+# 2.4.1 this entry stored `0.0106` and `0.0175`: the wavelengths themselves, neither
+# squared nor even scaled consistently, with b2 = 0.3060 for a published 0.3306.
+# Measured cost of that: n_d = 2.4074 against a published 2.4175, n_F 2.4228 vs
+# 2.4355, n_C 2.4009 vs 2.4099, and an Abbe number of 64.2 for a material whose
+# published value is 55.3 — the dispersion was off by 16%, not the index alone.
+# ⛔ The error was inherited character-for-character from the Rust archive
+# (`git show 524a7aa^:rust-old/src/ray/dispersion.rs`), a seventh member of the
+# 2.2.6 class, AND so was the 0.02 test tolerance that let it pass — wide enough
+# to swallow a 0.0096 miss. The pins below are tight and at three wavelengths.
 #must_use
 fn sellmeier_diamond() {
-    # two-term fit: b3 = 0, c3 = 1.0
     return _sellmeier_mk(
-      _disp_r(43358, 10000), _disp_r(106, 10000),
-      _disp_r(3060, 10000), _disp_r(175, 10000),
+      _disp_r(43356, 10000), _disp_r(11236, 1000000),
+      _disp_r(3306, 10000), _disp_r(30625, 1000000),
       f64_from(0), F64_ONE);
 }
 

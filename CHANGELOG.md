@@ -2,6 +2,109 @@
 
 ## [Unreleased]
 
+## [2.4.2] - 2026-09-22 — the diamond Sellmeier coefficients were never squared, and the test tolerance was wide enough to hide it
+
+One physics fix, taken as its own bite. `sellmeier_diamond` has shipped the Peter (1923)
+resonance constants **unsquared** since the port, putting n_d at 2.4074 against a published
+2.4175 and — the larger error — the Abbe number at **64.2** for a stone whose published
+V_d is **55.3**. Suite **6684 → 6691 assertions across 31 suites** (`ray_dispersion`
+54 → 61), 0 failed. Reference coverage **414/414**. `cyrius audit` exits 0; fmt, lint,
+`doc --check`, vet, deny clean; `deps --verify` 112/112; `#must_use` 428, 0 lost. No
+toolchain or dependency change: cyrius 6.6.6, hisab 3.2.1, sakshi 2.5.2, ganita 1.2.6.
+
+⚠ **This is the seventh member of the 2.2.6 class, and it arrived the same way.** The
+wrong literals are character-for-character identical in the deleted Rust archive
+(`git show 524a7aa^:rust-old/src/ray/dispersion.rs`: `b1: 4.335_8, c1: 0.010_6,
+b2: 0.306_0, c2: 0.017_5`) — **and so is the `< 0.02` test tolerance that passed them**.
+The port was faithful; the physics was wrong before it. "It matches Rust" remains no
+evidence at all.
+
+### Fixed
+
+- ⛔ **`sellmeier_diamond` — four wrong coefficients** (`src/ray_dispersion.cyr`).
+  `c1` and `c2` hold the resonance wavelengths **squared** everywhere else in this file
+  (fused silica stores `0.0684043^2` as `0.0046791482`; sapphire `0.0726631^2`); diamond
+  stored `0.0106` and `0.0175`, which are neither `0.1060`/`0.1750` nor their squares
+  `0.011236`/`0.030625` — the decimal point had moved as well. `b2` was `0.3060` for a
+  published `0.3306` (transposed digits) and `b1` `4.3358` for `4.3356`. Now Peter (1923)
+  as published, fit validity 0.225–0.665 um, which contains all three Fraunhofer lines.
+
+  | at | before | after | published | source |
+  |---|---|---|---|---|
+  | n_F (0.48613 um) | 2.42278 | **2.43554** | 2.4354 | H-beta |
+  | n_d (0.58756 um) | 2.40738 | **2.41749** | 2.4175 | He d |
+  | n_C (0.65627 um) | 2.40087 | **2.40991** | 2.4099 | H-alpha |
+  | V_d | 64.21 | **55.30** | 55.3 | — |
+
+  Verified at one further point away from the Fraunhofer set: 0.5893 um (the sodium D
+  line), where diamond's index is independently and very widely quoted as **2.4173** —
+  computed 2.4173. A second probe at 0.2265 um was dropped from this record rather than
+  reported: the only figure available to check it against came from the same Peter fit,
+  so it would have been the formula agreeing with itself.
+
+### Added
+
+- **`tests/ray_dispersion.tcyr` — 7 assertions (54 → 61), and the old one replaced.**
+  The defect's whole survival was a single assertion sampling a single wavelength at a
+  tolerance 2x its own error, which is the failure mode `CLAUDE.md` names. Now: three
+  **value** pins at n_F / n_d / n_C against published figures at TOL3 (0.001); one Abbe
+  pin at 55.3 ± 1.0, the statistic no assertion in this file had ever asked of diamond;
+  and the **invariants pinned separately** — n_F > n_d > n_C, plus monotonic fall from
+  0.30 → 0.45 → 0.60 um.
+  ⭐ **Mutation-checked, one literal at a time.** Restoring `c1` alone, `c2` alone, `b2`
+  alone, or all four, each kills all three value pins and the Abbe pin (4 failed / 61).
+  ⚠ **And the result that is worth writing down: the two monotonicity assertions do NOT
+  discriminate here** — wrong resonance constants still sit below the visible, so n still
+  falls across it, and all four mutants leave those two green. They are pinned for the
+  sign/ordering class, not this one. Recorded in the test file itself so nobody reads
+  four green invariants as four independent checks.
+
+### Not exposed — the other five presets were re-derived, not assumed
+
+The roadmap row for this bite said to check the archive first, "since the other five
+Sellmeier presets were not re-derived here and may share the source." They do share it.
+All six were recomputed at the three Fraunhofer lines and against published n and V_d:
+
+| preset | n_d computed | published | V_d computed | published | verdict |
+|---|---|---|---|---|---|
+| BK7 | 1.51680 | 1.51680 | 64.17 | 64.17 | exact — Schott N-BK7 as catalogued |
+| SF11 | 1.78472 | 1.78472 | 25.68 | 25.68 (N-SF11) | correct |
+| Fused silica | 1.45846 | 1.45846 | 67.82 | 67.8 | exact — Malitson 1965 |
+| Sapphire | 1.76816 | 1.76817 | 72.37 | ~72.2 | correct (o-ray) |
+| Water | 1.33418 | 1.33304 | **65.08** | **~55.6** | ⛔ **wrong — filed** |
+| Diamond | 2.41749 | 2.41750 | 55.30 | 55.3 | fixed here |
+
+- ⛔ **`sellmeier_water` is wrong and is NOT fixed here.** Its three terms are the first
+  three of Daimon & Masumura (2007) with the **IR term dropped**, which costs about
+  −0.0014 in n across the visible: n_d 1.33418 vs 1.33304, and a 17% dispersion error
+  (V_d 65.1 vs ~55.6). `examples/rainbow.cyr` prints it — `n(red, 656nm) = 1.332670`
+  against a published 1.33114. Not fixed in this release for a reason that is more than
+  scope discipline: **D&M is a four-term fit and `SellmeierCoefficients` holds exactly
+  three**, so the repair is a choice between refitting and widening the struct, and that
+  choice deserves its own bite. Filed in `docs/development/roadmap.md`. Its test
+  assertion is left passing at TOL_005 — deliberately, and now carrying a ⚠ comment
+  saying so, because silently tightening it would turn the suite red on a known defect
+  this release is not repairing.
+- **Two false alarms, resolved by measuring rather than by trusting the reference.** SF11
+  and sapphire first read as defects against recalled n_F / n_C figures. Recomputing
+  V_d from the coefficients — 25.69 and 72.37, both matching catalogue — showed the
+  recalled numbers were the error, not the coefficients. The only real discrepancies are
+  transcription-level and below the instrument: SF11's `b1` is `1.73759626` where Schott
+  publishes `1.73759695` (7e-7, worth ~1e-7 in n) and sapphire's `c2`/`b3` differ from
+  Malitson in the 5th digit (worth 1e-5 in n). Neither is a defect; both are recorded
+  here so the next audit does not re-open them.
+- **`medium_diamond()` is unaffected** — it is a flat n = 2.417 at the sodium D line,
+  independent of the Sellmeier path, and correct.
+
+### Performance
+
+**No change is claimed, and none is possible.** The change is four constants inside
+`sellmeier_diamond`, which **no benchmark calls** — `ray/sellmeier_n_at` benches BK7
+(`tests/prakash.bcyr:169`). 138 rows nonetheless read median **+3.12%**, mean +3.76%,
+with 11 rows past +10%; the 2.4.1 comparison run was taken seven hours earlier on a box
+in a different state, and a uniform whole-suite shift of that size with no reachable code
+change is exactly the band `CLAUDE.md` says is not a signal. Recorded, not claimed.
+
 ## [2.4.1] - 2026-09-22 — cyrius 6.6.6, hisab 3.2.1, and a doc gate that had never read the CIE module
 
 Toolchain **6.6.4 → 6.6.6** (crossing 6.6.5), hisab **3.1.1 → 3.2.1**, sakshi **2.5.2**

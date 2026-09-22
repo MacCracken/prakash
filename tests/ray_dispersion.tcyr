@@ -60,8 +60,34 @@ assert(f64_gt(sellmeier_n_at(sb, fraunhofer_f()), sellmeier_n_at(sb, fraunhofer_
 assert(f64_gt(sellmeier_n_at(sb, fraunhofer_d()), sellmeier_n_at(sb, fraunhofer_c())), "BK7 n_d > n_C");
 _assert_near(sellmeier_n_at(sellmeier_sf11(), fraunhofer_d()), _fd(17847, 10000), TOL3, "SF11 n_d ~ 1.7847");
 _assert_near(sellmeier_n_at(sellmeier_fused_silica(), fraunhofer_d()), _fd(14585, 10000), TOL3, "FS n_d ~ 1.4585");
+# ⚠ WATER IS A KNOWN-WRONG PRESET AND THIS ASSERTION PASSES IT. `sellmeier_water`
+# gives n_d = 1.33418 against a published 1.33304 and an Abbe number of 65.1 where
+# water's is ~55.6 — the coefficients are the first three terms of Daimon & Masumura
+# with the IR term dropped, and it is the dispersion that pays. TOL_005 is 4x wider
+# than the error, so this line reads green over it. Measured at 2.4.2 and filed in
+# docs/development/roadmap.md; deliberately NOT tightened here, because that would
+# turn the suite red on a defect this release is not fixing.
 _assert_near(sellmeier_n_at(sellmeier_water(), fraunhofer_d()), _fd(1333, 1000), TOL_005, "Water n_d ~ 1.333");
-_assert_near(sellmeier_n_at(sellmeier_diamond(), fraunhofer_d()), _fd(2417, 1000), TOL_02, "Diamond n_d ~ 2.417");
+
+# Diamond — Peter (1923), pinned at three wavelengths against published values
+# rather than at n_d alone (2.4.2). The pre-2.4.2 coefficients miss n_d by 0.0096,
+# n_F by 0.0128 and n_C by 0.0090 — every one of them 9x or more past TOL3 — and
+# miss the Abbe pin in the group below by 8.9. The old single assertion sampled n_d
+# only, at a tolerance of 0.02, and passed the defect for six releases.
+# ⚠ The two monotonicity lines at the end do NOT discriminate here: wrong resonance
+# constants still sit below the visible, so n still falls across it. They are pinned
+# for the sign/ordering class, not this one — mutation-checked and stated, because a
+# reader could otherwise take four green invariants for four independent checks.
+var sdia = sellmeier_diamond();
+_assert_near(sellmeier_n_at(sdia, fraunhofer_d()), _fd(241749, 100000), TOL3, "Diamond n_d = 2.41749");
+_assert_near(sellmeier_n_at(sdia, fraunhofer_f()), _fd(243554, 100000), TOL3, "Diamond n_F = 2.43554");
+_assert_near(sellmeier_n_at(sdia, fraunhofer_c()), _fd(240991, 100000), TOL3, "Diamond n_C = 2.40991");
+# Invariants, pinned apart from the values: normal dispersion across the visible.
+assert(f64_gt(sellmeier_n_at(sdia, fraunhofer_f()), sellmeier_n_at(sdia, fraunhofer_d())), "Diamond n_F > n_d");
+assert(f64_gt(sellmeier_n_at(sdia, fraunhofer_d()), sellmeier_n_at(sdia, fraunhofer_c())), "Diamond n_d > n_C");
+# Both resonances are below the visible, so n must fall monotonically right across it.
+assert(f64_gt(sellmeier_n_at(sdia, _fd(3, 10)), sellmeier_n_at(sdia, _fd(45, 100))), "Diamond n(0.30) > n(0.45)");
+assert(f64_gt(sellmeier_n_at(sdia, _fd(45, 100)), sellmeier_n_at(sdia, _fd(6, 10))), "Diamond n(0.45) > n(0.60)");
 
 assert(_between(sellmeier_n_at(sellmeier_bk7(), fraunhofer_d()), TOL1, f64_from(3)), "BK7 reasonable");
 assert(_between(sellmeier_n_at(sellmeier_sf11(), fraunhofer_d()), TOL1, f64_from(3)), "SF11 reasonable");
@@ -81,6 +107,10 @@ test_group("abbe");
 
 _assert_near(abbe_number(sellmeier_bk7()), _fd(6417, 100), TOL1, "BK7 Abbe ~ 64.17");
 _assert_near(abbe_number(sellmeier_sf11()), _fd(2576, 100), TOL1, "SF11 Abbe ~ 25.76");
+# The most discriminating diamond pin there is: the pre-2.4.2 coefficients answered
+# 64.21 here — a crown-glass dispersion for a stone whose published V_d is 55.3, and
+# 8.9 outside this band. No value assertion in this file had ever asked it (2.4.2).
+_assert_near(abbe_number(sellmeier_diamond()), _fd(553, 10), TOL1, "Diamond Abbe ~ 55.3");
 var v_bk7 = abbe_number(sellmeier_bk7());
 var v_sf11 = abbe_number(sellmeier_sf11());
 assert(f64_gt(v_bk7, v_sf11), "crown Abbe > flint");

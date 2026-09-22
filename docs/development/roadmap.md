@@ -28,7 +28,7 @@ rest are demand-gated or waiting on a consumer — build one only when someone a
 
 | # | Bucket | Item | State |
 |---|---|---|---|
-| 1 | 2.4.x patch | `sellmeier_diamond` coefficients are wrong (n_d 2.407, should be 2.417) | open — see below |
+| 1 | 2.4.x patch | `sellmeier_water` coefficients are wrong (V_d 65.1, water's is ~55.6) | open — see below |
 | 2–7 | 2.x | GRIN, DOE, Richards-Wolf, HG/LG beams, Buchdahl, aberrated MTF | demand-gated |
 | 8–12 | 2.x | Fluorescence, non-linear, OAM, metamaterials, CIE 2006 observer | demand-gated |
 | 13 | Blocked | soorat / kiran / ranga consume `dist/prakash.cyr` | waiting on the consumers |
@@ -60,16 +60,18 @@ started duplicating the release history and should be cut back.
 
 ## 2.4.x — patch: no public API moves
 
-- [ ] **`sellmeier_diamond` ships the wrong coefficients** (`src/ray_dispersion.cyr`).
-  The two resonance terms are stored UNSQUARED — `c1 = 0.0106`, `c2 = 0.0175` are the
-  Peter (1923) resonance *wavelengths* 0.1060 / 0.1750 um, not their squares
-  (0.011236 / 0.030625 um^2), and `b2 = 0.3060` should be 0.3306. Measured (2.4.1):
-  n_d = **2.4074** against the literature 2.4175, n_F = 2.4228 vs 2.4355, n_C = 2.4009
-  vs 2.4099, so the Abbe number comes out ~64 instead of ~55. The suite's only value
-  assertion, `Diamond n_d ~ 2.417` at tolerance **0.02**, is wide enough to pass the
-  defect — the 2.2.6 class exactly. Fix = three literals + a tightened assertion
-  (TOL 0.001) + an Abbe pin (55.3 ± 0.5); check the Rust archive first, since the
-  other five Sellmeier presets were not re-derived here and may share the source.
+- [ ] **`sellmeier_water` ships the wrong coefficients** (`src/ray_dispersion.cyr`).
+  Found by the all-six re-derivation that 2.4.2's diamond fix forced. The three terms
+  are the first three of Daimon & Masumura (2007) with the **IR term dropped**;
+  measured n_d = **1.33418** vs a published 1.33304, and V_d = **65.1** where water's
+  is ~55.6 — a 17% dispersion error, and the one the `examples/rainbow.cyr` output
+  prints. `tests/ray_dispersion.tcyr` passes it at TOL_005, 4x wider than the miss.
+  ⛔ **The obvious fix does not fit:** D&M is a FOUR-term fit and
+  `SellmeierCoefficients` holds exactly three (b1..b3/c1..c3). The dropped term is
+  worth about −0.0014 in n across the visible. So the bite is a choice — refit to
+  three terms against published n, or widen the struct — and that choice IS the item.
+  The other four presets (BK7, SF11, fused silica, sapphire) were re-derived at 2.4.2
+  and are correct; see that CHANGELOG entry for the table.
 
 ## 2.x — demand-gated: build when a consumer asks
 
