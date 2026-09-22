@@ -53,6 +53,8 @@ var NAN   = 0x7FF8000000000000;
 var NNAN  = 0xFFF8000000000000;
 var NANP7 = 0x7FF8000000000007;
 
+fn _hard_unit_fn(wl) { return F64_ONE; }
+
 alloc_init();
 
 # 2.1.0: *_from_json takes a trailing err_out.
@@ -212,6 +214,33 @@ assert(pattern2d_new(20000, 20000) == 0, "pattern2d_new(20000, 20000) returns 0"
 assert(pattern2d_new(1, 2305843009213693953) == 0,
   "pattern2d_new with a size that overflows i64 returns 0 (was heap corruption)");
 assert(pattern2d_new(0, 8) == 0, "pattern2d_new rejects a zero dimension");
+# ⛔ 2.4.8: the SAME overflow, in spd_from_function, four releases after the row
+# above pinned it in pattern2d_new. `alloc(n * 8)` wrapped for large n, alloc
+# returned a tiny buffer, and the fill loop wrote n elements through it. The
+# same sentinel value is reused deliberately so the two guards are pinned by one
+# number and cannot drift apart.
+var _ovf_e = 0;
+assert(spd_from_function(&_hard_unit_fn, f64_from(380), f64_from(780), 2305843009213693953, &_ovf_e) == 0,
+  "spd_from_function with a size that overflows i64 returns 0 (was a SIGSEGV)");
+assert(prakash_is_err(_ovf_e) == 1, "and it reports through err_out rather than a bare 0");
+
+# ⛔ 2.4.8: THE DOCUMENTED NULL FROM prescription_from_json CRASHED ALL SEVEN OF ITS
+# OWN CONSUMERS. The decoder is documented to return 0 on malformed input and this
+# file already asserted that — but nothing guarded the handle downstream, so the
+# documented failure path exited 139 the moment anyone used its result. Measured
+# end to end: prescription_from_json("not json at all", 15, &e) -> 0, then any of
+# the seven -> SIGSEGV. These pin the guards; each one crashed before 2.4.8.
+var _pnull = 0;
+var _pe = 0;
+assert(prescription_len(_pnull) == 0, "prescription_len(0) returns 0, not a fault");
+assert(prescription_is_empty(_pnull) == 1, "prescription_is_empty(0) returns 1, not a fault");
+assert(prescription_with_initial_medium(_pnull, F64_ONE) == 0, "prescription_with_initial_medium(0) returns 0");
+assert(prescription_add_surface(_pnull, F64_ONE, F64_ONE, F64_ONE, F64_ONE) == 0,
+  "prescription_add_surface(0) returns 0");
+assert(prescription_to_trace_surfaces(_pnull) == 0, "prescription_to_trace_surfaces(0) returns 0");
+assert(prescription_to_paraxial_surfaces(_pnull) == 0, "prescription_to_paraxial_surfaces(0) returns 0");
+assert(find_system_properties(_pnull, &_pe) == 0, "find_system_properties(0) returns 0");
+assert(prakash_is_err(_pe) == 1, "find_system_properties(0) reports through err_out");
 assert(pattern2d_new(0 - 4, 8) == 0, "pattern2d_new rejects a negative dimension");
 assert(spectrum_strip(0 - 5) == 0, "spectrum_strip rejects a negative sample count");
 assert(zernike_wf_to_grid(zernike_wf_flat(), 0 - 1) == 0, "zernike_wf_to_grid rejects grid_size < 0");

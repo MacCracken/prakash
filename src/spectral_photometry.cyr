@@ -250,6 +250,12 @@ fn luminous_flux(spd) {
 #must_use
 fn luminous_efficacy(spd) {
     var t = _vlambda_photopic();
+    # ⛔ 2.4.8: the 2.3.8 sweep that added these guards missed THIS function —
+    # its two siblings, luminous_flux above and luminous_flux_scotopic below,
+    # both carry one. The lazy table builders return 0 when their one-time
+    # allocation fails, and a 0 indexed here is the SIGSEGV that sweep existed
+    # to remove. 0 lm/W is already this function's sentinel for no radiant power.
+    if (t == 0) { return f64_from(0); }
     var radiant_sum = f64_from(0);
     var luminous_sum = f64_from(0);
     var i = 0;

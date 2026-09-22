@@ -267,9 +267,26 @@ fn ar_quarter_wave_thickness(wavelength, n_coating) {
     return f64_div(wavelength, f64_mul(f64_from(4), n_coating));
 }
 
-# Single-layer thin-film reflectance at normal incidence (exact formula):
-# R = (a^2*sin^2 d) / (b^2*sin^2 d + c^2*cos^2 d), delta = TAU*nc*d/wl,
-# a = ni*ns - nc^2, b = ni*ns + nc^2, c = nc*(ni+ns).
+# Single-layer thin-film reflectance at normal incidence (exact Airy formula):
+# R = (a^2*sin^2 d + p^2*cos^2 d) / (b^2*sin^2 d + c^2*cos^2 d), delta = TAU*nc*d/wl,
+# a = ni*ns - nc^2, b = ni*ns + nc^2, c = nc*(ni+ns), p = nc*(ni-ns).
+# ⛔ 2.4.8: THE p^2*cos^2 d NUMERATOR TERM WAS MISSING ENTIRELY. The denominator
+# carried both of its terms and the numerator only one, so R collapsed to 0
+# wherever cos d != 0 dominated — most visibly at **thickness = 0, which returned
+# 0.0 where the bare substrate reflects 0.04258**: a coating of no thickness made
+# the glass perfectly non-reflecting, and so did every half-wave (absentee)
+# thickness. Measured against this file's own 1-layer TMM (`multilayer_reflectance`),
+# MgF2 nc=1.38 quarter-wave on ns=1.52 designed at 550 nm:
+#   400 nm  0.0086281 vs 0.0220525  (-60.9%)    550 nm  0.0126008 vs 0.0126008 (exact)
+#   450 nm  0.0110862 vs 0.0162043  (-31.6%)    650 nm  0.0118579 vs 0.0143684 (-17.5%)
+#   500 nm  0.0122830 vs 0.0133568  ( -8.0%)    700 nm  0.0111880 vs 0.0159620 (-29.9%)
+# ⚠ 550 nm is exact because a quarter-wave film has delta = pi/2 there, so
+# cos d = 0 and the missing term vanishes. The suite compared this function to
+# `multilayer_reflectance` at **550 nm only** — the single wavelength in the band
+# where the defect is invisible — and its 400-700 nm sweep asserted only
+# 0 <= R <= 1, which the truncated formula satisfies everywhere. Same shape as the
+# 2.4.2 diamond and 2.4.6 LSA defects: the right instrument, aimed at the one point
+# that could not see it.
 #must_use
 fn coating_reflectance(wavelength, n_incident, n_coating, n_substrate, thickness) {
     var delta = f64_div(
@@ -282,7 +299,13 @@ fn coating_reflectance(wavelength, n_incident, n_coating, n_substrate, thickness
     var a = f64_sub(ni_ns, nc2);
     var b = f64_add(ni_ns, nc2);
     var c = f64_mul(n_coating, f64_add(n_incident, n_substrate));
-    var num = f64_mul(f64_mul(f64_mul(a, a), sin_d), sin_d);
+    # p mirrors c with a MINUS: c = nc*(ni+ns) carries the denominator's cos^2
+    # term, p = nc*(ni-ns) carries the numerator's. Losing one and keeping the
+    # other is what made a zero-thickness film non-reflecting.
+    var p = f64_mul(n_coating, f64_sub(n_incident, n_substrate));
+    var num = f64_add(
+      f64_mul(f64_mul(f64_mul(a, a), sin_d), sin_d),
+      f64_mul(f64_mul(f64_mul(p, p), cos_d), cos_d));
     var den = f64_add(
       f64_mul(f64_mul(f64_mul(b, b), sin_d), sin_d),
       f64_mul(f64_mul(f64_mul(c, c), cos_d), cos_d));

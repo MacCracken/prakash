@@ -2,6 +2,157 @@
 
 ## [Unreleased]
 
+## [2.4.8] - 2026-09-22 — a multi-agent audit of the whole project: two wrong formulas, a SIGSEGV on a documented failure path, and two public functions that contradicted each other
+
+The spectral and serialize constants were the brief; a 23-agent adversarial sweep over the
+whole project was run alongside it, and what it found was not in spectral or serialize.
+**Six repairs**, every one of them invisible to a green 31-suite run. Suite **6757 → 6796
+assertions across 31 suites**, 0 failed. Reference coverage **414/414**. `cyrius audit`
+exits 0; fmt, lint, `doc --check`, vet, deny clean; `deps --verify` 112/112; `#must_use`
+**429** (the new `_cri_golden`), 0 lost.
+
+⚠ **Method, since it is the reason these were found at all.** Six finders swept distinct
+lenses — spectral physics, CIE module logic, serialize, duplicated formulas, memory safety,
+and claims-vs-reality — and every candidate was put to two adversarial verifiers instructed
+to REFUTE it, one reproducing the measurement independently and one attacking the reference
+value. 28 candidates, 8 verified, 7 survived, 1 refuted. Every number below was
+re-measured by hand before the repair was written.
+
+### Breaking
+
+- ⛔ **`polarization_circular_right` and `polarization_circular_left` swap sign.** prakash
+  exported **two public "right-circular" constructors that disagreed about the same named
+  state on the same `StokesVector` type**:
+
+  | | before | after |
+  |---|---|---|
+  | `polarization_to_stokes(polarization_circular_right())` | S3 = **-1** | S3 = **+1** |
+  | `stokes_circular_right(1)` | S3 = +1 | S3 = +1 |
+
+  `wave_polarization` was the one that was right: the Stokes convention is universally
+  **S3 > 0 = right-circular**, and this library's own Mueller machinery agrees with it —
+  `mueller_quarter_wave_horizontal()` applied to `stokes_diagonal_plus(1)` yields S3 = -1,
+  the state that convention calls LEFT, which is what `stokes_circular_left` reports. So
+  the Jones constructors in `wave_core` moved, not the Stokes ones.
+  ⚠ **Neither suite could see it.** `tests/wave_core.tcyr` pinned S3 = -1 for "right" and
+  `tests/wave_polarization.tcyr` pinned S3 = +1 for "right" — each self-consistent, both
+  green, across a flat contradiction. A consumer reading circular handedness from
+  `wave_core` gets the opposite sign from 2.4.8 on.
+
+### Fixed
+
+- ⛔ **`coating_reflectance` was missing an entire numerator term.** The single-layer Airy
+  formula is `R = (a²sin²δ + p²cos²δ) / (b²sin²δ + c²cos²δ)`; the code computed the
+  denominator's two terms and **only one of the numerator's**, dropping `p = nc(ni-ns)`.
+  Measured against this file's own 1-layer TMM (MgF2 nc=1.38 quarter-wave on ns=1.52,
+  designed 550 nm): **-60.9% at 400 nm**, -31.6% at 450, -8.0% at 500, **exact at 550**,
+  -17.5% at 650, -29.9% at 700. Degenerate cases are worse than a percentage: a
+  **zero-thickness coating returned 0.0** where the bare substrate reflects 0.042580 — a
+  film of no thickness made the glass perfectly non-reflecting — and so did every
+  half-wave (absentee) thickness. After the repair the two agree **to the last bit at
+  every wavelength**, and t = 0 returns exactly `fresnel_normal`.
+  ⚠ **550 nm is exact because a quarter-wave film has δ = π/2 there**, so cos δ = 0 and
+  the missing term vanishes — and the suite's only cross-check against the TMM sampled
+  **550 nm alone**. Its 400–700 nm sweep asserted only `0 <= R <= 1`, which the truncated
+  formula satisfies everywhere. Third time in the 2.4.x audits that the right instrument
+  was aimed at the one point that could not see the defect.
+- ⛔ **`_cri_cct_refine` returned a clamped bracket endpoint, so Ra was wrong outside
+  ~1630–11850 K.** A golden section cannot find a minimum outside its bracket — it returns
+  the endpoint, silently. The ±3% bracket was sized from a measurement of McCamy's error
+  ("worst 18.6 K at 2000 K, i.e. 0.93%") **taken only where the bracket already works**;
+  McCamy's real error is **+601 K (+50.1%) at 1200 K** and **-5533 K (-22.1%) at 25000 K**.
+  It reaches Ra, because below 5000 K a Planckian radiator IS its own CIE 13.3 reference
+  and must score exactly 100:
+
+  | blackbody | before | after |
+  |---|---|---|
+  | 1000 K | **15.589** | **99.999** |
+  | 1200 K | 63.938 | 100.000 |
+  | 1500 K | 95.300 | 100.000 |
+  | 1600 K | 99.222 | 100.000 |
+  | 1800–4800 K | 100.000 | 100.000 (unchanged) |
+
+  The repair keeps the cheap bracket and **widens it only when the converged point lands on
+  an endpoint**, which is the signal that the minimum is outside. Published Ra for the
+  standard illuminants is unchanged: D65 99.992, A 100.000, F2 64.159, F11 82.834.
+  ⚠ **The invariant that catches this was already in the suite and started at 2000 K** —
+  above every temperature at which the defect appears. Right invariant, wrong sampling.
+- ⛔ **`prescription_from_json`'s documented null crashed all seven of its own consumers.**
+  The decoder is documented to return 0 on malformed input and `tests/hardening.tcyr`
+  asserted exactly that — and nothing in `ray_system.cyr` guarded the handle, so the
+  documented failure path **exited 139**. Reproduced end to end:
+  `prescription_from_json("not json at all", 15, &e)` → 0, then `prescription_len` →
+  SIGSEGV. All seven now guard: `prescription_len`, `prescription_is_empty`,
+  `prescription_with_initial_medium`, `prescription_add_surface`,
+  `prescription_to_trace_surfaces`, `prescription_to_paraxial_surfaces`,
+  `find_system_properties`.
+  ⛔ **And the 2.2.8 repair that fixed this exact defect for `Spd` asserted in its own
+  comment that "null-guarding is already the library-wide convention — ray_core, ray_trace,
+  ray_system and the wave_* accessors all do it".** That was false for `ray_system`: all
+  five `== 0` tests in the file were alloc-result checks. The claim is struck; "the
+  convention covers this" is a thing to CHECK, not to state.
+- ⛔ **`spd_from_function` — `alloc(n * 8)` overflows before alloc sees it.** For large `n`
+  the product wraps, alloc returns a tiny buffer, and the fill loop writes `n` elements
+  through it. The `n < 2` check screened the low end and nothing screened the high end.
+  Measured: `n = 2^61+1` → SIGSEGV; now returns 0 with `PK_ERR_INVALID_PARAMETER`. Same
+  bound and shape as `_pat_dims_bad`, and pinned in `tests/hardening.tcyr` with the **same
+  sentinel value** as the `pattern2d_new` row four releases above it.
+- ⛔ **Four lazy-table consumers indexed an unguarded table.** The 2.3.8 sweep taught the
+  builders to return 0 on allocation failure and guarded some callers; it missed
+  `luminous_efficacy` (whose two siblings *both* carry the guard), `_cri_band_delta`,
+  `_cri_tcs_xyz` and `_cri_planck_uv2`. Each is the SIGSEGV that sweep existed to remove.
+
+### Added
+
+- **`tests/wave_diffraction.tcyr`** — `coating_reflectance` vs the 1-layer TMM at **13
+  wavelengths across 400–700 nm** at 1e-6 instead of one at 550 nm, plus the three
+  degenerate thicknesses (0, half-wave, full-wave) that must all equal the bare substrate.
+  Mutation-checked: restoring the truncated numerator fails 6 assertions.
+- **`tests/spectral_cie.tcyr`** — the Planckian Ra = 100 invariant extended **down to
+  1000 K** in 100 K steps, below the 2000 K floor that hid the clamp. Mutation-checked:
+  reverting to the fixed ±3% bracket fails it.
+- **`tests/wave_core.tcyr`** — ⭐ the cross-module handedness binding, whose absence *was*
+  the defect: Jones and Stokes must agree on S3 for both circular states, and the
+  quarter-wave plate is asserted as the third opinion.
+- **`tests/hardening.tcyr`** — the `spd_from_function` overflow row and all seven
+  Prescription null-handle rows; every one of the eight crashed before this release.
+
+### Not exposed — what the sweep verified clean
+
+- **spectral_core / photometry physics**: Planck's radiation constants, Wien's
+  displacement, photon energy, `K_m` = 683, and the V(λ) table checked element-wise
+  against the CIE ȳ table (they are the same function — a two-implementations check).
+- **CIE module logic** beyond the CCT defect: Ra for the standard illuminants against
+  published values (D65 → 99.992, A → 100.000, F2 → 64.159 vs ~64, F11 → 82.834 vs ~83),
+  xyY round-trip, observer dispatch.
+- **serialize**: the seven wire formats round-trip, and the one candidate defect raised
+  against `lens_type_to_json` was **refuted** on verification.
+- **The duplicate-formula sweep** cleared every other pair it examined, including the two
+  independent Rayleigh phase functions in `atmosphere` and `pbr_advanced` and the six
+  per-module epsilon constants.
+
+### Deferred — filed with evidence, not fixed
+
+Twenty lower-severity findings passed through unverified and are recorded in
+`docs/development/roadmap.md` rather than repaired here. The substantive clusters: the
+null-handle sweep finished above for `Prescription` has the **same shape for the Rgb/Xyz,
+Medium, Polarization, Stokes, Sellmeier and Zernike decoder families** and for `ai.cyr`'s
+two encoders; the photopic V(λ) table and `planck_radiance` have **no absolute value pin**
+anywhere in the suite; and several shipped comments carry measurements taken against
+superseded code. Each is a bite, and batching them into a release that already changes a
+public sign would be exactly the "never batch large items" mistake CLAUDE.md names.
+
+### Performance
+
+**No change is claimed, and the one path that could have regressed was measured rather
+than argued.** The CCT repair adds a widening loop, so the question is whether the common
+path got slower. Counted directly by instrumenting `_cri_locus_dist2` in a copy of the
+tree: **D65, F2 and illuminant A each take exactly 24 locus evaluations, the same 24 as
+before** — the widening costs nothing unless it fires, and it fires only outside
+1630–11850 K, which no benchmark uses (1000 K takes 72). 138 rows read median **+3.48%**,
+mean +3.45%; `spectral/color_rendering_index` moved +5.7% and `spectral/cri_special` +2.3%,
+both inside a suite-wide shift of that size on a box whose state moved between runs.
+
 ## [2.4.7] - 2026-09-22 — the wave and ray constants hold up; the documentation had drifted for four releases
 
 Wave and ray constants audited, and then the whole documentation surface re-measured

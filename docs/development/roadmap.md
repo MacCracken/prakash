@@ -23,16 +23,17 @@ Prakash does NOT own:
 
 ## Open work at a glance
 
-**12 items. ⭐ Nothing is scheduled. Every item is demand-gated or waiting on a consumer —
-build one only when someone asks for it.**
+**13 items. ⭐ Item 1 is a filed defect backlog from the 2.4.8 audit and can ship in any
+patch; the rest are demand-gated or waiting on a consumer.**
 
 | # | Bucket | Item | State |
 |---|---|---|---|
-| 1–6 | 2.x | GRIN, DOE, Richards-Wolf, HG/LG beams, Buchdahl, aberrated MTF | demand-gated |
-| 7–11 | 2.x | Fluorescence, non-linear, OAM, metamaterials, CIE 2006 observer | demand-gated |
-| 12 | Blocked | soorat / kiran / ranga consume `dist/prakash.cyr` | waiting on the consumers |
+| 1 | 2.4.x patch | 20 findings from the 2.4.8 audit, filed with evidence, unverified | open — see below |
+| 2–7 | 2.x | GRIN, DOE, Richards-Wolf, HG/LG beams, Buchdahl, aberrated MTF | demand-gated |
+| 8–12 | 2.x | Fluorescence, non-linear, OAM, metamaterials, CIE 2006 observer | demand-gated |
+| 13 | Blocked | soorat / kiran / ranga consume `dist/prakash.cyr` | waiting on the consumers |
 
-⚠ **Items 1–11 are not a backlog anyone is working through.** Each is a subsystem,
+⚠ **Items 2–12 are not a backlog anyone is working through.** Each is a subsystem,
 listed so the scope boundary stays visible. Do not start one without a consumer
 asking for it.
 
@@ -56,6 +57,105 @@ promises it will not force a minor bump. Reshuffling is free by construction.
 what the work is and what would block it. Measurements belong in `CHANGELOG.md`;
 a row that grows past ~8 lines has started duplicating the release history and
 should be cut back.
+
+## 2.4.x — patch: no public API moves
+
+- [ ] **The 2.4.8 audit's 20 lower-severity findings.** A 23-agent adversarial sweep
+  verified 8 findings and repaired 6 (see the [2.4.8] CHANGELOG entry). These 20 ranked
+  below the verification cut and are recorded **unverified** — each carries the finder's
+  evidence and none has been independently reproduced, so confirm before repairing.
+  ⚠ They are NOT one bite. The clusters below are separable and CLAUDE.md's sizing rule
+  says not to batch them.
+
+  - **Rgb/Xyz accessor family dereferences the documented 0 from rgb_from_json** (`src/spectral_core.cyr`) —
+    MEASURED, exit 139. `rgb_from_json` is documented to return 0 and tests/hardening.tcyr:270-272 pins three
+    ways of getting it. Probe /tmp/pkprobe/chain2.cyr: `var c = rgb_from_json("{\"r\":\"x\"}", 9, &e);` -> c
+    == 0 (printed), then `rgb_to_
+  - **Medium / Polarization / Stokes / Sellmeier / Zernike consumers dereference documented 0 sentinels**
+    (`src/ray_core.cyr`) — MEASURED, exit 139 on every one (probes /tmp/pkprobe/chain3-5.cyr and u1-u11.cyr).
+    Three reachable chains, each starting from a 0 the library itself documents: (1) `medium_custom(0.5,
+    "bad", &e)` returns 0 with PK_ERR_INVALID_INDEX per ray_
+  - **ai.cyr's two JSON encoders were left out of the 2.2.7 encode-side null sweep** (`src/ai.cyr`) —
+    MEASURED, exit 139. Probe /tmp/pkprobe/ai1.cyr: `var c = ai_daimon_config_from_json("not json", 8, &e);`
+    -> c == 0 (printed; ai.cyr:130-131 documents that return), then `ai_daimon_config_to_json(c)` -> exit=139,
+    because line 118 does `str_f
+  - **The photopic V(λ) table has zero value pins — a 3.4% corruption passes the whole suite**
+    (`tests/spectral_photometry.tcyr`) — The photopic table's entire coverage is two assertions:
+    `_assert_near(_vl(vp, 35), F64_ONE, TOL6, "photopic V peaks 1.0 at 555nm")` (line 27) and an 81-iteration
+    `_in_range(_vl(vp, pi), Z, F64_ONE)` loop (line 30). Not one of the 81 values
+  - **planck_radiance has no absolute-value pin anywhere — c1 = 2hc² is unconstrained by the test suite**
+    (`tests/spectral_core.tcyr`) — Every assertion in the `blackbody` group (tests/spectral_core.tcyr lines
+    121-155) is either scale-invariant or sign-only: `planck positive`, `peak > shorter`, `peak > longer`,
+    `hotter more radiance`, `T=0 gives 0`, `T<0 gives 0`, `extreme l
+  - **The Planckian Ra = 100 invariant loop samples only 2000–4800 K — exactly the window where the CCT clamp
+    above does not bite** (`tests/spectral_cie.tcyr`) — `for (var _bb = 2000; _bb <= 4800; _bb = _bb + 400)`
+    asserts Ra(spd_blackbody(T)) = 100 to 1e-3. The invariant is exactly right and the tolerance is tight; the
+    SAMPLE RANGE is the problem. Measured Ra at the untested points of the same inva
+  - **The negative-zero wire-format pin tests +0.0, and the behaviour it documents is the opposite of what
+    bayan actually does** (`tests/serialize.tcyr`) — Two measurements (/tmp/prkaudit/p2.cyr,
+    /tmp/prkaudit/p3.cyr). (1) `f64_neg(f64_from(0))` returns bits 0x0, i.e. POSITIVE zero — so line 233
+    stores +0.0 and the assertion at 235-237 pins nothing about a signed zero. (2) With the real bit pa
+  - **spectral_band_similarity's doc table publishes pre-2.2.7 measurements for F2 and F11; both numbers are
+    stale by ~1.1 and ~1.7 points, and the pin the test file claims exists was never written**
+    (`src/spectral_cie.cyr`) — The table at lines 1938-1943 is headed "Measured against published Ra" and
+    gives the CURRENT output of this metric as F2 98.289 and F11 92.001. MEASURED with the shipped CIE 15:2004
+    tables: spectral_band_similarity(illuminant_f2()) = 97.196
+  - **The paragraph above _cri_cct_refine still documents the superseded search (40 ternary iterations, ±8%
+    bracket) that the code beneath it replaced** (`src/spectral_cie.cyr`) — Lines 3209-3211 read "40 ternary
+    iterations over a +/-8% bracket close the seed error to well under 0.01 K". The code at 3218-3243 is a
+    22-step golden-section over a ±3% bracket (`_cie_r(97, 100)` / `_cie_r(103, 100)`, `for (var it = 0; it
+  - **The "floats survive a to_json/from_json cycle BIT-EXACTLY" claim is false; bayan's decimal->f64 parser
+    loses 1 ULP on ~1 in 38,000 finite doubles** (`src/serialize.cyr`) — Measured (/tmp/prkaudit/p7.cyr):
+    499,748 random finite doubles encoded with the module's own path and decoded with rgb_from_json -> 13
+    values came back with different bits, all exactly +/-1 ULP (e.g. json=6.28282780197287e+197, in=0x6900cf5
+  - **pbr_split_sum_scale_bias's accuracy table was measured against the pre-2.2.8 (energy-gaining) LUT and is
+    wrong by up to 3.1x — including understating the bias error a consumer would size against**
+    (`src/pbr_advanced.cyr`) — Comment claims (measured against pbr_integrate_brdf_lut over an 11x10 grid):
+    `Karis: scale max err 0.5547, mean 0.1275 | bias max 0.0861, mean 0.0130`, and at line 368 `worst point r
+    = 0.6, n.v = 0.1, where the integral is 1.158 and the fit
+  - **src/error.cyr's math-shim tables describe a toolchain two minor versions old — 4 of the 5 divergences
+    they document are closed, and the file ships verbatim in both dist/ bundles** (`src/error.cyr`) — Two
+    present-tense claim blocks, both false on the pinned cyrius 6.6.6 / ganita 1.2.6 (measured with
+    /tmp/pk_probe2.cyr, /tmp/pk_probe3.cyr, raw bits):
+
+(a) Lines 155-166, `WHAT THIS DOES NOT FIX — the three remaining divergent rows`:
+    cl
+  - **docs/guides/allocation.md's per-call byte table understates medium_to_json by 12% and spd_to_json by up
+    to 2.2x — the two numbers a consumer sizes JSON output from** (`docs/guides/allocation.md`) — Measured
+    with alloc_used() deltas, caches warm, pre-built handles (/tmp/pk_probe8.cyr, /tmp/pk_probe7.cyr) — same
+    method the table states:
+  rgb_to_json               doc 136   measured 136  (control: the method reproduces)
+  medium_to_json
+  - **The independent textbook check on the Seidel bracket quotes 1.0162 for n = 1.7; 2(n^2-1)/(n+2) is 1.0216
+    and the shipped code measures 1.022** (`src/lens.cyr`) — src/lens.cyr:349-352 presents the best-form
+    singlet argmin as the INDEPENDENT check that replaced 2.2.6's self-referential one: 'the textbook
+    best-form singlet at p = -1, argmin q = 2(n^2-1)/(n+2): 0.7143 at n = 1.5, 0.8667 at 1.6, 1.0162 a
+  - **wavelength_to_rgb returns a null handle with err_out = PK_ERR_NONE when rgb_new's allocation fails**
+    (`src/spectral_core.cyr`) — `wavelength_to_rgb` stores `PK_ERR_NONE` into `err_out` at entry (line 112)
+    and its success path ends `return rgb_new(f64_mul(r, factor), ...)` (line 163). `rgb_new` returns 0 when
+    `alloc(sizeof(Rgb))` fails (line 45: `if (c == 0) { return
+  - **_cri_context builds a full D-series reference SPD then discards it for every source below 5000 K — 680
+    of the 2240 bytes a CRI call burns on a never-freeing allocator** (`src/spectral_cie.cyr`) — `var ref_spd
+    = _cri_d_illuminant(t_cct); if (t_cct < 5000) { ref_spd = spd_blackbody(t_cct); }` — the D-series
+    reconstruction (81 S0/S1/S2 basis mixes plus an allocation) runs unconditionally and is overwritten for
+    every warm source, which
+  - **A NaN surface radius is silently laundered into a valid flat surface (+inf) by the prescription round
+    trip** (`src/serialize.cyr`) — Measured (/tmp/prkaudit/p5.cyr): a PrescriptionSurface with radius =
+    0x7FF8000000000000 (NaN) encodes to {"name":"nanr","surfaces":[{"radius":null,...}],...} and decodes back
+    to radius bits 0x7ff0000000000000 — +infinity, i.e. a legitimate
+  - **A zero-length Spd encodes successfully but its own decoder rejects the result** (`src/serialize.cyr`) —
+    Measured (/tmp/prkaudit/p10.cyr): spd_to_json on an Spd with len = 0 emits
+    {"start_nm":380.0,"step_nm":5.0,"values":[]}, and feeding those exact bytes to spd_from_json returns 0
+    with err = -7 (PK_ERR_INVALID_PARAMETER), because of the `if (
+  - **pbr_distribution_ggx_aniso keeps the denominator epsilon that was removed from the isotropic GGX, so the
+    two disagree below roughness 1e-3** (`src/pbr_advanced.cyr`) — At ax = ay and h_dot_x = h_dot_y = 0 the
+    anisotropic GGX reduces analytically to the isotropic one exactly (the algebra cancels to
+    a2/(pi*(ndh^2(a2-1)+1)^2)), so any difference is implementation, not physics. Measured ratio aniso/iso at
+    n_d
+  - **Two call-site counts in shipped comments are stale: '_prk_pow ... other seven call sites' is 10, and
+    '_pbr_eps15 ... called from eight sites' is 13** (`src/error.cyr`) — src/error.cyr:152 ('The other seven
+    `_prk_pow` call sites pass a finite constant exponent and cannot reach here'): `grep -rn '_prk_pow('
+    src/*.cyr` excluding the definition and comment lines gives 12 call sites — atmosphere.cyr:157, bridge.
 
 ## 2.x — demand-gated: build when a consumer asks
 
@@ -104,6 +204,26 @@ someone needs it; all are listed so the scope boundary stays visible.
   does — one cell, in an otherwise correct five-row table. A table of measurements earns
   trust that prose does not, so a wrong cell in one is worse than a vague sentence.
   Re-run the numbers a comment states when you touch the function.
+- ⛔ **Two public functions that name the same state must be asserted against EACH
+  OTHER, or they will contradict each other and both suites will stay green.** 2.4.8
+  found `polarization_circular_right` (Jones, S3 = -1) and `stokes_circular_right`
+  (Stokes, S3 = +1) disagreeing on the same `StokesVector` type. Each suite pinned its
+  own side; 31 suites passed over a flat contradiction. When a second constructor for
+  a named quantity appears, the cross-module assertion is part of the work.
+- ⛔ **A documented null return is only safe if its CONSUMERS guard it — sweep by
+  family, and do not take a previous sweep's word.** 2.2.8 guarded the `Spd` family
+  and its own comment asserted null-guarding was "already the library-wide convention
+  — ray_core, ray_trace, ray_system and the wave_* accessors all do it". It was false
+  of `ray_system`: all seven Prescription consumers exited 139 on
+  `prescription_from_json`'s documented 0. **The remaining decoder families (Rgb/Xyz,
+  Medium, Polarization, Stokes, Sellmeier, Zernike, and ai.cyr's encoders) are filed
+  above and have not been checked.**
+- ⚠ **Sizing a numerical window from a measurement taken INSIDE that window proves
+  nothing.** `_cri_cct_refine`'s ±3% bracket was justified by "McCamy's error, worst
+  18.6 K at 2000 K, i.e. 0.93%" — measured only where the bracket already worked.
+  McCamy is +50.1% out at 1200 K. A golden section then returns its endpoint silently,
+  and Ra fell to 15.6 for a 1000 K blackbody that must score 100. Measure a tolerance
+  across the DOMAIN it will be used on, including both edges.
 - ⛔ **When one quantity is computed in two places, a repair to one does not reach the
   other — and nothing will tell you.** 2.4.6 found `lens_longitudinal_spherical_aberration`
   still carrying BOTH halves of the defect 2.2.6 repaired in `lens_seidel_coefficients`

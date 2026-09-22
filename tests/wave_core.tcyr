@@ -6,6 +6,7 @@
 
 include "src/error.cyr"
 include "src/wave_core.cyr"
+include "src/wave_polarization.cyr"
 
 fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
 fn _near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
@@ -130,10 +131,10 @@ assert(f64_lt(polarization_through_polarizer(polarization_horizontal(), F64_PI_2
 
 var pcr = polarization_circular_right();
 _assert_near(polarization_intensity(pcr), F64_ONE, TOL6, "circular right intensity 1");
-_assert_near(Polarization_phase(pcr), f64_neg(F64_PI_2), TOL6, "circular right phase -pi/2");
+_assert_near(Polarization_phase(pcr), F64_PI_2, TOL6, "circular right phase +pi/2 (2.4.8: was -pi/2)");
 var pcl = polarization_circular_left();
 _assert_near(polarization_intensity(pcl), F64_ONE, TOL6, "circular left intensity 1");
-_assert_near(Polarization_phase(pcl), F64_PI_2, TOL6, "circular left phase pi/2");
+_assert_near(Polarization_phase(pcl), f64_neg(F64_PI_2), TOL6, "circular left phase -pi/2 (2.4.8: was +pi/2)");
 
 # ── Jones -> Stokes ────────
 test_group("jones_stokes");
@@ -154,13 +155,33 @@ var scr = polarization_to_stokes(polarization_circular_right());
 _assert_near(StokesVector_s0(scr), F64_ONE, TOL6, "circular right S0 = 1");
 _assert_near(StokesVector_s1(scr), Z, TOL6, "circular right S1 = 0");
 _assert_near(StokesVector_s2(scr), Z, TOL6, "circular right S2 = 0");
-_assert_near(StokesVector_s3(scr), f64_neg(F64_ONE), TOL_01, "circular right S3 = -1");
+_assert_near(StokesVector_s3(scr), F64_ONE, TOL_01, "circular right S3 = +1 (2.4.8: was -1)");
 
 var scl = polarization_to_stokes(polarization_circular_left());
 _assert_near(StokesVector_s0(scl), F64_ONE, TOL6, "circular left S0 = 1");
 _assert_near(StokesVector_s1(scl), Z, TOL6, "circular left S1 = 0");
 _assert_near(StokesVector_s2(scl), Z, TOL6, "circular left S2 = 0");
-_assert_near(StokesVector_s3(scl), F64_ONE, TOL_01, "circular left S3 = +1");
+_assert_near(StokesVector_s3(scl), f64_neg(F64_ONE), TOL_01, "circular left S3 = -1 (2.4.8: was +1)");
+
+# ⭐ THE CROSS-MODULE BINDING, ABSENT UNTIL 2.4.8 — AND ITS ABSENCE IS THE WHOLE
+# DEFECT. wave_core builds circular states from Jones amplitudes and phase;
+# wave_polarization builds them directly as Stokes vectors. Both are public, both
+# name the same states, both return the SAME StokesVector type — and until 2.4.8
+# they disagreed about the sign of S3 for every one of them. Each suite pinned its
+# own side (this file asserted right = -1, tests/wave_polarization.tcyr asserted
+# right = +1), both passed, and all 31 suites were green over a contradiction.
+# Two implementations of one quantity must be asserted against EACH OTHER.
+var _xr = polarization_to_stokes(polarization_circular_right());
+var _xl = polarization_to_stokes(polarization_circular_left());
+_assert_near(StokesVector_s3(_xr), StokesVector_s3(stokes_circular_right(F64_ONE)), TOL_01,
+  "Jones and Stokes agree on RIGHT-circular handedness");
+_assert_near(StokesVector_s3(_xl), StokesVector_s3(stokes_circular_left(F64_ONE)), TOL_01,
+  "Jones and Stokes agree on LEFT-circular handedness");
+# And the library's own Mueller machinery is the third opinion: a quarter-wave plate
+# on +45 linear produces the state the Stokes convention calls LEFT-circular.
+_assert_near(StokesVector_s3(mueller_apply(mueller_quarter_wave_horizontal(), stokes_diagonal_plus(F64_ONE))),
+  StokesVector_s3(stokes_circular_left(F64_ONE)), TOL_01,
+  "the quarter-wave plate agrees with stokes_circular_left");
 
 var pgen = polarization_new(_fd(8, 10), _fd(6, 10), _fd(5, 10));
 _assert_near(StokesVector_s0(polarization_to_stokes(pgen)), polarization_intensity(pgen), TOL6, "S0 = intensity");

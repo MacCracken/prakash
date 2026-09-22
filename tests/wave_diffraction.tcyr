@@ -159,6 +159,7 @@ var N152 = _fd(152, 100);   # 1.52 glass
 var N138 = _fd(138, 100);   # 1.38 MgF2
 var N210 = _fd(21, 10);     # 2.1 ZrO2
 var TOL3 = _fd(1, 1000);    # 0.001
+var TOL6 = _fd(1, 1000000);  # 1e-6 (2.4.8: the coating-vs-TMM pins below)
 var TOL4 = _fd(1, 10000);   # 1e-4 — 2.2.7 multilayer value pins
 
 # air->glass: sqrt(1*1.52) ~ 1.233
@@ -203,6 +204,32 @@ store64(lay1 + 8, d_qw);
 var r_single = coating_reflectance(f64_from(550), F64_ONE, N138, N152, d_qw);
 var r_multi = multilayer_reflectance(f64_from(550), F64_ONE, N152, lay1, 1);
 _assert_near(r_single, r_multi, TOL3, "single layer matches coating");
+
+# ⭐ ACROSS THE BAND, NOT AT ONE WAVELENGTH — this is the pin that finds the 2.4.8
+# defect. `coating_reflectance` and the 1-layer TMM are two implementations of one
+# quantity, so they must agree everywhere, not at the design point. The assertion
+# above sampled **550 nm only**, which for a quarter-wave film is exactly where
+# delta = pi/2 and cos(delta) = 0 — the one wavelength in the band at which the
+# missing cos^2 numerator term vanishes. The pre-2.4.8 code was 61% low at 400 nm
+# and exact at 550. (2.4.8)
+for (var cw = 400; cw <= 700; cw = cw + 25) {
+    var rc_c = coating_reflectance(f64_from(cw), F64_ONE, N138, N152, d_qw);
+    var rc_m = multilayer_reflectance(f64_from(cw), F64_ONE, N152, lay1, 1);
+    _assert_near(rc_c, rc_m, TOL6, "coating == 1-layer TMM across 400-700nm");
+}
+# ⭐ AND THE DEGENERATE CASES, which are the ones a percentage error hides. A film
+# of zero thickness is not a film: R must be the bare-substrate Fresnel value, not
+# zero. Same for every half-wave (absentee-layer) thickness. Pre-2.4.8 all three
+# returned 0.0 — a coating that made the glass perfectly non-reflecting.
+var r_bare_exp = f64_div(
+  f64_mul(f64_sub(F64_ONE, N152), f64_sub(F64_ONE, N152)),
+  f64_mul(f64_add(F64_ONE, N152), f64_add(F64_ONE, N152)));
+_assert_near(coating_reflectance(f64_from(550), F64_ONE, N138, N152, Z), r_bare_exp, TOL6,
+  "zero-thickness coating = bare substrate, not 0");
+_assert_near(coating_reflectance(f64_from(550), F64_ONE, N138, N152, f64_mul(F64_TWO, d_qw)),
+  r_bare_exp, TOL6, "half-wave (absentee) layer = bare substrate");
+_assert_near(coating_reflectance(f64_from(550), F64_ONE, N138, N152, f64_mul(f64_from(4), d_qw)),
+  r_bare_exp, TOL6, "full-wave layer = bare substrate");
 
 # no layers = bare interface: ((1-1.52)/(1+1.52))^2
 var frac_bare = f64_div(f64_sub(F64_ONE, N152), f64_add(F64_ONE, N152));

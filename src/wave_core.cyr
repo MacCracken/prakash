@@ -135,15 +135,32 @@ fn polarization_horizontal() { return polarization_new(F64_ONE, f64_from(0), f64
 # Linear vertical: ex = 0, ey = 1.
 #must_use
 fn polarization_vertical() { return polarization_new(f64_from(0), F64_ONE, f64_from(0)); }
-# Right-circular: ex = ey = 1/sqrt(2), phase = -pi/2.
+# ⛔ 2.4.8 — BREAKING, AND IT IS A REPAIR OF A CONTRADICTION, NOT A CHANGE OF MIND.
+# These two phases were the wrong way round, so prakash exported TWO public
+# "right circular" constructors that disagreed about the same named state on the
+# same StokesVector type. Measured before:
+#   polarization_to_stokes(polarization_circular_right())  ->  S3 = -1
+#   stokes_circular_right(1)                               ->  S3 = +1
+# and left-circular was the mirror pair. `wave_polarization` is the one that was
+# right: the Stokes convention is universally **S3 > 0 = right-circular**, and this
+# library's own Mueller machinery agrees with it — mueller_quarter_wave_horizontal()
+# applied to stokes_diagonal_plus(1) yields S3 = -1, the state that convention calls
+# LEFT, which is what stokes_circular_left reports. So the Jones constructors here
+# were the outlier and they move, not the Stokes ones.
+# ⚠ NEITHER SUITE COULD SEE IT: tests/wave_core.tcyr pinned S3 = -1 for "right" and
+# tests/wave_polarization.tcyr pinned S3 = +1 for "right", each self-consistent, and
+# all 31 suites were green. The cross-module assertion that now binds them is in
+# tests/wave_core.tcyr. A consumer reading circular handedness from wave_core gets
+# the opposite sign from 2.4.8 on.
+# Right-circular: ex = ey = 1/sqrt(2), phase = +pi/2 (S3 = +1).
 #must_use
 fn polarization_circular_right() {
-    return polarization_new(F64_FRAC_1_SQRT2, F64_FRAC_1_SQRT2, f64_neg(F64_PI_2));
+    return polarization_new(F64_FRAC_1_SQRT2, F64_FRAC_1_SQRT2, F64_PI_2);
 }
-# Left-circular: ex = ey = 1/sqrt(2), phase = +pi/2.
+# Left-circular: ex = ey = 1/sqrt(2), phase = -pi/2 (S3 = -1).
 #must_use
 fn polarization_circular_left() {
-    return polarization_new(F64_FRAC_1_SQRT2, F64_FRAC_1_SQRT2, F64_PI_2);
+    return polarization_new(F64_FRAC_1_SQRT2, F64_FRAC_1_SQRT2, f64_neg(F64_PI_2));
 }
 
 # Intensity after a linear polarizer (Malus): cos^2(theta - pol_angle) * |E|^2.

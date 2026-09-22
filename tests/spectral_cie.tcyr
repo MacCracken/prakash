@@ -410,6 +410,21 @@ for (var _bb = 2000; _bb <= 4800; _bb = _bb + 400) {
     _assert_near(color_rendering_index(spd_blackbody(f64_from(_bb))), f64_from(100), _fd(1, 1000),
       "a Planckian radiator scores exactly Ra = 100 (2.2.7 gave 99.10 at 2000K)");
 }
+# ⛔ 2.4.8: THE LOOP ABOVE STARTS AT 2000 K, AND THAT IS EXACTLY WHY IT COULD NOT
+# SEE THE NEXT DEFECT. The 2.2.8 repair it guards replaced McCamy's raw seed with a
+# golden-section refinement over a +/-3% bracket — and a golden section returns the
+# ENDPOINT when the minimum lies outside its bracket. McCamy's error exceeds 3%
+# below ~1630 K, so the reference CCT was clamped and Ra collapsed:
+# **1000 K -> 15.589**, 1200 K -> 63.938, 1500 K -> 95.300, 1600 K -> 99.222.
+# Every one of those is below the 2000 K floor of the loop above. The invariant was
+# right, the sampling was not — the third time in the 2.4.x audits that a correct
+# instrument was aimed only where the defect is invisible.
+# The domain is [1000, 25000] K (the guards in _cri_cct_refine say so), so the
+# invariant is now asserted from the bottom of it.
+for (var _bblo = 1000; _bblo < 2000; _bblo = _bblo + 100) {
+    _assert_near(color_rendering_index(spd_blackbody(f64_from(_bblo))), f64_from(100), _fd(1, 100),
+      "a Planckian radiator scores Ra = 100 down to 1000 K (2.4.7 gave 15.59 at 1000K)");
+}
 # Illuminant A is a 2856 K Planckian radiator, so the same invariant binds it.
 _assert_near(color_rendering_index(illuminant_a()), f64_from(100), _fd(1, 1000),
   "Ra(A) = 100 to 3 decimals — A is Planckian (2.2.7 gave 99.95)");
