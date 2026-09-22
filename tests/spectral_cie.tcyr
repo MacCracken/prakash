@@ -39,6 +39,47 @@ while (ci < 81) {
     ci = ci + 1;
 }
 
+# ⭐ THE NORMALIZATION — the strongest single check on a CMF table, and the suite had
+# no form of it before 2.4.5. A table that was mis-scaled, truncated or corrupted in
+# bulk passes "non-negative" and passes a single peak value; it cannot pass this.
+# CIE defines the three CMFs to have equal integrals, so at 5 nm sampling over
+# 380-780 nm each column must sum to the same number: 21.3714 for the 1931 observer
+# and 23.33 for the 1964. Equality is the contract; the absolute value is the scale.
+fn _cmf_col_sum(t, col) {
+    var acc = f64_from(0);
+    var i = 0;
+    while (i < 81) {
+        if (col == 0) { acc = f64_add(acc, _cmf_x(t, i)); }
+        if (col == 1) { acc = f64_add(acc, _cmf_y(t, i)); }
+        if (col == 2) { acc = f64_add(acc, _cmf_z(t, i)); }
+        i = i + 1;
+    }
+    return acc;
+}
+var sx31 = _cmf_col_sum(t31, 0);
+var sy31 = _cmf_col_sum(t31, 1);
+var sz31 = _cmf_col_sum(t31, 2);
+_assert_near(sx31, _fd(213714, 10000), TOL_01, "1931 x-bar sums to 21.3714");
+_assert_near(sy31, _fd(213714, 10000), TOL_01, "1931 y-bar sums to 21.3714");
+_assert_near(sz31, _fd(213714, 10000), TOL_01, "1931 z-bar sums to 21.3714");
+# Equal integrals are what make equal-energy illuminant E come out achromatic. This
+# states the same contract as an OUTPUT, which is how a consumer would notice it.
+var _s31 = f64_add(f64_add(sx31, sy31), sz31);
+_assert_near(f64_div(sx31, _s31), _fd(1, 3), TOL3, "1931 equal-energy white x = 1/3");
+_assert_near(f64_div(sy31, _s31), _fd(1, 3), TOL3, "1931 equal-energy white y = 1/3");
+# ⚠ NOT `t64` — that name is already a global at line 252 of this file, and cyrlint's
+# init-order rule caught the collision: this block runs first and would have read a
+# silent zero. (2.4.5)
+var t64norm = cie_1964_table();
+var sx64 = _cmf_col_sum(t64norm, 0);
+var sy64 = _cmf_col_sum(t64norm, 1);
+var sz64 = _cmf_col_sum(t64norm, 2);
+_assert_near(sx64, sy64, TOL_01, "1964 x-bar and y-bar sums agree");
+_assert_near(sz64, sy64, TOL_01, "1964 z-bar and y-bar sums agree");
+var _s64 = f64_add(f64_add(sx64, sy64), sz64);
+_assert_near(f64_div(sx64, _s64), _fd(1, 3), TOL3, "1964 equal-energy white x = 1/3");
+_assert_near(f64_div(sy64, _s64), _fd(1, 3), TOL3, "1964 equal-energy white y = 1/3");
+
 # interpolation at a table point
 var cmf555 = cie_cmf_at(f64_from(555));
 _assert_near(Xyz_x(cmf555), _cmf_x(t31, 35), TOL6, "cmf_at 555 x matches table");

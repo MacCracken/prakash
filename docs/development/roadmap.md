@@ -93,6 +93,20 @@ someone needs it; all are listed so the scope boundary stays visible.
   published fit is not a reason to move public API — measure the merge first. The
   term that cannot be dropped is the **IR** one: absent, it costs ~0.0014 in n and
   17% of the dispersion (that was the pre-2.4.3 defect).
+- ⭐ **A derived constant must be pinned to the RELATIONSHIP it comes from, not only to
+  its output.** 2.4.5 found `_atm_prefactor` and `_atm_n_s` describing air at two
+  different temperatures — each a plausible textbook number, together 12% wrong. The
+  assertion that catches it states that `prefactor*3*N_S^2/(8pi^3)` reproduces
+  `(n^2-1)^2` for the same air. ⚠ It is also the **only** pin that catches all three
+  mutants: reverting `N_S` alone lands 2.9% from the published figure, inside the 3%
+  band a physics assertion can justify. When two constants are derived from one
+  another, pin the derivation.
+- ⚠ **An order-of-magnitude range assertion is not a test of a physical quantity.**
+  The atmosphere suite had 367 assertions and pinned Rayleigh scattering only as
+  `beta > 1e-6 && beta < 1e-4` — two decades wide, so a 12% calibration error passed
+  for the life of the module. Same shape as the too-wide tolerances the 2.4.2-2.4.4
+  dispersion repairs found. A range check earns its place next to a value pin, not
+  instead of one.
 - ⭐ **Two independent models of one material is the sharpest instrument this library
   has, and it must be set to the model error, not to a round number.** prakash carries
   a Sellmeier fit AND a Schott series for N-BK7, and a Cauchy pair AND a Sellmeier fit

@@ -38,6 +38,16 @@ var beta550 = atm_rayleigh_scattering_coefficient(WL);
 assert(f64_gt(beta550, Z), "beta positive");
 assert(f64_gt(beta550, _fd(1, 1000000)), "beta > 1e-6");
 assert(f64_lt(beta550, _fd(1, 10000)), "beta < 1e-4");
+# ⛔ EVERY ASSERTION ABOVE IS AN ORDER-OF-MAGNITUDE RANGE, and that is how a 12%
+# calibration error lived here until 2.4.5: `beta > 1e-6 && beta < 1e-4` spans two
+# decades. These pin the VALUE against published sea-level figures instead.
+# beta_R(550 nm) for standard air is 1.162e-5 /m WITH the King correction; this
+# function is the uncorrected one, so the target is 1.162e-5 / 1.0478 = 1.109e-5.
+# 3% covers the model's fixed-n approximation; the pre-2.4.5 constants were 11.8% out.
+_assert_near(beta550, _fd(1109, 100000000), _fd(333, 1000000000), "beta(550) = 1.109e-5 /m (published, uncorrected)");
+# The same number stated as the repaired model's own output, so a drift in either
+# direction is caught rather than only a drift away from the published figure.
+_assert_near(beta550, _fd(1095660, 100000000000), _fd(1, 100000000), "beta(550) = 1.09566e-5 /m (model)");
 assert(f64_gt(atm_rayleigh_scattering_coefficient(BLUE),
     f64_mul(atm_rayleigh_scattering_coefficient(RED), f64_from(4))), "blue scatters more");
 var beta_sea = atm_rayleigh_scattering_at_altitude(WL, Z);
@@ -107,12 +117,32 @@ assert(f64_lt(atm_air_mass(_rad(30)), atm_air_mass(_rad(60))), "air mass increas
 assert(f64_lt(atm_air_mass(_rad(60)), atm_air_mass(_rad(80))), "air mass increases 60<80");
 
 # ── Optical depth ────────
+# ⭐ THE INVARIANT THAT BROKE, PINNED DIRECTLY. `_atm_prefactor` is
+# (8pi^3/3)*(n^2-1)^2/N_S^2, so prefactor*3*N_S^2/(8pi^3) must reproduce (n^2-1)^2 for
+# the SAME air N_S describes. Through 2.4.4 it did not: the prefactor was built from
+# n at 0 C while N_S was air at ~20 C. Recovering (n^2-1)^2 from the shipped pair and
+# comparing against standard air at 15 C, 550 nm (n = 1.000277824) catches the
+# mismatch at its source rather than 12% downstream in beta. (2.4.5)
+var _n_std = _fd(1000277824, 1000000000);
+var _n2m1 = f64_sub(f64_mul(_n_std, _n_std), F64_ONE);
+var _recovered = f64_div(
+  f64_mul(f64_mul(atm_rayleigh_cross_section(F64_ONE), f64_from(3)),
+    f64_mul(_atm_n_s(), _atm_n_s())),
+  f64_mul(f64_from(8), f64_mul(F64_PI, f64_mul(F64_PI, F64_PI))));
+_assert_near(f64_div(_recovered, f64_mul(_n2m1, _n2m1)), F64_ONE, _fd(1, 10000),
+  "prefactor and N_S describe the same air");
+
 test_group("optical_depth");
 
 var tau_r = atm_optical_depth_rayleigh(WL);
 assert(f64_gt(tau_r, Z), "tau_r positive");
 assert(f64_gt(tau_r, _fd(5, 100)), "tau_r > 0.05");
 assert(f64_lt(tau_r, _fd(2, 10)), "tau_r < 0.2");
+# Hansen & Travis (1974): tau_R(lambda) = 0.008569*l^-4*(1 + 0.0113*l^-2 + 0.00013*l^-4),
+# l in um, which gives 0.09730 at 550 nm WITH the King correction -> 0.09286 without.
+# The pre-2.4.5 constants gave 0.10536, 13.5% high and comfortably inside the
+# `> 0.05 && < 0.2` band above. (2.4.5)
+_assert_near(tau_r, _fd(9286, 100000), _fd(3, 1000), "tau_R(550) = 0.09286 (Hansen & Travis, uncorrected)");
 assert(f64_gt(atm_optical_depth_rayleigh(BLUE), atm_optical_depth_rayleigh(RED)), "tau blue > red");
 assert(f64_gt(atm_optical_depth_mie(), Z), "tau_m positive");
 
@@ -264,6 +294,12 @@ for (var wl = 400; wl <= 700; wl = wl + 50) {
     assert(f64_lt(f64_abs(f64_sub(fk, _fd(1048, 1000))), _fd(1, 100)), "king factor ~ 1.048");
 }
 assert(f64_gt(atm_king_factor(WL), F64_ONE), "king factor > 1");
+# ⚠ Checked at 2.4.5 and left alone. Bodhaine et al. (1999) give F_K(air, 550 nm) =
+# 1.0478; this module's rho_n = 0.0279 + 0.000174/l^2 yields 1.04909, +0.12%. The
+# 0.000174 wavelength term could not be verified against a primary source, and the
+# discrepancy is 100x smaller than the constant defect 2.4.5 repaired, so the formula
+# stands and the disagreement is pinned rather than hidden.
+_assert_near(atm_king_factor(WL), _fd(104909, 100000), _fd(1, 10000), "king factor(550) = 1.04909 (published 1.0478)");
 var sig_u = atm_rayleigh_cross_section(WL);
 var sig_c = atm_rayleigh_cross_section_corrected(WL);
 assert(f64_gt(sig_c, sig_u), "corrected > uncorrected");

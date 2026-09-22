@@ -2,6 +2,119 @@
 
 ## [Unreleased]
 
+## [2.4.5] - 2026-09-22 — the atmosphere used two different airs in one formula; the CIE tables came through clean
+
+Both modules audited against published references. **CIE passes on every check made** and
+gains the pins those checks imply. **Atmosphere had one real defect**, and it is the kind
+that no plausibility reading finds: `_atm_prefactor` and `_atm_n_s` each looked like a
+textbook number, and they described air at two different temperatures. Suite **6713 → 6727
+assertions across 31 suites** (`atmosphere` 367 → 378, `spectral_cie` 1313 → 1322), 0
+failed. Reference coverage **414/414**. `cyrius audit` exits 0; fmt, lint, `doc --check`,
+vet, deny clean; `deps --verify` 112/112; `#must_use` 428, 0 lost. No toolchain or
+dependency change.
+
+### Fixed
+
+- ⛔ **`src/atmosphere.cyr` — the Rayleigh constants described air at two temperatures,
+  and the formula squares one against the other.** `_atm_prefactor` is
+  `(8pi^3/3)(n^2-1)^2/N_S^2`, built from **n_air = 1.000293** — the textbook index of air
+  at **0 C**. `_atm_n_s` was **2.504e25 m^-3**, which is air at about **20 C**. Because
+  `(n-1)` is proportional to number density, the two do not cancel, they compound. Both are
+  now standard air (**15 C, 101.325 kPa**), the condition every published sea-level figure
+  is quoted at.
+
+  | at 550 nm | before | after | published |
+  |---|---|---|---|
+  | beta_R (uncorrected) | 1.2395e-5 /m | **1.0957e-5 /m** | 1.109e-5 (= 1.162e-5 / F_K) |
+  | tau_R (uncorrected) | 0.10536 | **0.09313** | 0.09286 (Hansen & Travis / F_K) |
+  | error vs published | **+11.8% / +13.5%** | **-1.2% / +0.3%** | — |
+
+  Across the visible the repair moves the error from **+9.6% at 400 nm … +15.2% at 700 nm**
+  to **-3.1% … +1.8%**. ⚠ The remaining residual is the model's own approximation, not a
+  defect: the prefactor is wavelength-independent by construction while air's `(n-1)` varies
+  about 2% across the band, so one `n` has to be chosen — 550 nm, because that is where
+  published Rayleigh coefficients are quoted. Said at the constant so it is not "fixed"
+  later.
+  ⚠ **Nothing in the suite could have caught this.** Every atmosphere assertion touching
+  these quantities was an order-of-magnitude range: `beta > 1e-6 && beta < 1e-4` spans two
+  decades, `tau_r > 0.05 && tau_r < 0.2` spans four-fold. A 12% error is invisible to a
+  range that wide, and 367 assertions passed over it.
+
+### Added
+
+- **`tests/atmosphere.tcyr` — 11 assertions (367 → 378).** `beta_R(550)` and `tau_R(550)`
+  pinned against published figures at 3%, and `beta` additionally pinned at 1e-8 against
+  the repaired model's own output so drift is caught in either direction; the King factor
+  pinned at its computed 1.04909.
+- ⭐ **The invariant that actually broke, pinned at its source.** `prefactor * 3 * N_S^2 /
+  (8pi^3)` must reproduce `(n^2-1)^2` for the same air `N_S` describes. That single
+  assertion states the relationship the two constants have to satisfy, rather than waiting
+  to see it 12% downstream in beta.
+  ⚠ **And it is the only pin that catches every mutant.** Reverting `N_S` alone (leaving
+  the 15 C prefactor) puts beta 2.9% from published — **inside** the 3% band the published
+  pin uses — so that mutant passes the physics assertion and fails only the invariant.
+  Measured, not assumed: three mutants run, 4 / 2 / 4 failures, and the invariant is in all
+  three.
+- **`tests/spectral_cie.tcyr` — 9 assertions (1313 → 1322): the CMF normalization, which
+  the suite had no form of.** CIE defines the three colour-matching functions to have equal
+  integrals; at 5 nm over 380-780 nm each column of the 1931 table must sum to **21.3714**,
+  and the 1964 columns must agree with each other. A table mis-scaled, truncated or
+  corrupted in bulk passes "non-negative" and passes a single peak value, and cannot pass
+  this. The same contract is also stated as an output — equal-energy illuminant E must come
+  out at x = y = 1/3 — because that is how a consumer would notice it.
+- ⚠ **`cyrlint` caught a silent-zero collision in the new CIE test code**: the block uses
+  `cie_1964_table()` near the top of the file, and `t64` is already a global at line 252,
+  so the name would have read zero at init. Renamed `t64norm`; the reason is in the file.
+
+### Not exposed — the CIE audit, which found nothing to repair
+
+Every figure below was recomputed from the shipped tables, not read off a comment.
+
+- **CMF tables**: 1931 columns sum to **21.3716 / 21.3713 / 21.3715** (published 21.3714),
+  y-bar peaks at exactly **1.0000 at 555 nm**, and equal-energy white lands on
+  **0.33333, 0.33333**. The 1964, 2015 2-degree and 2015 10-degree tables are internally
+  consistent on the same tests (sums 23.33, 22.61, 23.70; peaks 0.9991 / 0.9995 / 0.9998 at
+  555 nm, all correct for their sampling).
+- **Illuminant chromaticities**, integrated against the shipped 1931 table: D65
+  **(0.31272, 0.32903)** — exact to five decimals; D50 (0.34568, 0.35851) vs published
+  (0.34567, 0.35850); F2 (0.37207, 0.37512) vs (0.37208, 0.37529); F11 (0.38054, 0.37691)
+  vs (0.38052, 0.37713). Worst deviation **2.2e-4**, in F11's y. The 2.2.7 repair of F2 and
+  F11 holds.
+- **White points** `xyz_d65_white` (0.95047, 1, 1.08883) and `xyz_d50_white`
+  (0.96422, 1, 0.82521) are the published values exactly.
+- **The sRGB matrix** matches IEC 61966-2-1 row for row, and — the check worth making —
+  maps the D65 white point to linear RGB **(1.000000, 1.000000, 1.000000)**.
+- **sRGB transfer constants** 0.0031308 / 12.92 / 1.055 / 0.055 / 2.4 are exact, and the
+  two branches agree at the join to 3e-8 (12.92 x 0.0031308 = 0.04044994 against
+  1.055 x 0.0031308^(1/2.4) - 0.055 = 0.04044991).
+
+### Not exposed — the rest of the atmosphere module
+
+- **Kasten & Young (1989) air mass**: constants 0.50572 / 96.07995 / -1.6364 are exact, and
+  the function returns **1.00000 at the zenith and 37.920 at the horizon**, the published
+  horizon value.
+- **Rayleigh phase** `3(1+cos^2)/(16pi)` and **Cornette-Shanks** are the standard normalized
+  forms; the suite already integrates the Rayleigh phase to 1.
+- **Mie constants** (beta_M 21e-6 /m, H_M 1200 m, g 0.76) and **H_R 8500 m** are the
+  conventional sky-model values from the graphics literature rather than measurements, and
+  are left as they are — they are a modelling choice, not a physical constant.
+- ⚠ **The King factor is 0.12% high and is NOT repaired.** `rho_n = 0.0279 + 0.000174/l^2`
+  gives F_K(550) = **1.04909** where Bodhaine et al. (1999) give **1.0478**. The constant
+  term alone (0.0279) would give 1.04806, which is closer — but the 0.000174 wavelength
+  coefficient could not be verified against a primary source, and changing a formula because
+  removing a term happens to improve one wavelength is fitting, not correcting. The
+  disagreement is now pinned in the suite at its computed value with the published figure
+  named beside it, so it is recorded rather than hidden.
+
+### Performance
+
+**No change is claimed.** Two constants; the arithmetic is unchanged. 138 rows: median
+**+0.00%**, mean -0.79%, 3 rows past +/-10%. The atmosphere rows are flat — the five that
+consume the repaired constants directly (`rayleigh_cross_section`,
+`rayleigh_scattering_coefficient`, `optical_depth_rayleigh`, `king_factor`,
+`mie_phase_cornette_shanks`) all read **+0.0%**, and `sky_color_rgb`'s +4.2% is a 35 ns move
+on an 826 ns row with no reachable change behind it.
+
 ## [2.4.4] - 2026-09-22 — the coefficient sweep the SF11 typo turned into: two more real defects, and the cross-check that could have caught one all along
 
 What started as a one-digit fidelity repair became a full re-derivation of every dispersion
