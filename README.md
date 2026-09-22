@@ -58,7 +58,7 @@ modules = ["dist/hisab.cyr"]
 
 [deps.prakash]
 git     = "https://github.com/MacCracken/prakash.git"
-tag     = "2.4.3"
+tag     = "2.4.4"
 modules = ["dist/prakash.cyr"]        # math-only core (no TLS)
 # For the AI client instead, pull the ai bundle (adds the sandhi HTTP/TLS stack):
 # modules = ["dist/prakash-ai.cyr"]

@@ -1,6 +1,6 @@
 # spectral core test suite — ported from rust-old/src/spectral/mod.rs.
 # Covers Rgb, wavelength->RGB, blackbody/Wien, color temperature, photon energy.
-# (serde roundtrip deferred to the bayan bite)
+# (Rgb's serde roundtrip lives in tests/serialize.tcyr)
 
 include "src/error.cyr"
 include "src/spectral_core.cyr"

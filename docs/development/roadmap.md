@@ -93,6 +93,18 @@ someone needs it; all are listed so the scope boundary stays visible.
   published fit is not a reason to move public API — measure the merge first. The
   term that cannot be dropped is the **IR** one: absent, it costs ~0.0014 in n and
   17% of the dispersion (that was the pre-2.4.3 defect).
+- ⭐ **Two independent models of one material is the sharpest instrument this library
+  has, and it must be set to the model error, not to a round number.** prakash carries
+  a Sellmeier fit AND a Schott series for N-BK7, and a Cauchy pair AND a Sellmeier fit
+  for fused silica. 2.4.4 found real defects in both second members — and the Schott
+  cross-check already existed, at `TOL_002`, **100x the 2.1e-5 defect it was built to
+  catch**. Corrected, the pair agrees to 1.7e-6. When adding a preset that duplicates
+  an existing model, pin the two against each other at their true agreement.
+- **A fidelity repair below the instrument needs a pin on the LITERAL, or it reverts
+  silently.** 2.4.4 corrected N-SF11's `b1` (2e-7 in n) and sapphire's three slipped
+  digits (3.3e-5); the mutation check showed the `b1` revert passing all 79 assertions.
+  Both are now pinned at the coefficient via the accessors at 1e-8, labelled in the
+  test file as regression pins rather than physics checks.
 - **Every Sellmeier preset carries an Abbe pin, and that is the assertion that bites.**
   Both 2.4.x coefficient defects (diamond, water) sat within ~0.4% on n_d while being
   8.9 and 9.4 out on V_d. A preset's index can look right while its dispersion is

@@ -1,6 +1,6 @@
 # ray dispersion test suite — ported from rust-old/src/ray/dispersion.rs.
 # Covers Cauchy/Sellmeier/Herzberger/Schott/Conrady, prisms, Abbe, chromatic ab.
-# (serde roundtrip deferred to the bayan bite)
+# (SellmeierCoefficients' serde roundtrip lives in tests/serialize.tcyr)
 
 include "src/error.cyr"
 include "src/ray_core.cyr"
@@ -25,6 +25,8 @@ fn _n3(x, y, z) {
 var TOL6 = f64_div(F64_ONE, f64_from(1000000));    # 1e-6
 var TOL3 = f64_div(F64_ONE, f64_from(1000));       # 0.001
 var TOL4 = f64_div(F64_ONE, f64_from(10000));      # 1e-4
+var TOL5 = f64_div(F64_ONE, f64_from(100000));     # 1e-5
+var TOL8 = f64_div(F64_ONE, f64_from(100000000));  # 1e-8
 var TOL_002 = f64_div(F64_ONE, f64_from(500));     # 0.002
 var TOL_005 = f64_div(F64_ONE, f64_from(200));     # 0.005
 var TOL_02 = f64_div(F64_ONE, f64_from(50));       # 0.02
@@ -50,7 +52,19 @@ assert(f64_gt(cauchy_n_at(cb, _fd(4, 10)), cauchy_n_at(cb, _fd(5, 10))), "cauchy
 assert(f64_gt(cauchy_n_at(cb, _fd(5, 10)), cauchy_n_at(cb, _fd(6, 10))), "cauchy dispersion 0.5>0.6");
 assert(f64_gt(cauchy_n_at(cb, _fd(6, 10)), cauchy_n_at(cb, _fd(7, 10))), "cauchy dispersion 0.6>0.7");
 
-_assert_near(cauchy_n_at(cauchy_fused_silica(), _fd(5876, 10000)), _fd(1458, 1000), TOL_02, "cauchy FS n ~ 1.458");
+# Cauchy fused silica (2.4.4). Was pinned at 1.458 +/- TOL_02, and the pre-2.4.4
+# coefficients answered 1.46825 — an 0.0098 miss inside a 0.02 tolerance. TOL3 is
+# right for a two-term Cauchy (the model's own error against Malitson is 1.7e-4
+# across 400-700 nm) and is 10x tighter than the miss it now has to catch.
+_assert_near(
+  cauchy_n_at(cauchy_fused_silica(), _fd(5876, 10000)), _fd(145846, 100000), TOL3, "cauchy FS n_d = 1.45846");
+# The two-term model against this file's verified Sellmeier set for the same glass.
+var cfs = cauchy_fused_silica();
+var sfs = sellmeier_fused_silica();
+_assert_near(
+  cauchy_n_at(cfs, fraunhofer_f()), sellmeier_n_at(sfs, fraunhofer_f()), TOL3, "cauchy FS ~ sellmeier at F");
+_assert_near(
+  cauchy_n_at(cfs, fraunhofer_c()), sellmeier_n_at(sfs, fraunhofer_c()), TOL3, "cauchy FS ~ sellmeier at C");
 
 # ── Sellmeier ────────
 test_group("sellmeier");
@@ -106,6 +120,20 @@ assert(_between(sellmeier_n_at(sellmeier_sapphire(), fraunhofer_d()), TOL1, f64_
 assert(_between(sellmeier_n_at(sellmeier_water(), fraunhofer_d()), TOL1, f64_from(3)), "Water reasonable");
 assert(_between(sellmeier_n_at(sellmeier_diamond(), fraunhofer_d()), TOL1, f64_from(3)), "Diamond reasonable");
 
+# ⚠ REGRESSION PINS ON THE LITERALS, NOT PHYSICS CHECKS — and they are here because
+# the mutation check said they had to be. 2.4.4 made two FIDELITY repairs whose effect
+# on n is below any tolerance a physics assertion can justify: N-SF11's b1 moves n by
+# 2e-7, and sapphire's three slipped digits by 3.3e-5. Reverting b1 passed all 79
+# assertions; reverting sapphire's trio was caught only by its Abbe pin, and only just.
+# These four pin the coefficients themselves, and are the only thing standing between
+# those repairs and a silent revert. (2.4.4)
+_assert_near(SellmeierCoefficients_b1(sellmeier_sf11()), _fd(173759695, 100000000), TOL8, "N-SF11 b1 literal");
+_assert_near(
+  SellmeierCoefficients_c1(sellmeier_sapphire()), _fd(5279925, 1000000000), TOL8, "sapphire c1 = 0.0726631^2");
+_assert_near(
+  SellmeierCoefficients_c2(sellmeier_sapphire()), _fd(1423826, 100000000), TOL8, "sapphire c2 = 0.1193242^2");
+_assert_near(SellmeierCoefficients_b3(sellmeier_sapphire()), _fd(53414021, 10000000), TOL8, "sapphire b3 literal");
+
 # resonance guard: at l^2 = c1, n stays finite and >= 1
 var res_wl = f64_sqrt(SellmeierCoefficients_c1(sellmeier_bk7()));
 var res_n = sellmeier_n_at(sellmeier_bk7(), res_wl);
@@ -116,7 +144,14 @@ assert(f64_ge(res_n, F64_ONE), "resonance n >= 1");
 test_group("abbe");
 
 _assert_near(abbe_number(sellmeier_bk7()), _fd(6417, 100), TOL1, "BK7 Abbe ~ 64.17");
-_assert_near(abbe_number(sellmeier_sf11()), _fd(2576, 100), TOL1, "SF11 Abbe ~ 25.76");
+# ⚠ 25.68, not 25.76: these are N-SF11's coefficients (see the preset's comment), and
+# N-SF11's catalogued Abbe number is 25.68 where the older SF11's is 25.76. The pin was
+# 25.76 +/- 1.0 through 2.4.3 — loose enough that it never had to choose. (2.4.4)
+_assert_near(abbe_number(sellmeier_sf11()), _fd(2568, 100), TOL_05, "N-SF11 Abbe = 25.68");
+_assert_near(sellmeier_n_at(sellmeier_sf11(), fraunhofer_d()), _fd(178472, 100000), TOL4, "N-SF11 n_d = 1.78472");
+# Sapphire had no value pin at all before 2.4.4 — only a "reasonable" range check.
+_assert_near(sellmeier_n_at(sellmeier_sapphire(), fraunhofer_d()), _fd(176817, 100000), TOL4, "Sapphire n_d = 1.76817");
+_assert_near(abbe_number(sellmeier_sapphire()), _fd(7231, 100), TOL_05, "Sapphire Abbe = 72.31");
 # The most discriminating diamond pin there is: the pre-2.4.2 coefficients answered
 # 64.21 here — a crown-glass dispersion for a stone whose published V_d is 55.3, and
 # 8.9 outside this band. No value assertion in this file had ever asked it (2.4.2).
@@ -212,9 +247,18 @@ assert(f64_gt(PrismSpread_spread(spread_flint), PrismSpread_spread(spread_crown)
 # ── additional models ────────
 test_group("additional_models");
 
-_assert_near(
-  schott_n_at(schott_bk7(), fraunhofer_d()),
-  sellmeier_n_at(sellmeier_bk7(), fraunhofer_d()), TOL_002, "Schott BK7 ~ Sellmeier BK7");
+# ⭐ TWO INDEPENDENT MODELS OF ONE GLASS — the sharpest instrument in this file, and
+# it was set to TOL_002 (inherited from the Rust archive) while the defect it was
+# there to catch measured 2.1e-5. At TOL5 the corrected pair agrees to 1.7e-6 across
+# 400-700 nm; the pre-2.4.4 a3 misses at every wavelength below. (2.4.4)
+var schb = schott_bk7();
+var selb = sellmeier_bk7();
+_assert_near(schott_n_at(schb, _fd(4, 10)), sellmeier_n_at(selb, _fd(4, 10)), TOL5, "Schott ~ Sellmeier at 0.40um");
+_assert_near(schott_n_at(schb, fraunhofer_f()), sellmeier_n_at(selb, fraunhofer_f()), TOL5, "Schott ~ Sellmeier at F");
+_assert_near(schott_n_at(schb, fraunhofer_d()), sellmeier_n_at(selb, fraunhofer_d()), TOL5, "Schott ~ Sellmeier at d");
+_assert_near(schott_n_at(schb, fraunhofer_c()), sellmeier_n_at(selb, fraunhofer_c()), TOL5, "Schott ~ Sellmeier at C");
+_assert_near(schott_n_at(schb, _fd(7, 10)), sellmeier_n_at(selb, _fd(7, 10)), TOL5, "Schott ~ Sellmeier at 0.70um");
+_assert_near(schott_n_at(schb, fraunhofer_d()), _fd(151680, 100000), TOL4, "Schott BK7 n_d = 1.51680");
 assert(_between(schott_n_at(schott_bk7(), _fd(4, 10)), _fd(14, 10), _fd(16, 10)), "Schott BK7 range 0.4");
 assert(_between(schott_n_at(schott_bk7(), _fd(5, 10)), _fd(14, 10), _fd(16, 10)), "Schott BK7 range 0.5");
 assert(_between(schott_n_at(schott_bk7(), _fd(6, 10)), _fd(14, 10), _fd(16, 10)), "Schott BK7 range 0.6");

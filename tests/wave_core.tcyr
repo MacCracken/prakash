@@ -1,7 +1,8 @@
 # wave core test suite — ported from rust-old/src/wave/mod.rs (#[cfg(test)]).
 # Covers interference, thin film, diffraction, grating, Malus, polarization,
 # and the Jones->Stokes conversion. (Coherence/Bessel/Airy/Fabry-Perot tests
-# ship with their own sub-modules; serde roundtrip deferred to the bayan bite.)
+# ship with their own sub-modules; Polarization's serde roundtrip lives in
+# tests/serialize.tcyr.)
 
 include "src/error.cyr"
 include "src/wave_core.cyr"

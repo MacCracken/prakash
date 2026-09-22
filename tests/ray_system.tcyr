@@ -1,6 +1,6 @@
 # ray system test suite — ported from rust-old/src/ray/system.rs.
 # Covers paraxial trace, prescription builder, cardinal points, common designs.
-# (serde roundtrip deferred to the bayan bite)
+# (Prescription's serde roundtrip lives in tests/serialize.tcyr)
 
 include "src/error.cyr"
 include "src/ray_core.cyr"

@@ -2,6 +2,132 @@
 
 ## [Unreleased]
 
+## [2.4.4] - 2026-09-22 — the coefficient sweep the SF11 typo turned into: two more real defects, and the cross-check that could have caught one all along
+
+What started as a one-digit fidelity repair became a full re-derivation of every dispersion
+preset in the library, because the SF11 slip is not the interesting kind. **Two genuine
+defects came out of it** — `schott_bk7`'s `a3` and `cauchy_fused_silica`'s `b` — and one of
+them had a purpose-built detector in the suite the whole time, set a hundred times too
+loose. Suite **6699 → 6713 assertions across 31 suites** (`ray_dispersion` 69 → 83), 0
+failed. Reference coverage **414/414**. `cyrius audit` exits 0; fmt, lint, `doc --check`,
+vet, deny clean; `deps --verify` 112/112; `#must_use` 428, 0 lost. No toolchain or
+dependency change: cyrius 6.6.6, hisab 3.2.1, ganita 1.2.6.
+
+⭐ **Every finding here came from making two independent models of the same material agree**,
+not from re-reading tables. prakash carries a Sellmeier fit and a Schott power series for
+N-BK7, and a Cauchy pair and a Sellmeier fit for fused silica. Those pairs are a metrology
+instrument: the two must agree to within their model error, and when they do not, one of
+them is wrong. Both defects below were invisible to any "is this number plausible" reading
+and obvious the moment the pair was compared.
+
+### Fixed
+
+- ⛔ **`schott_bk7` — `a3` had a zero inserted**: `0.000200816` for a catalogued
+  `0.00020816`. It put the Schott series **2.1e-5** off the Sellmeier fit of the same glass
+  at the d-line (9.5e-5 at 400 nm) and its Abbe number at **64.41** against a catalogued
+  **64.17**. Corrected, the two models agree to **1.7e-6** across 400–700 nm and n_d lands
+  on **1.51680** exactly.
+  ⛔ **The detector already existed and was set to `TOL_002`.** `Schott BK7 ~ Sellmeier BK7`
+  is in the suite, inherited from the Rust archive's `test_schott_bk7_matches_sellmeier`
+  (`assert!((n_schott - n_sellmeier).abs() < 0.002)`) — **a hundred times the defect it was
+  built to find**, at one wavelength. Right instrument, wrong setting, for the whole life of
+  the port. It is now `TOL5` (1e-5) at five wavelengths.
+- ⛔ **`cauchy_fused_silica` — `b` was the material's n_d, not its Cauchy constant.** It read
+  `1.4580`, which is fused silica's refractive index at the d-line; the Cauchy `b` is the
+  asymptotic index and is always *below* n_d. The giveaway sits three lines above it:
+  `cauchy_bk7` has `b = 1.5046` against BK7's n_d of 1.5168, correctly different. Adding
+  `c/l^2` on top of n_d double-counts the dispersion, so this returned **n_d = 1.46825
+  against a true 1.45846** — an **0.0098** error, and the suite's assertion was
+  `~1.458 +/- TOL_02`, **twice too wide to see it**. Replaced with a least-squares refit to
+  this file's own verified Malitson Sellmeier set over 400–700 nm: `b = 1.4483`,
+  `c = 0.00351`, worst |dn| **1.7e-4** across the band (BK7's pair manages 1.0e-4), n_d
+  within 1e-5. Inherited from the archive, which labelled it "approximate" — 0.0098 is not
+  approximate, it is wrong.
+
+### Fixed — fidelity, below the instrument
+
+Neither of these changes an answer anyone can measure; both are made because the source is
+cited and the transcription does not match it.
+
+- **`sellmeier_sf11` — `b1` `1.73759626` → `1.73759695`** (catalogued). Worth **2e-7** in n.
+- **`sellmeier_sapphire` — three slipped digits restored** to Malitson & Dodge: `c2`
+  `0.01421826` → `0.01423826` and `b3` `5.3414822` → `5.3414021` (digit transpositions),
+  `c1` `0.00527925` → `0.005279925` (a rounding). Worth **3.3e-5** in n. `b1` and `b2`
+  already matched the published set exactly, which is what identified the other four as
+  slips rather than a different source.
+- ⚠ **`sellmeier_sf11` is N-SF11, and prakash's own doc line said "SF11".** The two glasses
+  share n_d = 1.78472 but not their Abbe numbers — N-SF11 is 25.68, SF11 is 25.76 — and
+  this set answers 25.68. The Rust archive labelled it `N-SF11`; the doc comment prakash
+  added at 2.4.1 dropped the prefix, and **the suite pinned SF11's 25.76 at a tolerance of
+  1.0, loose enough that it never had to choose between the two glasses**. Doc line and
+  Abbe pin now both say N-SF11 / 25.68. The function name is unchanged — it is public API,
+  and a prefix is not worth a breaking rename.
+
+### Added
+
+- **`tests/ray_dispersion.tcyr` — 14 assertions (69 → 83), and three loose ones tightened.**
+  The Schott cross-check moved `TOL_002 → TOL5` and one wavelength → five, plus an n_d pin;
+  Cauchy fused silica moved `TOL_02 → TOL3` and gained two cross-checks against the
+  Sellmeier set for the same glass; N-SF11 gained an n_d pin and a `TOL_05` Abbe pin;
+  sapphire gained its **first value assertions of any kind** (it had only a "reasonable"
+  range check).
+- ⭐ **Four literal-level regression pins, added because the mutation check demanded them.**
+  Reverting SF11's `b1` passed **all 79** assertions — 2e-7 is below any tolerance a physics
+  assertion can honestly carry — and reverting sapphire's trio was caught only by its new
+  Abbe pin. So the two fidelity repairs are pinned at the coefficients themselves, at
+  `TOL8`, and are labelled in the file as regression pins rather than physics checks. Both
+  reverts now fail (1 and 4 assertions respectively).
+  ⚠ Stated plainly because the alternative is worse than useless: a fidelity repair with no
+  test that can see it is a repair that silently reverts.
+- **Mutation results for the two real defects**: Schott `a3` reverted → 4 failures; Cauchy
+  fused silica reverted → 3. ⚠ Note which pins did *not* fire: the `Schott BK7 n_d = 1.51680`
+  pin at TOL4 survives the `a3` revert (2.1e-5 miss inside a 1e-4 band), and the 0.70 um
+  cross-check survives it too. The four that catch it are the cross-checks at 0.40 um, F, d
+  and C. A pin that passes a mutant is not a pin; the suite now records which is which.
+
+### Fixed — stale comments, found by a lint rule that was already reporting them
+
+- **Five "untracked deferral" notes, and four of them described work that had shipped.**
+  `cyrius lint` reports untracked deferral language on a separate non-failing counter, so
+  these sat in plain sight: `tests/{ray_dispersion,ray_system,spectral_core}.tcyr` and
+  `tests/wave_core.tcyr` each said *"serde roundtrip deferred to the bayan bite"* — but
+  `tests/serialize.tcyr` roundtrips all seven serde types, **including** the
+  SellmeierCoefficients, Prescription, Rgb and Polarization those four files were deferring.
+  The fifth, `tests/hardening.tcyr:95`, read *"The two cases 2.2.4 recorded and deferred"*
+  directly above the assertions that 2.2.5 added to pin them. All five now say where the
+  coverage is, or that it landed. **Project-wide untracked deferrals: 5 → 0.**
+
+### Not exposed — checked rather than assumed
+
+- **All six Sellmeier presets, the two Cauchy pairs, the Schott series and the three
+  Fraunhofer wavelengths were re-derived.** BK7 (Sellmeier and Cauchy both) and fused silica
+  (Sellmeier) reproduce catalogue values exactly and needed nothing; the Fraunhofer set
+  (0.58756 / 0.48613 / 0.65627 um) is correct; Herzberger and Conrady ship no presets, only
+  evaluators, and the Herzberger `0.028` constant is the standard one.
+- **`ray_core`'s 13 `medium_*` indices** are all standard sodium-D values (air 1.000293,
+  quartz 1.544, sapphire 1.77, polycarbonate 1.585, …). Nothing to repair.
+- **`ray_fresnel`'s four `complex_*` metals**, checked by a quantity the n/k pair implies and
+  the literature publishes directly — normal-incidence reflectance
+  `R = ((n-1)^2 + k^2)/((n+1)^2 + k^2)`: gold 0.788, silver 0.981, copper 0.600,
+  aluminium 0.921, against published 550 nm figures of ~0.76 / 0.98 / 0.62 / 0.92. All four
+  inside the spread between published datasets. ⚠ Not a clean bill: the presets do not name
+  which dataset they come from, and gold and copper are not the Johnson & Christy values.
+  Left alone rather than swapped for numbers no better attested.
+- **`wave_polarization`'s four birefringent materials** are exact textbook pairs (calcite
+  1.6584/1.4864, quartz 1.5443/1.5534, rutile 2.616/2.903); mica is muscovite, biaxial and
+  documented as approximated by a uniaxial pair.
+- **Not re-derived in this bite**, and named so the boundary is visible: the CIE tables and
+  illuminants (audited at 2.2.7, where F2 and F11 were replaced from CIE 15:2004), the
+  atmosphere constants, and the PBR and lens modules.
+
+### Performance
+
+**No change is claimed.** Six constants; the machine code is the same shape. Unlike 2.4.2
+and 2.4.3, benchmarks here *do* exercise two of the repaired presets — `ray/schott_n_at`
+and `ray/cauchy_n_at` run `schott_bk7` and `cauchy_bk7` — and both read **+0.0%**
+(24 → 24 ns, 7 → 7 ns). 138 rows: median **+0.00%**, mean +1.12%, 5 rows past ±10%, all of
+them sub-100 ns.
+
 ## [2.4.3] - 2026-09-22 — water's Sellmeier fit was missing its infrared term, which is where the dispersion lives
 
 The open item 2.4.2 filed, taken as its own bite. `sellmeier_water` shipped Daimon &

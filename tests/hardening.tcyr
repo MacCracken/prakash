@@ -92,7 +92,8 @@ assert(_h_near(_p23, f64_from(8), f64_div(F64_ONE, f64_from(1000000000))),
   "pow(2, 3) ~= 8 (control: finite path unchanged)");
 
 # ── 1a. pow with a NaN exponent (2.2.5) ────────
-# The two cases 2.2.4 recorded and deferred. Rust returns the exponent's OWN
+# The two cases 2.2.4 recorded without pinning; 2.2.5 pins them here. Rust
+# returns the exponent's OWN
 # NaN — sign and payload — rather than a canonical one, so these are bit pins.
 assert(_h_bits(_prk_pow(ZERO, NAN), NAN) == 1, "pow(+0, NaN) = NaN (2.2.4: 1.0)");
 assert(_h_bits(_prk_pow(NZERO, NAN), NAN) == 1, "pow(-0, NaN) = NaN (2.2.4: 1.0)");
