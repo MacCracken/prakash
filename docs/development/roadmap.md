@@ -93,6 +93,17 @@ someone needs it; all are listed so the scope boundary stays visible.
   published fit is not a reason to move public API — measure the merge first. The
   term that cannot be dropped is the **IR** one: absent, it costs ~0.0014 in n and
   17% of the dispersion (that was the pre-2.4.3 defect).
+- ⚠ **Documentation counts drift silently and must be MEASURED, not read.** 2.4.7 found
+  every per-module assertion count in `docs/architecture/overview.md` stale, pbr by 539
+  and spectral by 334, and the totals in two files stale since 2.4.0. Nothing in the gate
+  checks a number written in prose. Re-measure them whenever a release touches tests:
+  `cyrius test tests/<suite>.tcyr | grep -oE '^[0-9]+ passed'` per suite, and the
+  parenthesised-total filter from CLAUDE.md for the project sum.
+- ⚠ **A recorded measurement is a claim like any other.** 2.4.7 found `_fresnel_fg`'s
+  accuracy table reporting the PUBLISHED value in a column that reports what the code
+  does — one cell, in an otherwise correct five-row table. A table of measurements earns
+  trust that prose does not, so a wrong cell in one is worse than a vague sentence.
+  Re-run the numbers a comment states when you touch the function.
 - ⛔ **When one quantity is computed in two places, a repair to one does not reach the
   other — and nothing will tell you.** 2.4.6 found `lens_longitudinal_spherical_aberration`
   still carrying BOTH halves of the defect 2.2.6 repaired in `lens_seidel_coefficients`

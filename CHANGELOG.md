@@ -2,6 +2,102 @@
 
 ## [Unreleased]
 
+## [2.4.7] - 2026-09-22 — the wave and ray constants hold up; the documentation had drifted for four releases
+
+Wave and ray constants audited, and then the whole documentation surface re-measured
+rather than re-read. **No physics defect was found** — these are the modules 2.2.6–2.2.8
+worked over hardest, and they check out on every analytic identity available. What was
+wrong was the record: a comment table reporting a value the code does not produce, and
+six stale counts in the architecture overview. Suite **6755 → 6757 assertions across 31
+suites**, 0 failed. Reference coverage **414/414**. `cyrius audit` exits 0; fmt, lint,
+`doc --check`, vet, deny clean; `deps --verify` 112/112; `#must_use` 428, 0 lost.
+
+### Fixed — documentation
+
+- ⛔ **`_fresnel_fg`'s accuracy table reported a value the code does not produce.** Its
+  `x = 1.0` row read `C(1.0) after = 0.779893`, which is the **published** value copied
+  into a column that reports measured output. Re-measured on the shipped function:
+  **0.779292**, unchanged by the 2.2.6 repair, 6.0e-4 from published and inside A&S's
+  stated 2e-3 bound. The other four rows are correct to the digit.
+  ⭐ **And why it is unchanged is the part the wrong cell hid.** The defect was A&S
+  coefficients applied to x²/x³/x⁴ instead of x — and **at x = 1 every power of x is 1**,
+  so the wrong and right forms are arithmetically identical there. x = 1 was not a weak
+  sample of that defect, it was a blind one. That completes the comment's own sentence
+  about the suite sampling only x = 0, 1 and 10: x = 0 and x = 1 could not see it, and at
+  x = 10 both forms had converged to the 0.5 asymptote.
+- **`docs/architecture/overview.md` — every per-module assertion count was stale**, some
+  by hundreds, having drifted since well before this release series: ray 593 → **599**,
+  spectral 1691 → **2025**, wave 1568 → **1665**, lens 234 → **239**, pbr 865 → **1404**,
+  atmosphere 373 → **378**, and the total 6684 → **6757**. `bridge`, `serialize` and `ai`
+  were correct. Measured per suite, not estimated.
+- **`README.md`** — the build block advertised 6684 assertions; now 6757.
+- **The [2.4.4] entry said `ray_core`'s "13 `medium_*` indices"; there are 12.** Corrected
+  in place. The README's own "12 materials" was right all along.
+- **`examples/rainbow.cyr`'s header gave ~42.4 / ~40.5 deg** with no indication those are
+  the published figures rather than the example's output, which is 42.33 / 40.33. Now
+  states both. ⭐ **And the comparison is independent evidence for the 2.4.3 water
+  repair**: with the pre-2.4.3 coefficients this example printed **42.11** for 650 nm and
+  the fix moved it to **42.33**, toward the published 42.4. Nothing in that repair was
+  fitted to a rainbow angle.
+
+### Added
+
+- **`docs/architecture/math.md` — the Seidel brackets, and the Rayleigh reference
+  conditions.** The file stated `σ = (8π³/3)(n²-1)²/(N²λ⁴)` without saying that **n and N
+  must describe the same air**, which is exactly the 2.4.5 defect; it now names standard
+  air (15 °C, 101.325 kPa, n = 1.000277824 at 550 nm) and records that the textbook
+  1.000293 is 0 °C. The Seidel section listed only the five symbols — for the
+  most-repaired formulas in the library (2.2.6, 2.2.8, 2.4.6) — and now carries both
+  brackets, the two textbook shapes that check them (best-form q = 0.7143, aplanatic
+  q = 0.80 at n = 1.5), and the note that
+  `lens_longitudinal_spherical_aberration` is S₁ at q = 0, p = -1 rather than a separate
+  formula.
+- ⭐ **A cross-module Airy pin (`tests/wave_airy.tcyr`).** prakash computes the Airy disk
+  in two modules — `airy_first_zero` as an angular radius with the exact **1.2196705**,
+  and `lens_airy_disk_radius` as a linear radius with the conventional **1.22** — and
+  neither suite referred to the other. They describe one quantity, related by r = θf with
+  N = f/D, so their ratio must be exactly 1.22/1.2196705 = 1.00027015 and nothing else.
+  That is now asserted, along with the exact agreement of `rayleigh_criterion` (which uses
+  the same rounded constant as lens). Mutation-checked: replacing `airy_first_zero`'s
+  constant with 1.22 fails it.
+- **Two tolerances tightened to the quantity they measure.** `R_p` at Brewster was pinned
+  at `< 1e-3`; R_p at Brewster is not small, it is **zero** — that is the definition of the
+  angle — and the code delivers 0.000000000000, so the bound is now 1e-12. `bessel_j1` was
+  pinned at TOL3 against an approximation good to ~1e-7; now TOL6 against the published
+  digits (J1(1) = 0.4400505857, J1(10) = 0.0434727462, the latter exercising the
+  asymptotic branch the first does not reach).
+
+### Not exposed — the wave and ray audit, which found no physics defect
+
+Every value below was measured through the shipped functions.
+
+- **`bessel_j1`** matches published J1 to 9 digits at x = 1, 2, 7, 10 and 20, and returns
+  **0.000000000** at the first zero 3.8317059702.
+- **Fresnel** gives exactly **0.040000000** at normal incidence for n = 1.5, Brewster at
+  **56.309932°** (= arctan 1.5), R_s at Brewster **0.147928994** (= ((n²-1)/(n²+1))²), and
+  **R_p = 0 to 12 decimals** there.
+- **Zernike** polynomials are correctly Noll-normalised: Z(2,0) = ±√3 at ρ = 1 and 0,
+  Z(4,0) = √5, Z(1,1) = 2, Z(3,1) = √8 = 2.828427125.
+- **Malus** returns exactly 1, 0.5 and 0 at 0°, 45° and 90°.
+- **AR coatings**: `ar_ideal_index(1, 1.52)` = **1.2328828** = √1.52 exactly; quarter-wave
+  thickness for n = 1.38 at 550 nm = **99.6377 nm** = λ/4n exactly.
+- **Fibre**: NA(1.4682, 1.4629) = **0.124639**, V = **2.06088** for a 4.1 µm core at
+  1.55 µm (single-mode, below the 2.405 cutoff — which is the first zero of J₀, correct).
+- **Fabry-Pérot** (finesse π√R/(1-R), coefficient 4R/(1-R)², Airy transmittance, FSR c/2nd
+  and λ²/2nd, resolving power mF), **coherence** (λ²/Δλ), **interference**
+  (a₁²+a₂²+2a₁a₂cos φ), **single/double slit** (sinc², 4·envelope·cos²) and the
+  **Cornette-Shanks** and **Rayleigh** phase forms are all the standard published
+  expressions.
+- **The two Airy constants are deliberately different and both correct**: 1.2196705 is the
+  exact first zero of J₁ divided by π, 1.22 is the conventional Rayleigh criterion. The new
+  cross-module pin licenses exactly that 0.027% difference and no other.
+
+### Performance
+
+**No change is claimed.** This release changes one comment table, three test tolerances,
+one example header and two documentation files — no shipped arithmetic at all. 138 rows:
+median **+0.00%**, mean -0.90%, 3 rows past ±10%, all sub-20 ns.
+
 ## [2.4.6] - 2026-09-22 — the Seidel repair of 2.2.6 never reached the function thirty lines below it
 
 PBR and lens constants audited. **PBR passes every check made** — all of it, on the
@@ -329,7 +425,7 @@ cited and the transcription does not match it.
   (Sellmeier) reproduce catalogue values exactly and needed nothing; the Fraunhofer set
   (0.58756 / 0.48613 / 0.65627 um) is correct; Herzberger and Conrady ship no presets, only
   evaluators, and the Herzberger `0.028` constant is the standard one.
-- **`ray_core`'s 13 `medium_*` indices** are all standard sodium-D values (air 1.000293,
+- **`ray_core`'s 12 `medium_*` indices** are all standard sodium-D values (air 1.000293,
   quartz 1.544, sapphire 1.77, polycarbonate 1.585, …). Nothing to repair.
 - **`ray_fresnel`'s four `complex_*` metals**, checked by a quantity the n/k pair implies and
   the literature publishes directly — normal-incidence reflectance

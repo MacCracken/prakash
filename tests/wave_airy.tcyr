@@ -3,6 +3,7 @@
 
 include "src/error.cyr"
 include "src/wave_airy.cyr"
+include "src/lens.cyr"
 
 fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
 fn _near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
@@ -21,7 +22,10 @@ alloc_init();
 test_group("bessel_j1");
 
 assert(f64_lt(f64_abs(bessel_j1(Z)), TOL6), "J1(0) = 0");
-_assert_near(bessel_j1(F64_ONE), _fd(44005, 100000), TOL3, "J1(1) ~ 0.44005");
+# ⚠ Tightened from TOL3 at 2.4.7: the A&S rational approximation this module uses
+# is good to ~1e-7, so a 1e-3 pin was four orders wider than the instrument and
+# would pass a badly degraded approximation. Published J1(1) = 0.4400505857.
+_assert_near(bessel_j1(F64_ONE), _fd(4400505857, 10000000000), TOL6, "J1(1) = 0.4400505857");
 assert(f64_lt(f64_abs(bessel_j1(_fd(38317, 10000))), TOL3), "J1(3.8317) ~ 0 (first zero)");
 _assert_near(bessel_j1(F64_PI), _fd(28468, 100000), TOL3, "J1(pi) ~ 0.28468");
 
@@ -40,7 +44,9 @@ while (xi < 6) {
     xi = xi + 1;
 }
 
-_assert_near(bessel_j1(f64_from(10)), _fd(4347, 100000), TOL3, "J1(10) ~ 0.04347");
+# Published J1(10) = 0.0434727462 — this one exercises the asymptotic branch
+# (|x| >= 8), which the 0.44005 pin above does not reach.
+_assert_near(bessel_j1(f64_from(10)), _fd(434727462, 10000000000), TOL6, "J1(10) = 0.0434727462");
 assert_eq(_is_finite(bessel_j1(f64_from(20))), 1, "J1(20) finite");
 assert(f64_lt(f64_abs(bessel_j1(f64_from(20))), F64_ONE), "J1(20) bounded");
 
@@ -74,5 +80,30 @@ test_group("rayleigh");
 _assert_near(rayleigh_criterion(WL, _fd(1, 10)), _fd(671, 100000000), _fd(1, 10000000), "rayleigh ~ 6.71e-6");
 assert(f64_gt(rayleigh_criterion(WL, _fd(5, 100)), rayleigh_criterion(WL, _fd(20, 100))),
   "larger aperture better resolution");
+
+# ── cross-module: the Airy radius has two independent implementations ────────
+test_group("airy_lens_agreement");
+
+# ⭐ prakash computes the Airy disk in TWO modules: wave_airy as an ANGULAR radius
+# (airy_first_zero = 1.2196705 lambda/D, the exact first zero of J1 over pi) and
+# lens as a LINEAR radius (lens_airy_disk_radius = 1.22 lambda N, the conventional
+# engineering form). They describe one physical quantity, related by r = theta*f
+# with N = f/D, so they must agree to exactly the ratio of their two constants and
+# to nothing else. That ratio, 1.22/1.2196705 = 1.00027015, is the ONLY licensed
+# disagreement between them — this pins it, so a change to either constant, or to
+# either formula, shows up here rather than as a silent 0.03% drift in one module.
+# Neither module had any assertion referring to the other before 2.4.7.
+var _agree_wl = _fd(55, 100000000);
+var _agree_d = _fd(1, 100);
+var _agree_f = _fd(1, 10);
+var _agree_n = lens_f_number(_agree_f, _agree_d);
+var _ang = f64_mul(airy_first_zero(_agree_wl, _agree_d), _agree_f);
+var _lin = lens_airy_disk_radius(_agree_wl, _agree_n);
+_assert_near(f64_div(_lin, _ang), _fd(100027015, 100000000), _fd(1, 1000000),
+  "wave and lens Airy radii differ by exactly 1.22/1.2196705");
+# The Rayleigh criterion in this module uses the SAME rounded 1.22 that lens uses,
+# so those two must agree exactly, with no licensed ratio at all.
+_assert_near(f64_mul(rayleigh_criterion(_agree_wl, _agree_d), _agree_f), _lin, TOL6 ,
+  "rayleigh_criterion * f == lens_airy_disk_radius");
 
 var r = assert_summary();

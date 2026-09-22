@@ -166,6 +166,24 @@ f_c = 1 / (λN)
 ### Seidel Aberrations
 S₁ (spherical), S₂ (coma), S₃ (astigmatism), S₄ (field curvature), S₅ (distortion)
 
+For a thin lens in air, with shape factor q and conjugate factor p below, the two
+brackets prakash evaluates — written here because they are the most-repaired
+formulas in the library (2.2.6, 2.2.8, 2.4.6):
+
+S₁ = φ³ · n/(4(n-1)²) · [ (n+2)/(n(n-1)²) q² + 4(n+1)/(n(n-1)) qp + (3n+2)/n p² + n²/(n-1)² ]
+
+S₂ = φ² · 1/(2(n-1)) · [ (n+1)/(n(n-1)) q + (2n+1)/n p ]
+
+⭐ **Two independent textbook results check these**, and are the reason to trust
+them rather than the algebra: with the object at infinity (p = -1) the
+spherical-minimum "best-form" shape is q = 2(n²-1)/(n+2) = **0.7143 at n = 1.5**,
+and the coma-free "aplanatic" shape is q = **0.80 at n = 1.5**. A bracket that
+does not reproduce both is wrong, whatever it was copied from.
+
+⚠ **`lens_longitudinal_spherical_aberration` evaluates S₁ at q = 0, p = -1** — it
+is the same bracket, not a separate formula. It disagreed with the one above from
+the port until 2.4.6.
+
 ### Shape Factor
 q = (R₂ + R₁) / (R₂ - R₁)
 
@@ -267,6 +285,13 @@ pdf = (n l) / π
 
 ### Rayleigh Cross-Section
 σ(λ) = (8π³/3)(n² - 1)² / (N²λ⁴)
+
+⚠ **n and N must describe the SAME air.** `(n - 1)` is proportional to number
+density, so the two do not cancel — pairing an `n` quoted at one temperature with
+an `N` at another compounds the error. prakash uses standard air throughout,
+**15 °C and 101.325 kPa**: N = 2.5469e25 m⁻³ and n = 1.000277824, the index at
+550 nm. ⛔ The textbook `n_air = 1.000293` is air at **0 °C**; prakash paired it
+with a ~20 °C N until 2.4.5 and was 12% high in β and τ as a result.
 
 ### Rayleigh Scattering Coefficient
 β(λ) = N σ(λ)

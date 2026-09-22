@@ -11,17 +11,17 @@ after the port-completeness review; recover it with
 | Module | Files | Tests | Key Types | Purpose |
 |--------|-------|-------|-----------|---------|
 | `error` | error.cyr | (smoke) | `PK_ERR_*` codes | Shared error codes + `prakash_set_log_level` / `_prk_trace` (sakshi logging) |
-| `ray` | ray_core, ray_fresnel, ray_trace, ray_simulate, ray_system, ray_dispersion, ray_fiber | 593 | `Medium`, `ComplexMedium`, `*Coefficients`, `TraceRay`, `OpticalSurface`, `PolarizedTraceHit`, `ParaxialRay`, `Prescription` | Geometric optics: Snell, Fresnel (real + complex), dispersion (Sellmeier/Cauchy/Herzberger/Schott/Conrady), chromatic aberration, fiber optics, sequential/recursive tracing with polarization, ray fans, spot diagrams, OPD |
-| `spectral` | spectral_core, spectral_cie, spectral_photometry | 1691 | `Rgb`, `Xyz`, `Spd`, `Observer` (tag constants) | Color science: wavelength↔RGB, Planck (numerically stable), Wien, CIE 1931/1964/2015 XYZ, SPD, illuminants, CRI, photometry (V(λ), luminous flux/efficacy) |
-| `wave` | wave_core, wave_polarization, wave_coherence, wave_airy, wave_fabry_perot, wave_diffraction, wave_zernike, wave_pattern | 1568 | `Polarization`, `StokesVector`, `MuellerMatrix` (16-f64 buffer), `Pattern2D`, `ZernikeWavefront`, `ThinFilmResult` | Wave optics: interference, coherence, Airy/Bessel, Fabry-Pérot, Fraunhofer/Fresnel diffraction, TMM (oblique s/p), AR coatings, Jones/Stokes/Mueller, Zernike polynomials, 2D FFT patterns, PSF |
-| `lens` | lens.cyr | 234 | `CardinalPoints`, `SeidelCoefficients` | Lens/mirror geometry: thin/thick lens, aberrations, MTF (mono + poly + through-focus), DoF, Petzval, multi-element |
-| `pbr` | pbr_core, pbr_advanced | 865 | (free functions) | PBR shading: Cook-Torrance, GGX, sheen, clearcoat, SSS, iridescence, volumetric, importance sampling, split-sum IBL |
-| `atmosphere` | atmosphere.cyr | 373 | (free functions + constants) | Rayleigh/Mie scattering, King correction, sky color, air mass, optical depth, sunset model |
+| `ray` | ray_core, ray_fresnel, ray_trace, ray_simulate, ray_system, ray_dispersion, ray_fiber | 599 | `Medium`, `ComplexMedium`, `*Coefficients`, `TraceRay`, `OpticalSurface`, `PolarizedTraceHit`, `ParaxialRay`, `Prescription` | Geometric optics: Snell, Fresnel (real + complex), dispersion (Sellmeier/Cauchy/Herzberger/Schott/Conrady), chromatic aberration, fiber optics, sequential/recursive tracing with polarization, ray fans, spot diagrams, OPD |
+| `spectral` | spectral_core, spectral_cie, spectral_photometry | 2025 | `Rgb`, `Xyz`, `Spd`, `Observer` (tag constants) | Color science: wavelength↔RGB, Planck (numerically stable), Wien, CIE 1931/1964/2015 XYZ, SPD, illuminants, CRI, photometry (V(λ), luminous flux/efficacy) |
+| `wave` | wave_core, wave_polarization, wave_coherence, wave_airy, wave_fabry_perot, wave_diffraction, wave_zernike, wave_pattern | 1665 | `Polarization`, `StokesVector`, `MuellerMatrix` (16-f64 buffer), `Pattern2D`, `ZernikeWavefront`, `ThinFilmResult` | Wave optics: interference, coherence, Airy/Bessel, Fabry-Pérot, Fraunhofer/Fresnel diffraction, TMM (oblique s/p), AR coatings, Jones/Stokes/Mueller, Zernike polynomials, 2D FFT patterns, PSF |
+| `lens` | lens.cyr | 239 | `CardinalPoints`, `SeidelCoefficients` | Lens/mirror geometry: thin/thick lens, aberrations, MTF (mono + poly + through-focus), DoF, Petzval, multi-element |
+| `pbr` | pbr_core, pbr_advanced | 1404 | (free functions) | PBR shading: Cook-Torrance, GGX, sheen, clearcoat, SSS, iridescence, volumetric, importance sampling, split-sum IBL |
+| `atmosphere` | atmosphere.cyr | 378 | (free functions + constants) | Rayleigh/Mie scattering, King correction, sky color, air mass, optical depth, sunset model |
 | `bridge` | bridge.cyr | 28 | (free functions) | Primitive-value cross-crate hooks (bijli/tara/badal) — no dependency on sibling crates |
 | `serialize` | serialize.cyr | 49 | (free functions) | JSON roundtrips for the seven serde-tested types. ⚠ **Encode goes straight into a `str_builder`** since 2.3.4/2.3.5 — bayan is used only for Grisu2 float rendering; **decode** still walks a bayan value tree. Floats are bit-exact; every `*_from_json` reports via `err_out`; every wire format is pinned to exact bytes |
 | `ai` | ai.cyr | 30 | `DaimonClient`, `DaimonConfig`, `HooshConfig` | AI-assisted optics queries via sandhi HTTP POST — **not in the core bundle** |
 
-**Total**: 25 science modules + error, **6684 test assertions across 31 suites**,
+**Total**: 25 science modules + error, **6757 test assertions across 31 suites**,
 138 benchmarks. (`tests/hardening.tcyr` is the cross-module regression suite for the
 2.0.2 audit repairs and the 2.1.0 error channels — see those CHANGELOG entries.)
 

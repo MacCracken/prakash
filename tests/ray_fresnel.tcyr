@@ -60,7 +60,11 @@ var t_at_ba = ray_snell(F64_ONE, _fd(15, 10), ba, &eb);
 var cos_i_ba = f64_cos(ba);
 var cos_t_ba = f64_cos(t_at_ba);
 var rp_ba = fresnel_p(F64_ONE, _fd(15, 10), cos_i_ba, cos_t_ba);
-assert(f64_lt(rp_ba, _fd(1, 1000)), "p-pol ~0 at Brewster");
+# ⚠ WAS `< 1e-3`, NINE ORDERS LOOSER THAN THE QUANTITY. R_p at Brewster is not
+# "small", it is zero — that is the definition of the angle — and the shipped code
+# delivers 0.000000000000. A 1e-3 bound would pass a Brewster angle wrong by a
+# degree, or an R_p formula with a sign slip in a small term. (2.4.7)
+assert(f64_lt(rp_ba, _fd(1, 1000000000000)), "p-pol is ZERO at Brewster, not merely small");
 var rs_ba = fresnel_s(F64_ONE, _fd(15, 10), cos_i_ba, cos_t_ba);
 assert(f64_gt(rs_ba, rp_ba), "s-pol > p-pol at Brewster");
 
