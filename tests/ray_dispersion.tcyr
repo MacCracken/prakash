@@ -24,6 +24,7 @@ fn _n3(x, y, z) {
 
 var TOL6 = f64_div(F64_ONE, f64_from(1000000));    # 1e-6
 var TOL3 = f64_div(F64_ONE, f64_from(1000));       # 0.001
+var TOL4 = f64_div(F64_ONE, f64_from(10000));      # 1e-4
 var TOL_002 = f64_div(F64_ONE, f64_from(500));     # 0.002
 var TOL_005 = f64_div(F64_ONE, f64_from(200));     # 0.005
 var TOL_02 = f64_div(F64_ONE, f64_from(50));       # 0.02
@@ -60,14 +61,23 @@ assert(f64_gt(sellmeier_n_at(sb, fraunhofer_f()), sellmeier_n_at(sb, fraunhofer_
 assert(f64_gt(sellmeier_n_at(sb, fraunhofer_d()), sellmeier_n_at(sb, fraunhofer_c())), "BK7 n_d > n_C");
 _assert_near(sellmeier_n_at(sellmeier_sf11(), fraunhofer_d()), _fd(17847, 10000), TOL3, "SF11 n_d ~ 1.7847");
 _assert_near(sellmeier_n_at(sellmeier_fused_silica(), fraunhofer_d()), _fd(14585, 10000), TOL3, "FS n_d ~ 1.4585");
-# ⚠ WATER IS A KNOWN-WRONG PRESET AND THIS ASSERTION PASSES IT. `sellmeier_water`
-# gives n_d = 1.33418 against a published 1.33304 and an Abbe number of 65.1 where
-# water's is ~55.6 — the coefficients are the first three terms of Daimon & Masumura
-# with the IR term dropped, and it is the dispersion that pays. TOL_005 is 4x wider
-# than the error, so this line reads green over it. Measured at 2.4.2 and filed in
-# docs/development/roadmap.md; deliberately NOT tightened here, because that would
-# turn the suite red on a defect this release is not fixing.
-_assert_near(sellmeier_n_at(sellmeier_water(), fraunhofer_d()), _fd(1333, 1000), TOL_005, "Water n_d ~ 1.333");
+# Water — Daimon & Masumura (2007) at 20 C, three-term merge (2.4.3). Pinned at
+# three wavelengths at TOL4, 11x tighter than the 0.0011 miss the pre-2.4.3
+# coefficients carried; the old single TOL_005 assertion was 4x WIDER than that
+# miss and passed it for six releases. The Abbe pin in the group below is the one
+# that really bites: dropping the IR term cost 17% of the dispersion, not 0.1% of n.
+var swat = sellmeier_water();
+_assert_near(sellmeier_n_at(swat, fraunhofer_d()), _fd(133304, 100000), TOL4, "Water n_d = 1.33304");
+_assert_near(sellmeier_n_at(swat, fraunhofer_f()), _fd(133712, 100000), TOL4, "Water n_F = 1.33712");
+_assert_near(sellmeier_n_at(swat, fraunhofer_c()), _fd(133114, 100000), TOL4, "Water n_C = 1.33114");
+assert(f64_gt(sellmeier_n_at(swat, fraunhofer_f()), sellmeier_n_at(swat, fraunhofer_d())), "Water n_F > n_d");
+assert(f64_gt(sellmeier_n_at(swat, fraunhofer_d()), sellmeier_n_at(swat, fraunhofer_c())), "Water n_d > n_C");
+# The IR term puts a resonance at 3.27 um, outside the fit's 0.182-1.129 um validity.
+# These two pin that it stays outside: n must be finite, above 1 and falling across
+# prakash's whole visible band, both edges included.
+assert(_between(sellmeier_n_at(swat, _fd(38, 100)), _fd(132, 100), _fd(135, 100)), "Water n(380nm) sane");
+assert(_between(sellmeier_n_at(swat, _fd(78, 100)), _fd(132, 100), _fd(135, 100)), "Water n(780nm) sane");
+assert(f64_gt(sellmeier_n_at(swat, _fd(38, 100)), sellmeier_n_at(swat, _fd(78, 100))), "Water n(380) > n(780)");
 
 # Diamond — Peter (1923), pinned at three wavelengths against published values
 # rather than at n_d alone (2.4.2). The pre-2.4.2 coefficients miss n_d by 0.0096,
@@ -111,6 +121,10 @@ _assert_near(abbe_number(sellmeier_sf11()), _fd(2576, 100), TOL1, "SF11 Abbe ~ 2
 # 64.21 here — a crown-glass dispersion for a stone whose published V_d is 55.3, and
 # 8.9 outside this band. No value assertion in this file had ever asked it (2.4.2).
 _assert_near(abbe_number(sellmeier_diamond()), _fd(553, 10), TOL1, "Diamond Abbe ~ 55.3");
+# Same for water (2.4.3): the pre-2.4.3 coefficients answered 65.08 here, 9.4 outside
+# this band, while their n_d sat only 0.0011 from published. Dropping a Sellmeier term
+# shows up in the DISPERSION first — which is why every preset now carries an Abbe pin.
+_assert_near(abbe_number(sellmeier_water()), _fd(557, 10), TOL1, "Water Abbe ~ 55.7");
 var v_bk7 = abbe_number(sellmeier_bk7());
 var v_sf11 = abbe_number(sellmeier_sf11());
 assert(f64_gt(v_bk7, v_sf11), "crown Abbe > flint");

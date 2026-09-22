@@ -23,17 +23,16 @@ Prakash does NOT own:
 
 ## Open work at a glance
 
-**13 items. ⭐ One is a known physics defect and can ship in any patch (item 1); the
-rest are demand-gated or waiting on a consumer — build one only when someone asks.**
+**12 items. ⭐ Nothing is scheduled. Every item is demand-gated or waiting on a consumer —
+build one only when someone asks for it.**
 
 | # | Bucket | Item | State |
 |---|---|---|---|
-| 1 | 2.4.x patch | `sellmeier_water` coefficients are wrong (V_d 65.1, water's is ~55.6) | open — see below |
-| 2–7 | 2.x | GRIN, DOE, Richards-Wolf, HG/LG beams, Buchdahl, aberrated MTF | demand-gated |
-| 8–12 | 2.x | Fluorescence, non-linear, OAM, metamaterials, CIE 2006 observer | demand-gated |
-| 13 | Blocked | soorat / kiran / ranga consume `dist/prakash.cyr` | waiting on the consumers |
+| 1–6 | 2.x | GRIN, DOE, Richards-Wolf, HG/LG beams, Buchdahl, aberrated MTF | demand-gated |
+| 7–11 | 2.x | Fluorescence, non-linear, OAM, metamaterials, CIE 2006 observer | demand-gated |
+| 12 | Blocked | soorat / kiran / ranga consume `dist/prakash.cyr` | waiting on the consumers |
 
-⚠ **Items 2–12 are not a backlog anyone is working through.** Each is a subsystem,
+⚠ **Items 1–11 are not a backlog anyone is working through.** Each is a subsystem,
 listed so the scope boundary stays visible. Do not start one without a consumer
 asking for it.
 
@@ -45,7 +44,7 @@ anyone intends to do them:
 | Bucket | Means | Rule |
 |---|---|---|
 | **2.4.x — patch** | no public API moves | internals, perf, tests, docs, tooling, data fixes |
-| **2.4.x — minor** | adds public API | new entry points, new capability |
+| **2.5.x — minor** | adds public API | new entry points, new capability |
 | **2.x — demand-gated** | adds a subsystem | build when a consumer actually asks |
 | **Blocked** | not prakash's move | waiting on something external |
 
@@ -53,25 +52,10 @@ anyone intends to do them:
 ship in any order, in any patch release, in any combination — the bucket only
 promises it will not force a minor bump. Reshuffling is free by construction.
 
-**Nothing here depends on anything else here**, with one exception stated in
-item 2. ⚠ **Keep rows SHORT.** A row says what the work is and what would block
-it. Measurements belong in `CHANGELOG.md`; a row that grows past ~8 lines has
-started duplicating the release history and should be cut back.
-
-## 2.4.x — patch: no public API moves
-
-- [ ] **`sellmeier_water` ships the wrong coefficients** (`src/ray_dispersion.cyr`).
-  Found by the all-six re-derivation that 2.4.2's diamond fix forced. The three terms
-  are the first three of Daimon & Masumura (2007) with the **IR term dropped**;
-  measured n_d = **1.33418** vs a published 1.33304, and V_d = **65.1** where water's
-  is ~55.6 — a 17% dispersion error, and the one the `examples/rainbow.cyr` output
-  prints. `tests/ray_dispersion.tcyr` passes it at TOL_005, 4x wider than the miss.
-  ⛔ **The obvious fix does not fit:** D&M is a FOUR-term fit and
-  `SellmeierCoefficients` holds exactly three (b1..b3/c1..c3). The dropped term is
-  worth about −0.0014 in n across the visible. So the bite is a choice — refit to
-  three terms against published n, or widen the struct — and that choice IS the item.
-  The other four presets (BK7, SF11, fused silica, sapphire) were re-derived at 2.4.2
-  and are correct; see that CHANGELOG entry for the table.
+**Nothing here depends on anything else here.** ⚠ **Keep rows SHORT.** A row says
+what the work is and what would block it. Measurements belong in `CHANGELOG.md`;
+a row that grows past ~8 lines has started duplicating the release history and
+should be cut back.
 
 ## 2.x — demand-gated: build when a consumer asks
 
@@ -100,6 +84,19 @@ someone needs it; all are listed so the scope boundary stays visible.
 - [ ] soorat / kiran / ranga: consume `dist/prakash.cyr` directly once they move to Cyrius
 
 ## Constraints established by measurement — read before optimizing
+
+- **`SellmeierCoefficients` holds exactly THREE terms, and that is now a known
+  boundary rather than an assumption.** 2.4.3 needed Daimon & Masumura's four-term
+  water fit and did not widen the struct: D&M's two adjacent UV resonances (135 and
+  162 nm) are carried by one least-squares merged term at 138.3 nm, which tracks the
+  published four-term curve to **3.5e-6 in n** across 380-780 nm. So a four-term
+  published fit is not a reason to move public API — measure the merge first. The
+  term that cannot be dropped is the **IR** one: absent, it costs ~0.0014 in n and
+  17% of the dispersion (that was the pre-2.4.3 defect).
+- **Every Sellmeier preset carries an Abbe pin, and that is the assertion that bites.**
+  Both 2.4.x coefficient defects (diamond, water) sat within ~0.4% on n_d while being
+  8.9 and 9.4 out on V_d. A preset's index can look right while its dispersion is
+  badly wrong; pin both.
 
 - **An `Spd` holds POINT SAMPLES, not bin averages or bin integrals.**
   `_spd_integrate` is `sum(power[i] * cmf[i]) * 5` — a rectangle rule where the

@@ -2,6 +2,106 @@
 
 ## [Unreleased]
 
+## [2.4.3] - 2026-09-22 — water's Sellmeier fit was missing its infrared term, which is where the dispersion lives
+
+The open item 2.4.2 filed, taken as its own bite. `sellmeier_water` shipped Daimon &
+Masumura's first three terms with the **IR term dropped**, which cost ~0.0014 in n
+across the whole visible band and **17% of the dispersion**: V_d read 65.1 for water,
+whose published value is ~55.7. Suite **6691 → 6699 assertions across 31 suites**
+(`ray_dispersion` 61 → 69), 0 failed. Reference coverage **414/414**. `cyrius audit`
+exits 0; fmt, lint, `doc --check`, vet, deny clean; `deps --verify` 112/112; `#must_use`
+428, 0 lost. No toolchain or dependency change: cyrius 6.6.6, hisab 3.2.1, ganita 1.2.6.
+
+⭐ **The reference was recovered by over-determination, not by recall.** The four-term
+D&M coefficient set this repair needed had to be right before anything could be fitted
+to it, and a first transcription of its `A1` was wrong (`5.684027565e-1`). What caught
+it: with the other three terms held fixed, each of three independent published water
+indices — n_F 1.33712, n_d 1.33304, n_C 1.33114 — was solved individually for the `A1`
+it demanded, and all three agreed on **0.56743 ± 0.00003**, against a recalled 0.56840.
+Three equations, one unknown, and they converged on `5.674277366e-1`. The corrected set
+then reproduces all four anchor values to **2e-5**. A single anchor would have been a
+guess; three agreeing is a measurement.
+
+### Fixed
+
+- ⛔ **`sellmeier_water` — the infrared term was missing** (`src/ray_dispersion.cyr`).
+  Water's visible dispersion is set by two UV resonances *and* an IR resonance at
+  3.27 um; the preset carried three UV terms and no IR term, so it was systematically
+  high and far too weakly dispersing.
+
+  | at | before | after | published |
+  |---|---|---|---|
+  | n_F (0.48613 um) | 1.33780 | **1.33712** | 1.33712 |
+  | n_d (0.58756 um) | 1.33418 | **1.33303** | 1.33304 |
+  | n_C (0.65627 um) | 1.33266 | **1.33114** | 1.33114 |
+  | V_d | 65.08 | **55.68** | ~55.7 |
+
+  ⚠ **Terms 1 and 3 are D&M verbatim; term 2 is prakash's own, deliberately.** D&M is a
+  **four**-term fit and `SellmeierCoefficients` holds three, so D&M's two adjacent UV
+  resonances (135 nm and 162 nm) are carried by one least-squares merged term at
+  138.3 nm. Measured: the merged set tracks the published four-term curve to
+  **3.5e-6 in n** across 380–780 nm — three orders of magnitude inside the error being
+  repaired. The source comment says so at the coefficients, so that term is not later
+  "restored" from the paper as a transcription slip.
+  ⭐ **The alternative was widening the struct to four terms.** That moves public API
+  (`sizeof`, the accessors, every preset) for a minor bump, to buy 3.5e-6. Measuring
+  the merge first is what made this a patch; recorded as a constraint in the roadmap.
+- **`examples/rainbow.cyr` had been printing the defect for six releases.** Its
+  dispersion analysis read `n(red, 656nm) = 1.332670`, `n(blue, 486nm) = 1.337806`,
+  `delta n = 0.005136`; it now reads **1.331147 / 1.337129 / 0.005981** against a
+  published 1.33114 / 1.33712 / 0.00598. ⚠ The examples compile against
+  `dist/prakash.cyr`, not `src/`, so this output does not move until the bundle is
+  regenerated — a `src/` fix alone leaves the example printing the old numbers.
+
+### Added
+
+- **`tests/ray_dispersion.tcyr` — 8 assertions (61 → 69), replacing one.** The defect's
+  entire cover was a single `Water n_d ~ 1.333` at TOL_005, **4x wider than its own
+  0.0011 miss**. Now: three value pins at n_F / n_d / n_C at the new **TOL4 (1e-4)**,
+  11x tighter than that miss; an Abbe pin at 55.7 ± 1.0; the n_F > n_d > n_C ordering;
+  and three band-edge pins (n at 380 nm and 780 nm inside (1.32, 1.35), falling across
+  the band) that exist because this repair introduces a resonance at 3.27 um which the
+  old coefficients did not have — they pin that it stays outside the visible.
+  ⭐ **Mutation-checked, both ways.** Restoring all six old literals kills all three
+  value pins and the Abbe pin (4 failed / 69). Isolating the actual defect — swapping
+  only the IR term back for D&M's third UV term — kills those four **and both band-edge
+  pins** (6 failed / 69).
+  ⚠ Note the asymmetry, since 2.4.2 recorded the opposite result for diamond: here the
+  band-edge invariants **do** discriminate against the isolated defect but **not**
+  against the full old coefficient set, which happens to land inside the band. An
+  invariant's discriminating power is per-mutant, and the only way to know is to run it.
+
+### Changed
+
+- **Every Sellmeier preset now carries an Abbe pin.** Both 2.4.x coefficient defects sat
+  within ~0.4% on n_d while being 8.9 (diamond) and 9.4 (water) out on V_d. A preset's
+  index can look right while its dispersion is badly wrong, and only the Abbe number
+  asked. Recorded as a constraint in `docs/development/roadmap.md`.
+- **roadmap** — the water item is closed and the `2.4.x — patch` bucket is empty again,
+  so the section is removed; the two constraints this bite established (the struct's
+  three-term boundary and the Abbe-pin rule) are kept under *Constraints established by
+  measurement*, which is what that section is for.
+
+### Fixed — documentation defects found in the file being edited
+
+- **The bucket table listed `2.4.x` for BOTH patch and minor**, which is not a SemVer
+  classification of anything. Introduced at 2.4.1, when the patch row moved 2.3.x →
+  2.4.x and collided with the minor row already there. Patch is 2.4.x, minor is 2.5.x.
+- **"with one exception stated in item 2" pointed at nothing.** No row in this file
+  states a dependency on another; the clause is present unchanged in `11eb34c`, so it
+  predates the 2.4.x renumbering rather than being broken by it. Removed.
+
+### Performance
+
+**No change is claimed, and none is possible.** The change is six constants inside
+`sellmeier_water`, and **no benchmark references that preset** — grepped:
+`tests/prakash.bcyr` has 0 occurrences, and every dispersion row (`ray/sellmeier_n_at`,
+`ray/abbe_number`, `ray/prism_*`) benches `_bk7`. The 138 rows read median **−3.68%**,
+mean −3.82%, 17 rows past ±10%, which is very nearly the mirror image of the **+3.12%**
+median 2.4.2 recorded 35 minutes earlier against an unreachable change of its own. Two
+successive whole-suite excursions of ±3% with no reachable code change in either is the
+box, and is exactly what `CLAUDE.md` says not to read as a signal. Recorded, not claimed.
+
 ## [2.4.2] - 2026-09-22 — the diamond Sellmeier coefficients were never squared, and the test tolerance was wide enough to hide it
 
 One physics fix, taken as its own bite. `sellmeier_diamond` has shipped the Peter (1923)
