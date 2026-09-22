@@ -294,6 +294,38 @@ assert(f64_gt(f64_abs(lens_longitudinal_spherical_aberration(f64_from(10), f64_f
     f64_abs(lens_longitudinal_spherical_aberration(f64_from(5), f64_from(100), N15))),
   "LSA increases with ray height");
 
+# ⭐ THE PIN THAT FINDS THE 2.4.6 DEFECT, AND THE ONLY ONE THAT COULD.
+# lens_longitudinal_spherical_aberration evaluates the SAME Seidel bracket as
+# lens_seidel_coefficients, at q = 0 and p = -1 (equiconvex singlet, object at
+# infinity). So LSA(h, f, n) must equal h^2 * S_I(n, f, 0, -1) / (2*phi) exactly.
+# Through 2.4.5 it did not: that function kept the extra (n-1) on the p^2 term and
+# omitted the n^2/(n-1)^2 constant, both of which 2.2.6 had repaired thirty lines
+# away, leaving the bracket 6.15x too small at n = 1.5. The assertion above —
+# "LSA increases with ray height", inherited from the Rust suite — holds for any
+# positive bracket and passed the defect for the life of the port. (2.4.6)
+fn _lsa_from_seidel(h, f, n) {
+    var e = 0;
+    var sc = lens_seidel_coefficients(n, f, Z, f64_neg(F64_ONE));
+    var s1 = SeidelCoefficients_spherical(sc);
+    return f64_div(f64_mul(f64_mul(h, h), s1), f64_mul(F64_TWO, f64_div(F64_ONE, f)));
+}
+var _lsa_n = 0;
+while (_lsa_n < 4) {
+    var _nv = f64_add(N15, f64_div(f64_from(_lsa_n), f64_from(10)));
+    var _lsa_direct = lens_longitudinal_spherical_aberration(f64_from(10), f64_from(100), _nv);
+    var _lsa_seidel = _lsa_from_seidel(f64_from(10), f64_from(100), _nv);
+    assert(f64_lt(f64_abs(f64_sub(_lsa_direct, _lsa_seidel)),
+        f64_mul(f64_abs(_lsa_seidel), _fd(1, 1000000000))),
+      "LSA agrees with the Seidel bracket at q=0, p=-1");
+    _lsa_n = _lsa_n + 1;
+}
+# And a value pin, so the pair cannot drift together. At n = 1.5, f = 100, h = 10
+# the bracket is (3n+2)/n + n^2/(n-1)^2 = 4.33333 + 9 = 13.33333, giving
+# s1 = phi^3 * n/(4(n-1)^2) * 13.33333 = 2.0e-5 and LSA = h^2*s1/(2*phi) = 0.1.
+# The pre-2.4.6 bracket of 2.16667 gave 0.01625.
+_assert_near(lens_longitudinal_spherical_aberration(f64_from(10), f64_from(100), N15),
+  _fd(1, 10), _fd(1, 1000000), "LSA(h=10, f=100, n=1.5) = 0.1");
+
 var tca = lens_chromatic_aberration(f64_from(100), f64_from(64));
 assert(f64_gt(tca, Z), "chromatic > 0");
 _assert_near(tca, _fd(15625, 10000), EPS, "TCA = 1.5625");

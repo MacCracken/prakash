@@ -93,6 +93,19 @@ someone needs it; all are listed so the scope boundary stays visible.
   published fit is not a reason to move public API — measure the merge first. The
   term that cannot be dropped is the **IR** one: absent, it costs ~0.0014 in n and
   17% of the dispersion (that was the pre-2.4.3 defect).
+- ⛔ **When one quantity is computed in two places, a repair to one does not reach the
+  other — and nothing will tell you.** 2.4.6 found `lens_longitudinal_spherical_aberration`
+  still carrying BOTH halves of the defect 2.2.6 repaired in `lens_seidel_coefficients`
+  thirty lines above it, and 2.2.8 audited that bracket again without looking down. The
+  bracket was 6.15x too small at n = 1.5. **Before repairing a formula, grep for its other
+  evaluation sites**, and leave behind an assertion that pins the copies against each
+  other rather than trusting them to stay in step.
+- ⭐ **An integral is the strongest check a distribution can be given.** NDFs
+  (`integral D cos = 1` over the hemisphere), phase functions (`integral = 1` over the
+  sphere), sampling PDFs and CMF tables all have one, and 2.4.5-2.4.6 found that none of
+  them was pinned. A wrong 4pi, a dropped factor or a guard epsilon that has taken over
+  the answer survives "is it positive", "is it symmetric" and a single spot value; it
+  cannot survive the integral. The 2.2.6 GGX epsilon defect WAS this integral collapsing.
 - ⭐ **A derived constant must be pinned to the RELATIONSHIP it comes from, not only to
   its output.** 2.4.5 found `_atm_prefactor` and `_atm_n_s` describing air at two
   different temperatures — each a plausible textbook number, together 12% wrong. The

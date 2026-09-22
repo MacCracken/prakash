@@ -425,4 +425,75 @@ assert(load64(_lut_out + 8) != f64_from(7), "a successful call overwrote bias");
 # The split-sum scale is a directional albedo: it cannot exceed 1 (the 2.2.8 check).
 assert(f64_le(load64(_lut_out), F64_ONE) == 1, "split-sum scale stays <= 1");
 
+# ── Phase-function and PDF normalization ────────
+test_group("normalization");
+
+# ⭐ THE DEFINING PROPERTY OF A PHASE FUNCTION: its integral over the FULL sphere
+# is 1. Every one of these was checked numerically during the 2.4.6 audit and every
+# one passed; none of them was pinned, so the audit is recorded here rather than
+# only in a changelog. A wrong 4pi, a dropped (1-g^2), or a 16pi written as 8pi is
+# invisible to "is it positive" and "is it symmetric" and cannot survive this.
+fn _sphere_int_hg(g) {
+    var acc = f64_from(0);
+    var i = 0;
+    while (i < 2000) {
+        var th = f64_div(f64_mul(f64_add(f64_from(i), F64_HALF), F64_PI), f64_from(2000));
+        acc = f64_add(acc, f64_mul(f64_mul(pbr_henyey_greenstein(f64_cos(th), g), f64_sin(th)),
+            f64_div(F64_PI, f64_from(2000))));
+        i = i + 1;
+    }
+    return f64_mul(acc, f64_mul(F64_TWO, F64_PI));
+}
+fn _sphere_int_rayleigh() {
+    var acc = f64_from(0);
+    var i = 0;
+    while (i < 2000) {
+        var th = f64_div(f64_mul(f64_add(f64_from(i), F64_HALF), F64_PI), f64_from(2000));
+        acc = f64_add(acc, f64_mul(f64_mul(pbr_phase_rayleigh(f64_cos(th)), f64_sin(th)),
+            f64_div(F64_PI, f64_from(2000))));
+        i = i + 1;
+    }
+    return f64_mul(acc, f64_mul(F64_TWO, F64_PI));
+}
+_assert_near(_sphere_int_hg(Z), F64_ONE, _fd(1, 1000), "HG(g=0) integrates to 1");
+_assert_near(_sphere_int_hg(_fd(3, 10)), F64_ONE, _fd(1, 1000), "HG(g=0.3) integrates to 1");
+_assert_near(_sphere_int_hg(_fd(76, 100)), F64_ONE, _fd(1, 1000), "HG(g=0.76) integrates to 1");
+_assert_near(_sphere_int_hg(f64_neg(_fd(5, 10))), F64_ONE, _fd(1, 1000), "HG(g=-0.5) integrates to 1");
+_assert_near(_sphere_int_rayleigh(), F64_ONE, _fd(1, 1000), "Rayleigh phase integrates to 1");
+# Isotropic is 1/(4pi) exactly, so its integral is exact rather than quadrature.
+_assert_near(f64_mul(pbr_phase_isotropic(), f64_mul(f64_from(4), F64_PI)), F64_ONE,
+  _fd(1, 1000000000000), "isotropic phase integrates to 1");
+
+# Charlie is an NDF, not a phase function: the contract is the hemisphere integral
+# of D*cos, the same one pbr_core's GGX and Beckmann must satisfy.
+fn _charlie_norm(r) {
+    var acc = f64_from(0);
+    var i = 0;
+    while (i < 2000) {
+        var th = f64_div(f64_mul(f64_add(f64_from(i), F64_HALF), F64_PI_2), f64_from(2000));
+        var c = f64_cos(th);
+        acc = f64_add(acc, f64_mul(f64_mul(f64_mul(pbr_distribution_charlie(c, r), c), f64_sin(th)),
+            f64_div(F64_PI_2, f64_from(2000))));
+        i = i + 1;
+    }
+    return f64_mul(acc, f64_mul(F64_TWO, F64_PI));
+}
+_assert_near(_charlie_norm(F64_ONE), F64_ONE, _fd(1, 1000), "Charlie(r=1) integrates to 1");
+_assert_near(_charlie_norm(_fd(5, 10)), F64_ONE, _fd(1, 1000), "Charlie(r=0.5) integrates to 1");
+_assert_near(_charlie_norm(_fd(1, 10)), F64_ONE, _fd(1, 1000), "Charlie(r=0.1) integrates to 1");
+
+# A sampling PDF that does not integrate to 1 biases every estimator built on it.
+fn _cosine_pdf_int() {
+    var acc = f64_from(0);
+    var i = 0;
+    while (i < 2000) {
+        var th = f64_div(f64_mul(f64_add(f64_from(i), F64_HALF), F64_PI_2), f64_from(2000));
+        acc = f64_add(acc, f64_mul(f64_mul(pbr_sample_cosine_pdf(f64_cos(th)), f64_sin(th)),
+            f64_div(F64_PI_2, f64_from(2000))));
+        i = i + 1;
+    }
+    return f64_mul(acc, f64_mul(F64_TWO, F64_PI));
+}
+_assert_near(_cosine_pdf_int(), F64_ONE, _fd(1, 1000), "cosine-hemisphere PDF integrates to 1");
+
 var r = assert_summary();

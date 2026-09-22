@@ -2,6 +2,118 @@
 
 ## [Unreleased]
 
+## [2.4.6] - 2026-09-22 — the Seidel repair of 2.2.6 never reached the function thirty lines below it
+
+PBR and lens constants audited. **PBR passes every check made** — all of it, on the
+strongest instrument available for a BRDF — and gains the normalization pins those checks
+imply. **The lens module had one real defect**, and it is the most uncomfortable kind: the
+same bracket, already repaired twice, duplicated into a second function that neither repair
+looked at. Suite **6727 → 6755 assertions across 31 suites** (`pbr_core` 453 → 466,
+`pbr_advanced` 928 → 938, `lens` 234 → 239), 0 failed. Reference coverage **414/414**.
+`cyrius audit` exits 0; fmt, lint, `doc --check`, vet, deny clean; `deps --verify` 112/112;
+`#must_use` 428, 0 lost. No toolchain or dependency change.
+
+### Fixed
+
+- ⛔ **`lens_longitudinal_spherical_aberration` carried both halves of the 2.2.6 defect,
+  four releases after 2.2.6 repaired them.** The function evaluates the same Seidel
+  spherical bracket as `lens_seidel_coefficients` at q = 0, p = -1 — the equiconvex singlet
+  with the object at infinity, as the Rust original's own comment says
+  (`rust-old/src/lens.rs:502`). Its `inner` read `(3n+2)(n-1)/n`: **the p^2 term with the
+  extra (n-1) that 2.2.6 removed**, and **no `n^2/(n-1)^2` constant at all** — the term
+  2.2.6's note calls "absent entirely". The bracket came out
+
+  | n | before | correct | factor |
+  |---|---|---|---|
+  | 1.5 | 2.1667 | **13.3333** | **6.15x** |
+  | 1.6 | 2.5500 | 11.3611 | 4.46x |
+  | 1.7 | 2.9235 | 10.0744 | 3.45x |
+  | 1.8 | 3.2889 | 9.1736 | 2.79x |
+
+  ⚠ **2.2.6 and 2.2.8 both audited this bracket and neither looked thirty lines down.**
+  The two functions compute one quantity and were free to disagree, so they did. The repair
+  writes `inner` with the same sub-expressions the Seidel bracket uses — the folded
+  `n/(n-1)` square included — and the suite now pins them against each other.
+  ⚠ **The suite could not have caught it.** The only assertion on this function was
+  *"LSA increases with ray height"*, inherited from the Rust test of the same name, which
+  holds for **any** positive bracket. Third instance of an inherited too-weak test in the
+  2.4.x audits, after diamond's `< 0.02` and Schott's `< 0.002`.
+
+### Added
+
+- ⭐ **`tests/lens.tcyr` — the cross-check that finds it (234 → 239).** `LSA(h, f, n)` must
+  equal `h^2 * S_I(n, f, 0, -1) / (2 phi)`, asserted at four refractive indices to a
+  relative 1e-9, plus a value pin (`LSA(10, 100, 1.5) = 0.1`; the old bracket gave 0.01625).
+  Mutation-checked: restoring the pre-2.4.6 bracket fails 5 assertions, and dropping only
+  the `n^2/(n-1)^2` constant fails the same 5.
+- **`tests/pbr_core.tcyr` — the NDF normalization, which the suite had no form of
+  (453 → 466).** The defining property of a microfacet distribution is that
+  `integral of D(h)*cos(theta_h) over the hemisphere = 1`. GGX and Beckmann are pinned at
+  five roughnesses each. ⚠ This is exactly the integral the 2.2.6 GGX epsilon defect
+  collapsed — D was 4.2x low at roughness 0.01 and eight orders low at 0.001 — and it was
+  found by reading the code, because nothing asserted it. Now something does. Also: `F0`
+  pinned against published normal-incidence reflectance for glass, water and diamond.
+- **`tests/pbr_advanced.tcyr` — phase-function and PDF normalization (928 → 938).**
+  Henyey-Greenstein at g = 0, 0.3, 0.76 and -0.5; the Rayleigh phase; the isotropic phase;
+  the Charlie sheen NDF at three roughnesses; and the cosine-hemisphere PDF. A wrong `4pi`,
+  a dropped `(1-g^2)` or a `16pi` written as `8pi` is invisible to "is it positive" and "is
+  it symmetric", and cannot survive an integral.
+
+### Changed
+
+- **`lens_cardinal_points` — the sign convention is now stated.** Checked at 2.4.6 and
+  correct, but previously unwritten: `ffd`/`bfd` are positive rightward from their
+  vertices, while the two principal-plane fields are the **negative** of the usual
+  "position from the vertex, positive rightward". For a symmetric biconvex lens
+  (n = 1.5, R = +/-50, d = 5) the planes sit at +1.6949 from V1 and -1.6949 from V2, and the
+  struct reports -1.6949 and +1.6949. Self-consistent, magnitudes correct — documented
+  rather than changed, because the fields are public API.
+
+### Not exposed — the PBR audit, which found nothing to repair
+
+Every property below was integrated numerically from the shipped formulas.
+
+- **GGX and Beckmann NDFs integrate to exactly 1.000000** at roughness 1.0, 0.8, 0.5, 0.3,
+  0.2, 0.1 and 0.05.
+- **Every phase function integrates to exactly 1.000000** over the full sphere: isotropic,
+  Rayleigh, and Henyey-Greenstein at g = 0, 0.3, 0.76, -0.5 and 0.9. The **Charlie** sheen
+  NDF satisfies the hemisphere-with-cosine contract to 1.000000 at four roughnesses, and
+  the **cosine-hemisphere PDF** integrates to 1.000000.
+- **`pbr_ior_to_f0`** reproduces published normal-incidence reflectance: 0.04000 for n = 1.5
+  (glass/plastic), 0.02037 for water, 0.17197 for diamond.
+- **The analytic split-sum** constants match Karis/Lazarov `EnvBRDFApprox` term for term:
+  `r = (1-m, -0.0275m+0.0425, -0.572m+1.04, 0.022m-0.04)`,
+  `a004 = min(r.x^2, 2^(-9.28 n.v)) r.x + r.y`, `A = -1.04a + r.z`, `B = 1.04a + r.w`.
+- **Cook-Torrance**, the Smith/Schlick-GGX geometry remaps (direct `k = (r+1)^2/8`, IBL
+  `k = alpha/2`), Lambert `albedo/pi` and the clearcoat and sheen forms are all the standard
+  published expressions. The energy bound on the split-sum LUT is already asserted by the
+  suite from 2.2.8.
+
+### Not exposed — the rest of the lens module
+
+- **Seidel spherical and coma reproduce both textbook singlet results**, which is the
+  independent check 2.2.8 installed and it still holds: the best-form shape at
+  `q = 2(n^2-1)/(n+2) = 0.7143` for n = 1.5, and the aplanatic (coma-free) shape at
+  `q = 0.80`.
+- **Depth of field** matches the classic worked case — 50 mm, f/8, CoC 0.03 mm, subject 5 m
+  gives H = 10.42 m, near 3.39 m, far 9.53 m — and `far` goes to infinity **exactly** at the
+  hyperfocal subject distance.
+- **Cardinal points**: for the symmetric biconvex test lens, f = 50.8475, bfd = 49.1525,
+  ffd = -49.1525, and the principal planes are symmetric at 1.6949 — the standard
+  `-f(n-1)d/(nR)` positions.
+- **Diffraction and MTF**: `1.22 lambda / D`, Airy radius `1.22 lambda N`, cutoff
+  `1/(lambda N)`, and `(2/pi)(acos v - v sqrt(1-v^2))` are the standard forms; NA = 1/(2N)
+  and FOV = 2 atan(sensor/2f) are correct. Petzval sum `1/(n f)` and radius `-1/S`,
+  LCA = f/V, and the separated-lens forms are standard.
+
+### Performance
+
+**No change is claimed.** One bracket, in a function **no benchmark calls** — grepped:
+`tests/prakash.bcyr` has 0 occurrences of `longitudinal_spherical`, and `lens/seidel_
+coefficients` (which does exercise the bracket this one now matches) is untouched. 138 rows:
+median **+0.00%**, mean +1.09%, 7 rows past +/-10%; every lens and PBR row that moved more
+than 5% is a sub-20 ns row where one nanosecond of quantisation is 5-20%.
+
 ## [2.4.5] - 2026-09-22 — the atmosphere used two different airs in one formula; the CIE tables came through clean
 
 Both modules audited against published references. **CIE passes on every check made** and

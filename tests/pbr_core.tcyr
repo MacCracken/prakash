@@ -270,4 +270,52 @@ assert_eq(_pbr_ln2(), f64_ln(F64_TWO), "_pbr_ln2 literal == f64_ln(2) bit-for-bi
 assert_eq(_pbr_min_dot(), f64_div(f64_from(1), f64_from(1000)),
   "_pbr_min_dot literal == 1/1000 bit-for-bit");
 
+# ── NDF normalization ────────
+test_group("ndf_normalization");
+
+# ⭐ THE DEFINING PROPERTY OF A MICROFACET DISTRIBUTION, and the suite had no form
+# of it before 2.4.6: the integral of D(h) * cos(theta_h) over the hemisphere must
+# be exactly 1. A distribution that is mis-scaled, has a wrong power, or whose
+# guard epsilon has taken over the answer at low roughness cannot satisfy it — the
+# 2.2.6 GGX epsilon defect (D 4.2x low at roughness 0.01, 8 orders low at 0.001)
+# is precisely this integral collapsing, and it was found by reading the code
+# rather than by a test. Trapezoid in theta over [0, pi/2], 2000 steps.
+fn _ndf_norm_ggx(r) {
+    var acc = f64_from(0);
+    var i = 0;
+    while (i < 2000) {
+        var th = f64_div(f64_mul(f64_add(f64_from(i), F64_HALF), F64_PI_2), f64_from(2000));
+        var c = f64_cos(th);
+        acc = f64_add(acc, f64_mul(f64_mul(f64_mul(pbr_distribution_ggx(c, r), c), f64_sin(th)),
+            f64_div(F64_PI_2, f64_from(2000))));
+        i = i + 1;
+    }
+    return f64_mul(acc, f64_mul(F64_TWO, F64_PI));
+}
+fn _ndf_norm_beckmann(r) {
+    var acc = f64_from(0);
+    var i = 0;
+    while (i < 2000) {
+        var th = f64_div(f64_mul(f64_add(f64_from(i), F64_HALF), F64_PI_2), f64_from(2000));
+        var c = f64_cos(th);
+        acc = f64_add(acc, f64_mul(f64_mul(f64_mul(pbr_distribution_beckmann(c, r), c), f64_sin(th)),
+            f64_div(F64_PI_2, f64_from(2000))));
+        i = i + 1;
+    }
+    return f64_mul(acc, f64_mul(F64_TWO, F64_PI));
+}
+var _nr = 1;
+while (_nr <= 5) {
+    var _rv = f64_div(f64_from(_nr), f64_from(5));
+    _assert_near(_ndf_norm_ggx(_rv), F64_ONE, _fd(1, 1000), "GGX integrates to 1");
+    _assert_near(_ndf_norm_beckmann(_rv), F64_ONE, _fd(1, 1000), "Beckmann integrates to 1");
+    _nr = _nr + 1;
+}
+
+# IOR -> F0 against published normal-incidence reflectances. F0 = ((1-n)/(1+n))^2
+# is exact, so these are tight; they pin the mapping, not an approximation.
+_assert_near(pbr_ior_to_f0(_fd(15, 10)), F04, _fd(1, 1000000), "F0(n=1.5) = 0.04 (glass/plastic)");
+_assert_near(pbr_ior_to_f0(_fd(1333, 1000)), _fd(2037, 100000), _fd(1, 100000), "F0(n=1.333) = 0.0204 (water)");
+_assert_near(pbr_ior_to_f0(_fd(2417, 1000)), _fd(17197, 100000), _fd(1, 100000), "F0(n=2.417) = 0.1720 (diamond)");
+
 var r = assert_summary();
