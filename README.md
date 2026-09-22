@@ -58,7 +58,7 @@ modules = ["dist/hisab.cyr"]
 
 [deps.prakash]
 git     = "https://github.com/MacCracken/prakash.git"
-tag     = "2.4.9"
+tag     = "2.5.0"
 modules = ["dist/prakash.cyr"]        # math-only core (no TLS)
 # For the AI client instead, pull the ai bundle (adds the sandhi HTTP/TLS stack):
 # modules = ["dist/prakash-ai.cyr"]
@@ -114,10 +114,10 @@ prakash (Cyrius)
 
 ```sh
 cyrius deps                 # resolve the hisab git dep
-for f in tests/*.tcyr; do cyrius test "$f"; done   # 7121 assertions, 31 suites
+for f in tests/*.tcyr; do cyrius test "$f"; done   # 7171 assertions, 31 suites
 cyrius distlib              # regenerate dist/prakash.cyr
 cyrius distlib ai           # regenerate dist/prakash-ai.cyr
-cyrius bench tests/prakash.bcyr                     # 138 benchmarks
+cyrius bench tests/prakash.bcyr                     # 139 benchmarks
 ./scripts/bench-history.sh  # append to the CSV history + benchmarks.md
 ```
 

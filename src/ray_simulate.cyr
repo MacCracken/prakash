@@ -401,7 +401,98 @@ fn optical_path_length(ray, surfaces, image_z, err_out) {
     return opl;
 }
 
-# Optical path difference of a ray relative to a chief ray. Writes err to err_out.
+# ── Wavefront reference ────────
+# ⛔ 2.5.0: optical_path_difference and opd_fan subtracted two optical_path_length
+# values, each ending where ITS OWN ray crosses image_z. Those are different
+# points, and a wavefront aberration is only defined against a COMMON one. The
+# extra path from a ray's own intercept to the reference point is first order in
+# its transverse aberration and does not cancel: it subtracts h * dW/dh from W,
+# which for spherical aberration (W ~ h^4) is 4W — so both functions returned -3x
+# the true wavefront aberration, sign flipped. Measured on an equiconvex singlet
+# (R = 100, t = 1, n = 1.5, image plane at paraxial focus): -3.001 / -3.004 /
+# -3.009 / -3.016 at h = 1..4, against a separately coded path-to-common-point
+# harness that agrees with Welford's -h^4 B / (32 f^3) to 0.5%. Every ray now
+# ends at P, the chief ray's intercept with image_z:
+#   W = [OPL to the last surface + n' |Q - P|] - [chief OPL to P]
+# signed negative when the final ray travels away from P (a virtual image). The
+# segment Q -> P is not the ray's own path; the difference is second order in
+# the ray's angular deviation from QP, far below W at any aperture where
+# third-order aberration theory means anything. optical_path_length itself is
+# unchanged: it is a correct path length to a plane, just not an OPD.
+
+# Traces `ray` and returns its optical path to the last surface it hits, storing
+# the ray leaving that surface (or `ray` itself for an empty system) at fr_out.
+# 0 with err_out set when the trace fails.
+fn _sim_opl_to_last(ray, surfaces, fr_out, err_out) {
+    store64(err_out, PK_ERR_NONE);
+    store64(fr_out, ray);
+    var e = 0;
+    var hits = trace_sequential(ray, surfaces, &e);
+    if (prakash_is_err(e) == 1) {
+        store64(err_out, e);
+        return f64_from(0);
+    }
+    var opl = f64_from(0);
+    var prev_pos = TraceRay_pos(ray);
+    var prev_n = TraceRay_n(ray);
+    var nhits = vec_len(hits);
+    var i = 0;
+    while (i < nhits) {
+        var hit = vec_get(hits, i);
+        opl = f64_add(opl, f64_mul(prev_n, _sim_dist(prev_pos, TraceHit_hit_point(hit))));
+        prev_pos = TraceHit_hit_point(hit);
+        prev_n = TraceRay_n(TraceHit_ray_after(hit));
+        i = i + 1;
+    }
+    if (nhits > 0) {
+        store64(fr_out, TraceHit_ray_after(vec_get(hits, nhits - 1)));
+    }
+    return opl;
+}
+
+# n' times the distance from the final ray's origin to (px, py, pz), negative
+# when the ray travels away from that point.
+fn _sim_leg_to_point(fr, px, py, pz) {
+    var q = TraceRay_pos(fr);
+    var d = TraceRay_dir(fr);
+    var dx = f64_sub(px, RayVec3_x(q));
+    var dy = f64_sub(py, RayVec3_y(q));
+    var dz = f64_sub(pz, RayVec3_z(q));
+    var len = f64_sqrt(f64_add(f64_add(f64_mul(dx, dx), f64_mul(dy, dy)), f64_mul(dz, dz)));
+    var along = f64_add(f64_add(f64_mul(dx, RayVec3_x(d)), f64_mul(dy, RayVec3_y(d))),
+      f64_mul(dz, RayVec3_z(d)));
+    if (f64_lt(along, f64_from(0)) == 1) { len = f64_neg(len); }
+    return f64_mul(TraceRay_n(fr), len);
+}
+
+# The chief ray's optical path to its own intercept P with the plane image_z;
+# P's x and y go to px_out / py_out. PK_ERR_INVALID_PARAMETER when the chief
+# ray leaves the system parallel to that plane and so never meets it.
+fn _sim_chief_ref(chief_ray, surfaces, image_z, px_out, py_out, err_out) {
+    var fr = 0;
+    var e = 0;
+    var opl = _sim_opl_to_last(chief_ray, surfaces, &fr, &e);
+    if (prakash_is_err(e) == 1) {
+        store64(err_out, e);
+        return f64_from(0);
+    }
+    var q = TraceRay_pos(fr);
+    var d = TraceRay_dir(fr);
+    if (f64_gt(f64_abs(RayVec3_z(d)), _sim_eps15()) == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return f64_from(0);
+    }
+    var t = f64_div(f64_sub(image_z, RayVec3_z(q)), RayVec3_z(d));
+    store64(px_out, f64_add(RayVec3_x(q), f64_mul(t, RayVec3_x(d))));
+    store64(py_out, f64_add(RayVec3_y(q), f64_mul(t, RayVec3_y(d))));
+    store64(err_out, PK_ERR_NONE);
+    return f64_add(opl, _sim_leg_to_point(fr, load64(px_out), load64(py_out), image_z));
+}
+
+# Wavefront aberration of `ray` relative to `chief_ray` at the plane image_z:
+# both paths end at the chief ray's image-plane intercept (see the 2.5.0 note
+# above). Negative at the paraxial focus of an undercorrected singlet. Writes
+# err to err_out.
 #must_use
 fn optical_path_difference(ray, chief_ray, surfaces, image_z, err_out) {
     store64(err_out, PK_ERR_NONE);
@@ -413,27 +504,34 @@ fn optical_path_difference(ray, chief_ray, surfaces, image_z, err_out) {
         store64(err_out, PK_ERR_INVALID_PARAMETER);
         return 0;
     }
-    var e1 = 0;
-    var opl_ray = optical_path_length(ray, surfaces, image_z, &e1);
-    if (prakash_is_err(e1) == 1) {
-        store64(err_out, e1);
-        return f64_from(0);
-    }
+    var px = 0;
+    var py = 0;
     var e2 = 0;
-    var opl_chief = optical_path_length(chief_ray, surfaces, image_z, &e2);
+    var opl_chief = _sim_chief_ref(chief_ray, surfaces, image_z, &px, &py, &e2);
     if (prakash_is_err(e2) == 1) {
         store64(err_out, e2);
         return f64_from(0);
     }
-    return f64_sub(opl_ray, opl_chief);
+    var fr = 0;
+    var e1 = 0;
+    var opl_ray = _sim_opl_to_last(ray, surfaces, &fr, &e1);
+    if (prakash_is_err(e1) == 1) {
+        store64(err_out, e1);
+        return f64_from(0);
+    }
+    return f64_sub(f64_add(opl_ray, _sim_leg_to_point(fr, px, py, image_z)), opl_chief);
 }
 
-# An (aperture_height, opd) pair for opd_fan results.
+# An (aperture_height, opd) pair for opd_fan results. `height` is the fan's
+# NORMALISED pupil coordinate (-1..1), not a length; `opd` is in lens units.
 #derive(accessors)
 struct OpdPoint { height; opd; }
 
-# OPD for each ray in a fan relative to the chief ray (min |aperture_height|).
-# Returns a `vec` of OpdPoint; vignetted rays are excluded, empty on failure.
+# Wavefront aberration for each ray in a fan, relative to the chief ray (min
+# |aperture_height|) and referenced to that ray's image-plane intercept, as
+# optical_path_difference. Returns a `vec` of OpdPoint; vignetted rays are
+# excluded, empty on failure. Give an odd ray count so the fan contains its
+# chief ray exactly (ray_fan_meridional puts t = 0 in the middle).
 #must_use
 fn opd_fan(fan, surfaces, image_z) {
     _prk_trace("opd_fan");
@@ -454,21 +552,26 @@ fn opd_fan(fan, surfaces, image_z) {
         }
         i = i + 1;
     }
+    var px = 0;
+    var py = 0;
     var ec = 0;
-    var opl_chief = optical_path_length(FanRay_ray(vec_get(fan, chief_idx)), surfaces, image_z, &ec);
+    var opl_chief = _sim_chief_ref(FanRay_ray(vec_get(fan, chief_idx)), surfaces, image_z,
+      &px, &py, &ec);
     if (prakash_is_err(ec) == 1) {
         return result;
     }
     i = 0;
     while (i < count) {
         var fr = vec_get(fan, i);
+        var last = 0;
         var e = 0;
-        var opl = optical_path_length(FanRay_ray(fr), surfaces, image_z, &e);
+        var opl = _sim_opl_to_last(FanRay_ray(fr), surfaces, &last, &e);
         if (prakash_is_err(e) == 0) {
             var op = alloc(sizeof(OpdPoint));
             if (op == 0) { return 0; }
             OpdPoint_set_height(op, FanRay_aperture_height(fr));
-            OpdPoint_set_opd(op, f64_sub(opl, opl_chief));
+            OpdPoint_set_opd(op,
+              f64_sub(f64_add(opl, _sim_leg_to_point(last, px, py, image_z)), opl_chief));
             vec_push(result, op);
         }
         i = i + 1;

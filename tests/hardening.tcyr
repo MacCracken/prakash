@@ -371,7 +371,9 @@ var _rt5 = _h_rt(0x0010000000000000, "DBL_MIN survives bit-exact");
 # 0x3E1BDA70DB50D1A0, one ULP high. This asserts the DEFECTIVE result on purpose.
 # When a bayan update fixes the decoder THIS FAILS, and that is the signal to
 # delete it and the caveat in src/serialize.cyr's header — the same pattern this
-# file uses for the math-shim divergences.
+# file uses for the math-shim divergences. Filed upstream at 2.5.0 (bayan
+# docs/development/issues/2026-09-22-prakash-f64-parse-double-rounding-at-midpoint.md),
+# with 27 failing vectors.
 var _ulp_c = rgb_new(0x3E1BDA70DB50D19F, F64_ONE, F64_ONE);
 var _ulp_js = rgb_to_json(_ulp_c);
 var _ulp_back = rgb_from_json(str_data(_ulp_js), str_len(_ulp_js), &e);

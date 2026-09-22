@@ -267,4 +267,107 @@ while (iod < vec_len(opd_data)) {
 var opd_empty = opd_fan(vec_new(), biconvex_lens(), f64_from(200));
 assert_eq(vec_len(opd_empty), 0, "opd_fan empty input");
 
+# ⛔ 2.5.0: EVERY OPD ASSERTION ABOVE HOLDS FOR THE DEFECT THIS FIXED. Chief-vs-
+# chief is zero and an off-axis ray is nonzero whatever the reference point is,
+# so the suite passed while both functions returned -3x the wavefront aberration
+# (sign flipped, three times too large) by ending each ray at ITS OWN image-plane
+# intercept instead of a common one. These pin the value against Welford's
+# third-order result, and the shape against the tracer's geometric intercepts
+# through the Hamilton relation — which no reference-point error can satisfy.
+# Fixture: equiconvex singlet with front radius r (+100 converging, -100
+# diverging), 1 thick, n = 1.5, image plane at the traced paraxial focus.
+fn _w_singlet(r) {
+    var s = vec_new();
+    vec_push(s, surface_sphere(r, Z, N15, f64_from(20)));
+    vec_push(s, surface_sphere(f64_neg(r), F64_ONE, F64_ONE, f64_from(20)));
+    return s;
+}
+fn _w_last(r, h) {
+    var e = 0;
+    var hits = trace_sequential(off_axis_ray(h, f64_from(0 - 10)), _w_singlet(r), &e);
+    return TraceHit_ray_after(vec_get(hits, vec_len(hits) - 1));
+}
+# Paraxial image z and EFL (h / tan u') for front radius r, to out[0], out[1].
+fn _w_paraxial(r, out) {
+    var fr = _w_last(r, _fd(1, 10000));
+    var p = TraceRay_pos(fr);
+    var d = TraceRay_dir(fr);
+    store64(out, f64_sub(RayVec3_z(p), f64_div(f64_mul(RayVec3_y(p), RayVec3_z(d)), RayVec3_y(d))));
+    store64(out + 8, f64_div(f64_mul(_fd(1, 10000), RayVec3_z(d)), f64_neg(RayVec3_y(d))));
+    return 0;
+}
+fn _w(r, h, zi) {
+    var e = 0;
+    return optical_path_difference(off_axis_ray(h, f64_from(0 - 10)), off_axis_ray(Z, f64_from(0 - 10)),
+      _w_singlet(r), zi, &e);
+}
+# -B h^4 / (32 f^3), B = (3n+2)/n + n^2/(n-1)^2 = 13.3333 at n = 1.5 (q = 0, p = -1).
+fn _w_book(h, f) {
+    var h4 = f64_mul(f64_mul(h, h), f64_mul(h, h));
+    var b = f64_add(f64_div(f64_from(13), f64_from(3)), f64_from(9));
+    return f64_neg(f64_div(f64_mul(h4, b), f64_mul(f64_from(32), f64_mul(f64_mul(f, f), f))));
+}
+var _wpar = alloc(16);
+if (_wpar == 0) { syscall(60, 1); }
+_w_paraxial(f64_from(100), _wpar);
+var _w_zp = load64(_wpar);
+# Measured EFL 100.1669, matching the thick-lens formula.
+var _w_efl = load64(_wpar + 8);
+var _w_r = f64_from(100);
+# W(h) against Welford's W040. Measured W/book 0.9953 / 0.9955 / 0.9958 / 0.9962
+# at h = 1..4 (thickness and fifth order); 2.4.9 gave -2.987 .. -3.004.
+for (var _wh = 1; _wh <= 4; _wh = _wh + 1) {
+    var _h = f64_from(_wh);
+    _assert_near(f64_div(_w(_w_r, _h, _w_zp), _w_book(_h, _w_efl)), F64_ONE, _fd(1, 100),
+      "OPD at paraxial focus = -B h^4/(32 f^3) to 1% (Welford W040)");
+}
+assert(f64_lt(_w(_w_r, F64_ONE, _w_zp), Z), "an undercorrected singlet's marginal OPD is negative at paraxial focus");
+# h^4 law: measured W(2)/W(1) = 16.003. ⚠ This one does NOT catch the 2.4.9
+# defect — it read 16.019 there, because subtracting h dW/dh keeps the power
+# law. It pins the aberration's order, and the pins either side pin the value.
+_assert_near(f64_div(_w(_w_r, F64_TWO, _w_zp), _w(_w_r, F64_ONE, _w_zp)), f64_from(16), _fd(5, 100),
+  "OPD scales as h^4");
+# Hamilton: the transverse ray error at the image plane is R dW/dh, with the
+# reference radius R = f for a stop at the lens. Measured eps / (f dW/dh) =
+# 1.0001 / 1.0008 / 1.0018 / 1.0032 at h = 1..4. The own-intercept OPD of 2.4.9
+# measured -0.3332 here (W(1) = +1.238e-6 against the true -4.126e-7).
+for (var _wk = 1; _wk <= 4; _wk = _wk + 1) {
+    var _hk = f64_from(_wk);
+    var _dl = _fd(1, 100);
+    var _dw = f64_div(f64_sub(_w(_w_r, f64_add(_hk, _dl), _w_zp), _w(_w_r, f64_sub(_hk, _dl), _w_zp)),
+      f64_mul(F64_TWO, _dl));
+    var _lr = _w_last(_w_r, _hk);
+    var _lp = TraceRay_pos(_lr);
+    var _ld = TraceRay_dir(_lr);
+    var _eps = f64_add(RayVec3_y(_lp),
+      f64_mul(f64_div(f64_sub(_w_zp, RayVec3_z(_lp)), RayVec3_z(_ld)), RayVec3_y(_ld)));
+    _assert_near(f64_div(_eps, f64_mul(_w_efl, _dw)), F64_ONE, _fd(1, 100),
+      "traced transverse aberration = f dW/dh to 1% (Hamilton)");
+}
+# A VIRTUAL image: the diverging singlet's paraxial focus lies in front of it
+# (z = -99.17), so every final ray travels AWAY from the reference point and its
+# last leg counts negative. Measured W/book 1.0049 / 1.0050 / 1.0053 / 1.0058,
+# positive as it must be for f < 0. Counting that leg positive instead was
+# measured at W(1) = +0.0201 (48,000x) — the h^2 sag of the lens, doubled.
+_w_paraxial(f64_neg(_w_r), _wpar);
+assert(f64_lt(load64(_wpar), Z), "the diverging singlet's image is virtual");
+for (var _wv = 1; _wv <= 4; _wv = _wv + 1) {
+    var _hv = f64_from(_wv);
+    _assert_near(f64_div(_w(f64_neg(_w_r), _hv, load64(_wpar)), _w_book(_hv, load64(_wpar + 8))), F64_ONE,
+      _fd(1, 100), "virtual-image OPD = -B h^4/(32 f^3) to 1% (f < 0)");
+}
+# opd_fan is the same computation over a fan: symmetric in h, zero at the chief,
+# and bit-equal to optical_path_difference ray for ray.
+var _wfan = ray_fan_meridional(f64_from(4), 9, Z, f64_from(0 - 10));
+var _wod = opd_fan(_wfan, _w_singlet(_w_r), _w_zp);
+assert_eq(vec_len(_wod), 9, "opd_fan keeps all 9 rays of an unvignetted fan");
+for (var _wi = 0; _wi < vec_len(_wod); _wi = _wi + 1) {
+    var _e = 0;
+    var _direct = optical_path_difference(FanRay_ray(vec_get(_wfan, _wi)), off_axis_ray(Z, f64_from(0 - 10)),
+      _w_singlet(_w_r), _w_zp, &_e);
+    assert_eq(OpdPoint_opd(vec_get(_wod, _wi)), _direct, "opd_fan equals optical_path_difference bit-for-bit");
+    assert_eq(OpdPoint_opd(vec_get(_wod, _wi)), OpdPoint_opd(vec_get(_wod, 8 - _wi)), "opd_fan is symmetric in h");
+}
+assert_eq(OpdPoint_opd(vec_get(_wod, 4)), Z, "opd_fan chief is exactly 0");
+
 var r = assert_summary();

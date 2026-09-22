@@ -3,6 +3,9 @@
 
 include "src/error.cyr"
 include "src/lens.cyr"
+include "src/ray_core.cyr"
+include "src/ray_fresnel.cyr"
+include "src/ray_trace.cyr"
 
 fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
 fn _near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
@@ -313,20 +316,25 @@ assert(f64_gt(f64_abs(lens_longitudinal_spherical_aberration(f64_from(10), f64_f
     f64_abs(lens_longitudinal_spherical_aberration(f64_from(5), f64_from(100), N15))),
   "LSA increases with ray height");
 
-# ⭐ THE PIN THAT FINDS THE 2.4.6 DEFECT, AND THE ONLY ONE THAT COULD.
+# ⭐ THE PIN THAT FINDS THE 2.4.6 DEFECT.
 # lens_longitudinal_spherical_aberration evaluates the SAME Seidel bracket as
 # lens_seidel_coefficients, at q = 0 and p = -1 (equiconvex singlet, object at
-# infinity). So LSA(h, f, n) must equal h^2 * S_I(n, f, 0, -1) / (2*phi) exactly.
+# infinity). So LSA(h, f, n) must equal h^2 * S_I(n, f, 0, -1) / (2 phi^2): S_I
+# over twice the square of the marginal ray's image-space slope u' = h phi.
 # Through 2.4.5 it did not: that function kept the extra (n-1) on the p^2 term and
 # omitted the n^2/(n-1)^2 constant, both of which 2.2.6 had repaired thirty lines
 # away, leaving the bracket 6.15x too small at n = 1.5. The assertion above —
 # "LSA increases with ray height", inherited from the Rust suite — holds for any
 # positive bracket and passed the defect for the life of the port. (2.4.6)
+# ⚠ 2.5.0: THIS PIN WAS WRITTEN AS h^2 S_I / (2 phi) AND WAS WRONG WITH THE CODE.
+# It encodes a relationship between two functions, so when both carry the same
+# wrong divisor it agrees; it catches the two DRIFTING APART, never both being
+# wrong. The group below is what checks them against physics.
 fn _lsa_from_seidel(h, f, n) {
-    var e = 0;
     var sc = lens_seidel_coefficients(n, f, Z, f64_neg(F64_ONE));
     var s1 = SeidelCoefficients_spherical(sc);
-    return f64_div(f64_mul(f64_mul(h, h), s1), f64_mul(F64_TWO, f64_div(F64_ONE, f)));
+    var phi = f64_div(F64_ONE, f);
+    return f64_div(f64_mul(f64_mul(h, h), s1), f64_mul(F64_TWO, f64_mul(phi, phi)));
 }
 var _lsa_n = 0;
 while (_lsa_n < 4) {
@@ -338,20 +346,115 @@ while (_lsa_n < 4) {
       "LSA agrees with the Seidel bracket at q=0, p=-1");
     _lsa_n = _lsa_n + 1;
 }
-# And a value pin, so the pair cannot drift together. At n = 1.5, f = 100, h = 10
-# the bracket is (3n+2)/n + n^2/(n-1)^2 = 4.33333 + 9 = 13.33333, giving
-# s1 = phi^3 * n/(4(n-1)^2) * 13.33333 = 2.0e-5 and LSA = h^2*s1/(2*phi) = 0.1.
-# The pre-2.4.6 bracket of 2.16667 gave 0.01625.
-# ⛔ 2.4.9: THIS PIN IS A REGRESSION LOCK, NOT A PHYSICS CHECK, AND IT WAS PRESENTED
-# AS ONE. Its expected value is computed from the very expression it tests — the
-# derivation above IS the code — so it can only confirm the code agrees with itself.
-# The textbook third-order result for this case is h^2*B/(8f) = 100*13.333/800 =
-# 1.6667, 16.7x larger, and 2.4.6 computed that gap and set it aside as a
-# normalisation convention. The 2.4.8 audit's critic reports the code scales as
-# 1/f^2 where a length must scale as 1/f, measured against ray_trace. Filed as
-# roadmap item 1; this pin stays until that item replaces it with a traced value.
+# Welford's closed form, h^2 B / (8 f) with B = (3n+2)/n + n^2/(n-1)^2 = 13.3333
+# at n = 1.5: 100 * 13.3333 / 800 = 1.66667. This is the expression the code
+# evaluates, so on its own it only locks the value; the traced group below is
+# what makes it a physics check. Through 2.4.9 this line pinned 0.1 — derived
+# from the code, 16.7x too small, and presented as a check. (2.5.0)
 _assert_near(lens_longitudinal_spherical_aberration(f64_from(10), f64_from(100), N15),
-  _fd(1, 10), _fd(1, 1000000), "LSA(h=10, f=100, n=1.5) = 0.1");
+  _fd(5, 3), _fd(1, 1000000), "LSA(h=10, f=100, n=1.5) = h^2 B/(8f) = 1.66667");
+
+# ── Seidel against this library's own ray trace ────────
+# ⛔ 2.5.0: EVERY SEIDEL ASSERTION ABOVE IS BLIND TO A MULTIPLIER. The argmin, the
+# aplanatic zero and the sign are all invariant under any positive factor, and
+# the only value pins were derived from the code. So `spherical` shipped
+# n/(n-1)^2 too large (6x at n = 1.5), `coma` 1/(n-1) too large (2x) and LSA
+# f(n-1)^2/n too small (16.7x at f = 100) through four audits of this bracket.
+# These trace a real equiconvex singlet (radii +/-R, 1 thick, stop at the front
+# vertex, object at infinity: q = 0, p = -1) with ray_trace — Snell at spheres,
+# sharing no code with lens.cyr — and compare. The residual is lens thickness,
+# which thin-lens third-order theory leaves out, so it must SHRINK as R grows;
+# a wrong multiplier would not.
+fn _tr_singlet(r, n) {
+    var s = vec_new();
+    vec_push(s, surface_sphere(r, Z, n, f64_from(20)));
+    vec_push(s, surface_sphere(f64_neg(r), F64_ONE, F64_ONE, f64_from(20)));
+    return s;
+}
+# The ray leaving the singlet, launched from (0, y0, -10) along (0, dy, dz).
+fn _tr_final(surfs, y0, dy, dz) {
+    var e = 0;
+    var r = trace_ray_new(ray_vec3(Z, y0, f64_from(0 - 10)), ray_vec3(Z, dy, dz), F64_ONE);
+    var hits = trace_sequential(r, surfs, &e);
+    return TraceHit_ray_after(vec_get(hits, vec_len(hits) - 1));
+}
+fn _tr_y_at(fr, zi) {
+    var p = TraceRay_pos(fr);
+    var d = TraceRay_dir(fr);
+    return f64_add(RayVec3_y(p), f64_mul(f64_div(f64_sub(zi, RayVec3_z(p)), RayVec3_z(d)), RayVec3_y(d)));
+}
+fn _tr_axis_z(fr) {
+    var p = TraceRay_pos(fr);
+    var d = TraceRay_dir(fr);
+    return f64_sub(RayVec3_z(p), f64_div(f64_mul(RayVec3_y(p), RayVec3_z(d)), RayVec3_y(d)));
+}
+# Traced LSA at h = 1: paraxial focus (h = 1e-4) minus marginal focus.
+fn _tr_lsa(surfs) {
+    return f64_sub(_tr_axis_z(_tr_final(surfs, _fd(1, 10000), Z, F64_ONE)),
+      _tr_axis_z(_tr_final(surfs, F64_ONE, Z, F64_ONE)));
+}
+# code / traced for LSA, S_I and tangential coma, written to out[0..2].
+fn _tr_ratios(r, n, out) {
+    var e = 0;
+    var f = lens_thick_focal_length(n, r, f64_neg(r), F64_ONE, &e);
+    var phi = f64_div(F64_ONE, f);
+    var surfs = _tr_singlet(r, n);
+    var lsa = _tr_lsa(surfs);
+    var sc = lens_seidel_coefficients(n, f, Z, f64_neg(F64_ONE));
+    store64(out, f64_div(lens_longitudinal_spherical_aberration(F64_ONE, f, n), lsa));
+    # S_I / h^4 = 2 LSA u'^2 / h^4 = 2 LSA phi^2 at h = 1.
+    store64(out + 8, f64_div(SeidelCoefficients_spherical(sc), f64_mul(f64_mul(F64_TWO, lsa), f64_mul(phi, phi))));
+    # Tangential coma at field theta = 0.01, pupil height 2: centroid of the
+    # +/-2 pair minus the chief, at the paraxial image plane. Predicted
+    # -(3/2) coma h^2 theta f (the sign convention is documented at the source).
+    var th = _fd(1, 100);
+    var sy = _prk_sin(th);
+    var cz = _prk_cos(th);
+    var y0 = f64_neg(f64_mul(f64_from(10), f64_div(sy, cz)));
+    var zp = _tr_axis_z(_tr_final(surfs, _fd(1, 10000), Z, F64_ONE));
+    var yc = _tr_y_at(_tr_final(surfs, y0, sy, cz), zp);
+    var yu = _tr_y_at(_tr_final(surfs, f64_add(y0, F64_TWO), sy, cz), zp);
+    var yl = _tr_y_at(_tr_final(surfs, f64_sub(y0, F64_TWO), sy, cz), zp);
+    var ct = f64_sub(f64_div(f64_add(yu, yl), F64_TWO), yc);
+    var pred = f64_neg(f64_mul(f64_mul(f64_div(f64_from(3), F64_TWO), SeidelCoefficients_coma(sc)),
+        f64_mul(f64_mul(f64_from(4), th), f)));
+    store64(out + 16, f64_div(pred, ct));
+    return 0;
+}
+var _trr = alloc(24);
+var _trr_prev = alloc(24);
+if (_trr == 0) { syscall(60, 1); }
+if (_trr_prev == 0) { syscall(60, 1); }
+# Measured at R = 400: LSA 1.0012 / S_I 1.0012 / coma 1.0041 at n = 1.5 and
+# 1.0015 / 1.0015 / 1.0039 at n = 1.8. Before 2.5.0 the same three read
+# 0.015 / 6.007 / 2.008 at n = 1.5.
+for (var _tn = 15; _tn <= 18; _tn = _tn + 3) {
+    _tr_ratios(f64_from(400), _fd(_tn, 10), _trr);
+    _assert_near(load64(_trr), F64_ONE, _fd(5, 1000),
+      "LSA matches the traced z_paraxial - z_marginal to 0.5% (R = 400)");
+    _assert_near(load64(_trr + 8), F64_ONE, _fd(5, 1000),
+      "S_I/h^4 matches 2 LSA phi^2 from the trace to 0.5% (R = 400)");
+    _assert_near(load64(_trr + 16), F64_ONE, _fd(1, 100),
+      "coma matches the traced tangential coma to 1% (R = 400)");
+}
+# And the residual is thickness: it shrinks monotonically as R = 100 -> 200 -> 400.
+_tr_ratios(f64_from(100), N15, _trr_prev);
+for (var _tk = 0; _tk < 3; _tk = _tk + 1) {
+    assert(f64_lt(f64_abs(f64_sub(load64(_trr_prev + _tk * 8), F64_ONE)), _fd(2, 100)),
+      "the thick-lens residual at R = 100 is under 2%");
+}
+_tr_ratios(f64_from(200), N15, _trr);
+for (var _tk2 = 0; _tk2 < 3; _tk2 = _tk2 + 1) {
+    assert(f64_lt(f64_abs(f64_sub(load64(_trr + _tk2 * 8), F64_ONE)),
+        f64_abs(f64_sub(load64(_trr_prev + _tk2 * 8), F64_ONE))),
+      "code/traced moves toward 1 as the lens thins (R = 100 -> 200)");
+}
+_tr_ratios(f64_from(400), N15, _trr_prev);
+for (var _tk3 = 0; _tk3 < 3; _tk3 = _tk3 + 1) {
+    assert(f64_lt(f64_abs(f64_sub(load64(_trr_prev + _tk3 * 8), F64_ONE)),
+        f64_abs(f64_sub(load64(_trr + _tk3 * 8), F64_ONE))),
+      "code/traced moves toward 1 as the lens thins (R = 200 -> 400)");
+}
 
 var tca = lens_chromatic_aberration(f64_from(100), f64_from(64));
 assert(f64_gt(tca, Z), "chromatic > 0");

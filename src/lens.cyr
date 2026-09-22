@@ -327,13 +327,30 @@ fn lens_conjugate_factor(object_distance, image_distance) {
 #derive(accessors)
 struct SeidelCoefficients { spherical; coma; astigmatism; field_curvature; distortion; }
 
-# Third-order Seidel aberration coefficients for a thin lens in air.
+# Third-order Seidel aberration coefficients for a thin lens in air, stop at
+# the lens, normalised to Welford's sums: spherical = S_I / h^4,
+# coma = -S_II / (h^2 H), astigmatism = S_III / H^2, field_curvature =
+# S_IV / H^2, distortion = S_V = 0 (h = marginal ray height, H = Lagrange
+# invariant). Transverse and wavefront forms follow from these — see
+# docs/architecture/math.md.
 #must_use
 fn lens_seidel_coefficients(n, focal_length, q, p) {
     _prk_trace("seidel_coefficients");
     var phi = f64_div(F64_ONE, focal_length);
     var nm1 = f64_sub(n, F64_ONE);
-    var term2 = f64_div(n, f64_mul(f64_from(4), _lens_pow2(nm1)));
+    # phi^3 / 4: Welford's S_I = (h^4 K^3 / 4) * [bracket], per unit h^4.
+    # ⛔ 2.5.0: THIS PREFACTOR WAS phi^3 * n/(4(n-1)^2) FROM THE PORT THROUGH 2.4.9,
+    # so `spherical` came out n/(n-1)^2 too large: 6.0x at n = 1.5, 4.44x at 1.6,
+    # 2.81x at 1.8. The bracket below is already Welford's own; only the
+    # multiplier was wrong. Every audit since 2.2.6 checked the bracket through its
+    # ARGMIN over q, and an argmin cannot see a positive q-independent factor, so
+    # four repairs of the bracket all passed straight over it. Measured against
+    # this library's own ray trace (equiconvex singlet, t = 1, object at
+    # infinity), code/traced S_I/h^4 was 6.028 / 6.014 / 6.007 at R = 100 / 200 /
+    # 400 — converging on n/(n-1)^2 = 6 as the lens thins. It is now 1.005 /
+    # 1.002 / 1.001; the residual is lens thickness, which third-order thin-lens
+    # theory leaves out. The pin is the traced one in tests/lens.tcyr.
+    var term2 = f64_div(_lens_pow3(phi), f64_from(4));
     # ⚠ 2.2.6 DELIBERATELY DIVERGES FROM THE RUST ORIGINAL. The Rust bracket
     # (rust-old/src/lens.rs:464-468) had only THREE terms and scaled the p^2 one
     # inconsistently, so the quadratic in q had a positive discriminant and
@@ -350,9 +367,10 @@ fn lens_seidel_coefficients(n, focal_length, q, p) {
     # The bracket is the standard Coddington form
     #   (n+2)q^2 + 4(n+1)pq + (3n+2)(n-1)p^2 + n^3/(n-1)
     # divided term-wise by n(n-1) to sit under this function's existing
-    # phi^3 * n/(4(n-1)^2) prefactor. Two changes fall out: the p^2 term loses
-    # its extra (n-1), and the constant n^2/(n-1)^2 — absent entirely — comes
-    # back.
+    # phi^3 * n/(4(n-1)^2) prefactor (itself wrong — see 2.5.0 above; the
+    # divided bracket is Welford's, and phi^3/4 is its multiplier). Two changes
+    # fall out: the p^2 term loses its extra (n-1), and the constant
+    # n^2/(n-1)^2 — absent entirely — comes back.
     # ⚠ 2.2.6'S CROSS-CHECK WAS SELF-REFERENTIAL and is replaced. It compared the
     # argmin against q = 2(n+1)/(n+2) — derived from the same bracket it was
     # validating — so it agreed by construction, and that is how the q^2 term
@@ -399,9 +417,22 @@ fn lens_seidel_coefficients(n, focal_length, q, p) {
     # published Seidel value, which a correctness release should not do.
     var nr = f64_div(n, nm1);
     var sd = f64_mul(nr, nr);
-    var spherical = f64_mul(f64_mul(_lens_pow3(phi), term2),
-      f64_add(f64_add(f64_add(sa, sb), sc), sd));
-    var cterm2 = f64_div(F64_ONE, f64_mul(F64_TWO, nm1));
+    var spherical = f64_mul(term2, f64_add(f64_add(f64_add(sa, sb), sc), sd));
+    # phi^2 / 2: Welford's S_II = -(h^2 K^2 H / 2) * [bracket]. `coma` is
+    # (phi^2/2) * [bracket], i.e. -S_II/(h^2 H) — the sign convention this
+    # function has always had, stated here because it is not self-evident.
+    # What it means physically, measured by trace with the stop at the lens:
+    # tangential coma (marginal-pair centroid minus chief, along the image
+    # height) = -(3/2) * coma * h^2 * theta * f. So coma < 0 is a flare pointing
+    # AWAY from the axis — the ordinary "positive coma" of a biconvex singlet.
+    # ⛔ 2.5.0: THIS WAS 1/(2(n-1)) THROUGH 2.4.9, and the 2.2.8 note below
+    # called that "a consistent normalisation". It was not: it made coma 1/(n-1)
+    # too large (2.0x at n = 1.5, 1.67x at 1.6, 1.25x at 1.8). The aplanatic
+    # zero at q = 0.80 is invariant under any positive factor, so the 2.2.8 pin
+    # that confirmed the bracket could not see it. Traced/formula |ratio| was
+    # 2.032 / 2.016 / 2.008 at R = 100 / 200 / 400; it is now 1.016 / 1.008 /
+    # 1.004.
+    var cterm2 = F64_HALF;
     # ⚠ 2.2.8: BOTH COMA COEFFICIENTS WERE WRONG, and they sat directly beside
     # the spherical bracket that 2.2.6 audited without looking at them.
     # The thin-lens Coddington coma bracket is (n+1)/(n(n-1)) q + (2n+1)/n p;
@@ -409,8 +440,8 @@ fn lens_seidel_coefficients(n, focal_length, q, p) {
     # where the true aplanatic singlet is q = 0.80 at n = 1.5 — so the function
     # reported ZERO coma for a shape with substantial real coma, and placed the
     # coma-free shape on the wrong side of the spherical minimum, inverting the
-    # standard design conclusion. cterm2 = 1/(2(n-1)) is a consistent
-    # normalisation and is left alone.
+    # standard design conclusion. (2.2.8 left cterm2 = 1/(2(n-1)) alone as "a
+    # consistent normalisation"; it was wrong by 1/(n-1) — see 2.5.0 above.)
     # D = (n+1)/(n*(n-1)) * q
     var cd = f64_mul(f64_div(f64_add(n, F64_ONE), f64_mul(n, nm1)), q);
     # E = (2n+1)/n * p
@@ -428,7 +459,9 @@ fn lens_seidel_coefficients(n, focal_length, q, p) {
 
 # Longitudinal spherical aberration for a marginal ray at ray_height, for the
 # equiconvex singlet with the object at infinity — q = 0, p = -1, as the Rust
-# original's comment stated (`rust-old/src/lens.rs:502`).
+# original's comment stated (`rust-old/src/lens.rs:502`). A length, in the unit
+# of focal_length: z_paraxial - z_marginal, positive for an undercorrected lens
+# (marginal focus nearer the lens). Third-order: h^2 B / (8 f).
 # ⛔ 2.4.6: THIS FUNCTION EVALUATES THE SAME BRACKET AS lens_seidel_coefficients
 # ABOVE, AND IT STILL CARRIED BOTH HALVES OF THE DEFECT 2.2.6 REPAIRED THERE.
 # `inner` read `(3n+2)(n-1)/n`: the p^2 term with the extra (n-1) that 2.2.6
@@ -441,6 +474,17 @@ fn lens_seidel_coefficients(n, focal_length, q, p) {
 # the same name. The pin that finds it is the one now in tests/lens.tcyr: this
 # function's s1 MUST equal lens_seidel_coefficients(n, f, 0, -1).spherical,
 # because that is the same quantity. Keep the two expressions in step.
+# ⛔ 2.5.0: AND THEN IT RETURNED h^2 * s1 / (2 phi), WHICH IS NOT A LENGTH.
+# Longitudinal SA is S_I / (2 u'^2) with u' = h phi the marginal ray's image-
+# space slope, so per unit h^4 it is h^2 * s1 / (2 phi^2) = h^2 B / (8 f). The
+# old divisor dropped one phi, making the result scale as 1/f^2 instead of 1/f,
+# and it sat on top of the n/(n-1)^2 prefactor error fixed above. Net: 16.7x too
+# small at f = 100, 33x at f = 200, 67x at f = 400 (n = 1.5) — the factor
+# f(n-1)^2/n. 2.4.6 computed that gap against the textbook h^2 B/(8f), and set
+# it aside as a normalisation convention; its value pin was derived from this
+# expression and so agreed with it. The pin is now the traced z_paraxial -
+# z_marginal in tests/lens.tcyr: 0.016562 at R = 100 (h = 1) against 0.016639
+# here, the gap being lens thickness, shrinking to 0.12% at R = 400.
 #must_use
 fn lens_longitudinal_spherical_aberration(ray_height, focal_length, n) {
     var phi = f64_div(F64_ONE, focal_length);
@@ -451,10 +495,9 @@ fn lens_longitudinal_spherical_aberration(ray_height, focal_length, n) {
     var inner = f64_add(
       f64_div(f64_add(f64_mul(f64_from(3), n), F64_TWO), n),
       f64_mul(nr, nr));
-    var s1 = f64_mul(
-      f64_div(f64_mul(_lens_pow3(phi), n), f64_mul(f64_from(4), _lens_pow2(nm1))),
-      inner);
-    return f64_div(f64_mul(f64_mul(ray_height, ray_height), s1), f64_mul(F64_TWO, phi));
+    var s1 = f64_mul(f64_div(_lens_pow3(phi), f64_from(4)), inner);
+    return f64_div(f64_mul(f64_mul(ray_height, ray_height), s1),
+      f64_mul(F64_TWO, f64_mul(phi, phi)));
 }
 
 # Longitudinal (axial) chromatic aberration: LCA = f / V.

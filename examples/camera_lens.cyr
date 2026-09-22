@@ -163,12 +163,16 @@ fn main() {
     # ── OPD fan ────────
     say_line("");
     say_line("OPD fan (meridional, on-axis):");
-    var fan = ray_fan_meridional(f64_from(5), 11, f64_from(0), f64_neg(f64_from(100)));
+    # OpdPoint_height is the NORMALISED pupil coordinate, -1..1 across the fan;
+    # scale by the fan's radius for a height in mm. (Printed raw with a "mm"
+    # label through 2.4.9 — 5x too small.)
+    var fan_r = f64_from(5);
+    var fan = ray_fan_meridional(fan_r, 11, f64_from(0), f64_neg(f64_from(100)));
     var opd = opd_fan(fan, tsurf, image_z);
     for (var o = 0; o < vec_len(opd); o = o + 1) {
         var pt = vec_get(opd, o);
         say("  h=");
-        say_f_pad(OpdPoint_height(pt), 2, 6);
+        say_f_pad(f64_mul(OpdPoint_height(pt), fan_r), 2, 6);
         say(" mm  OPD=");
         say_f_pad(OpdPoint_opd(pt), 6, 11);
         say_line(" mm");

@@ -2,6 +2,134 @@
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-09-22 — lens and OPD magnitudes: the 2.4.8 critic's five, confirmed against the tracer and fixed
+
+The five findings the 2.4.8 audit's completeness critic reported, which 2.4.8's
+release notes did not surface and 2.4.9 filed unverified as roadmap item 1. **Each was
+reproduced against this library's own ray tracer before a line of source changed**,
+and all five were real at exactly the magnitudes reported. Suite **7121 → 7171
+assertions across 31 suites**, 0 failed. Reference coverage **414/414**. `cyrius audit`
+exits 0; fmt, lint, `doc --check` (63 files), vet, deny clean; `deps --verify` 112/112;
+`#must_use` 429, 0 lost. Benchmarks 138 → 139.
+
+### Breaking — published values move
+No signature, struct layout or error code changes. The break is in the numbers, which
+were wrong.
+
+| API | Change | Factor at n = 1.5 | Migration for stored values |
+|---|---|---|---|
+| `SeidelCoefficients_spherical` | multiplier φ³·n/(4(n−1)²) → **φ³/4** | ÷ 6 | × (n−1)²/n |
+| `SeidelCoefficients_coma` | multiplier φ²/(2(n−1)) → **φ²/2** | ÷ 2 | × (n−1); sign convention unchanged |
+| `lens_longitudinal_spherical_aberration` | → **h²𝔅/(8f)**, a length (was ∝ 1/f²) | × 16.7 at f = 100 | × f(n−1)²/n |
+| `optical_path_difference`, `opd_fan` | every ray now ends at the chief ray's image-plane intercept | pure spherical: old = **−3W** | none for a mixed wavefront — recompute |
+
+The old OPD was W − h·dW/dh, derived and measured for spherical (−3.001 to −3.016×).
+That makes it −W for pure defocus and 0 for tilt, so no single factor converts it.
+An image plane in front of the last surface (a virtual image) is also handled now.
+Its final leg counts negative, where 2.4.9 dropped that leg entirely.
+Unchanged: `astigmatism`, `field_curvature`, `distortion`, every best-form argmin and
+the aplanatic zero, `optical_path_length`, the `OpdPoint` layout.
+
+### Fixed
+- **lens — `lens_seidel_coefficients` prefactors.** The bracket was already Welford's;
+  the multipliers were not. `spherical` came out n/(n−1)² too large and `coma`
+  1/(n−1) too large. Four audits of this bracket (2.2.6, 2.2.8, 2.4.6, 2.4.9) checked
+  its best-form argmin and aplanatic zero. Both are invariant under any positive
+  factor, so all four passed over it. Code/traced, equiconvex singlet, t = 1, n = 1.5:
+
+  | | R = 100 | R = 200 | R = 400 | 2.4.9, R = 400 |
+  |---|---|---|---|---|
+  | S₁/h⁴ | 1.0047 | 1.0024 | 1.0012 | 6.007 |
+  | tangential coma | 1.0159 | 1.0082 | 1.0041 | 2.008 |
+  | LSA | 1.0047 | 1.0024 | 1.0012 | 0.015 |
+
+  The residual is lens thickness, and it halves each time R doubles. At n = 1.8,
+  R = 400 it is 1.0015 / 1.0015 / 1.0039. The 2.2.8 comment calling cterm2 = 1/(2(n−1))
+  "a consistent normalisation" is corrected in place. The header now states the
+  normalisation to Welford's sums (`spherical` = S₁/h⁴, `coma` = −S₂/(h²H), …).
+  It also states the measured meaning of the coma sign: tangential coma =
+  −(3/2)·`coma`·h²θf, so `coma` < 0 is a flare pointing away from the axis.
+- **lens — `lens_longitudinal_spherical_aberration` divided by 2φ where LSA = S₁/(2u′²),
+  u′ = hφ, needs 2φ².** On top of the prefactor, that made it f(n−1)²/n too small —
+  16.7× at f = 100, 33× at 200, 67× at 400. 2.4.6 computed the 16.7× gap against the
+  textbook h²𝔅/(8f) and set it aside as a normalisation convention. The trace says
+  otherwise: z_paraxial − z_marginal = 0.016562 at R = 100, h = 1, against 0.016639
+  now. Before, it was 0.000997.
+- **ray_simulate — `optical_path_difference` and `opd_fan` measured −3× the wavefront
+  aberration, sign flipped.** Each subtracted two `optical_path_length`s ending where
+  each ray met the image plane, which is a different point per ray. A wavefront
+  aberration is only defined against a common point. Both now end every ray at P, the
+  chief ray's intercept: W = [OPL to the last surface + n′·|Q − P|] − [chief OPL to P].
+  New internal helpers `_sim_opl_to_last`, `_sim_leg_to_point`, `_sim_chief_ref`.
+  Against Welford's −h⁴𝔅/(32f³): 0.9953 / 0.9955 / 0.9958 / 0.9962 at h = 1..4 (2.4.9:
+  −2.987 … −3.004).
+- **examples/camera_lens — the OPD fan printed the normalised pupil coordinate with an
+  "mm" label**, so every height was 5× too small (−1.00 … 1.00 "mm" across a 5 mm fan).
+  `OpdPoint`'s comment now says the field is normalised.
+- **docs/architecture/math.md published the wrong multipliers from 2.4.7 to 2.4.9**, and
+  called the two shape checks "the reason to trust these rather than the algebra".
+  Rewritten: Welford's sums with h and H, the normalisation, a table of what each
+  predicts (LSA, W₀₄₀, tangential coma), the traced table above, a statement of what
+  each kind of check can and cannot see, and a new *Wavefront Aberration (OPD)* section.
+- **docs/development/roadmap.md** — item 1 removed (12 items, no known defect open). One
+  sentence still said the decoder families "have not been checked"; 2.4.9's mechanical
+  null sweep covered them. Release buckets rolled forward to 2.5.x patch / 2.6.x minor.
+
+### Tests — every new pin mutation-checked, one literal at a time
+tests/lens.tcyr traces the singlet with `ray_trace`, which shares no code with
+lens.cyr. It pins LSA, S₁ and tangential coma to it at n = 1.5 and 1.8 (0.5% / 0.5% /
+1% at R = 400), and pins the residual shrinking monotonically as R = 100 → 200 → 400.
+tests/ray_simulate.tcyr pins OPD to Welford's W₀₄₀ at h = 1..4 (1%), its sign, the
+h⁴ law, and the **Hamilton relation**: the tracer's transverse ray error equals
+f·dW/dh, measured 1.0001–1.0032. It also pins a virtual-image OPD for the diverging
+singlet (1.0049–1.0058), and checks `opd_fan` against `optical_path_difference` bit
+for bit.
+
+| Mutant | Fails |
+|---|---|
+| M1 `spherical` multiplier back to φ³·n/(4(n−1)²) | 7 (S₁ trace ×2, LSA↔S₁ ×4, R = 100 residual) |
+| M2 `coma` multiplier back to φ²/(2(n−1)) | 3 (coma trace ×2, residual) |
+| M3 LSA divisor back to 2φ | 10 |
+| M4 the whole 2.4.9 `ray_simulate.cyr` | 9 (W₀₄₀ ×4, sign, Hamilton ×4 — it measured −0.3332) |
+| M5 virtual-image leg unsigned | 4 (it measured W(1) = +0.0201, 48,000×) |
+
+⚠ **Recorded because they do NOT fire.** The h⁴ law passes M4 (16.019): subtracting
+h·dW/dh preserves the power law. The convergence ordering passes M1 by itself, since
+a constant factor leaves the ordering intact; the absolute bands catch it. And
+2.4.6's LSA↔S₁ relation pin, rewritten here for 2φ², held **both** functions at the
+same wrong divisor for three releases. A relation pin catches drift between two
+functions, never both being wrong. The self-derived value pin `LSA(10, 100, 1.5) = 0.1`
+is replaced by Welford's 1.66667, labelled as a value lock whose physics check is
+the traced group.
+
+### Added
+- **bench `ray/optical_path_difference`** — 1.116 µs, two traces (`optical_path_length`
+  is 581 ns).
+
+### Performance
+- None claimed. `lens/seidel_coefficients` read 58 and 56 ns in this release's two runs,
+  against 58 / 59 / 60 across 2.4.6–2.4.9. That is inside this host's noise.
+
+### Upstream
+- **bayan: the decoder defect 2.4.9 pinned is filed** at `docs/development/issues/
+  2026-09-22-prakash-f64-parse-double-rounding-at-midpoint.md` in the bayan repo, with a
+  self-proving repro (exit 4 today, 0 when fixed) and 27 vectors. Root cause, measured
+  by replaying `_d_decimal_to_f64`'s slow path with bayan's own helpers: **double
+  rounding**. W·10^E is rounded to 64 bits, which lands values within 0.33–2.04 LSB of
+  the midpoint EXACTLY on it (27/27 at `low == 0x400`), and that false tie then rounds
+  to even. So the error goes both ways (13 up, 14 down), and only odd doubles fail
+  (27/27). Rate at bayan 1.5.6: 22 per 10⁶ across all doubles. bayan's own oracle
+  fixture is 328 lines, which gives about a 0.7% chance of containing one. prakash's
+  hardening pin stays until the fix lands.
+
+### Process — owned
+2.4.6 computed the 16.7× LSA gap and called it a convention, and wrote a value pin
+derived from the code. 2.4.7 published the wrong multipliers in math.md and presented
+shape checks as sufficient. 2.4.8 had all five findings in its audit output and did
+not surface them. The roadmap now records the constraint that would have caught
+them: *when a formula has an independent implementation in this library, pin
+against it*.
+
 ## [2.4.9] - 2026-09-22 — the 2.4.8 audit's twenty lower-severity findings, each reproduced before it was repaired
 
 The twenty findings 2.4.8 filed unverified. **Every one was reproduced by hand first**,

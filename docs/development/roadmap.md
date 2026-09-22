@@ -23,17 +23,15 @@ Prakash does NOT own:
 
 ## Open work at a glance
 
-**13 items. ⭐ Item 1 is a filed physics-defect report that would move published values
-(a breaking change); the rest are demand-gated or waiting on a consumer.**
+**12 items, all demand-gated or waiting on a consumer.** No known defect is open.
 
 | # | Bucket | Item | State |
 |---|---|---|---|
-| 1 | 2.x breaking | Lens/OPD magnitudes: Seidel prefactors, LSA 1/f², OPD −3× | open, unverified |
-| 2–7 | 2.x | GRIN, DOE, Richards-Wolf, HG/LG beams, Buchdahl, aberrated MTF | demand-gated |
-| 8–12 | 2.x | Fluorescence, non-linear, OAM, metamaterials, CIE 2006 observer | demand-gated |
-| 13 | Blocked | soorat / kiran / ranga consume `dist/prakash.cyr` | waiting on the consumers |
+| 1–6 | 2.x | GRIN, DOE, Richards-Wolf, HG/LG beams, Buchdahl, aberrated MTF | demand-gated |
+| 7–11 | 2.x | Fluorescence, non-linear, OAM, metamaterials, CIE 2006 observer | demand-gated |
+| 12 | Blocked | soorat / kiran / ranga consume `dist/prakash.cyr` | waiting on the consumers |
 
-⚠ **Items 2–12 are not a backlog anyone is working through.** Each is a subsystem,
+⚠ **Items 1–11 are not a backlog anyone is working through.** Each is a subsystem,
 listed so the scope boundary stays visible. Do not start one without a consumer
 asking for it.
 
@@ -44,12 +42,12 @@ anyone intends to do them:
 
 | Bucket | Means | Rule |
 |---|---|---|
-| **2.4.x — patch** | no public API moves | internals, perf, tests, docs, tooling, data fixes |
-| **2.5.x — minor** | adds public API | new entry points, new capability |
+| **2.5.x — patch** | no public API moves | internals, perf, tests, docs, tooling, data fixes |
+| **2.6.x — minor** | adds public API | new entry points, new capability |
 | **2.x — demand-gated** | adds a subsystem | build when a consumer actually asks |
 | **Blocked** | not prakash's move | waiting on something external |
 
-⚠ **The bucket is a SemVer classification, not a queue.** Anything in 2.4.x can
+⚠ **The bucket is a SemVer classification, not a queue.** Anything in 2.5.x can
 ship in any order, in any patch release, in any combination — the bucket only
 promises it will not force a minor bump. Reshuffling is free by construction.
 
@@ -57,30 +55,6 @@ promises it will not force a minor bump. Reshuffling is free by construction.
 what the work is and what would block it. Measurements belong in `CHANGELOG.md`;
 a row that grows past ~8 lines has started duplicating the release history and
 should be cut back.
-
-## 2.x — breaking: moves published values
-
-- [ ] **Lens and OPD magnitudes — five reports from the 2.4.8 audit's completeness
-  critic, filed UNVERIFIED.** They were in that audit's output and were not surfaced
-  in the 2.4.8 release notes; recorded here so they cannot be lost twice. Each was
-  measured against `ray_trace`, this library's own independent implementation, which
-  reproduces the textbook third-order results to under 1%:
-  - **Seidel S₁ and S₂ prefactors** (`lens_seidel_coefficients`, src/lens.cyr): S₁
-    carries n/(n−1)² and S₂ 1/(n−1) that S₃ = φ and S₄ = φ/n do not — reported ~6x and
-    ~2x at n = 1.5. Would move every published Seidel value.
-  - **`lens_longitudinal_spherical_aberration` scales as 1/f²** where a length must
-    scale as 1/f — the reported error doubles with f (8.3x at f = 50, 16.6x at 100,
-    66.6x at 400). 2.4.6 computed the 16.7x gap at f = 100 and set it aside as a
-    normalisation convention; the scaling says it is not one.
-  - **`optical_path_difference` / `opd_fan` return −3x the wavefront aberration**:
-    each ray is terminated at its OWN image-plane intercept instead of a common
-    reference point, giving (1−2m)·W for a ρ^2m term.
-  - **tests are self-referential or prefactor-blind**: the LSA value pin derives its
-    expected value from the code's own expression; the OPD group asserts only zero /
-    nonzero; the argmin checks cannot see a prefactor (math.md now says so).
-  ⚠ Verify each against a trace before changing anything — these are reports, and
-  2.4.8's own sweep refuted one of its eight verified candidates. This is several
-  bites, not one, and it needs a **Breaking** CHANGELOG section with a migration note.
 
 ## 2.x — demand-gated: build when a consumer asks
 
@@ -148,6 +122,8 @@ someone needs it; all are listed so the scope boundary stays visible.
   asserts the WRONG result for 1.621274542797433e-9 on purpose. When bayan is fixed
   that assertion fails, which is the signal to delete it and the caveat in
   src/serialize.cyr. Same pattern the file already uses for the math-shim divergences.
+  Filed upstream at 2.5.0 with a self-proving repro, 27 vectors and the root cause
+  (bayan `docs/development/issues/2026-09-22-prakash-f64-parse-double-rounding-at-midpoint.md`).
 - ⛔ **Two public functions that name the same state must be asserted against EACH
   OTHER, or they will contradict each other and both suites will stay green.** 2.4.8
   found `polarization_circular_right` (Jones, S3 = -1) and `stokes_circular_right`
@@ -159,15 +135,26 @@ someone needs it; all are listed so the scope boundary stays visible.
   and its own comment asserted null-guarding was "already the library-wide convention
   — ray_core, ray_trace, ray_system and the wave_* accessors all do it". It was false
   of `ray_system`: all seven Prescription consumers exited 139 on
-  `prescription_from_json`'s documented 0. **The remaining decoder families (Rgb/Xyz,
-  Medium, Polarization, Stokes, Sellmeier, Zernike, and ai.cyr's encoders) are filed
-  above and have not been checked.**
+  `prescription_from_json`'s documented 0. The remaining decoder families were then
+  covered by 2.4.9's mechanical sweep (the ⭐ bullet above), not by reading.
 - ⚠ **Sizing a numerical window from a measurement taken INSIDE that window proves
   nothing.** `_cri_cct_refine`'s ±3% bracket was justified by "McCamy's error, worst
   18.6 K at 2000 K, i.e. 0.93%" — measured only where the bracket already worked.
   McCamy is +50.1% out at 1200 K. A golden section then returns its endpoint silently,
   and Ra fell to 15.6 for a 1000 K blackbody that must score 100. Measure a tolerance
   across the DOMAIN it will be used on, including both edges.
+- ⛔ **A shape check cannot see a multiplier, and a value pin derived from the code
+  cannot see anything.** Four audits (2.2.6, 2.2.8, 2.4.6, 2.4.9) repaired the Seidel
+  bracket against its best-form argmin and aplanatic zero — both invariant under any
+  positive factor — while `spherical` sat 6x too large, `coma` 2x and LSA 16.7x too
+  small, and the one value pin had been computed from the expression it tested.
+  2.5.0 found all three by tracing a real singlet with `ray_trace` and comparing.
+  **When a formula has an independent implementation in this library, pin against
+  it**, and check that the residual shrinks where theory says it should (here: as
+  the lens thins) — a wrong factor does not.
+- ⚠ **A pin relating two functions catches them drifting apart, never both being
+  wrong together.** 2.4.6's `LSA == h²·S₁/(2φ)` caught the second copy of the Seidel
+  bracket, and then held both at the same wrong divisor until 2.5.0.
 - ⛔ **When one quantity is computed in two places, a repair to one does not reach the
   other — and nothing will tell you.** 2.4.6 found `lens_longitudinal_spherical_aberration`
   still carrying BOTH halves of the defect 2.2.6 repaired in `lens_seidel_coefficients`

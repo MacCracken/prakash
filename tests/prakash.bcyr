@@ -157,6 +157,7 @@ var _dir3 = 0;
 var _nrm3 = 0;
 var _presc_bx = 0;
 var _img_z = 0;
+var _ray_marg = 0;
 
 # ── Ray ────────
 # Unpolarized Fresnel reflectance at one incidence angle.
@@ -487,6 +488,12 @@ fn b_refract_3d() { var r = ray_refract_3d(_dir3, _nrm3, _n1, _n2, _err); return
 fn b_find_system_properties() { var r = find_system_properties(_presc_bx, _err); return 0; }
 # Composite: optical path length of one ray through the surface list to the image plane.
 fn b_optical_path_length() { var r = optical_path_length(_ray0, _surfaces, _img_z, _err); return 0; }
+# Composite: wavefront aberration of a marginal ray against the axial chief ray —
+# two traces plus the common-reference-point legs (reworked 2.5.0).
+fn b_optical_path_difference() {
+    var r = optical_path_difference(_ray_marg, _ray0, _surfaces, _img_z, _err);
+    return 0;
+}
 
 # Allocate the shared fixtures, then run every benchmark above in order.
 fn main() {
@@ -641,6 +648,8 @@ fn main() {
     _nrm3 = ray_vec3(f64_from(0), f64_from(0), F64_ONE);
     _presc_bx = prescription_biconvex(f64_from(100), _bf(15, 10), f64_from(12), f64_from(5));
     _img_z = f64_from(50);
+    _ray_marg = trace_ray_new(ray_vec3(f64_from(0), f64_from(3), f64_from(0)),
+      ray_vec3(f64_from(0), f64_from(0), F64_ONE), F64_ONE);
 
     bench("ray/fresnel_unpolarized", &b_fresnel_unpolarized, 500000);
     bench("ray/fiber_na", &b_fiber_na, 500000);
@@ -797,6 +806,7 @@ fn main() {
     # ── ray: system / simulate (2.3.9) ──
     bench("ray/find_system_properties", &b_find_system_properties, 20000);
     bench("ray/optical_path_length", &b_optical_path_length, 100000);
+    bench("ray/optical_path_difference", &b_optical_path_difference, 100000);
     return 0;
 }
 

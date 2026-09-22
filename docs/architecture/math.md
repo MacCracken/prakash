@@ -166,37 +166,75 @@ f_c = 1 / (λN)
 ### Seidel Aberrations
 S₁ (spherical), S₂ (coma), S₃ (astigmatism), S₄ (field curvature), S₅ (distortion)
 
-For a thin lens in air, with shape factor q and conjugate factor p below, the two
-brackets prakash evaluates — written here because they are the most-repaired
-formulas in the library (2.2.6, 2.2.8, 2.4.6):
+For a thin lens in air with the stop at the lens — shape factor q and conjugate
+factor p below, h the marginal ray height, H the Lagrange invariant — these are
+Welford's sums (*Aberrations of Optical Systems*, thin-lens chapter). They are the
+most-repaired formulas in the library (2.2.6, 2.2.8, 2.4.6, 2.5.0):
 
-S₁ = φ³ · n/(4(n-1)²) · [ (n+2)/(n(n-1)²) q² + 4(n+1)/(n(n-1)) qp + (3n+2)/n p² + n²/(n-1)² ]
+S₁ = (h⁴φ³/4) · [ (n+2)/(n(n-1)²) q² + 4(n+1)/(n(n-1)) qp + (3n+2)/n p² + n²/(n-1)² ]
 
-S₂ = φ² · 1/(2(n-1)) · [ (n+1)/(n(n-1)) q + (2n+1)/n p ]
+S₂ = −(h²φ²H/2) · [ (n+1)/(n(n-1)) q + (2n+1)/n p ]
 
-Two independent textbook results check the **bracket**: with the object at
-infinity (p = -1) the spherical-minimum "best-form" shape is
-q = 2(n²-1)/(n+2) = **0.7143 at n = 1.5**, and the coma-free "aplanatic" shape is
-q = **0.80 at n = 1.5**. A bracket that does not reproduce both is wrong, whatever
-it was copied from.
+S₃ = H²φ,  S₄ = H²φ/n,  S₅ = 0
 
-⛔ **But they check NOTHING ELSE, and this page said otherwise from 2.4.7 to 2.4.9.**
-It called them "the reason to trust these rather than the algebra". An argmin
-location and a zero crossing depend only on the RATIOS of the terms inside the
-bracket, so both are completely blind to the prefactor in front of it — the
-φ³·n/(4(n-1)²) and φ²·1/(2(n-1)) above could be wrong by any constant factor and
-both checks would still pass. The 2.4.8 audit's completeness critic reports
-exactly that — S₁ about 6x and S₂ about 2x too large at n = 1.5, measured against
-this library's own ray tracer — together with a 1/f² scaling error in
-`lens_longitudinal_spherical_aberration` and a -3x error in
-`optical_path_difference`. **Those reports are filed, unverified, as item 1 of
-docs/development/roadmap.md.** Until they are resolved, treat S₁, S₂ and LSA
-magnitudes from this library as unconfirmed; the bracket shapes and argmins are
-confirmed.
+`lens_seidel_coefficients` returns them per unit aperture and field:
+`spherical` = S₁/h⁴, `coma` = −S₂/(h²H) = (φ²/2)·[…], `astigmatism` = S₃/H² = φ,
+`field_curvature` = S₄/H² = φ/n, `distortion` = 0. The sign on `coma` is the one
+the function has always had; physically, **`coma` < 0 is a flare pointing away
+from the axis**, the ordinary coma of a biconvex singlet.
 
-⚠ **`lens_longitudinal_spherical_aberration` evaluates S₁ at q = 0, p = -1** — it
-is the same bracket, not a separate formula. It disagreed with the one above from
-the port until 2.4.6.
+What they predict, each checked against `trace_sequential` (below):
+
+| Quantity | Formula | Where |
+|----------|---------|-------|
+| Longitudinal SA, z_paraxial − z_marginal | S₁/(2u′²), u′ = hφ → h²𝔅/(8f) | `lens_longitudinal_spherical_aberration` |
+| Wavefront aberration at paraxial focus | −S₁/8 → −h⁴𝔅/(32f³) | `optical_path_difference`, `opd_fan` |
+| Tangential coma, field angle θ | −(3/2) · `coma` · h²θf | — |
+
+with 𝔅 = (3n+2)/n + n²/(n-1)², the bracket at q = 0, p = −1 (equiconvex, object at
+infinity): 13.333 at n = 1.5. **`lens_longitudinal_spherical_aberration` is the
+same bracket, not a separate formula** — it disagreed with S₁ until 2.4.6.
+
+**Two kinds of check, and each is blind to what the other sees.**
+
+- *The bracket's shape.* With p = −1 the spherical-minimum "best-form" shape is
+  q = 2(n²−1)/(n+2) = **0.7143 at n = 1.5** (0.8667 / 1.0216 / 1.1789 at 1.6–1.8),
+  and the coma-free "aplanatic" shape is q = **0.80 at n = 1.5**. A bracket that
+  does not reproduce both is wrong, whatever it was copied from. But an argmin and
+  a zero crossing depend only on the RATIOS of the terms inside the bracket, so
+  both are blind to the multiplier in front of it.
+- *The magnitude.* tests/lens.tcyr traces an equiconvex singlet (radii ±R, 1
+  thick) and compares code/traced. The residual is lens thickness, which thin-lens
+  theory leaves out, so it shrinks as R grows; a wrong multiplier would not:
+
+  | n = 1.5 | R = 100 | R = 200 | R = 400 |
+  |---------|---------|---------|---------|
+  | LSA | 1.0047 | 1.0024 | 1.0012 |
+  | S₁/h⁴ | 1.0047 | 1.0024 | 1.0012 |
+  | tangential coma | 1.0159 | 1.0082 | 1.0041 |
+
+⛔ **From 2.4.7 to 2.4.9 this page published φ³·n/(4(n−1)²) and φ²·1/(2(n−1)) as
+the multipliers**, and called the two shape checks "the reason to trust these
+rather than the algebra". They were wrong: `spherical` came out n/(n−1)² too large
+(6× at n = 1.5), `coma` 1/(n−1) too large (2×), and LSA — which also divided by φ
+where it needed φ² — f(n−1)²/n too small (16.7× at f = 100, and scaling as 1/f²).
+Four audits of the bracket passed over them because every check was a shape check
+and every value pin was derived from the code. Fixed in 2.5.0, found by the 2.4.8
+audit's critic, confirmed against the tracer before any change was made.
+
+### Wavefront Aberration (OPD)
+W(ray) = [OPL to the last surface + n′·|Q − P|] − [OPL of the chief ray to P]
+
+P is the chief ray's intercept with the image plane and Q is where the ray leaves
+the last surface. The leg Q → P counts negative when the ray travels away from P
+(a virtual image). **Every ray must end at the SAME point.** Through 2.4.9 each
+ended at its own image-plane intercept, which subtracts h·dW/dh from W: −3W for
+spherical aberration, sign flipped. The straight leg Q → P is not the ray's own
+path; the error is second order in the ray's angular deviation from QP.
+
+Independent check (tests/ray_simulate.tcyr): the transverse ray error at the image
+plane equals f·dW/dh (Hamilton), measured to 0.01–0.32% for h = 1..4 on the
+singlet above. The 2.4.9 form gives −0.333 there.
 
 ### Shape Factor
 q = (R₂ + R₁) / (R₂ - R₁)

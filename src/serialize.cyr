@@ -22,6 +22,13 @@
 # the defect is the decoder, not the text. There is no band in which it cannot
 # happen; it is rare, not absent. Upstream's to fix (CLAUDE.md: never edit lib/);
 # tests/hardening.tcyr pins a known-failing value so this note retires itself.
+# 2.5.0: filed upstream as bayan docs/development/issues/
+# 2026-09-22-prakash-f64-parse-double-rounding-at-midpoint.md. Root cause: the
+# slow path rounds W*10^E to 64 bits, which lands near-midpoint values EXACTLY on
+# the midpoint, then breaks that false tie to even — so the error is 1 ULP in
+# EITHER direction (13 up, 14 down of 27 cases) and only ever hits odd doubles.
+# Re-measured by direct to_json/from_json at 1.5.6: 22 per 10^6 across all
+# doubles.
 #
 # FAILURE CONVENTION (2.1.0): every `*_from_json` takes a trailing `err_out`
 # pointer, per the library-wide convention in error.cyr. It writes PK_ERR_NONE on
