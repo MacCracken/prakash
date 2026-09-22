@@ -20,6 +20,7 @@ include "src/ray_fresnel.cyr"
 include "src/ray_trace.cyr"
 include "src/ray_dispersion.cyr"
 include "src/ray_system.cyr"
+include "src/ray_simulate.cyr"
 include "src/spectral_cie.cyr"
 include "src/spectral_photometry.cyr"
 include "src/wave_core.cyr"
@@ -180,6 +181,22 @@ assert(_h_bits(_prk_pow(0x8000000000000001, f64_from(3)), NZERO) == 1,
 assert(_h_bits(_prk_pow(f64_neg(F64_TWO), F64_HALF), NNAN) == 1,
   "control: a non-integral exponent on a negative base is still NaN");
 
+# ── 1e'. the RAW builtins the shims sit in front of (2.4.9) ────────
+# ⛔ src/error.cyr's shim tables went stale TWICE with every assertion passing —
+# at ganita 1.1.4 and again between cyrius 6.5.33 and 6.6.6 — because every pin
+# above goes THROUGH `_prk_pow` / `_prk_exp`, and a shim masks the builtin at
+# exactly the inputs its table describes. These assert the RAW intrinsics, so an
+# upstream change on either side fails here rather than rotting the table. As of
+# cyrius 6.6.6 / ganita 1.2.6 all five of the table's rows agree with Rust unshimmed;
+# if one of these fails, re-measure and update src/error.cyr, do not just re-pin.
+assert(_h_bits(f64_exp(NINF), ZERO) == 1, "RAW f64_exp(-inf) = 0.0 (was NaN at 6.5.33)");
+assert(_h_bits(f64_exp(PINF), PINF) == 1, "RAW f64_exp(+inf) = +inf (was NaN at 6.5.33)");
+assert(_h_bits(ganita_f64_pow(ZERO, F64_TWO), ZERO) == 1, "RAW ganita_f64_pow(0, 2) = 0.0");
+assert(_h_bits(ganita_f64_pow(ZERO, ZERO), F64_ONE) == 1, "RAW ganita_f64_pow(0, 0) = 1.0");
+assert(_h_bits(ganita_f64_pow(ZERO, f64_neg(F64_ONE)), PINF) == 1, "RAW ganita_f64_pow(0, -1) = +inf");
+assert(_h_bits(ganita_f64_pow(F64_TWO, f64_from(3)), 0x4020000000000000) == 1,
+  "RAW ganita_f64_pow(2, 3) = 8 exactly");
+
 # ── 1f. the one call site the pow repair actually moves ────────
 # `br_absolute_magnitude_to_luminosity` computes 10^((4.83 - M)/2.5), so an
 # infinite magnitude reaches `_prk_pow` with an infinite exponent. It returned
@@ -325,10 +342,14 @@ assert(_h_bits(spd_at(s_zerostep, f64_from(380)), ZERO) == 1,
   "spd_at on an empty zero-step SPD = 0.0 (was an out-of-bounds read)");
 
 # ── 6. Round-trip fidelity ────────
-# bayan 1.2.1 replaced the 6-decimal encoder with Grisu2, so floats now survive
-# a JSON round-trip bit-exactly. 2.0.0 shipped against the lossy encoder, which
-# also flushed any |x| < 5e-7 to zero.
-test_group("JSON float round-trip is bit-exact");
+# bayan 1.2.1 replaced the 6-decimal encoder with Grisu2, so the EMITTED text is
+# round-trip-correct. 2.0.0 shipped against the lossy encoder, which also flushed
+# any |x| < 5e-7 to zero.
+# ⚠ 2.4.9: the five values below survive bit-exactly, and they were read for years
+# as proof that EVERY double does — "a test that samples only the points a bug
+# survives". bayan's decoder mis-rounds ~1 in 10^5 random doubles by 1 ULP. The
+# known-failing value is pinned at the end of this group.
+test_group("JSON float round-trip (bit-exact for these values)");
 
 fn _h_rt(bits, label) {
     var c = rgb_new(bits, bits, bits);
@@ -344,6 +365,18 @@ var _rt2 = _h_rt(0x3FD5555555555555, "1/3 survives bit-exact");
 var _rt3 = _h_rt(0x3E112E0BE826D695, "1e-9 survives (the 6-decimal encoder flushed it to 0)");
 var _rt4 = _h_rt(0x01A56E1FC2F8F359, "1e-300 survives bit-exact");
 var _rt5 = _h_rt(0x0010000000000000, "DBL_MIN survives bit-exact");
+# ⛔ 2.4.9: THE UPSTREAM DEFECT, PINNED SO IT CANNOT BE FORGOTTEN. bayan emits
+# "1.621274542797433e-9" for 0x3E1BDA70DB50D19F — the correct shortest string; a
+# correctly-rounded parser returns the original bits — and bayan's decoder returns
+# 0x3E1BDA70DB50D1A0, one ULP high. This asserts the DEFECTIVE result on purpose.
+# When a bayan update fixes the decoder THIS FAILS, and that is the signal to
+# delete it and the caveat in src/serialize.cyr's header — the same pattern this
+# file uses for the math-shim divergences.
+var _ulp_c = rgb_new(0x3E1BDA70DB50D19F, F64_ONE, F64_ONE);
+var _ulp_js = rgb_to_json(_ulp_c);
+var _ulp_back = rgb_from_json(str_data(_ulp_js), str_len(_ulp_js), &e);
+assert(Rgb_r(_ulp_back) == 0x3E1BDA70DB50D1A0,
+  "bayan decoder still mis-rounds 1.621274542797433e-9 by +1 ULP (delete when this fails)");
 
 # A flat optical surface has radius = +inf. JSON has no infinity literal, so
 # bayan encodes it as null; without the decode-side restore it came back as 0.0
@@ -730,5 +763,123 @@ var _c5 = sakshi_ring_event_count();
 assert(_c5 > _c4, "a real traced operation reaches sakshi at SK_TRACE");
 
 prakash_set_log_level(SK_INFO);
+
+# ── null handles: the 2.4.9 sweep ────────
+test_group("null_handle_sweep");
+
+# ⛔ 2.4.9: EVERY ASSERTION BELOW EXITED 139 BEFORE THIS RELEASE. 2.2.8 guarded the Spd
+# family and wrote that null-guarding was "already the library-wide convention";
+# 2.4.8 found all seven Prescription consumers crashing on the documented 0 from
+# prescription_from_json. So 2.4.9 stopped trusting the convention and MEASURED it:
+# every public function in the library (413) was called in its own process with each
+# handle, array and count zeroed, and again with counts = 4 so that dereferences
+# inside loops were reached. 55 + 13 = 68 died with SIGSEGV. These pin the guards.
+# A crash here does not fail one assertion — it kills the whole suite binary, which
+# is exactly the failure mode a consumer would have seen.
+var _nb = alloc(65536);
+var _ne = 0;
+assert(pbr_fresnel_schlick_rgb(0, 0, _nb) == 0, "pbr_fresnel_schlick_rgb(null) returns its sentinel, not a SIGSEGV");
+assert(pbr_lambert_diffuse_rgb(0, _nb) == 0, "pbr_lambert_diffuse_rgb(null) returns its sentinel, not a SIGSEGV");
+assert(medium_permittivity(0) == 0, "medium_permittivity(null) returns its sentinel, not a SIGSEGV");
+assert(ray_reflect_2d(0, 0) == 0, "ray_reflect_2d(null) returns its sentinel, not a SIGSEGV");
+assert(ray_reflect_3d(0, 0) == 0, "ray_reflect_3d(null) returns its sentinel, not a SIGSEGV");
+_ne = 0;
+assert(ray_refract_3d(0, 0, 0, 0, &_ne) == 0, "ray_refract_3d(null) returns its sentinel, not a SIGSEGV");
+assert(prakash_is_err(_ne) == 1, "ray_refract_3d(null) reports through err_out");
+assert(abbe_number(0) == 0, "abbe_number(null) returns its sentinel, not a SIGSEGV");
+assert(cauchy_n_at(0, 0) == 0, "cauchy_n_at(null) returns its sentinel, not a SIGSEGV");
+assert(conrady_n_at(0, 0) == 0, "conrady_n_at(null) returns its sentinel, not a SIGSEGV");
+assert(herzberger_n_at(0, 0) == 0, "herzberger_n_at(null) returns its sentinel, not a SIGSEGV");
+assert(partial_dispersion(0) == 0, "partial_dispersion(null) returns its sentinel, not a SIGSEGV");
+_ne = 0;
+assert(prism_angular_spread(0, 0, 0, 0, &_ne) == 0, "prism_angular_spread(null) returns its sentinel, not a SIGSEGV");
+assert(prakash_is_err(_ne) == 1, "prism_angular_spread(null) reports through err_out");
+_ne = 0;
+assert(prism_dispersion(0, 0, 0, &_ne) == 0, "prism_dispersion(null) returns its sentinel, not a SIGSEGV");
+assert(prakash_is_err(_ne) == 1, "prism_dispersion(null) reports through err_out");
+assert(schott_n_at(0, 0) == 0, "schott_n_at(null) returns its sentinel, not a SIGSEGV");
+assert(sellmeier_n_at(0, 0) == 0, "sellmeier_n_at(null) returns its sentinel, not a SIGSEGV");
+assert(fresnel_normal_complex(0, 0) == 0, "fresnel_normal_complex(null) returns its sentinel, not a SIGSEGV");
+assert(fresnel_p_complex(0, 0, 0) == 0, "fresnel_p_complex(null) returns its sentinel, not a SIGSEGV");
+assert(fresnel_s_complex(0, 0, 0) == 0, "fresnel_s_complex(null) returns its sentinel, not a SIGSEGV");
+assert(fresnel_unpolarized_complex(0, 0, 0) == 0,
+  "fresnel_unpolarized_complex(null) returns its sentinel, not a SIGSEGV");
+_ne = 0;
+assert(ray_snell_3d(0, 0, 0, 0, _nb, &_ne) == 0, "ray_snell_3d(null) returns its sentinel, not a SIGSEGV");
+assert(prakash_is_err(_ne) == 1, "ray_snell_3d(null) reports through err_out");
+assert(opd_fan(0, 0, 0) == 0, "opd_fan(null) returns its sentinel, not a SIGSEGV");
+_ne = 0;
+assert(optical_path_difference(0, 0, 0, 0, &_ne) == 0,
+  "optical_path_difference(null) returns its sentinel, not a SIGSEGV");
+assert(prakash_is_err(_ne) == 1, "optical_path_difference(null) reports through err_out");
+_ne = 0;
+assert(optical_path_length(0, 0, 0, &_ne) == 0, "optical_path_length(null) returns its sentinel, not a SIGSEGV");
+assert(prakash_is_err(_ne) == 1, "optical_path_length(null) reports through err_out");
+assert(spot_diagram(0, 0, 0, 0, 0, 0, 0) == 0, "spot_diagram(null) returns its sentinel, not a SIGSEGV");
+assert(spot_rms_radius(0) == 0, "spot_rms_radius(null) returns its sentinel, not a SIGSEGV");
+assert(trace_recursive(0, 0, 0) == 0, "trace_recursive(null) returns its sentinel, not a SIGSEGV");
+assert(paraxial_refract(0, 0) == 0, "paraxial_refract(null) returns its sentinel, not a SIGSEGV");
+assert(paraxial_trace(0, 0) == 0, "paraxial_trace(null) returns its sentinel, not a SIGSEGV");
+assert(paraxial_transfer(0, 0) == 0, "paraxial_transfer(null) returns its sentinel, not a SIGSEGV");
+_ne = 0;
+assert(trace_sequential(0, 0, &_ne) == 0, "trace_sequential(null) returns its sentinel, not a SIGSEGV");
+assert(prakash_is_err(_ne) == 1, "trace_sequential(null) reports through err_out");
+_ne = 0;
+assert(trace_sequential_polarized(0, 0, &_ne) == 0,
+  "trace_sequential_polarized(null) returns its sentinel, not a SIGSEGV");
+assert(prakash_is_err(_ne) == 1, "trace_sequential_polarized(null) reports through err_out");
+assert(linear_srgb_to_xyz(0) == 0, "linear_srgb_to_xyz(null) returns its sentinel, not a SIGSEGV");
+assert(xyz_to_linear_srgb(0) == 0, "xyz_to_linear_srgb(null) returns its sentinel, not a SIGSEGV");
+assert(xyz_to_srgb(0) == 0, "xyz_to_srgb(null) returns its sentinel, not a SIGSEGV");
+assert(xyz_to_xyy(0) == 0, "xyz_to_xyy(null) returns its sentinel, not a SIGSEGV");
+assert(rgb_clamp(0) == 0, "rgb_clamp(null) returns its sentinel, not a SIGSEGV");
+assert(rgb_luminance(0) == 0, "rgb_luminance(null) returns its sentinel, not a SIGSEGV");
+assert(rgb_to_u8(0) == 0, "rgb_to_u8(null) returns its sentinel, not a SIGSEGV");
+assert(polarization_intensity(0) == 0, "polarization_intensity(null) returns its sentinel, not a SIGSEGV");
+assert(polarization_through_polarizer(0, 0) == 0,
+  "polarization_through_polarizer(null) returns its sentinel, not a SIGSEGV");
+assert(polarization_to_stokes(0) == 0, "polarization_to_stokes(null) returns its sentinel, not a SIGSEGV");
+assert(stokes_degree_of_polarization(0) == 0,
+  "stokes_degree_of_polarization(null) returns its sentinel, not a SIGSEGV");
+assert(biref_birefringence(0) == 0, "biref_birefringence(null) returns its sentinel, not a SIGSEGV");
+assert(biref_half_wave_thickness(0, 0) == 0, "biref_half_wave_thickness(null) returns its sentinel, not a SIGSEGV");
+assert(biref_quarter_wave_thickness(0, 0) == 0,
+  "biref_quarter_wave_thickness(null) returns its sentinel, not a SIGSEGV");
+assert(biref_retardation(0, 0, 0) == 0, "biref_retardation(null) returns its sentinel, not a SIGSEGV");
+assert(biref_to_mueller(0, 0, 0) == 0, "biref_to_mueller(null) returns its sentinel, not a SIGSEGV");
+assert(stokes_ellipticity_angle(0) == 0, "stokes_ellipticity_angle(null) returns its sentinel, not a SIGSEGV");
+assert(stokes_intensity(0) == 0, "stokes_intensity(null) returns its sentinel, not a SIGSEGV");
+assert(stokes_orientation_angle(0) == 0, "stokes_orientation_angle(null) returns its sentinel, not a SIGSEGV");
+assert(zernike_wf_evaluate(0, 0, 0) == 0, "zernike_wf_evaluate(null) returns its sentinel, not a SIGSEGV");
+assert(zernike_wf_rms_error(0) == 0, "zernike_wf_rms_error(null) returns its sentinel, not a SIGSEGV");
+assert(zernike_wf_strehl_ratio(0, 0) == 0, "zernike_wf_strehl_ratio(null) returns its sentinel, not a SIGSEGV");
+_ne = 0;
+assert(rgb_from_json(0, 4, &_ne) == 0, "rgb_from_json(null) returns its sentinel, not a SIGSEGV");
+assert(prakash_is_err(_ne) == 1, "rgb_from_json(null) reports through err_out");
+_ne = 0;
+assert(medium_from_json(0, 4, &_ne) == 0, "medium_from_json(null) returns its sentinel, not a SIGSEGV");
+assert(prakash_is_err(_ne) == 1, "medium_from_json(null) reports through err_out");
+_ne = 0;
+assert(sellmeier_from_json(0, 4, &_ne) == 0, "sellmeier_from_json(null) returns its sentinel, not a SIGSEGV");
+assert(prakash_is_err(_ne) == 1, "sellmeier_from_json(null) reports through err_out");
+_ne = 0;
+assert(polarization_from_json(0, 4, &_ne) == 0, "polarization_from_json(null) returns its sentinel, not a SIGSEGV");
+assert(prakash_is_err(_ne) == 1, "polarization_from_json(null) reports through err_out");
+_ne = 0;
+assert(prescription_from_json(0, 4, &_ne) == 0, "prescription_from_json(null) returns its sentinel, not a SIGSEGV");
+assert(prakash_is_err(_ne) == 1, "prescription_from_json(null) reports through err_out");
+_ne = 0;
+assert(spd_from_json(0, 4, &_ne) == 0, "spd_from_json(null) returns its sentinel, not a SIGSEGV");
+assert(prakash_is_err(_ne) == 1, "spd_from_json(null) reports through err_out");
+_ne = 0;
+assert(lens_type_from_json(0, 4, &_ne) == LENS_TYPE_INVALID,
+  "lens_type_from_json(null) returns its sentinel, not a SIGSEGV");
+assert(prakash_is_err(_ne) == 1, "lens_type_from_json(null) reports through err_out");
+assert(lens_mtf_polychromatic(0, 4, 0, 4, 0, 0) == 0,
+  "lens_mtf_polychromatic(null) returns its sentinel, not a SIGSEGV");
+assert(lens_mtf_through_focus(0, 0, 0, 0, 4, _nb) == 0,
+  "lens_mtf_through_focus(null) returns its sentinel, not a SIGSEGV");
+assert(lens_petzval_sum(0, 4) == 0, "lens_petzval_sum(null) returns its sentinel, not a SIGSEGV");
+assert(lens_system_magnification(0, 4) == 0, "lens_system_magnification(null) returns its sentinel, not a SIGSEGV");
 
 var r = assert_summary();

@@ -32,6 +32,37 @@ while (pi < 81) {
 }
 
 # scotopic peak near 507nm (index ~25)
+# ⛔ 2.4.9: THE PHOTOPIC TABLE HAD NO VALUE PINS — two assertions for 81 entries:
+# the 555 nm peak, and "every value in [0, 1]". Mutation-verified by the 2.4.8
+# audit: overwriting V(475 nm) from 0.1126 to 0.734 passes both, while
+# luminous_flux(D65) moves +3.39%. The scotopic table below got nine value pins,
+# monotonicity and a seam check — but only after 30 of its 81 entries were found
+# wrong in 2.2.7/2.2.8. The photopic one never had the same scrutiny.
+#
+# ⭐ The strongest pin is an IDENTITY, not a list of values: CIE photopic V(lambda)
+# IS the CIE 1931 y-bar colour-matching function — same function, two tables. So
+# every one of the 81 entries must equal y-bar bit-for-bit. That one loop pins all
+# 81 values against an independent table (spectral_cie's, audited against its
+# normalisation at 2.4.5) and would catch a corruption anywhere in either.
+var _t31 = cie_1931_table();
+for (var _vi = 0; _vi < 81; _vi = _vi + 1) {
+    assert_eq(_vl(vp, _vi), load64(_t31 + _vi * 24 + 8),
+      "photopic V(lambda) == CIE 1931 y-bar, bit-for-bit (same function)");
+}
+# And the consumer-facing consequence of that identity: luminous flux is 683 x
+# the CIE Y tristimulus of the same SPD. Bit-exact, because both sum the same
+# 81 products in the same order.
+var _d65 = illuminant_d65();
+assert_eq(luminous_flux(_d65), f64_mul(f64_mul(f64_from(683), Xyz_y(spd_to_xyz(_d65))), F64_ONE),
+  "luminous_flux(spd) == 683 * Y(spd), bit-for-bit");
+# Shape invariants, pinned separately from the values: rising to 555 nm, falling after.
+for (var _vr = 1; _vr <= 35; _vr = _vr + 1) {
+    assert(f64_ge(_vl(vp, _vr), _vl(vp, _vr - 1)), "photopic V rises monotonically to 555 nm");
+}
+for (var _vf = 36; _vf < 81; _vf = _vf + 1) {
+    assert(f64_le(_vl(vp, _vf), _vl(vp, _vf - 1)), "photopic V falls monotonically after 555 nm");
+}
+
 var vs = _vlambda_scotopic();
 var best_i = 0;
 var best_v = _vl(vs, 0);

@@ -333,6 +333,14 @@ fn trace_surface(ray, surface, err_out) {
 fn trace_sequential(initial_ray, surfaces, err_out) {
     _prk_trace("trace_sequential");
     store64(err_out, PK_ERR_NONE);
+    if (initial_ray == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
+    if (surfaces == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
     var hits = vec_new();
     var current = initial_ray;
     var count = vec_len(surfaces);
@@ -365,6 +373,14 @@ struct PolarizedTraceHit { hit; rp_over_rs; transmittance_s; transmittance_p; }
 fn trace_sequential_polarized(initial_ray, surfaces, err_out) {
     _prk_trace("trace_sequential_polarized");
     store64(err_out, PK_ERR_NONE);
+    if (initial_ray == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
+    if (surfaces == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
     var results = vec_new();
     var current = initial_ray;
     var cum_ts = F64_ONE;

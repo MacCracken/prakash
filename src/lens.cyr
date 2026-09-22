@@ -252,6 +252,12 @@ fn lens_mtf_diffraction_limited(spatial_freq, cutoff_freq) {
 # f64 buffers; missing weights (i >= n_weights) default to 1.0.
 #must_use
 fn lens_mtf_polychromatic(wavelengths, n_wl, weights, n_weights, f_num, spatial_freq) {
+    if (n_wl > 0) {
+        if (wavelengths == 0) { return f64_from(0); }
+    }
+    if (n_weights > 0) {
+        if (weights == 0) { return f64_from(0); }
+    }
     var sum_w = f64_from(0);
     var sum_mtf = f64_from(0);
     for (var i = 0; i < n_wl; i = i + 1) {
@@ -272,6 +278,10 @@ fn lens_mtf_polychromatic(wavelengths, n_wl, weights, n_weights, f_num, spatial_
 # Through-focus MTF: writes (defocus, mtf) pairs to out+i*16. w20 = defocus /
 # (8*N^2*lambda); attenuation = |sinc(pi*w20*v)|.
 fn lens_mtf_through_focus(wavelength, f_num, spatial_freq, defocus_range, n_defocus, out) {
+    if (n_defocus > 0) {
+        if (defocus_range == 0) { return 0; }
+        if (out == 0) { return 0; }
+    }
     var cutoff = lens_mtf_cutoff_frequency(wavelength, f_num);
     var v = f64_div(spatial_freq, cutoff);
     for (var i = 0; i < n_defocus; i = i + 1) {
@@ -348,7 +358,7 @@ fn lens_seidel_coefficients(n, focal_length, q, p) {
     # validating — so it agreed by construction, and that is how the q^2 term
     # below kept a wrong factor of (n-1) through an audit. The INDEPENDENT check
     # is the textbook best-form singlet at p = -1, argmin q = 2(n^2-1)/(n+2):
-    # 0.7143 at n = 1.5, 0.8667 at 1.6, 1.0162 at 1.7 — measured 0.71 / 0.87 /
+    # 0.7143 at n = 1.5, 0.8667 at 1.6, 1.0216 at 1.7 — measured 0.71 / 0.87 /
     # 1.02 on a 0.01 scan. Its companion is the aplanatic (coma-free) shape at
     # q = 0.80 for n = 1.5, which the coma bracket further down now reproduces.
     # A = (n+2)/(n*(n-1)^2) * q * q
@@ -456,6 +466,9 @@ fn lens_chromatic_aberration(focal_length, abbe_v) {
 # Petzval sum S = sum 1/(n_i*f_i). elements is an interleaved (n, f) buffer.
 #must_use
 fn lens_petzval_sum(elements, n_elements) {
+    if (n_elements > 0) {
+        if (elements == 0) { return f64_from(0); }
+    }
     var sum = f64_from(0);
     for (var i = 0; i < n_elements; i = i + 1) {
         sum = f64_add(sum,
@@ -503,6 +516,9 @@ fn lens_separated_bfd(f1, f2, separation, err_out) {
 # System magnification = product of individual magnifications (empty = 1).
 #must_use
 fn lens_system_magnification(magnifications, n) {
+    if (n > 0) {
+        if (magnifications == 0) { return f64_from(0); }
+    }
     var prod = F64_ONE;
     for (var i = 0; i < n; i = i + 1) {
         prod = f64_mul(prod, load64(magnifications + i * 8));

@@ -112,4 +112,28 @@ var _rid = ai_register_agent(0, &_re);
 assert_eq(_re, PK_ERR_INVALID_PARAMETER, "ai_register_agent(null) reports PK_ERR_INVALID_PARAMETER");
 assert_eq(streq(_rid, "unknown"), 1, "ai_register_agent(null) returns the \"unknown\" sentinel");
 
+# ── null handles (2.4.9) ────────
+test_group("ai_null_handle_sweep");
+# ⛔ All four exited 139 before 2.4.9. The two encoders were missed by the 2.2.7
+# encode-side sweep because ai.cyr ships only in dist/prakash-ai.cyr; the two
+# decoders read a null buffer inside bayan. Feeding the ENCODER the decoder's own
+# documented 0 pins the chain a consumer would actually hit, not just a literal.
+var _nb = alloc(4096);
+var _ne = 0;
+var _bad_d = ai_daimon_config_from_json("not json", 8, &_ne);
+assert(_bad_d == 0, "the decoder's documented 0 ...");
+assert(ai_daimon_config_to_json(_bad_d) == 0, "... fed to the encoder returns 0, not a SIGSEGV");
+var _bad_h = ai_hoosh_config_from_json("not json", 8, &_ne);
+assert(ai_hoosh_config_to_json(_bad_h) == 0, "hoosh: decoder 0 fed to the encoder returns 0");
+assert(ai_daimon_config_to_json(0) == 0, "ai_daimon_config_to_json(null) returns its sentinel, not a SIGSEGV");
+assert(ai_hoosh_config_to_json(0) == 0, "ai_hoosh_config_to_json(null) returns its sentinel, not a SIGSEGV");
+_ne = 0;
+assert(ai_daimon_config_from_json(0, 4, &_ne) == 0,
+  "ai_daimon_config_from_json(null) returns its sentinel, not a SIGSEGV");
+assert(prakash_is_err(_ne) == 1, "ai_daimon_config_from_json(null) reports through err_out");
+_ne = 0;
+assert(ai_hoosh_config_from_json(0, 4, &_ne) == 0,
+  "ai_hoosh_config_from_json(null) returns its sentinel, not a SIGSEGV");
+assert(prakash_is_err(_ne) == 1, "ai_hoosh_config_from_json(null) reports through err_out");
+
 var r = assert_summary();

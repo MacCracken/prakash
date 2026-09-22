@@ -120,13 +120,19 @@ fn medium_custom(n, name, err_out) {
         store64(err_out, PK_ERR_INVALID_INDEX);
         return 0;
     }
-    return _medium_mk(n, name);
+    # 2.4.9: a failed allocation used to return 0 with err_out still PK_ERR_NONE,
+    # so a caller that checked prakash_is_ok() then dereferenced null. A null
+    # handle must be distinguishable from a success (CLAUDE.md).
+    var m = _medium_mk(n, name);
+    if (m == 0) { store64(err_out, PK_ERR_ALLOCATION); }
+    return m;
 }
 
 # Relative dielectric permittivity (eps_r = n^2). Bridges to bijli's EM
 # permittivity; for non-magnetic materials n = sqrt(eps_r).
 #must_use
 fn medium_permittivity(m) {
+    if (m == 0) { return f64_from(0); }
     var n = Medium_n(m);
     return f64_mul(n, n);
 }
@@ -170,6 +176,8 @@ fn ray_reflect_angle(incident_angle) {
 # Reflect a 2D direction vector about a surface normal (both normalized).
 #must_use
 fn ray_reflect_2d(direction, normal) {
+    if (direction == 0) { return 0; }
+    if (normal == 0) { return 0; }
     var dx = RayVec2_x(direction);
     var dy = RayVec2_y(direction);
     var nx = RayVec2_x(normal);
@@ -184,6 +192,8 @@ fn ray_reflect_2d(direction, normal) {
 # Reflect a 3D direction vector about a surface normal (both normalized).
 #must_use
 fn ray_reflect_3d(direction, normal) {
+    if (direction == 0) { return 0; }
+    if (normal == 0) { return 0; }
     var dx = RayVec3_x(direction);
     var dy = RayVec3_y(direction);
     var dz = RayVec3_z(direction);
@@ -206,6 +216,14 @@ fn ray_reflect_3d(direction, normal) {
 #must_use
 fn ray_refract_3d(direction, normal, n1, n2, err_out) {
     store64(err_out, PK_ERR_NONE);
+    if (direction == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
+    if (normal == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
     var dx = RayVec3_x(direction);
     var dy = RayVec3_y(direction);
     var dz = RayVec3_z(direction);
@@ -222,10 +240,15 @@ fn ray_refract_3d(direction, normal, n1, n2, err_out) {
     }
     var cos_t = f64_sqrt(f64_sub(F64_ONE, sin2_t));
     var factor = f64_sub(f64_mul(ratio, cos_i), cos_t);
-    return ray_vec3(
+    # 2.4.9: a failed allocation used to return 0 with err_out still PK_ERR_NONE,
+    # so a caller that checked prakash_is_ok() then dereferenced null. A null
+    # handle must be distinguishable from a success (CLAUDE.md).
+    var v = ray_vec3(
       f64_add(f64_mul(ratio, dx), f64_mul(factor, nx)),
       f64_add(f64_mul(ratio, dy), f64_mul(factor, ny)),
       f64_add(f64_mul(ratio, dz), f64_mul(factor, nz)));
+    if (v == 0) { store64(err_out, PK_ERR_ALLOCATION); }
+    return v;
 }
 
 # ── Utility ────────

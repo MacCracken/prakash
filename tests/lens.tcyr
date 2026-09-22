@@ -256,6 +256,25 @@ for (var _bi = 0 - 300; _bi <= 300; _bi = _bi + 1) {
 _assert_near(_bq, _fd(7143, 10000), _fd(2, 100),
   "best-form singlet argmin q = 0.7143 at n=1.5 (shipped 1.4286 through 2.2.7)");
 assert(f64_gt(_bs, Z), "and the spherical minimum is still positive there");
+# ⚠ 2.4.9: THE PIN ABOVE SAMPLES ONE REFRACTIVE INDEX, and it is the one non-circular
+# check on the most-repaired bracket in the library. The source comment quoting the
+# same formula at n = 1.7 carried a transposed digit (1.0162 for 1.0216) that
+# nothing could catch, because n = 1.6-1.8 were covered only by a sign assertion
+# at a fixed q. So the argmin is now pinned at four indices against
+# 2(n^2-1)/(n+2), each independently of the others. Measured on a 0.001 scan:
+# 0.714 / 0.867 / 1.022 / 1.179 — matching 0.7143 / 0.8667 / 1.0216 / 1.1789.
+for (var _ni = 16; _ni <= 18; _ni = _ni + 1) {
+    var _nn = _fd(_ni, 10);
+    var _nbq = Z;
+    var _nbs = f64_div(F64_ONE, Z);
+    for (var _nq = 0 - 3000; _nq <= 3000; _nq = _nq + 1) {
+        var _qq = _fd(_nq, 1000);
+        var _ss = SeidelCoefficients_spherical(lens_seidel_coefficients(_nn, f64_from(100), _qq, f64_neg(F64_ONE)));
+        if (f64_lt(_ss, _nbs) == 1) { _nbs = _ss; _nbq = _qq; }
+    }
+    var _nexp = f64_div(f64_mul(F64_TWO, f64_sub(f64_mul(_nn, _nn), F64_ONE)), f64_add(_nn, F64_TWO));
+    _assert_near(_nbq, _nexp, _fd(2, 1000), "best-form argmin q = 2(n^2-1)/(n+2) at n = 1.6, 1.7 and 1.8");
+}
 
 # Coma must cross zero at the aplanatic shape, q = 0.80 for n = 1.5.
 assert(f64_lt(f64_mul(
@@ -323,6 +342,14 @@ while (_lsa_n < 4) {
 # the bracket is (3n+2)/n + n^2/(n-1)^2 = 4.33333 + 9 = 13.33333, giving
 # s1 = phi^3 * n/(4(n-1)^2) * 13.33333 = 2.0e-5 and LSA = h^2*s1/(2*phi) = 0.1.
 # The pre-2.4.6 bracket of 2.16667 gave 0.01625.
+# ⛔ 2.4.9: THIS PIN IS A REGRESSION LOCK, NOT A PHYSICS CHECK, AND IT WAS PRESENTED
+# AS ONE. Its expected value is computed from the very expression it tests — the
+# derivation above IS the code — so it can only confirm the code agrees with itself.
+# The textbook third-order result for this case is h^2*B/(8f) = 100*13.333/800 =
+# 1.6667, 16.7x larger, and 2.4.6 computed that gap and set it aside as a
+# normalisation convention. The 2.4.8 audit's critic reports the code scales as
+# 1/f^2 where a length must scale as 1/f, measured against ray_trace. Filed as
+# roadmap item 1; this pin stays until that item replaces it with a traced value.
 _assert_near(lens_longitudinal_spherical_aberration(f64_from(10), f64_from(100), N15),
   _fd(1, 10), _fd(1, 1000000), "LSA(h=10, f=100, n=1.5) = 0.1");
 

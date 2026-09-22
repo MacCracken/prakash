@@ -120,6 +120,7 @@ fn complex_dielectric(n, name) {
 # R = ((n1-n2)^2 + k2^2) / ((n1+n2)^2 + k2^2).
 #must_use
 fn fresnel_normal_complex(n1, medium) {
+    if (medium == 0) { return f64_from(0); }
     var mn = ComplexMedium_n(medium);
     var mk = ComplexMedium_k(medium);
     var dn = f64_sub(n1, mn);
@@ -154,6 +155,7 @@ fn _fr_complex_cos_t(n1, mn, mk, incident_angle, cos_re_out, cos_im_out) {
 # Fresnel reflectance for s-polarized light on an absorbing medium. R_s = |r_s|^2.
 #must_use
 fn fresnel_s_complex(n1, medium, incident_angle) {
+    if (medium == 0) { return f64_from(0); }
     var mn = ComplexMedium_n(medium);
     var mk = ComplexMedium_k(medium);
     var cos_i = _prk_cos(incident_angle);
@@ -174,6 +176,7 @@ fn fresnel_s_complex(n1, medium, incident_angle) {
 # Fresnel reflectance for p-polarized light on an absorbing medium. R_p = |r_p|^2.
 #must_use
 fn fresnel_p_complex(n1, medium, incident_angle) {
+    if (medium == 0) { return f64_from(0); }
     var mn = ComplexMedium_n(medium);
     var mk = ComplexMedium_k(medium);
     var cos_i = _prk_cos(incident_angle);
@@ -194,6 +197,7 @@ fn fresnel_p_complex(n1, medium, incident_angle) {
 # Average (unpolarized) Fresnel reflectance on an absorbing medium.
 #must_use
 fn fresnel_unpolarized_complex(n1, medium, incident_angle) {
+    if (medium == 0) { return f64_from(0); }
     var rs = fresnel_s_complex(n1, medium, incident_angle);
     var rp = fresnel_p_complex(n1, medium, incident_angle);
     return f64_mul(F64_HALF, f64_add(rs, rp));
@@ -260,11 +264,24 @@ fn _ray_snell_3d_out(direction, nx, ny, nz, n1, n2, rx_out, ry_out, rz_out, refl
 # directly; this one preserves the public signature.
 #must_use
 fn ray_snell_3d(direction, normal, n1, n2, refl_out, err_out) {
+    if (direction == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
+    if (normal == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
     var rx = f64_from(0);
     var ry = f64_from(0);
     var rz = f64_from(0);
     var _r = _ray_snell_3d_out(direction, RayVec3_x(normal), RayVec3_y(normal), RayVec3_z(normal),
       n1, n2, &rx, &ry, &rz, refl_out, err_out);
     if (prakash_is_err(load64(err_out)) == 1) { return 0; }
-    return ray_vec3(rx, ry, rz);
+    # 2.4.9: a failed allocation used to return 0 with err_out still PK_ERR_NONE,
+    # so a caller that checked prakash_is_ok() then dereferenced null. A null
+    # handle must be distinguishable from a success (CLAUDE.md).
+    var v = ray_vec3(rx, ry, rz);
+    if (v == 0) { store64(err_out, PK_ERR_ALLOCATION); }
+    return v;
 }

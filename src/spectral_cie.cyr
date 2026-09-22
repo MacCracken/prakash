@@ -1583,6 +1583,7 @@ fn _xyy_new(x, y, big_y) {
 # XYZ -> xyY chromaticity; (0, 0, 0) when X + Y + Z < 1e-15.
 #must_use
 fn xyz_to_xyy(xyz) {
+    if (xyz == 0) { return 0; }
     var sum = f64_add(f64_add(Xyz_x(xyz), Xyz_y(xyz)), Xyz_z(xyz));
     if (f64_lt(sum, _cie_eps15()) == 1) {
         return _xyy_new(f64_from(0), f64_from(0), f64_from(0));
@@ -1605,6 +1606,7 @@ fn xyz_from_xyy(cx, cy, big_y) {
 # Linear sRGB (D65) from XYZ.
 #must_use
 fn xyz_to_linear_srgb(xyz) {
+    if (xyz == 0) { return 0; }
     var x = Xyz_x(xyz);
     var y = Xyz_y(xyz);
     var z = Xyz_z(xyz);
@@ -1626,6 +1628,7 @@ fn xyz_to_linear_srgb(xyz) {
 # Gamma-corrected, clamped sRGB from XYZ.
 #must_use
 fn xyz_to_srgb(xyz) {
+    if (xyz == 0) { return 0; }
     var lin = xyz_to_linear_srgb(xyz);
     return rgb_clamp(rgb_new(
         linear_to_srgb_gamma(Rgb_r(lin)),
@@ -1636,6 +1639,7 @@ fn xyz_to_srgb(xyz) {
 # XYZ from linear sRGB (inverse matrix).
 #must_use
 fn linear_srgb_to_xyz(rgb) {
+    if (rgb == 0) { return 0; }
     var r = Rgb_r(rgb);
     var g = Rgb_g(rgb);
     var b = Rgb_b(rgb);
@@ -1961,12 +1965,12 @@ fn _cri_band_delta(test_spd, ref_spd, test_y_total, ref_y_total, start, end) {
 #   illuminant   this metric   published CIE Ra
 #   D65          100.000       100 (reference, by definition)
 #   A             99.996       100 (reference, by definition)
-#   F2            98.289        64
-#   F11           92.001        83
+#   F2            97.196        64
+#   F11           93.688        83
 #
 # The two reference illuminants come out right because any similarity metric
 # scores an illuminant against itself as perfect; the two that carry real
-# information are wrong by 34 and 9 points, and in F2's case it reports
+# information are wrong by 33 and 11 points, and in F2's case it reports
 # near-perfect rendering for a lamp that is notoriously poor. A caller comparing
 # these numbers to a datasheet is being actively misled, which is why the honest
 # name is the primary one now.
@@ -3231,18 +3235,6 @@ fn _cri_locus_dist2(t_k, uk, vk) {
     return f64_add(f64_mul(du, du), f64_mul(dv, dv));
 }
 
-# Correlated colour temperature by minimising the CIE 1960 distance to the
-# Planckian locus, seeded from McCamy's cubic and refined by ternary search.
-#
-# ⚠ 2.2.8: THE CRI REFERENCE USED TO COME STRAIGHT FROM McCAMY, whose cubic is
-# an approximation, so the reference blackbody sat at the wrong temperature and
-# a Planckian test source did not score Ra = 100 — which it must, being its own
-# reference below 5000 K. Measured before: a 2000 K blackbody was assigned
-# CCT 1981.4 K and scored Ra = 99.1024; 3400 K -> 3409.6 K, Ra = 99.7959.
-# 40 ternary iterations over a +/-8% bracket close the seed error to well under
-# 0.01 K, which is far tighter than the 5 K the reference selection needs.
-# McCamy is deliberately LEFT ALONE as the public cct_from_xy: it is the
-# documented, tested, published approximation and callers may want exactly it.
 # One golden-section pass over [lo, hi]: 22 steps, ONE new locus evaluation per
 # step rather than the two a ternary search needs, and each evaluation is 81
 # Planck exponentials. 0.618^22 ~ 1.3e-5 of the bracket width.
@@ -3273,6 +3265,25 @@ fn _cri_golden(lo_in, hi_in, uk, vk) {
     return f64_div(f64_add(lo, hi), F64_TWO);
 }
 
+# Correlated colour temperature by minimising the CIE 1960 distance to the
+# Planckian locus, seeded from McCamy's cubic and refined by golden-section search
+# (`_cri_golden` above), widening the bracket whenever the minimum lands on an
+# endpoint. Measured (2.4.9): recovers a blackbody's own temperature to within
+# **0.077 K anywhere in 1000-25000 K** — pinned in tests/spectral_cie.tcyr.
+#
+# ⚠ 2.2.8: THE CRI REFERENCE USED TO COME STRAIGHT FROM McCAMY, whose cubic is
+# an approximation, so the reference blackbody sat at the wrong temperature and
+# a Planckian test source did not score Ra = 100 — which it must, being its own
+# reference below 5000 K. Measured before: a 2000 K blackbody was assigned
+# CCT 1981.4 K and scored Ra = 99.1024; 3400 K -> 3409.6 K, Ra = 99.7959.
+# ⚠ 2.4.9 struck the sentence that followed, which described this search as "40
+# ternary iterations over a +/-8% bracket". A later release replaced that with a
+# 22-step golden section over +/-3%, and the description was never updated — so a
+# reader checking "is the bracket wide enough?" was told +/-8%, which WOULD have
+# contained the 1500 K case that +/-3% silently clamped (the 2.4.8 defect below).
+# McCamy is deliberately LEFT ALONE as the public cct_from_xy: it is the
+# documented, tested, published approximation and callers may want exactly it.
+#
 # ⛔ 2.4.8: A GOLDEN SECTION CANNOT FIND A MINIMUM OUTSIDE ITS BRACKET — IT
 # RETURNS THE ENDPOINT, SILENTLY. The +/-3% bracket below was sized from McCamy's
 # error "worst measured 18.6 K at 2000 K, i.e. 0.93%", and that measurement was
@@ -3340,8 +3351,17 @@ fn _cri_context(test_spd) {
     if (uv0 == 0) { return 0; }
     _cri_uv(t_xyz, uv0);
     t_cct = _cri_cct_refine(load64(uv0), load64(uv0 + 8), t_cct);
-    var ref_spd = _cri_d_illuminant(t_cct);
-    if (f64_lt(t_cct, f64_from(5000)) == 1) { ref_spd = spd_blackbody(t_cct); }
+    # 2.4.9: choose the reference, THEN build it. This used to construct the full
+    # 81-sample D-series SPD first and overwrite it with the blackbody whenever the
+    # source was below 5000 K — on a bump allocator that never frees, a discarded
+    # 680-byte reference per CRI call for every warm source (illuminant A, every
+    # incandescent, every Planckian below 5000 K).
+    var ref_spd = 0;
+    if (f64_lt(t_cct, f64_from(5000)) == 1) {
+        ref_spd = spd_blackbody(t_cct);
+    } else {
+        ref_spd = _cri_d_illuminant(t_cct);
+    }
     if (ref_spd == 0) { return 0; }
     var r_xyz = spd_to_xyz(ref_spd);
     if (r_xyz == 0) { return 0; }
@@ -3442,7 +3462,8 @@ fn cri_special(test_spd, i) {
 # General Colour Rendering Index Ra: the mean of R1..R8.
 #
 # ⚠ 2.2.7 REPLACED THIS FUNCTION'S ALGORITHM ENTIRELY. Through 2.2.6 it returned
-# an 8-band normalised-energy comparison that scored F2 at 98.29 where the
+# an 8-band normalised-energy comparison that scored F2 at 98.29 (on the
+# pre-2.2.7 F2 table; 97.20 on the corrected one) where the
 # published CIE Ra is 64 — a lamp famous for poor rendering reported as nearly
 # perfect. That metric is still available, honestly named, as
 # `spectral_band_similarity`; this is now real CIE 13.3.

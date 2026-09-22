@@ -52,6 +52,7 @@ fn paraxial_chief(field_angle, n) {
 # Refract a paraxial ray at a surface of power phi: nu' = nu - y*phi.
 #must_use
 fn paraxial_refract(ray, power) {
+    if (ray == 0) { return 0; }
     return paraxial_ray_new(ParaxialRay_y(ray),
       f64_sub(ParaxialRay_nu(ray), f64_mul(ParaxialRay_y(ray), power)));
 }
@@ -59,6 +60,7 @@ fn paraxial_refract(ray, power) {
 # Transfer a paraxial ray across a reduced thickness t/n: y' = y + (t/n)*nu.
 #must_use
 fn paraxial_transfer(ray, reduced_thickness) {
+    if (ray == 0) { return 0; }
     return paraxial_ray_new(
       f64_add(ParaxialRay_y(ray), f64_mul(reduced_thickness, ParaxialRay_nu(ray))),
       ParaxialRay_nu(ray));
@@ -83,6 +85,8 @@ fn paraxsurf_new(power, reduced_t) {
 #must_use
 fn paraxial_trace(ray, surfaces) {
     _prk_trace("paraxial_trace");
+    if (ray == 0) { return 0; }
+    if (surfaces == 0) { return 0; }
     var states = vec_new();
     var current = ray;
     vec_push(states, current);

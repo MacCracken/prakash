@@ -102,7 +102,7 @@ soorat (PBR shading), kiran (lighting), ranga (lens effects)
 - **No magic.** Every operation is measurable, auditable, traceable.
 - **`#must_use`** on all pure functions — the load-bearing attribute here.
   Count it, do not quote it: `grep -rhoE '^\s*#must_use' src/*.cyr | wc -l`
-  (429 at 2.4.8). ⚠ A hard-coded figure here has gone stale at three separate
+  (429 at 2.4.9). ⚠ A hard-coded figure here has gone stale at three separate
   releases; the command is the source of truth.
 - ⚠ **Inserting a function directly above another one STEALS its attributes.**
   A `#doc` + `#must_use` block binds to whatever declaration follows it, so a new

@@ -198,6 +198,7 @@ fn zernike_wf_flat() {
 # Evaluate the wavefront W(rho,theta) = sum_j c_j Z_j. Returns 0 outside pupil.
 #must_use
 fn zernike_wf_evaluate(wf, rho, theta) {
+    if (wf == 0) { return f64_from(0); }
     if (f64_gt(rho, F64_ONE) == 1) {
         return f64_from(0);
     }
@@ -252,6 +253,7 @@ fn zernike_wf_to_grid(wf, grid_size) {
 # RMS = sqrt(sum_{j>3} c_j^2).
 #must_use
 fn zernike_wf_rms_error(wf) {
+    if (wf == 0) { return f64_from(0); }
     var coeffs = ZernikeWavefront_coeffs(wf);
     var len = ZernikeWavefront_len(wf);
     var sum = f64_from(0);
@@ -295,6 +297,7 @@ fn zernike_wf_peak_to_valley(wf, samples) {
 # Strehl ratio (Marechal): S = exp(-(2*pi*sigma)^2), sigma = RMS/wavelength.
 #must_use
 fn zernike_wf_strehl_ratio(wf, wavelength) {
+    if (wf == 0) { return f64_from(0); }
     var sigma = f64_div(zernike_wf_rms_error(wf), wavelength);
     var x = f64_mul(f64_mul(F64_TWO, F64_PI), sigma);
     return _prk_exp(f64_neg(f64_mul(x, x)));

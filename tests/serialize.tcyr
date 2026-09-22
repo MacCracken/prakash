@@ -7,11 +7,14 @@
 # floats to 6 decimals", which stopped being true at bayan 1.2.1 — that release
 # replaced the 6-decimal renderer with round-trip-correct Grisu2 and fixed a
 # real data-loss bug (the old encoder flushed any |x| < 5e-7 to zero). The
-# encoder is bit-exact now, so ~1e-5 is a LOOSE tolerance that would not catch a
-# renderer regression, not a tight one forced by the encoder. Verified unchanged
-# by the 2.2.4 bump: the 6.5.20 -> 6.5.33 bayan diff has no hunk in the Grisu2
-# region, so no JSON byte moves. Tightening these to bit-exact is worth doing;
-# it is a test change, not a bump change.
+# encoder is round-trip-correct now, so ~1e-5 is a LOOSE tolerance that would not
+# catch a renderer regression, not a tight one forced by the encoder. Verified
+# unchanged by the 2.2.4 bump: the 6.5.20 -> 6.5.33 bayan diff has no hunk in the
+# Grisu2 region, so no JSON byte moves.
+# ⚠ 2.4.9: this used to add "tightening these to bit-exact is worth doing". It is
+# not, for EVERY value: bayan's decoder mis-rounds ~1 in 10^5 doubles by 1 ULP (see
+# src/serialize.cyr's header). Bit-exact pins are right for SPECIFIC values that
+# are known to survive, which is what tests/hardening.tcyr does.
 
 include "src/error.cyr"
 include "src/spectral_core.cyr"
@@ -217,25 +220,58 @@ assert_eq(streq(str_data(spd_to_json(wspd1)),
     "{\"start_nm\":400.0,\"step_nm\":2.5,\"values\":[7.0]}"), 1,
   "spd_to_json single sample emits no trailing comma");
 
-# Negative values survive the hand-assembled path.
+# Negative values survive the hand-assembled path — and so does NEGATIVE ZERO.
 #
-# ⛔ AND NEGATIVE ZERO DOES NOT — the wire format loses its sign. bayan's Grisu2
-# renders -0.0 as "0.0", so a round-trip turns -0.0 into +0.0. This is upstream
-# bayan behaviour and it is PRE-EXISTING, not a 2.3.4 regression: the value-tree
-# path this function replaced emitted the identical bytes (verified by a
-# byte-for-byte A/B of both implementations before the swap). It is pinned here
-# because the encoder is documented as bit-exact everywhere else, and this is the
-# one exception — worth knowing before someone relies on round-tripping a signed
-# zero. Not worth working around in prakash: a signed zero in a spectral power
-# distribution has no physical meaning, and the fix belongs upstream.
+# ⛔ 2.4.9 CORRECTED THIS BLOCK, WHICH HAD THE BEHAVIOUR BACKWARDS AND TESTED NOTHING.
+# It said bayan's Grisu2 "renders -0.0 as 0.0, so a round-trip turns -0.0 into
+# +0.0", called that the one exception to bit-exactness, and pinned the bytes
+# `[-0.25,0.0]`. Both halves were wrong, and for one reason: the value stored was
+# `f64_neg(f64_from(0))`, which on cyrius is **+0.0** (bits 0x0) — a quirk this
+# repo already documents in tests/hardening.tcyr and src/error.cyr, but not here.
+# So the test fed POSITIVE zero, got "0.0" back, and concluded the sign was lost.
+# Measured with the real bit pattern 0x8000000000000000: bayan emits "-0.0" (its
+# sign branch runs before its zero branch), and decoding restores
+# 0x8000000000000000 exactly. Negative zero round-trips bit-exactly; there is no
+# exception. Written as a bit literal because no f64_* operation yields -0.0 here.
 var wneg = alloc(2 * 8);
 store64(wneg,     f64_neg(f64_div(f64_from(1), f64_from(4))));
-store64(wneg + 8, f64_neg(f64_from(0)));
+store64(wneg + 8, 0x8000000000000000);
 var wspdn = spd_from_static(f64_from(380), f64_from(5), wneg, 2);
-assert_eq(streq(str_data(spd_to_json(wspdn)),
-    "{\"start_nm\":380.0,\"step_nm\":5.0,\"values\":[-0.25,0.0]}"), 1,
-  "spd_to_json keeps a negative value and DROPS negative zero's sign");
+var wnjs = spd_to_json(wspdn);
+assert_eq(streq(str_data(wnjs),
+    "{\"start_nm\":380.0,\"step_nm\":5.0,\"values\":[-0.25,-0.0]}"), 1,
+  "spd_to_json keeps a negative value AND negative zero's sign");
+var wne = 0;
+var wnback = spd_from_json(str_data(wnjs), str_len(wnjs), &wne);
+assert_eq(load64(Spd_values(wnback) + 8), 0x8000000000000000,
+  "-0.0 decodes back to 0x8000000000000000, bit-exact on both sides");
 
 assert_eq(spd_to_json(0), 0, "spd_to_json(null) keeps the 0 sentinel");
+
+# ── the encoder refuses what the decoder would reject or misread (2.4.9) ────────
+# ⛔ A NaN surface radius encoded as null and DECODED AS +inf — a valid flat surface
+# — with PK_ERR_NONE: a corrupt lens came back as a different, legitimate one. Any
+# other NaN field encoded as null and was rejected on decode. Both now refused at
+# the encoder, with the same 0 sentinel a null handle gets.
+var _pn = prescription_new("nan");
+_pn = prescription_add_surface(_pn, 0x7FF8000000000000, f64_from(5), _fd(15, 10), f64_from(10));
+assert_eq(prescription_to_json(_pn), 0, "a NaN radius is refused, not laundered into a flat surface");
+var _pt = prescription_new("nan_t");
+_pt = prescription_add_surface(_pt, f64_from(50), 0x7FF8000000000000, _fd(15, 10), f64_from(10));
+assert_eq(prescription_to_json(_pt), 0, "a NaN thickness is refused rather than emitted as null");
+# The path _ser_num_or_inf exists for must keep working: a GENUINE +inf radius is a
+# flat surface, encodes as null, and decodes back to +inf.
+var _pf = prescription_new("flat");
+_pf = prescription_add_surface(_pf, 0x7FF0000000000000, f64_from(5), _fd(15, 10), f64_from(10));
+var _pfj = prescription_to_json(_pf);
+assert(_pfj != 0, "a +inf (flat) radius still encodes");
+var _pfe = 0;
+var _pfb = prescription_from_json(str_data(_pfj), str_len(_pfj), &_pfe);
+assert_eq(PrescriptionSurface_radius(vec_get(Prescription_surfaces(_pfb), 0)), 0x7FF0000000000000,
+  "and still decodes back to +inf");
+# ⛔ An empty Spd encoded to a document spd_from_json rejects. The decoder's `n <= 0`
+# check is deliberate, so the encoder now declines instead.
+assert_eq(spd_to_json(spd_new(f64_from(380), f64_from(5), 0, 0)), 0,
+  "an empty Spd is refused at encode, since its own decoder would reject it");
 
 var r = assert_summary();

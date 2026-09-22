@@ -381,6 +381,15 @@ _assert_near(spectral_band_similarity(illuminant_d65()), f64_from(100), TOL_01,
 # That metric survives, honestly named, as `spectral_band_similarity`, and is
 # pinned separately below to show that correct SPD data never fixed it: with the
 # CIE 15:2004 tables in place it still says 97.20 for F2.
+# ⛔ 2.4.9: "PINNED SEPARATELY BELOW" WAS NOT TRUE — the only
+# spectral_band_similarity assertion in the suite was D65 = 100 (the one value every
+# similarity metric gets right by construction). So the source table kept
+# publishing the pre-2.2.7 F2 and F11 figures (98.289 / 92.001) for years after
+# the SPDs they were measured on were replaced. Now actually pinned, both lamps:
+_assert_near(spectral_band_similarity(illuminant_f2()), _fd(97196, 1000), TOL_01,
+  "spectral_band_similarity(F2) = 97.196 — near-perfect for a Ra-64 lamp");
+_assert_near(spectral_band_similarity(illuminant_f11()), _fd(93688, 1000), TOL_01,
+  "spectral_band_similarity(F11) = 93.688");
 #
 # The real implementation is validated against PUBLISHED Ra across BOTH
 # reference branches — Planckian below 5000 K, D-series reconstruction above:
@@ -421,6 +430,20 @@ for (var _bb = 2000; _bb <= 4800; _bb = _bb + 400) {
 # instrument was aimed only where the defect is invisible.
 # The domain is [1000, 25000] K (the guards in _cri_cct_refine say so), so the
 # invariant is now asserted from the bottom of it.
+# ⭐ 2.4.9: PIN THE REFINEMENT ITSELF, NOT ONLY ITS CONSEQUENCE. The Ra loops above
+# and below show the 2.4.8 CCT clamp only through CRI; this localises it. A
+# blackbody's CCT is its own temperature, so the refined value must recover T across
+# the whole [1000, 25000] K domain the refine's guards declare. Measured after the
+# 2.4.8 repair: worst 0.077 K (at 25000 K). Before it: off by 1349 K at 1000 K and
+# 4949 K at 25000 K — the refine returned its bracket endpoint.
+for (var _rt = 1000; _rt <= 25000; _rt = _rt + 1000) {
+    var _rxyz = spd_to_xyz(spd_blackbody(f64_from(_rt)));
+    var _rxyy = xyz_to_xyy(_rxyz);
+    var _ruv = alloc(16);
+    _cri_uv(_rxyz, _ruv);
+    var _rref = _cri_cct_refine(load64(_ruv), load64(_ruv + 8), cct_from_xy(XyY_x(_rxyy), XyY_y(_rxyy)));
+    _assert_near(_rref, f64_from(_rt), _fd(1, 10), "CCT refine recovers a blackbody's own T to 0.1 K, 1000-25000 K");
+}
 for (var _bblo = 1000; _bblo < 2000; _bblo = _bblo + 100) {
     _assert_near(color_rendering_index(spd_blackbody(f64_from(_bblo))), f64_from(100), _fd(1, 100),
       "a Planckian radiator scores Ra = 100 down to 1000 K (2.4.7 gave 15.59 at 1000K)");

@@ -9,21 +9,38 @@
 
 # ── Anisotropic GGX ────────
 
-# Anisotropic GGX NDF: 1 / (pi*ax*ay*term^2 + 1e-15),
-# term = (hx/ax)^2 + (hy/ay)^2 + ndh^2.
+# Anisotropic GGX NDF: 1 / (pi*ax*ay*term^2), term = (hx/ax)^2 + (hy/ay)^2 + ndh^2,
+# with ax and ay floored at the same alpha minimum as the isotropic form.
+# ⛔ 2.4.9: THE 2.2.6 GGX REPAIR NEVER CROSSED THE MODULE BOUNDARY. 2.2.6 found the
+# isotropic pbr_distribution_ggx carrying a `+ 1e-15` in its denominator that took
+# over the answer at low roughness (4.2x LOW at 0.01, eight orders low at 0.001) and
+# replaced it with an alpha floor. This twin, one file over, kept both halves of the
+# old form: the epsilon, and no floor. With ax = ay and a CONSISTENT half-vector
+# (hx^2 + hy^2 = 1 - ndh^2) the two must agree exactly — the algebra reduces to
+# a^2 / (pi*(ndh^2(a^2-1)+1)^2) — and they did not. Measured aniso/iso before:
+#   roughness 1e-3, ndh 1     0.999638     roughness 1e-5, ndh 1      0.387219
+#   roughness 1e-4, ndh 1     0.294661     roughness 1e-5, ndh 0.999  0.000100
+# Confined to the near-mirror regime, which is why nothing saw it; the same defect
+# the isotropic form was repaired for. The floor keeps the denominator strictly
+# positive (pi*ax*ay*term^2 >= pi*1e-16*ndh^4 ... and term >= ndh^2 > 0 whenever
+# the half-vector is in the upper hemisphere), so the epsilon has no job left.
 #must_use
 fn pbr_distribution_ggx_aniso(n_dot_h, h_dot_x, h_dot_y, roughness_x, roughness_y) {
     var ax = f64_mul(roughness_x, roughness_x);
     var ay = f64_mul(roughness_y, roughness_y);
+    var amin = _pbr_alpha_min();
+    if (f64_lt(ax, amin) == 1) { ax = amin; }
+    if (f64_lt(ay, amin) == 1) { ay = amin; }
     var ndh = f64_clamp(n_dot_h, f64_from(0), F64_ONE);
     var hx_ax = f64_div(h_dot_x, ax);
     var hy_ay = f64_div(h_dot_y, ay);
     var term = f64_add(
       f64_add(f64_mul(hx_ax, hx_ax), f64_mul(hy_ay, hy_ay)),
       f64_mul(ndh, ndh));
-    var denom = f64_add(
-      f64_mul(f64_mul(f64_mul(f64_mul(F64_PI, ax), ay), term), term),
-      _pbr_eps15());
+    var denom = f64_mul(f64_mul(f64_mul(f64_mul(F64_PI, ax), ay), term), term);
+    # term = 0 only for a half-vector with ndh = hx = hy = 0, which is not a
+    # direction; report 0 rather than divide by it.
+    if (f64_le(denom, f64_from(0)) == 1) { return f64_from(0); }
     return f64_div(F64_ONE, denom);
 }
 
@@ -360,15 +377,25 @@ fn pbr_sample_cosine_pdf(n_dot_l) {
 #      incidence — so scale was flat at 0.998 across most of the domain and
 #      lowest exactly where the specular response is strongest.
 #
-# Accuracy of the replacement, measured against pbr_integrate_brdf_lut (itself
-# corrected in 2.2.7 — see the k remap there) over an 11x10 grid:
-#   old fit:  scale max err 0.9167, mean 0.3357 | bias max 0.1456, mean 0.0202
-#   Karis:    scale max err 0.5547, mean 0.1275 | bias max 0.0861, mean 0.0130
-# ⚠ Karis is a published MOBILE approximation and its residual is concentrated
-# at extreme grazing with mid roughness (worst point r = 0.6, n.v = 0.1, where
-# the integral is 1.158 and the fit gives 0.603). It is an approximation, not a
-# replacement for pbr_integrate_brdf_lut — callers wanting accuracy there should
-# integrate. What it is not, any more, is a constant and a zero.
+# Accuracy of this fit against pbr_integrate_brdf_lut, re-measured at 2.4.9 on the
+# CURRENT (energy-conserving, 2.2.8) LUT — grid n.v = 0.0..1.0 step 0.1 x
+# r = 0.1..1.0 step 0.1 (110 points), 1024 samples; stable at 4096:
+#   scale  max err 0.1803, mean 0.0629  (worst: n.v = 1.0, r = 0.4 — fit 0.777,
+#                                        integral 0.958; at NORMAL incidence)
+#   bias   max err 0.1357, mean 0.0135  (worst: n.v = 0.0, r = 0.1 — fit 0.762,
+#                                        integral 0.626; at grazing)
+# ⛔ 2.4.9 REPLACED THE PREVIOUS TABLE, which had been measured against the 2.2.7
+# LUT that 2.2.8 found energy-GAINING (k = alpha^2/2). It claimed scale max 0.5547
+# (3.1x overstated), bias max 0.0861 (1.6x UNDERSTATED — the one a consumer sizes
+# against), and named the worst point as r = 0.6, n.v = 0.1 "where the integral is
+# 1.158": the fit there is 0.603 and the corrected integral is 0.635, and 1.158 is
+# not reachable anywhere on the current LUT (max A + B over a 21x21 grid is 1.0).
+# Its "old fit" row (the pre-2.2.7 constant-and-zero fit) was measured against the
+# same superseded LUT and is dropped rather than re-measured. The table now has a
+# suite assertion behind it (tests/pbr_advanced.tcyr), so it cannot rot silently.
+# ⚠ Karis is a published MOBILE approximation. It is not a replacement for
+# pbr_integrate_brdf_lut — callers wanting accuracy should integrate. What it is
+# not, any more, is a constant and a zero.
 fn pbr_split_sum_scale_bias(n_dot_v, roughness, out) {
     var ndv = f64_clamp(n_dot_v, f64_from(0), F64_ONE);
     var m = f64_clamp(roughness, f64_from(0), F64_ONE);

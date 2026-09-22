@@ -60,6 +60,7 @@ fn rgb_white() { return rgb_new(F64_ONE, F64_ONE, F64_ONE); }
 # Clamp all channels to [0, 1].
 #must_use
 fn rgb_clamp(c) {
+    if (c == 0) { return 0; }
     return rgb_new(
       f64_clamp(Rgb_r(c), f64_from(0), F64_ONE),
       f64_clamp(Rgb_g(c), f64_from(0), F64_ONE),
@@ -84,6 +85,7 @@ fn _r_sat_u8(ch) {
 # Clamp to [0, 1] and quantise to 8-bit channels (RgbU8; NaN -> 0); 0 on allocation failure.
 #must_use
 fn rgb_to_u8(c) {
+    if (c == 0) { return 0; }
     var cc = rgb_clamp(c);
     var u = alloc(sizeof(RgbU8));
     if (u == 0) { return 0; }
@@ -96,6 +98,7 @@ fn rgb_to_u8(c) {
 # Rec. 709 luminance: 0.2126*r + 0.7152*g + 0.0722*b.
 #must_use
 fn rgb_luminance(c) {
+    if (c == 0) { return f64_from(0); }
     return f64_add(f64_add(
         f64_mul(_r(2126, 10000), Rgb_r(c)),
         f64_mul(_r(7152, 10000), Rgb_g(c))),
@@ -153,7 +156,12 @@ fn wavelength_to_rgb(wavelength_nm, err_out) {
           f64_div(f64_mul(_r(7, 10), f64_sub(f64_from(780), w)), f64_sub(f64_from(780), f64_from(700))));
     }
 
-    return rgb_new(f64_mul(r, factor), f64_mul(g, factor), f64_mul(b, factor));
+    # 2.4.9: a failed allocation used to return 0 with err_out still PK_ERR_NONE,
+    # so a caller that checked prakash_is_ok() then dereferenced null. A null
+    # handle must be distinguishable from a success (CLAUDE.md).
+    var c = rgb_new(f64_mul(r, factor), f64_mul(g, factor), f64_mul(b, factor));
+    if (c == 0) { store64(err_out, PK_ERR_ALLOCATION); }
+    return c;
 }
 
 # ── Blackbody radiation ────────

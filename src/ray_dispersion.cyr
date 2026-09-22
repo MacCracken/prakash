@@ -54,6 +54,7 @@ fn cauchy_fused_silica() { return _cauchy_mk(_disp_r(14483, 10000), _disp_r(351,
 # Refractive index at wavelength_um: b + c/l^2.
 #must_use
 fn cauchy_n_at(coef, wavelength_um) {
+    if (coef == 0) { return f64_from(0); }
     var l2 = f64_mul(wavelength_um, wavelength_um);
     return f64_add(CauchyCoefficients_b(coef), f64_div(CauchyCoefficients_c(coef), l2));
 }
@@ -183,6 +184,7 @@ fn _sellmeier_term(b, l2, c) {
 # Refractive index at wavelength_um. Clamps to 1.0 in the unphysical n^2 < 1 region.
 #must_use
 fn sellmeier_n_at(coef, wavelength_um) {
+    if (coef == 0) { return f64_from(0); }
     var l2 = f64_mul(wavelength_um, wavelength_um);
     var t1 = _sellmeier_term(SellmeierCoefficients_b1(coef), l2, SellmeierCoefficients_c1(coef));
     var t2 = _sellmeier_term(SellmeierCoefficients_b2(coef), l2, SellmeierCoefficients_c2(coef));
@@ -197,6 +199,7 @@ fn sellmeier_n_at(coef, wavelength_um) {
 # Abbe number V = (n_d - 1) / (n_F - n_C).
 #must_use
 fn abbe_number(sellmeier) {
+    if (sellmeier == 0) { return f64_from(0); }
     var n_d = sellmeier_n_at(sellmeier, fraunhofer_d());
     var n_f = sellmeier_n_at(sellmeier, fraunhofer_f());
     var n_c = sellmeier_n_at(sellmeier, fraunhofer_c());
@@ -222,6 +225,10 @@ fn prism_deviation(apex_angle, n, err_out) {
 # Prism deviation using the Sellmeier index at wavelength_um.
 #must_use
 fn prism_dispersion(apex_angle, sellmeier, wavelength_um, err_out) {
+    if (sellmeier == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
     var n = sellmeier_n_at(sellmeier, wavelength_um);
     return prism_deviation(apex_angle, n, err_out);
 }
@@ -234,6 +241,10 @@ struct PrismSpread { dev_short; dev_long; spread; }
 #must_use
 fn prism_angular_spread(apex_angle, sellmeier, wavelength_short_um, wavelength_long_um, err_out) {
     store64(err_out, PK_ERR_NONE);
+    if (sellmeier == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
     var e1 = 0;
     var dev_short = prism_dispersion(apex_angle, sellmeier, wavelength_short_um, &e1);
     if (prakash_is_err(e1) == 1) {
@@ -274,6 +285,7 @@ fn _herzberger_mk(a, b, c, d, e) {
 # Herzberger index at wavelength_um: a + b*L + c*L^2 + d*l^2 + e*l^4, L = 1/(l^2 - 0.028).
 #must_use
 fn herzberger_n_at(coef, wavelength_um) {
+    if (coef == 0) { return f64_from(0); }
     var l2 = f64_mul(wavelength_um, wavelength_um);
     var l = f64_div(F64_ONE, f64_sub(l2, _disp_r(28, 1000)));   # 0.028
     # Match Rust's left-associative coefficient-first order: c*l*l = (c*l)*l.
@@ -322,6 +334,7 @@ fn schott_bk7() {
 # Schott power-series index: sqrt(a0 + a1*l^2 + a2/l^2 + a3/l^4 + a4/l^6 + a5/l^8); 1 if n^2 <= 0.
 #must_use
 fn schott_n_at(coef, wavelength_um) {
+    if (coef == 0) { return f64_from(0); }
     var l2 = f64_mul(wavelength_um, wavelength_um);
     var li = f64_div(F64_ONE, l2);
     # Match Rust's left-associative coefficient-first folds: a3*x*x = (a3*x)*x.
@@ -355,6 +368,7 @@ fn _conrady_mk(n0, a, b) {
 # Conrady index at wavelength_um: n0 + a/l + b/l^3.5.
 #must_use
 fn conrady_n_at(coef, wavelength_um) {
+    if (coef == 0) { return f64_from(0); }
     var term_a = f64_div(ConradyCoefficients_a(coef), wavelength_um);
     var term_b = f64_div(ConradyCoefficients_b(coef), _prk_pow(wavelength_um, _disp_r(7, 2)));
     return f64_add(f64_add(ConradyCoefficients_n0(coef), term_a), term_b);
@@ -365,6 +379,7 @@ fn conrady_n_at(coef, wavelength_um) {
 # Partial dispersion P_g,F = (n_g - n_F) / (n_F - n_C). 0 if n_F ~ n_C.
 #must_use
 fn partial_dispersion(sellmeier) {
+    if (sellmeier == 0) { return f64_from(0); }
     var n_g = sellmeier_n_at(sellmeier, _disp_r(43584, 100000));   # g-line 0.43584
     var n_f = sellmeier_n_at(sellmeier, fraunhofer_f());
     var n_c = sellmeier_n_at(sellmeier, fraunhofer_c());

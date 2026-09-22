@@ -78,6 +78,8 @@ struct TraceTree { segments; interactions; }
 #must_use
 fn trace_recursive(ray, surfaces, config) {
     _prk_trace("trace_recursive");
+    if (ray == 0) { return 0; }
+    if (surfaces == 0) { return 0; }
     var segments = vec_new();
     var interactions = 0;
     _trace_recursive_inner(ray, surfaces, config, F64_ONE, 0, segments, &interactions);
@@ -268,6 +270,7 @@ struct SpotPoint { x; y; optical_path; aperture_height; }
 #must_use
 fn spot_diagram(surfaces, aperture_radius, num_rings, num_arms, field_angle, start_z, image_z) {
     _prk_trace("spot_diagram");
+    if (surfaces == 0) { return 0; }
     var bundle = ray_bundle(aperture_radius, num_rings, num_arms, field_angle, start_z);
     var spots = vec_new();
     var count = vec_len(bundle);
@@ -322,6 +325,7 @@ fn spot_diagram(surfaces, aperture_radius, num_rings, num_arms, field_angle, sta
 # RMS distance of spot points from their centroid (0 for empty).
 #must_use
 fn spot_rms_radius(spots) {
+    if (spots == 0) { return f64_from(0); }
     var n = vec_len(spots);
     if (n == 0) { return f64_from(0); }
     var nf = f64_from(n);
@@ -355,6 +359,10 @@ fn spot_rms_radius(spots) {
 #must_use
 fn optical_path_length(ray, surfaces, image_z, err_out) {
     store64(err_out, PK_ERR_NONE);
+    if (ray == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
     var e = 0;
     var hits = trace_sequential(ray, surfaces, &e);
     if (prakash_is_err(e) == 1) {
@@ -397,6 +405,14 @@ fn optical_path_length(ray, surfaces, image_z, err_out) {
 #must_use
 fn optical_path_difference(ray, chief_ray, surfaces, image_z, err_out) {
     store64(err_out, PK_ERR_NONE);
+    if (ray == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
+    if (chief_ray == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
     var e1 = 0;
     var opl_ray = optical_path_length(ray, surfaces, image_z, &e1);
     if (prakash_is_err(e1) == 1) {
@@ -421,6 +437,7 @@ struct OpdPoint { height; opd; }
 #must_use
 fn opd_fan(fan, surfaces, image_z) {
     _prk_trace("opd_fan");
+    if (fan == 0) { return 0; }
     var result = vec_new();
     var count = vec_len(fan);
     if (count == 0) {

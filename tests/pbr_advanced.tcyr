@@ -496,4 +496,60 @@ fn _cosine_pdf_int() {
 }
 _assert_near(_cosine_pdf_int(), F64_ONE, _fd(1, 1000), "cosine-hemisphere PDF integrates to 1");
 
+# ── anisotropic <-> isotropic GGX agreement (2.4.9) ────────
+test_group("ggx_aniso_iso_agreement");
+
+# ⭐ TWO IMPLEMENTATIONS OF ONE QUANTITY, NOW ASSERTED AGAINST EACH OTHER. With
+# ax = ay and a CONSISTENT half-vector (hx^2 + hy^2 = 1 - ndh^2) the anisotropic
+# GGX reduces exactly to the isotropic one. Before 2.4.9 they disagreed below
+# roughness 1e-3 — aniso/iso was 0.294661 at 1e-4 and 0.000100 at 1e-5, ndh 0.999
+# — because the 2.2.6 epsilon repair never reached the anisotropic twin. Repairing
+# the twin then exposed that the ISOTROPIC form was itself 19% low at the alpha
+# floor (catastrophic cancellation in ndh^2(a2-1)+1). The ladder reaches 1e-6, far
+# below the 0.1-1.0 range the suite used to sample, because that is where both
+# defects lived.
+for (var _gr = 0; _gr <= 6; _gr = _gr + 1) {
+    var _r = F64_ONE;
+    for (var _gk = 0; _gk < _gr; _gk = _gk + 1) { _r = f64_div(_r, f64_from(10)); }
+    var _gn = 0;
+    while (_gn < 3) {
+        var _ndh = F64_ONE;
+        if (_gn == 1) { _ndh = _fd(999, 1000); }
+        if (_gn == 2) { _ndh = _fd(9, 10); }
+        var _hx = f64_sqrt(f64_sub(F64_ONE, f64_mul(_ndh, _ndh)));
+        var _da = pbr_distribution_ggx_aniso(_ndh, _hx, Z, _r, _r);
+        var _di = pbr_distribution_ggx(_ndh, _r);
+        assert(f64_lt(f64_abs(f64_sub(f64_div(_da, _di), F64_ONE)), _fd(1, 1000000000)),
+          "aniso GGX == iso GGX at ax = ay, roughness 1 down to 1e-6");
+        _gn = _gn + 1;
+    }
+}
+# And the absolute value at the floor, against the closed form, so the PAIR cannot
+# drift together: at n.h = 1, D = 1/(pi*alpha^2) with alpha = 1e-8.
+var _dexact = f64_div(F64_ONE, f64_mul(F64_PI, f64_mul(_pbr_alpha_min(), _pbr_alpha_min())));
+assert(f64_lt(f64_abs(f64_sub(f64_div(pbr_distribution_ggx(F64_ONE, _fd(1, 10000)), _dexact), F64_ONE)),
+    _fd(1, 1000000000)), "iso GGX at the alpha floor = 1/(pi*alpha^2) exactly (was 19% low)");
+
+# ── split-sum fit accuracy, pinned (2.4.9) ────────
+test_group("split_sum_fit_accuracy");
+# The source comment on pbr_split_sum_scale_bias states the fit's max error against
+# the integrated LUT. That table rotted once already — it was measured against the
+# superseded 2.2.7 LUT and was wrong by up to 3.1x until 2.4.9 — so the figures are
+# now bounds the suite enforces: a change to the fit OR the LUT that moves them
+# fails here instead of silently invalidating the comment. Measured 0.1803 / 0.1357.
+var _kf = alloc(16);
+var _kl = alloc(16);
+var _kmax_s = Z;
+var _kmax_b = Z;
+for (var _ka = 0; _ka <= 10; _ka = _ka + 1) {
+    for (var _kc = 1; _kc <= 10; _kc = _kc + 1) {
+        pbr_split_sum_scale_bias(_fd(_ka, 10), _fd(_kc, 10), _kf);
+        pbr_integrate_brdf_lut(_fd(_ka, 10), _fd(_kc, 10), 1024, _kl);
+        _kmax_s = f64_max(_kmax_s, f64_abs(f64_sub(load64(_kf), load64(_kl))));
+        _kmax_b = f64_max(_kmax_b, f64_abs(f64_sub(load64(_kf + 8), load64(_kl + 8))));
+    }
+}
+_assert_near(_kmax_s, _fd(1803, 10000), _fd(5, 1000), "Karis split-sum scale max err = 0.1803 over the grid");
+_assert_near(_kmax_b, _fd(1357, 10000), _fd(5, 1000), "Karis split-sum bias max err = 0.1357 over the grid");
+
 var r = assert_summary();

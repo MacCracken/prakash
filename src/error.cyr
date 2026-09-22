@@ -63,18 +63,24 @@ fn prakash_is_ok(code) {
 # it — all 5485 assertions passed either side of the bump — because the shim
 # masks the builtin at exactly the point the table describes.
 #
-# Measured on cyrius 6.5.33, x86_64 (raw f64 bits, this host):
+# Re-measured on cyrius 6.6.6 / ganita 1.2.6, x86_64 (raw f64 bits), for 2.4.9:
 #
-#   expression              Cyrius builtin      Rust    shim
-#   ganita_f64_pow(0.0, 2)  0.0  (was NaN)      0.0     0.0
-#   ganita_f64_pow(0.0, 0)  1.0  (was NaN)      1.0     1.0
-#   ganita_f64_pow(0.0,-1)  +inf (was NaN)      +inf    +inf
-#   f64_exp(-inf)           NaN                 0.0     0.0
-#   f64_exp(+inf)           NaN                 +inf    +inf
+#   expression              Cyrius builtin              Rust    shim
+#   ganita_f64_pow(0.0, 2)  0.0  (NaN before 1.1.4)     0.0     0.0
+#   ganita_f64_pow(0.0, 0)  1.0  (NaN before 1.1.4)     1.0     1.0
+#   ganita_f64_pow(0.0,-1)  +inf (NaN before 1.1.4)     +inf    +inf
+#   f64_exp(-inf)           0.0  (NaN at 6.5.33)        0.0     0.0
+#   f64_exp(+inf)           +inf (NaN at 6.5.33)        +inf    +inf
 #
-# So the three pow rows now agree with Rust WITHOUT the shim; the two f64_exp
-# rows are the ones still doing work (f64_exp is a compiler intrinsic and was
-# untouched by the ganita change — verified, not assumed).
+# ⛔ 2.4.9: ALL FIVE ROWS NOW AGREE WITH RUST WITHOUT THE SHIM. This table used to
+# say "the two f64_exp rows are the ones still doing work" — true at 6.5.33 and
+# false by 6.6.6, where the intrinsic returns 0.0 and +inf itself. So `_prk_exp`,
+# like the zero-base `_prk_pow` branch, is now a REDUNDANT PIN rather than a live
+# repair. It stays: it costs one comparison, and if an intrinsic regresses it
+# catches that before a consumer does. tests/hardening.tcyr now asserts the RAW
+# builtins too, so the next upstream move fails the suite rather than rotting this
+# table a third time (it went stale once at 1.1.4 and again between 6.5.33 and
+# 6.6.6, both times with every assertion passing).
 #
 # Finite arguments are delegated unchanged, so no in-range result moves.
 
@@ -149,21 +155,29 @@ fn _prk_cos(x) {
 # `br_absolute_magnitude_to_luminosity` computes `10^((4.83 - M)/2.5)`, so an
 # infinite magnitude gives an infinite exponent; `atm_air_mass` computes
 # `(96.07995 - z_deg)^-1.6364`, so an infinite zenith angle gives an infinite
-# base. Both returned NaN where Rust returns a defined value. The other seven
-# `_prk_pow` call sites pass a finite constant exponent and cannot reach here.
+# base. Both returned NaN where Rust returns a defined value. The other ten
+# `_prk_pow` call sites (12 in all, counted 2.4.9 — this said "seven") pass a
+# finite exponent and cannot reach here: nine pass a constant, and the tenth,
+# pbr_distribution_charlie, passes the COMPUTED 1/alpha — finite by construction
+# because alpha is clamped to [0.001, 1] two lines above it, so 1/alpha <= 1000.
 #
-# ⚠ WHAT THIS DOES NOT FIX — the three remaining divergent rows are ULP
-# inexactness in the `exp`/`ln` pair, not domain errors, and are left alone:
-#   pow(2, 3)   = 0x401FFFFFFFFFFFFE  vs Rust 0x4020000000000000 (exactly 8)
-#   pow(-2, 3)  = 0xC01FFFFFFFFFFFFE  vs Rust 0xC020000000000000 (exactly -8)
+# ⚠ WHAT THIS DOES NOT FIX — ONE remaining divergent row, ULP inexactness in the
+# `exp`/`ln` pair rather than a domain error, left alone:
 #   pow(2, 0.5) = 0x3FF6A09E667F3BCC  vs Rust 0x3FF6A09E667F3BCD (1 ULP)
-# Closing those means a correctly-rounded pow, not a guard. A negative base is
-# therefore finite-but-inexact where Rust is exact (it was NaN before ganita
-# 1.1.4, i.e. it used to fail loudly); no prakash call site passes one.
+# Closing it means a correctly-rounded pow, not a guard.
+# ⛔ 2.4.9: THIS LISTED THREE ROWS; TWO HAD CLOSED UPSTREAM. Re-measured on cyrius
+# 6.6.6 / ganita 1.2.6: pow(2, 3) = 0x4020000000000000 and pow(-2, 3) =
+# 0xC020000000000000, exactly 8 and -8 as Rust gives. tests/hardening.tcyr had
+# already recorded that ("the cyrius 6.6.2 bump CLOSED three of the four"), so the
+# suite and this comment contradicted each other and the suite was right — and this
+# text ships verbatim in both dist/ bundles, telling consumers integer powers were
+# 1 ULP under when they were exact.
 #
-# ⚠ AND ONE MORE, found by widening the sweep rather than reported: a negative
-# base that UNDERFLOWS through an odd exponent loses its sign.
-#   pow(-5e-324, 3) = 0x0  vs Rust 0x8000000000000000 (-0.0)
+# ⚠ AND ONE MORE, found by widening the sweep rather than reported — AND ALSO
+# CLOSED UPSTREAM BY 6.6.6 (re-measured 2.4.9: raw ganita_f64_pow(-5e-324, 3) =
+# 0x8000000000000000, matching Rust). What it said, for the record: a negative
+# base that underflowed through an odd exponent lost its sign.
+#   pow(-5e-324, 3) = 0x0  vs Rust 0x8000000000000000 (-0.0)   [was; now fixed]
 # Root cause traced, not guessed: ganita takes the magnitude from
 # exp(3*ln(5e-324)), which underflows to +0 (measured), then applies the sign
 # with `f64_neg` — and cyrius's `f64_neg(+0.0)` yields +0.0, not -0.0 (measured).

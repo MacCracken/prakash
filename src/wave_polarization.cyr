@@ -39,11 +39,15 @@ fn stokes_circular_left(intensity) { return stokes_new(intensity, f64_from(0), f
 
 # Total intensity (S0).
 #must_use
-fn stokes_intensity(s) { return StokesVector_s0(s); }
+fn stokes_intensity(s) {
+    if (s == 0) { return f64_from(0); }
+    return StokesVector_s0(s);
+}
 
 # Ellipticity angle chi: 0.5 * atan2(S3, sqrt(S1^2 + S2^2)); 0 for zero vector.
 #must_use
 fn stokes_ellipticity_angle(s) {
+    if (s == 0) { return f64_from(0); }
     var s1 = StokesVector_s1(s);
     var s2 = StokesVector_s2(s);
     var s3 = StokesVector_s3(s);
@@ -59,6 +63,7 @@ fn stokes_ellipticity_angle(s) {
 # Orientation angle psi: 0.5 * atan2(S2, S1).
 #must_use
 fn stokes_orientation_angle(s) {
+    if (s == 0) { return f64_from(0); }
     return f64_mul(F64_HALF, ganita_f64_atan2(StokesVector_s2(s), StokesVector_s1(s)));
 }
 
@@ -311,29 +316,34 @@ fn biref_mica() { return _biref_mk(_wp_r(15601, 10000), _wp_r(15936, 10000), "mi
 # Birefringence: delta_n = n_e - n_o.
 #must_use
 fn biref_birefringence(mat) {
+    if (mat == 0) { return f64_from(0); }
     return f64_sub(BirefringentMaterial_n_e(mat), BirefringentMaterial_n_o(mat));
 }
 
 # Phase retardation: 2*pi * d * |delta_n| / lambda.
 #must_use
 fn biref_retardation(mat, thickness, wavelength) {
+    if (mat == 0) { return f64_from(0); }
     return f64_div(f64_mul(f64_mul(F64_TAU, thickness), f64_abs(biref_birefringence(mat))), wavelength);
 }
 
 # Quarter-wave-plate thickness: lambda / (4*|delta_n|).
 #must_use
 fn biref_quarter_wave_thickness(mat, wavelength) {
+    if (mat == 0) { return f64_from(0); }
     return f64_div(wavelength, f64_mul(f64_from(4), f64_abs(biref_birefringence(mat))));
 }
 
 # Half-wave-plate thickness: lambda / (2*|delta_n|).
 #must_use
 fn biref_half_wave_thickness(mat, wavelength) {
+    if (mat == 0) { return f64_from(0); }
     return f64_div(wavelength, f64_mul(F64_TWO, f64_abs(biref_birefringence(mat))));
 }
 
 # Mueller matrix for this material at a thickness and wavelength (fast axis horizontal).
 #must_use
 fn biref_to_mueller(mat, thickness, wavelength) {
+    if (mat == 0) { return 0; }
     return mueller_retarder(biref_retardation(mat, thickness, wavelength));
 }

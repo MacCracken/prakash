@@ -2,6 +2,151 @@
 
 ## [Unreleased]
 
+## [2.4.9] - 2026-09-22 — the 2.4.8 audit's twenty lower-severity findings, each reproduced before it was repaired
+
+The twenty findings 2.4.8 filed unverified. **Every one was reproduced by hand first**,
+and that mattered: three of the finders' proposed fixes were wrong or incomplete, and
+two of the repairs uncovered defects no finder had reported. Suite **6796 → 7121
+assertions across 31 suites**, 0 failed. Reference coverage **414/414**. `cyrius audit`
+exits 0; fmt, lint, `doc --check`, vet, deny clean; untracked deferrals 0;
+`deps --verify` 112/112; `#must_use` 429, 0 lost.
+
+⚠ **Where the finders were wrong, measured rather than argued:**
+- **#10** proposed qualifying the JSON float claim as "bit-exact within |x| ~ 1e±30".
+  Measured: bayan's decoder mis-rounds **2 in 200,000 random doubles inside prakash's own
+  1e-16…1e16 band** (e.g. `1.621274542797433e-9`). There is no safe band — only a rate.
+- **#20** counted 13 `_pbr_eps15()` call sites. It is **12** — this release removed one.
+- **#19** said the anisotropic GGX disagreed with the isotropic one. After repairing the
+  anisotropic form, the disagreement persisted in the OTHER direction: the **isotropic**
+  GGX was the inexact one (below).
+
+### Fixed — the null-handle class, swept mechanically (findings #1, #2, #3)
+
+- ⛔ **68 public functions exited 139 on a null argument.** Findings #1–#3 named about
+  twenty, across the Rgb/Xyz, Medium, Polarization, Stokes, Sellmeier, Zernike and
+  ai.cyr families. Three previous releases had guarded this class by inspection (2.2.7
+  encoders, 2.2.8 Spd, 2.4.8 Prescription) and each concluded it was done, so 2.4.9
+  **measured it instead**: every public function in the library — 413 — was called in
+  its own process with its handles, arrays and counts zeroed, then again with counts = 4
+  so loop bodies were reached. **55 + 13 = 68 died with SIGSEGV**, spanning dispersion
+  (`sellmeier_n_at`, `cauchy_n_at`, `abbe_number`, `prism_dispersion`, …), complex
+  Fresnel, `ray_reflect_*`/`ray_refract_3d`/`ray_snell_3d`, the tracers
+  (`trace_sequential`, `trace_recursive`, `spot_diagram`, `opd_fan`, …), paraxial,
+  birefringence, Stokes, Zernike, colour conversion, both RGB PBR helpers, the nine JSON
+  decoders fed a null buffer, and four lens functions taking an array and a count.
+  Guarded at the lowest shared point where one exists — `_ser_obj` covers six decoders
+  at once. **All 413 now survive both passes.** Sentinels follow the existing
+  convention: 0 / 0.0, or `PK_ERR_INVALID_PARAMETER` / `PK_ERR_PARSE` through `err_out`.
+  A null array with a count of 0 keeps its existing empty-input answer.
+  ⚠ Several of these returned a **plausible value** rather than crashing once a lower
+  function was guarded — `zernike_wf_strehl_ratio(0)` would have reported a perfect
+  1.0, `biref_to_mueller(0)` a valid retarder matrix — so they are guarded directly
+  rather than relying on their callees.
+
+### Fixed — physics
+
+- ⛔ **The isotropic GGX NDF was 19% low at its own alpha floor** — *not reported by the
+  audit; found because #19's agreement test could not pass without it.* The 2.2.6 floor
+  puts α² at 1e-16, and `ndh²(α² − 1) + 1` cannot hold that: `1e-16 − 1` rounds to
+  `−(1 − 2⁻⁵³)`, so the sum is 1.11e-16 and D read **2.58e15 against the exact
+  1/(πα²) = 3.18e15**. Rewritten as `ndh²·α² + (1 − ndh²)` — the same polynomial,
+  exact at the floor. ⚠ **The first stable form cost 18%**: `(1−ndh)(1+ndh)` adds a
+  multiply and an add, each a real call. Same binary, 4 interleaved pairs × 2e6:
+  original 16–17 ns, that form **19–20 ns**, the shipped form **16 ns**.
+- ⛔ **The anisotropic GGX kept the epsilon 2.2.6 removed from the isotropic one (#19).**
+  With αx = αy and a consistent half-vector the two must agree exactly; aniso/iso read
+  0.294661 at roughness 1e-4 and **0.000100 at 1e-5, n·h = 0.999**. Given the isotropic
+  form's repair — the α floor, no epsilon — they now agree to 1e-9 from roughness 1 down
+  to 1e-6. The 2.2.6 repair had never crossed the module boundary.
+
+### Fixed — contracts
+
+- **Four functions returned a null handle alongside `PK_ERR_NONE` on allocation failure
+  (#15)** — `wavelength_to_rgb`, `medium_custom`, `ray_refract_3d`, and `ray_snell_3d`,
+  which the finder did not name and a sweep of the class found. They now report
+  `PK_ERR_ALLOCATION`. ⚠ **Not directly tested**: the suite has no way to make the bump
+  allocator fail. Repaired by inspection, as the audit found it.
+- **`prescription_to_json` refuses a NaN field instead of laundering it (#17).** A NaN
+  radius encoded as `null` and decoded as +∞ — a legitimate flat surface — with
+  `PK_ERR_NONE`. A genuine +∞ radius still round-trips.
+- **`spd_to_json` refuses an empty Spd (#18)**, which its own decoder rejects.
+- **`_cri_context` built the D-series reference and then discarded it (#16)** for every
+  source below 5000 K — a 680-byte leak per CRI call on a bump allocator.
+
+### Fixed — documentation, each number re-measured
+
+- **#7 — the negative-zero test tested positive zero, and its comment had the behaviour
+  backwards.** It stored `f64_neg(f64_from(0))`, which is +0.0 on cyrius (a quirk this
+  repo already documents elsewhere), then concluded bayan drops zero's sign. A real
+  `0x8000000000000000` round-trips bit-exactly as `"-0.0"`.
+- **#10 — "floats survive a to_json/from_json cycle BIT-EXACTLY" is false**, in four
+  places. The encoder is right; bayan's decoder mis-rounds ~1 in 10⁵ doubles by 1 ULP.
+  The known-failing value is pinned at its defective result, so the caveat retires
+  itself when bayan is fixed. Upstream's to fix — lib/ is not edited here.
+- **#12 — `src/error.cyr`'s math-shim tables described cyrius 6.5.33.** On 6.6.6 /
+  ganita 1.2.6 all five `f64_exp`/`pow` rows agree with Rust unshimmed, and only
+  `pow(2, 0.5)` still diverges. The text ships in both bundles and told consumers
+  integer powers were 1 ULP under when they are exact.
+- **#11 — the split-sum accuracy table was measured against the superseded 2.2.7 LUT**:
+  scale max error 0.5547 → **0.1803**, bias max 0.0861 → **0.1357** (understated 1.6x),
+  and the worst scale point is at normal incidence, not grazing.
+- **#13 — `docs/guides/allocation.md`**: `medium_to_json` 136 → **152** (grows with the
+  name); `spd_to_json` 2,576 → **1,464–5,632** at 81 samples (grows with each value's
+  decimal length). Every other row re-measured and reproduced exactly.
+- **#8** the band-similarity table (F2 98.289 → **97.196**, F11 92.001 → **93.688**);
+  **#9** the CCT paragraph, which described a superseded ±8% search and had become
+  detached from its function when 2.4.8 inserted `_cri_golden`; **#14** a transposed
+  digit (1.0162 → **1.0216**; the same slip in the released 2.2.8 entry is left as
+  written); **#20** two call-site counts (seven → **ten**, eight → **twelve**).
+
+### Fixed — two false claims of my own
+
+- **`docs/architecture/math.md` (added 2.4.7) said the best-form and aplanatic checks are
+  "the reason to trust" the Seidel formulas.** They check the bracket's ratios and are
+  blind to any prefactor. Corrected, pointing at roadmap item 1.
+- **The `tests/lens.tcyr` LSA value pin (added 2.4.6) is self-derived** — its expected
+  0.1 is computed from the expression it tests. Labelled as the regression lock it is.
+
+### Added — pins that would have caught the rest
+
+- **V(λ) (#4)**: all 81 photopic entries asserted **bit-equal to CIE 1931 ȳ** (same
+  function, two tables); `luminous_flux == 683·Y` bit-exact; monotonicity both flanks.
+  The audit's corruption (V(475 nm) → 0.734) used to pass everything; it now fails 3.
+- **Planck (#5)**: c1 and c2 against the exact 2019 SI values; B(λ, T) at three points to
+  1e-9; the T⁵ scaling identity; and Wien's constant tied to c2 (`b = c2/4.965114…`)
+  plus a numeric argmax scan. Dropping c1's factor of 2 — the 2.2.6 defect shape — used
+  to pass everything; it now fails 4.
+- **CCT (#6)**: the refinement itself must recover a blackbody's temperature to 0.1 K
+  across 1000–25000 K (measured worst 0.077 K). Reverting 2.4.8's repair fails it at 15 of
+  25 temperatures — both ends of the domain, where the Ra loop sees only the cold end.
+- **GGX**: aniso ≡ iso from roughness 1 to 1e-6 at three n·h; the isotropic value at the
+  floor against 1/(πα²). Each repair's mutant fails 6 and 9 assertions.
+- **The 68 null guards**, generated from the same specification as the guards so the
+  two lists cannot drift; removing one kills the suite binary.
+- Also: the Karis fit's error as enforced bounds, band-similarity F2/F11, the best-form
+  argmin at n = 1.6–1.8, raw-builtin tripwires behind the math shims, the -0.0 round
+  trip on both sides, and the NaN / empty-Spd refusals.
+
+### Not fixed — filed for a decision
+
+- ⛔ **Five physics reports from 2.4.8's completeness critic were never surfaced in the
+  2.4.8 release notes.** Measured against `ray_trace`, they report the Seidel S₁ and S₂
+  prefactors ~6x and ~2x too large at n = 1.5, `lens_longitudinal_spherical_aberration`
+  scaling as 1/f² where a length must scale as 1/f (it is the 16.7x gap 2.4.6 computed
+  and set aside as a convention), and `optical_path_difference` returning −3x the
+  wavefront aberration. **Not verified here and not in this release's scope**; fixing
+  them moves published values, so it is a breaking change. Filed as roadmap item 1.
+
+### Performance
+
+**No change is claimed**, and the two places a regression was possible were measured
+same-binary rather than read off the suite. Null guards: `cauchy_n_at` guarded vs
+unguarded, 4 interleaved pairs × 3e6 — **7 ns and 7 ns** in every pair. The GGX rewrite:
+16 ns vs the original's 16–17 ns (above). Across 138 rows: median **+0.00%**, mean
+−0.23%; every guarded hot path is flat (`pbr/distribution_ggx` 17 → 16 ns,
+`ray/sellmeier_n_at`, `spectral/rgb_luminance`, `wave/polarization_intensity`,
+`pbr/cook_torrance` all +0.0%). `wave/bessel_j1` moved +14% and was not touched.
+
 ## [2.4.8] - 2026-09-22 — a multi-agent audit of the whole project: two wrong formulas, a SIGSEGV on a documented failure path, and two public functions that contradicted each other
 
 The spectral and serialize constants were the brief; a 23-agent adversarial sweep over the

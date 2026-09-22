@@ -166,6 +166,7 @@ fn polarization_circular_left() {
 # Intensity after a linear polarizer (Malus): cos^2(theta - pol_angle) * |E|^2.
 #must_use
 fn polarization_through_polarizer(p, polarizer_angle) {
+    if (p == 0) { return f64_from(0); }
     var ex = Polarization_ex(p);
     var ey = Polarization_ey(p);
     var pol_angle = ganita_f64_atan2(ey, ex);
@@ -176,6 +177,7 @@ fn polarization_through_polarizer(p, polarizer_angle) {
 # Total intensity: ex^2 + ey^2.
 #must_use
 fn polarization_intensity(p) {
+    if (p == 0) { return f64_from(0); }
     return f64_add(f64_mul(Polarization_ex(p), Polarization_ex(p)),
       f64_mul(Polarization_ey(p), Polarization_ey(p)));
 }
@@ -200,6 +202,7 @@ fn stokes_new(s0, s1, s2, s3) {
 # Degree of polarization: sqrt(s1^2 + s2^2 + s3^2) / s0.
 #must_use
 fn stokes_degree_of_polarization(s) {
+    if (s == 0) { return f64_from(0); }
     if (f64_lt(f64_abs(StokesVector_s0(s)), _wave_r(1, 1000000000000000)) == 1) {
         return f64_from(0);
     }
@@ -213,6 +216,7 @@ fn stokes_degree_of_polarization(s) {
 # Jones polarization -> Stokes vector.
 #must_use
 fn polarization_to_stokes(p) {
+    if (p == 0) { return 0; }
     var ex = Polarization_ex(p);
     var ey = Polarization_ey(p);
     var phase = Polarization_phase(p);

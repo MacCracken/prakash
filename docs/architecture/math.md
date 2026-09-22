@@ -174,11 +174,25 @@ S₁ = φ³ · n/(4(n-1)²) · [ (n+2)/(n(n-1)²) q² + 4(n+1)/(n(n-1)) qp + (3n
 
 S₂ = φ² · 1/(2(n-1)) · [ (n+1)/(n(n-1)) q + (2n+1)/n p ]
 
-⭐ **Two independent textbook results check these**, and are the reason to trust
-them rather than the algebra: with the object at infinity (p = -1) the
-spherical-minimum "best-form" shape is q = 2(n²-1)/(n+2) = **0.7143 at n = 1.5**,
-and the coma-free "aplanatic" shape is q = **0.80 at n = 1.5**. A bracket that
-does not reproduce both is wrong, whatever it was copied from.
+Two independent textbook results check the **bracket**: with the object at
+infinity (p = -1) the spherical-minimum "best-form" shape is
+q = 2(n²-1)/(n+2) = **0.7143 at n = 1.5**, and the coma-free "aplanatic" shape is
+q = **0.80 at n = 1.5**. A bracket that does not reproduce both is wrong, whatever
+it was copied from.
+
+⛔ **But they check NOTHING ELSE, and this page said otherwise from 2.4.7 to 2.4.9.**
+It called them "the reason to trust these rather than the algebra". An argmin
+location and a zero crossing depend only on the RATIOS of the terms inside the
+bracket, so both are completely blind to the prefactor in front of it — the
+φ³·n/(4(n-1)²) and φ²·1/(2(n-1)) above could be wrong by any constant factor and
+both checks would still pass. The 2.4.8 audit's completeness critic reports
+exactly that — S₁ about 6x and S₂ about 2x too large at n = 1.5, measured against
+this library's own ray tracer — together with a 1/f² scaling error in
+`lens_longitudinal_spherical_aberration` and a -3x error in
+`optical_path_difference`. **Those reports are filed, unverified, as item 1 of
+docs/development/roadmap.md.** Until they are resolved, treat S₁, S₂ and LSA
+magnitudes from this library as unconfirmed; the bracket shapes and argmins are
+confirmed.
 
 ⚠ **`lens_longitudinal_spherical_aberration` evaluates S₁ at q = 0, p = -1** — it
 is the same bracket, not a separate formula. It disagreed with the one above from

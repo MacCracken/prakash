@@ -7,10 +7,21 @@
 # v_float_new(bits), parse with parse_buf(data,len); *_from_json takes (data ptr,
 # byte len) since bayan's build output Str is not NUL-terminated.
 #
-# FLOAT FIDELITY: since bayan 1.2.1 the encoder is Grisu2 round-trip-correct, so
-# f64 values survive a to_json/from_json cycle BIT-EXACTLY. (Before that it
-# rendered 6 decimals, which silently flushed any |x| < 5e-7 to zero — prakash
-# 2.0.0 shipped against that encoder.)
+# FLOAT FIDELITY: since bayan 1.2.1 the ENCODER is Grisu2 round-trip-correct — it
+# always emits the shortest string that parses back to the original bits. (Before
+# that it rendered 6 decimals, which silently flushed any |x| < 5e-7 to zero —
+# prakash 2.0.0 shipped against that encoder.)
+# ⛔ 2.4.9: "survives a to_json/from_json cycle BIT-EXACTLY" WAS STATED HERE WITHOUT
+# QUALIFICATION, AND IT IS NOT TRUE. The encoder is right; bayan's DECODER
+# (`_d_decimal_to_f64`, vendored in lib/bayan.cyr) mis-rounds a small fraction of
+# the strings it is handed by exactly 1 ULP. Measured with seeded random doubles
+# through rgb_to_json -> rgb_from_json: **2 in 200,000 with |x| in 1e-16..1e16** —
+# prakash's own magnitude band, e.g. 1.621274542797433e-9 comes back one ULP high —
+# and 5 in 200,000 across the full exponent range. A correctly-rounded parser
+# (Python's float()) returns the ORIGINAL bits from every one of those strings, so
+# the defect is the decoder, not the text. There is no band in which it cannot
+# happen; it is rare, not absent. Upstream's to fix (CLAUDE.md: never edit lib/);
+# tests/hardening.tcyr pins a known-failing value so this note retires itself.
 #
 # FAILURE CONVENTION (2.1.0): every `*_from_json` takes a trailing `err_out`
 # pointer, per the library-wide convention in error.cyr. It writes PK_ERR_NONE on
@@ -47,6 +58,13 @@ var LENS_TYPE_INVALID = (0 - 1);
 # PK_ERR_PARSE.
 #must_use
 fn _ser_obj(json, len, err_out) {
+    # 2.4.9: a null buffer with a nonzero length was read straight off address 0
+    # inside bayan (vendored, not ours to guard), so every decoder routed through
+    # here exited 139 on it. This is the untrusted-input boundary; report PARSE.
+    if (json == 0) {
+        store64(err_out, PK_ERR_PARSE);
+        return 0;
+    }
     var v = bayan_json_v_parse_buf(json, len);
     if (v == 0) {
         store64(err_out, PK_ERR_PARSE);
@@ -102,6 +120,13 @@ fn _ser_str(v, key, err_out) {
         return 0;
     }
     return str_data(s);
+}
+
+# 1 if `bits` is a NaN: exponent all ones with a nonzero mantissa. A signed
+# compare is exact here because masking the sign bit leaves a non-negative i64.
+fn _ser_is_nan(bits) {
+    if ((bits & 0x7FFFFFFFFFFFFFFF) > 0x7FF0000000000000) { return 1; }
+    return 0;
 }
 
 # ── Rgb (spectral) ────────
@@ -291,6 +316,11 @@ fn lens_type_to_json(lt) {
 #must_use
 fn lens_type_from_json(json, len, err_out) {
     store64(err_out, PK_ERR_NONE);
+    # The one decoder that does not enter through _ser_obj, so it needs its own.
+    if (json == 0) {
+        store64(err_out, PK_ERR_PARSE);
+        return LENS_TYPE_INVALID;
+    }
     var v = bayan_json_v_parse_buf(json, len);
     if (v == 0) {
         store64(err_out, PK_ERR_PARSE);
@@ -368,6 +398,24 @@ fn prescription_to_json(p) {
     # `cyrius coverage` could not see it because these are all exercised with
     # valid handles. Returning 0 matches the decoders' sentinel.
     if (p == 0) { return 0; }
+    # ⛔ 2.4.9: REFUSE A NaN RATHER THAN LAUNDER IT INTO A VALID LENS. JSON has no
+    # NaN, so bayan writes every non-finite f64 as `null` — and the decoder reads a
+    # null RADIUS as +inf, a flat surface (_ser_num_or_inf, which exists because a
+    # plano surface must survive). So a corrupt or uninitialised radius went in as
+    # garbage and came out as a legitimate, silently different lens, with
+    # err = PK_ERR_NONE on the way back. A NaN in any other field encoded as null
+    # and was REJECTED on decode — loud, but the encoder had still emitted a document
+    # its own decoder refuses. Either way the right answer is to not emit it: return
+    # the 0 sentinel, the same one a null handle gets.
+    if (_ser_is_nan(Prescription_n_initial(p)) == 1) { return 0; }
+    var ns = Prescription_surfaces(p);
+    for (var ci = 0; ci < vec_len(ns); ci = ci + 1) {
+        var cs = vec_get(ns, ci);
+        if (_ser_is_nan(PrescriptionSurface_radius(cs)) == 1) { return 0; }
+        if (_ser_is_nan(PrescriptionSurface_thickness(cs)) == 1) { return 0; }
+        if (_ser_is_nan(PrescriptionSurface_n_after(cs)) == 1) { return 0; }
+        if (_ser_is_nan(PrescriptionSurface_aperture_radius(cs)) == 1) { return 0; }
+    }
     # 2.3.5: emitted straight into a str_builder instead of through a bayan value
     # tree. See _ser_sb_f64 and the [2.3.5] CHANGELOG entry for why; output is
     # byte-identical and pinned in tests/serialize.tcyr.
@@ -450,20 +498,29 @@ fn spd_to_json(s) {
     # `cyrius coverage` could not see it because these are all exercised with
     # valid handles. Returning 0 matches the decoders' sentinel.
     if (s == 0) { return 0; }
+    # ⛔ 2.4.9: an EMPTY Spd encoded to {"start_nm":..,"step_nm":..,"values":[]},
+    # which spd_from_json then rejected with PK_ERR_INVALID_PARAMETER (its `n <= 0`
+    # check is deliberate). A document prakash produced that prakash refuses to
+    # read breaks the round-trip property the module exists for. The decoder's
+    # strictness stands; the encoder now declines to emit what it would refuse.
+    if (Spd_len(s) <= 0) { return 0; }
     # ⭐ 2.3.4: emitted straight into a str_builder rather than through a bayan
     # value tree. An Spd carries ~81 samples, so the tree form allocated a JSON
     # float node AND a vec push PER SAMPLE — 162 allocations for one call — to
     # build a structure whose only consumer was the serializer three lines later.
     #
     # Measured same-binary with interleaved arms: **71.76 -> 67.59 us (-5.8%)**,
-    # and allocation volume **6,808 -> 2,576 bytes per call (-62%)**. ⚠ The memory
-    # figure is the one that matters: prakash's bump allocator NEVER FREES, so
+    # and allocation volume **6,808 -> 2,576 bytes per call (-62%)** for D65 — the
+    # cost tracks the rendered decimal length of the values, not only the sample
+    # count, so at 81 samples it spans 1,464 (F2) to 5,632 (a 5000 K blackbody).
+    # ⚠ The memory figure is the one that matters: prakash's bump allocator NEVER FREES, so
     # every spd_to_json call permanently consumed 6.8 KB. A consumer serializing a
     # few thousand SPDs was giving up ~27 MB it could never get back.
     #
     # ⚠ Grisu2 is UNTOUCHED and deliberately so. `bayan_f64_to_json` is the same
     # renderer the tree path used; it is ~68% of this function's cost and it is
-    # what makes f64 round-trips bit-exact (2.3.3 measured it at 671 ns against
+    # why the EMITTED text is round-trip-correct — decoding is bayan's and is not
+    # always exact, see the file header (2.3.3 measured it at 671 ns against
     # 66 ns for the 6-decimal renderer it replaced, which silently flushed
     # |x| < 5e-7 to zero). Only the tree is skipped, never the float path.
     #

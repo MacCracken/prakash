@@ -18,7 +18,8 @@ spawns one arms the lock for every subsequent allocation.
 ## Per-call cost of the public entry points
 
 Measured on x86-64 with `alloc_used()` deltas, steady state (caches warm) at
-2.3.8. "Retained" is the part you keep — the returned object. "Scratch" was
+2.3.8; every row except `psf_from_wavefront` re-measured at 2.4.9 (the two JSON
+rows were wrong, the rest reproduced exactly). "Retained" is the part you keep — the returned object. "Scratch" was
 working memory; since 2.3.8 the 2D diffraction path reuses it.
 
 | Entry point | Bytes per call | Note |
@@ -27,10 +28,10 @@ working memory; since 2.3.8 the 2D diffraction path reuses it.
 | `trace_sequential` (2 surfaces) | 408 | 2 × `trace_surface` + the vec |
 | `spot_diagram` (3 × 6 fan) | 11,304 | 38 × `trace_surface` |
 | `rgb_to_json` | 136 | |
-| `medium_to_json` | 136 | |
+| `medium_to_json` | 152 | air / glass; **grows with the name** — 160 for "crown glass" (was listed as 136, which no preset reproduces) |
 | `sellmeier_to_json` | 336 | |
 | `prescription_to_json` (6 surfaces) | 1,480 | grows with surface count |
-| `spd_to_json` (81 samples) | 2,576 | grows with `Spd_len` |
+| `spd_to_json` (81 samples) | **1,464 – 5,632** | grows with `Spd_len` **and with the decimal length of each value**: F2 1,464 · D65 2,576 · illuminant A 5,616 · blackbody 5000 K 5,632. The single figure 2,576 listed here until 2.4.9 was the D65 case; sizing a blackbody workload from it under-provisions 2.2× |
 | `diffraction_pattern_2d(64×64)` | 32,792 | was 99,352 before 2.3.8 |
 | `diffraction_pattern_circular(32)` | 8,216 | was 33,304 |
 | `psf_from_wavefront(32×32)` | 8,216 | was 25,112 |

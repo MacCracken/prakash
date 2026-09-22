@@ -120,6 +120,54 @@ assert(f64_lt(edge_lum, center_lum), "edge intensity < center");
 # ── blackbody & Wien ────────
 test_group("blackbody");
 
+# ⛔ 2.4.9: NO ASSERTION IN THE SUITE HAD EVER EVALUATED planck_radiance AGAINST A
+# NUMBER. Every one in this group was scale-invariant or sign-only ("positive",
+# "peak > shorter", "hotter more radiance"), so replacing c1 = 2hc^2 with hc^2 —
+# dropping a factor of 2, exactly the 2.2.6 defect shape — halved every radiance and
+# nothing failed. The peak-bracketing pair at 5778 K passes for any peak in
+# 362-725 nm, so c2 could be 31% low or 38% high. The constants are CORRECT; what
+# was missing is anything that would notice if they stopped being.
+# References below are evaluated independently from the exact 2019 SI values
+# (h = 6.62607015e-34, c = 299792458, k = 1.380649e-23) at 40 significant digits.
+fn _rel(a, b) { return f64_abs(f64_div(f64_sub(a, b), b)); }
+var _REL9 = f64_div(F64_ONE, f64_from(1000000000));        # 1e-9
+var _REL12 = f64_div(F64_ONE, f64_from(1000000000000));    # 1e-12
+# The two radiation constants themselves: c1 = 2hc^2, c2 = hc/k.
+assert(f64_lt(_rel(_planck_c1(), 0x3CA12A2C4851FF61),
+    _REL12) == 1, "c1 = 2hc^2 = 1.19104297239718841e-16 W m^2 sr^-1");
+assert(f64_lt(_rel(_planck_c2(), 0x3F8D7755A2CF4403),
+    _REL12) == 1, "c2 = hc/k = 1.43877687750393380e-2 m K");
+# Absolute spectral radiance B(lambda, T) in W sr^-1 m^-3 at three points.
+assert(f64_lt(_rel(planck_radiance(_fd(5, 10000000), f64_from(5000)), f64_from(12107190590398)), _REL9) == 1,
+  "B(500 nm, 5000 K) = 1.2107190590e13");
+assert(f64_lt(_rel(planck_radiance(_fd(1, 1000000), f64_from(3000)), f64_from(992403333007)), _REL9) == 1,
+  "B(1 um, 3000 K) = 9.9240333301e11");
+assert(f64_lt(_rel(planck_radiance(_fd(1, 100000), f64_from(300)), _fd(9924033330071, 1000000)), _REL9) == 1,
+  "B(10 um, 300 K) = 9.9240333301e6");
+# Scaling identity, independent of both constants: at fixed lambda*T, B goes as T^5,
+# so these two (lambda*T = 3e-3 m K for both) must differ by exactly (10)^5.
+assert(f64_lt(_rel(f64_div(planck_radiance(_fd(1, 1000000), f64_from(3000)),
+        planck_radiance(_fd(1, 100000), f64_from(300))), f64_from(100000)), _REL12) == 1,
+  "B scales as T^5 at fixed lambda*T");
+# ⭐ Wien's law and Planck's argmax are two models of ONE quantity, so pin them to
+# each other. Wien's constant is derived from c2: b = c2 / x where x = 4.965114231744276
+# solves x = 5(1 - e^-x). wien_peak carries b as its own literal, so this binds the
+# two literals together — a change to either alone fails here.
+var _wien_b = wien_peak(F64_ONE);
+assert(f64_lt(_rel(_wien_b, f64_div(_planck_c2(), _fd(4965114231744276, 1000000000000000))), _REL9) == 1,
+  "Wien's b = c2 / 4.965114231744276 (the two literals agree)");
+# And numerically: the argmax of planck_radiance must land on wien_peak(T).
+var _wbest = 0;
+var _wbv = f64_from(0);
+for (var _wk = 0; _wk < 20001; _wk = _wk + 1) {
+    var _wl = f64_div(f64_add(f64_from(400), f64_div(f64_from(_wk), f64_from(100))), f64_from(1000000000));
+    var _wv = planck_radiance(_wl, f64_from(5800));
+    if (f64_gt(_wv, _wbv) == 1) { _wbv = _wv; _wbest = _wk; }
+}
+var _wscan_nm = f64_add(f64_from(400), f64_div(f64_from(_wbest), f64_from(100)));
+_assert_near(_wscan_nm, f64_mul(wien_peak(f64_from(5800)), f64_from(1000000000)), _fd(2, 100),
+  "argmax of Planck at 5800 K lands on wien_peak = 499.6159 nm (to the 0.01 nm scan step)");
+
 var wl_sun = _fd(5, 10000000);   # 500e-9 m = 5e-7
 assert(f64_gt(planck_radiance(wl_sun, f64_from(5778)), Z), "planck positive");
 

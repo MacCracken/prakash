@@ -23,8 +23,10 @@ fn _pbr_ln2() { return 0x3FE62E42FEFA39EF; }
 # (tests/pbr_core.tcyr pins it), so this is bit-identical to the form it replaces.
 # ⚠ It is a literal for the reason _pbr_ln2's comment states two lines up, which
 # this function did not follow until 2.3.2: it ran a DIVISION plus an int->f64
-# conversion on every call, and it is called from **eight** sites across
-# pbr_core and pbr_advanced, several inside the Smith/geometry terms that a
+# conversion on every call, and it is called from **twelve** sites across
+# pbr_core and pbr_advanced (counted 2.4.9: this said "eight", and was 13 until
+# 2.4.9 removed the one in pbr_distribution_ggx_aniso), several inside the
+# Smith/geometry terms that a
 # shading loop hits per light per pixel.
 #must_use
 fn _pbr_eps15() { return 0x3CD203AF9EE75616; }
@@ -80,6 +82,8 @@ fn pbr_fresnel_schlick(f0, cos_theta) {
 
 # Fresnel-Schlick per RGB channel. f0/out are 3-f64 buffers.
 fn pbr_fresnel_schlick_rgb(f0, cos_theta, out) {
+    if (f0 == 0) { return 0; }
+    if (out == 0) { return 0; }
     var ct = f64_clamp(cos_theta, f64_from(0), F64_ONE);
     var factor = _pbr_pow5(f64_sub(F64_ONE, ct));
     for (var i = 0; i < 3; i = i + 1) {
@@ -120,7 +124,27 @@ fn pbr_distribution_ggx(n_dot_h, roughness) {
     var ndh = n_dot_h;
     if (f64_lt(ndh, 0) == 1) { ndh = 0; }
     if (f64_gt(ndh, F64_ONE) == 1) { ndh = F64_ONE; }
-    var denom = f64_add(f64_mul(f64_mul(ndh, ndh), f64_sub(a2, F64_ONE)), F64_ONE);
+    # ⛔ 2.4.9: `ndh^2 * (a2 - 1) + 1` CANCELS CATASTROPHICALLY AT THE ALPHA FLOOR.
+    # The floor above puts a2 at 1e-16, and `1e-16 - 1` is not representable — it
+    # rounds to -(1 - 2^-53), so adding 1 back yields 1.11e-16, not 1e-16: an 11%
+    # error in denom and a **19% error in D**, which read 2.58e15 against the exact
+    # 1/(pi*alpha^2) = 3.18e15 at n.h = 1. So the 2.2.6 floor's own promise ("D <=
+    # 1/(pi*1e-16) ~ 3.2e15") was not quite what it delivered. Found in 2.4.9 by the
+    # anisotropic twin, which after its own repair computed the exact value and
+    # disagreed with this one. The rewrite is the same polynomial —
+    #   ndh^2 * (a2 - 1) + 1  ==  ndh^2 * a2 + (1 - ndh^2)
+    # — with the tiny term and the (possibly tiny) complement formed SEPARATELY, so
+    # nothing large is subtracted from anything large. `1 - ndh^2` is exact by
+    # Sterbenz wherever it can be small (ndh^2 in [0.5, 2]); at ndh = 1 it is exactly
+    # 0 and denom is exactly a2.
+    # ⚠ THE FIRST 2.4.9 REWRITE COST 18% AND THIS ONE COSTS NOTHING. The obvious
+    # stable form, `ndh^2*a2 + (1-ndh)(1+ndh)`, adds a multiply and an add, and
+    # every f64_* op is a real call here (Cyrius has no #inline). Same-binary,
+    # interleaved, 4 pairs x 2e6 iterations: original 16-17 ns, (1-ndh)(1+ndh) form
+    # **19-20 ns**, this form **16 ns** — same op count as the original, and
+    # 1.000000000000 of the exact value at the floor where the original gave 0.811.
+    var ndh2 = f64_mul(ndh, ndh);
+    var denom = f64_add(f64_mul(ndh2, a2), f64_sub(F64_ONE, ndh2));
     return f64_div(a2, f64_mul(f64_mul(F64_PI, denom), denom));
 }
 
@@ -219,6 +243,8 @@ fn pbr_lambert_diffuse(albedo) {
 
 # Lambertian diffuse per RGB channel. albedo/out are 3-f64 buffers.
 fn pbr_lambert_diffuse_rgb(albedo, out) {
+    if (albedo == 0) { return 0; }
+    if (out == 0) { return 0; }
     for (var i = 0; i < 3; i = i + 1) {
         store64(out + i * 8, f64_mul(load64(albedo + i * 8), _pbr_frac_1_pi()));
     }
