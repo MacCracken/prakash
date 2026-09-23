@@ -29,11 +29,10 @@ Rust→Cyrius port and the 2.2–2.5 correctness audits pushed back, plus the ga
 `docs/research/physics-completeness-audit.md` records as still open (absorbing thin
 films, fiber dispersion) and the 3×3 polarization ray tracing that document marked
 implemented but that was never built. 2.6.0 shipped the first of them — Gaussian
-beams, HG/LG modes, M² and OAM — and 2.6.1 made it fast; see `CHANGELOG.md`.
+beams, HG/LG modes, M² and OAM — 2.6.1 made it fast and 2.6.2 closed its edge cases; see `CHANGELOG.md`.
 
 | Version | Release | Roadmap items it closes |
 |---|---|---|
-| 2.6.2 | patch | 2.6.1 verification's remaining findings (test pins, 3 extreme-range defects) |
 | **2.7.0** | Aberrations → image quality | wavefront coefficients from Seidel sums; aberrated MTF |
 | 2.8.0 | GRIN optics | gradient-index ray tracing |
 | 2.9.0 | Diffractive optics | DOE: phase gratings, holographic elements |
@@ -54,20 +53,6 @@ Fixes found along the way ship as patches (2.6.1, …) of whichever minor is cur
 ⚠ **Keep rows SHORT.** A row says what the release delivers and what it will be
 pinned against. Measurements belong in `CHANGELOG.md`; a row that grows past ~8
 lines has started duplicating the release history and should be cut back.
-
-### 2.6.2 — patch: the 2.6.1 verification's remaining findings
-
-The 2.6.1 verification confirmed 28 findings; the one that made a release claim
-false shipped in 2.6.1. The rest (re-derive the exact pins with a mutation run of
-the 2.6.1 diff against 2.6.0): test pins for
-~50 surviving mutants (beam_abcd's general-path range refusals, B = 0 with A ≠ 1,
-the free-space dispatch's d == 1 guard, the LG Dekker branch |l| ≥ 2^26, the
-subnormal rounding path, the inline scale copies' h = 2^1023 branches); a
-"keep in step" note at every inline copy of `_bm_scale2`/`_bm_inv2`; and three
-pre-existing extreme-range defects — `gaussian_intensity` NaN when the peak or 2P
-overflows, `beam_radius` a fabricated 0 when Im q > DBL_MAX/π, and a NaN field when
-k = 2π/λ overflows. Also: gate the LG fast path at t² < 708 (validated faster and
-more accurate in the far-tail shell).
 
 ### 2.7.0 — Aberrations → image quality
 

@@ -2,6 +2,47 @@
 
 ## [Unreleased]
 
+## [2.6.2] - 2026-09-23 — the 2.6.1 verification's remaining findings
+
+The 28 findings the 2.6.1 verification confirmed, minus the one 2.6.1 already
+shipped. No change for ordinary inputs: every output that moves was, in 2.6.1,
++inf, NaN or a fabricated value returned as success at the extremes of the double
+range — each new value is checked against mpmath. A differential fuzz against 2.6.1
+(3 seeds × 250k cases per function family) had 0 unexplained differences.
+Suite **7863 → 8204 assertions across 32 suites**, 0 failed; `cyrius audit` exits 0;
+`#must_use` 461, 0 lost. Benchmarks 151.
+
+### Fixed — all pre-existing, all at the edges of the double range
+- **`beam_coupling_efficiency` fabricated η** where π·w₁·w₂/λ falls below the normal
+  range (w₁·w₂ underflowing, or a huge λ): the t term lost its bits — to 0 when the
+  product flushed — and 4/ratio² came back as success whatever the curvatures
+  (0.8667 for a pair whose true η is 8.8e-33). Those pairs now take the q form,
+  η = 4·Im q₁·Im q₂/|q₁ − q₂*|², formed on scaled mantissas: 4,037 changed values in
+  a 400k-pair fuzz, worst 3.3 ulps from mpmath, no error code changed. The same q
+  form answers where 2.6.1's sum was +inf or NaN (identical beams now give exactly 1).
+- **`gaussian_intensity` returned NaN, +inf or a false 0 as success** where the peak
+  or 2P overflows, a subnormal power loses bits, or e^(−2t²) goes subnormal; it now
+  forms the value exactly (≤ 3.25 ulps) and refuses a true overflow. The far tail
+  where the intensity rounds to 0 keeps a fast early-out (r = 19w costs 112 → 292 ns,
+  the one place the exact tail must run; elsewhere within 3%).
+- **`beam_radius` / `beam_waist_radius` returned a fabricated 0** (then NaN fields
+  and NaN coupling as success) where π·Im q overflows or λ·|q|² underflows; a split
+  exponent path now gives the radius within 2.1 ulps.
+- **HG/LG fields returned NaN as success** where k = 2π/λ or k·r² overflows; the
+  curvature phase is re-formed as (r/w)²·Re q/Im q only where the direct phase was
+  inf or NaN (within 4 ulps).
+- LG fast-path gate moved from t² < 700 to t² < 708 (where e^(−t²) is still normal):
+  the [700, 708) band is 1.7-2.5× faster and more accurate than 2.6.1.
+
+### Tests
+341 assertions added — pins for every mutant the 2.6.1 verification found surviving
+(beam_abcd's general-path range refusals, B = 0 with A ≠ 1, the free-space dispatch's
+d = 1 guard, the LG Dekker branch |l| ≥ 2^26, the subnormal rounding path, the inline
+scale copies' h = 2^1023 branches off the axis, the coupling q form's overflow
+triggers one at a time) and for every fix above. A "keep in step" note now sits on
+`_bm_scale2` and names all eight inline copies. Two wrong test labels corrected (one
+checked the +z call's error code for a −z point).
+
 ## [2.6.1] - 2026-09-23 — the Gaussian-beam module made fast, without moving a bit
 
 The roadmap's 2.6.x row: recover what the 2.6.0 review's range-safety fixes cost.

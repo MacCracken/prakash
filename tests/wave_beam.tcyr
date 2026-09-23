@@ -393,6 +393,35 @@ _v = gaussian_beam_radius_m2(W0, LAM, _fd(9, 10), Z10, &e);
 assert_eq(e, PK_ERR_INVALID_PARAMETER, "M^2 < 1 refused");
 _v = gaussian_beam_radius_m2(W0, LAM, NAN, Z10, &e);
 assert_eq(e, PK_ERR_INVALID_PARAMETER, "M^2 = NaN refused");
+# Refusals RETURN 0, not a computed number with the code set (2.6.1 made these
+# early-outs value tests), and the other half of each NaN/inf pair is refused too.
+_v = gaussian_curvature(0, LAM, F64_ONE, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "curvature: w0 = 0 refused");
+assert_eq(_v, 0, "curvature refusal returns 0");
+_v = gaussian_radius_of_curvature(0, LAM, F64_ONE, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "R: w0 = 0 refused");
+assert_eq(_v, 0, "R refusal returns 0");
+_v = gaussian_intensity(F64_ONE, W0, 0, 0, 0, &e);
+assert_eq(_v, 0, "intensity refusal returns 0");
+# ... at P = 0 as well: past the refused w the P = +-0 line returns peak*g, which
+# is 0/0 = NaN at w = 0 (2.6.1 review, round 2: the w == 0 test was the only guard).
+_v = gaussian_intensity(0, W0, 0, 0, 0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "intensity: P = 0 with wavelength = 0 refused");
+assert_eq(_v, 0, "... and returns 0, not NaN");
+_v = gaussian_radius_of_curvature(W0, LAM, INF, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "R: z = +inf refused");
+assert_eq(_v, 0, "R: z = +inf returns 0");
+_v = gaussian_radius_of_curvature(W0, LAM, 0xFFF0000000000000, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "R: z = -inf refused");
+_v = gaussian_curvature(W0, LAM, NAN, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "curvature: z = NaN refused");
+_v = gaussian_intensity(F64_ONE, W0, LAM, INF, 0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "intensity: r = +inf refused");
+assert_eq(_v, 0, "intensity: r = +inf returns 0");
+# A -0 power is accepted (f64_ge(-0, 0), as in 2.6.0) and gives -0.
+_v = gaussian_intensity(0x8000000000000000, W0, LAM, 0, 0, &e);
+assert_eq(e, PK_ERR_NONE, "intensity: power -0 accepted");
+assert_eq(_v, 0x8000000000000000, "intensity: power -0 gives -0");
 # A good call after a refusal reports success again (err_out is written on entry).
 _v = gaussian_beam_radius(W0, LAM, Z10, &e);
 assert_eq(e, PK_ERR_NONE, "err_out reset by the next good call");
@@ -572,6 +601,25 @@ var cw2 = gaussian_beam_new(_fd(8, 1000000), LAM2, &e);
 _assert_rel(beam_coupling_efficiency(cw1, cw2, &e), coupling_efficiency_gaussian(_fd(5, 1000000), _fd(8, 1000000)),
   REL14, "at two waists == coupling_efficiency_gaussian");
 _assert_rel(beam_coupling_efficiency(cw1, cw1, &e), F64_ONE, REL14, "a beam couples to itself fully");
+# ... and EXACTLY: w/w + w/w = 2 and dc = 0, so 4/4 — which also pins the literal 4.0.
+assert_eq(beam_coupling_efficiency(cw1, cw1, &e), F64_ONE, "a beam couples to itself: exactly 1.0");
+var cwc = gaussian_beam_from_q(_fd(3, 10), _fd(2, 10), LAM2, &e);
+assert_eq(beam_coupling_efficiency(cwc, cwc, &e), F64_ONE, "a curved beam couples to itself: exactly 1.0");
+# The 1e-9 wavelength tolerance and its strict >: pairs from a lattice search on
+# either side of fl(wl*1e-9), so moving the literal by one ulp either way, or
+# testing >=, fails one of them.
+var cwa = gaussian_beam_new(W0, 0x3FF4390873D3DFFF, &e);
+var cwb = gaussian_beam_new(W0, 0x3FF43908737D04CF, &e);
+var _cx = beam_coupling_efficiency(cwa, cwb, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "dwl one lattice step above fl(wl*1e-9) refused");
+var cwd = gaussian_beam_new(W0, 0x3FF92B90B9304600, &e);
+var cwf = gaussian_beam_new(W0, 0x3FF92B90B8C42B19, &e);
+_cx = beam_coupling_efficiency(cwd, cwf, &e);
+assert_eq(e, PK_ERR_NONE, "dwl == fl(wl*1e-9) accepted (a strict >)");
+var cwg = gaussian_beam_new(W0, 0x3FF4CCCCCCCCCCCD, &e);
+var cwh = gaussian_beam_new(W0, f64_mul(0x3FF4CCCCCCCCCCCD, f64_sub(F64_ONE, f64_mul(_fd(15, 10), REL9))), &e);
+_cx = beam_coupling_efficiency(cwg, cwh, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "wavelengths 1.5e-9 apart refused");
 # Curvature mismatch: against the upper-half-plane form 4 Im q1 Im q2/|q1 - q2*|^2
 # and against a numerical overlap integral of the two complex fields.
 var cq1 = gaussian_beam_from_q(_fd(3, 10), _fd(2, 10), LAM2, &e);
@@ -627,6 +675,11 @@ assert_eq(beam_mirror(be, NAN), PK_ERR_INVALID_PARAMETER, "R = NaN refused");
 assert_eq(beam_curved_interface(be, F64_ONE, N15, 0), PK_ERR_DIVISION_BY_ZERO, "interface R = 0 refused");
 assert_eq(beam_interface(be, 0, N15), PK_ERR_INVALID_PARAMETER, "n1 = 0 refused");
 assert_eq(beam_interface(be, F64_ONE, f64_neg(N15)), PK_ERR_INVALID_PARAMETER, "n2 < 0 refused");
+# A bad index outranks R = 0: INVALID, not DIVISION_BY_ZERO (the 2.6.0 order).
+assert_eq(beam_curved_interface(be, 0, N15, 0), PK_ERR_INVALID_PARAMETER, "curved: n1 = 0 outranks R = 0");
+assert_eq(beam_curved_interface(be, INF, N15, 0), PK_ERR_INVALID_PARAMETER, "curved: n1 = inf outranks R = 0");
+assert_eq(beam_curved_interface(be, F64_ONE, 0, 0), PK_ERR_INVALID_PARAMETER, "curved: n2 = 0 outranks R = 0");
+assert_eq(beam_curved_interface(be, F64_ONE, INF, 0), PK_ERR_INVALID_PARAMETER, "curved: n2 = inf outranks R = 0");
 assert_eq(beam_abcd(be, F64_ONE, F64_ONE, F64_ONE, F64_ONE), PK_ERR_INVALID_PARAMETER, "det = 0 refused");
 assert_eq(beam_abcd(be, f64_neg(F64_ONE), 0, 0, F64_ONE), PK_ERR_INVALID_PARAMETER, "det < 0 refused");
 assert_eq(beam_abcd(be, NAN, 0, 0, F64_ONE), PK_ERR_INVALID_PARAMETER, "NaN entry refused");
@@ -1054,7 +1107,11 @@ var bq12 = gaussian_beam_from_q(F64_ONE, F64_TWO, LAM, &e);
 _assert_rel(beam_gouy_phase(bq12), 0x3FDDAC670561BB4F, REL14, "from_q(1, 2) starts at atan(1/2)");
 var bq_10 = gaussian_beam_from_q(Z10, zr, LAM, &e);
 _assert_rel(beam_gouy_phase(bq_10), gaussian_gouy_phase(W0, LAM, Z10, &e), REL14, "from_q continues the TEM00 law");
-# Refusals at the edges of the double range, each leaving the beam untouched.
+# Refusals at the edges of the double range, each leaving the beam untouched. The
+# result-range checks exist in THREE copies since 2.6.1: beam_propagate enters
+# _bm_abcd_free (bov), the thin lens and every B = 0, A > 0 matrix _bm_abcd_b0
+# (bun2, bwl), and only a direct beam_abcd with B != 0 that is not free space
+# reaches the general path (bgn, and the block after it).
 var bov = gaussian_beam_from_q(0x7FE0000000000000, F64_ONE, LAM, &e);
 assert_eq(beam_propagate(bov, 0x7FE0000000000000), PK_ERR_INVALID_PARAMETER, "Re q' overflow refused");
 assert_eq(GaussianBeam_q_re(bov), 0x7FE0000000000000, "overflow refusal left Re q alone");
@@ -1071,6 +1128,57 @@ assert_eq(GaussianBeam_wavelength(bwl), f64_from(10), "wavelength refusal left t
 var bgn = gaussian_beam_from_q(0x601DD55745CBB7ED, F64_ONE, _fd(1, 1000000), &e);
 assert_eq(beam_abcd(bgn, 0, 0x4202A05F20000000, 0xBDDB7CDFD9D7BDBB, 0), PK_ERR_NONE, "a = 0 element on |q| ~ 1e155");
 _assert_rel(beam_gouy_phase(bgn), F64_PI_2, REL14, "its Gouy phase stays finite (pi/2)");
+# beam_abcd's GENERAL path (b != 0, and not free space: a != 1 or d != 1) has its
+# own copy of the result-range refusals; every element wrapper enters _bm_abcd_b0
+# or _bm_abcd_free, so only these reach it. Each input isolates one check
+# (0x01A56E1FC2F8F359 = 1e-300, 0x4202A05F20000000 = 1e10, 0x7E37E43C8800759C =
+# 1e300, 0x3DDB7CDFD9D7BDBB = 1e-10).
+var bg1 = gaussian_beam_from_q(0, F64_ONE, F64_ONE, &e);
+assert_eq(beam_abcd(bg1, 0x01A56E1FC2F8F359, F64_ONE, 0, 0x4202A05F20000000), PK_ERR_INVALID_PARAMETER,
+  "general path: Im q' = 1e-310 (subnormal) refused");
+assert_eq(GaussianBeam_q_im(bg1), F64_ONE, "general-path Im q' underflow left the beam alone");
+var bg2 = gaussian_beam_from_q(0, F64_ONE, LAM, &e);
+assert_eq(beam_abcd(bg2, 0x7E37E43C8800759C, F64_ONE, 0, 0x3DDB7CDFD9D7BDBB), PK_ERR_INVALID_PARAMETER,
+  "general path: Im q' = +inf refused");
+assert_eq(GaussianBeam_q_im(bg2), F64_ONE, "general-path Im q' overflow left the beam alone");
+var bg3 = gaussian_beam_from_q(F64_ONE, F64_ONE, LAM, &e);
+assert_eq(beam_abcd(bg3, F64_ONE, 0x7E37E43C8800759C, 0, 0x3DDB7CDFD9D7BDBB), PK_ERR_INVALID_PARAMETER,
+  "general path: Re q' = +inf refused");
+assert_eq(GaussianBeam_q_re(bg3), F64_ONE, "general-path Re q' overflow left the beam alone");
+var bg4 = gaussian_beam_from_q(0, F64_ONE, 0x01A56E1FC2F8F359, &e);
+assert_eq(beam_abcd(bg4, 0x3DDB7CDFD9D7BDBB, F64_ONE, 0, F64_ONE), PK_ERR_INVALID_PARAMETER,
+  "general path: wavelength' = 1e-310 (subnormal) refused");
+assert_eq(GaussianBeam_wavelength(bg4), 0x01A56E1FC2F8F359, "general-path wavelength underflow left the beam alone");
+var bg5 = gaussian_beam_from_q(0, F64_ONE, 0x7E37E43C8800759C, &e);
+assert_eq(beam_abcd(bg5, 0x4202A05F20000000, F64_ONE, 0, F64_ONE), PK_ERR_INVALID_PARAMETER,
+  "general path: wavelength' = +inf refused");
+assert_eq(GaussianBeam_wavelength(bg5), 0x7E37E43C8800759C, "general-path wavelength overflow left the beam alone");
+# ... and _bm_abcd_b0's copies (a flat interface into n = 1e10: det = 1e-10) of the
+# Im q' overflow, Re q' overflow and subnormal-wavelength refusals.
+var bi10 = gaussian_beam_from_q(0, 0x7E37E43C8800759C, LAM1U, &e);
+assert_eq(beam_interface(bi10, F64_ONE, 0x4202A05F20000000), PK_ERR_INVALID_PARAMETER,
+  "interface: Im q' overflow refused");
+assert_eq(GaussianBeam_q_im(bi10), 0x7E37E43C8800759C, "... left Im q alone");
+var bi11 = gaussian_beam_from_q(0x7E37E43C8800759C, F64_ONE, LAM1U, &e);
+assert_eq(beam_interface(bi11, F64_ONE, 0x4202A05F20000000), PK_ERR_INVALID_PARAMETER,
+  "interface: Re q' overflow refused");
+assert_eq(GaussianBeam_q_re(bi11), 0x7E37E43C8800759C, "... left Re q alone");
+var bi12 = gaussian_beam_from_q(0, F64_ONE, 0x01A56E1FC2F8F359, &e);
+assert_eq(beam_interface(bi12, F64_ONE, 0x4202A05F20000000), PK_ERR_INVALID_PARAMETER,
+  "interface: a wavelength' of 1e-310 refused");
+assert_eq(GaussianBeam_wavelength(bi12), 0x01A56E1FC2F8F359, "... left the wavelength alone");
+# B = 0 with A != 1 (a relay/telescope [[M, 0], [C, 1/M]]): the only callers of
+# _bm_abcd_b0's a*q multiply are direct beam_abcd calls, and the pins above that
+# reach it have Re q = 0 and C = 0, where a*Re q and a*Im q cannot show. Exact
+# rational references: q = 1 + i, q' = (A q + B)/(C q + D).
+var brl1 = gaussian_beam_from_q(F64_ONE, F64_ONE, LAM1U, &e);
+assert_eq(beam_abcd(brl1, F64_TWO, 0, 0, F64_HALF), PK_ERR_NONE, "[[2,0],[0,1/2]] ok");
+assert_eq(GaussianBeam_q_re(brl1), 0x4010000000000000, "[[2,0],[0,1/2]]: Re q' = 4 (A scales Re q)");
+assert_eq(GaussianBeam_q_im(brl1), 0x4010000000000000, "[[2,0],[0,1/2]]: Im q' = 4");
+var brl2 = gaussian_beam_from_q(F64_ONE, F64_ONE, LAM1U, &e);
+assert_eq(beam_abcd(brl2, F64_TWO, 0, f64_neg(F64_ONE), F64_HALF), PK_ERR_NONE, "[[2,0],[-1,1/2]] ok");
+assert_eq(GaussianBeam_q_re(brl2), 0xC003333333333333, "[[2,0],[-1,1/2]]: Re q' = -2.4 (A scales Im q too)");
+assert_eq(GaussianBeam_q_im(brl2), 0x3FE999999999999A, "[[2,0],[-1,1/2]]: Im q' = 0.8");
 
 # Resonator: negative-branch cavity (round-trip b < 0: the only case where |b|
 # selects the root), Kogelnik & Li values; the stability-edge refusals; the Gouy
@@ -1395,35 +1503,166 @@ var _io = gaussian_intensity(F64_ONE, F64_ONE, f64_from(100), 0, 0x7FE1CCF385EBC
 assert_eq(e, PK_ERR_INVALID_PARAMETER, "intensity there refused, not NaN");
 _io = gaussian_beam_radius_m2(F64_ONE, f64_from(100), F64_TWO, 0x7FE1CCF385EBC8A0, &e);
 assert_eq(e, PK_ERR_INVALID_PARAMETER, "the M^2 radius inherits it");
-# ...and in the NEAR field (|z/z_R| <= 2^27): w0 = 1e307, lambda = z = 1e308 gives
-# t ~ 32 and a true w of 3.2e308 — 2.6.0 and the first 2.6.1 cut returned +inf
-# as success there, and the intensity NaN.
+assert_eq(_io, 0, "the M^2 refusal returns 0, not +inf");
+_wo = gaussian_beam_radius(F64_ONE, f64_from(100), 0x7FE1CCF385EBC8A0, &e);
+assert_eq(_wo, 0, "the refusal returns 0, not +inf");
+_io = gaussian_intensity(F64_ONE, F64_ONE, f64_from(100), 0, 0x7FE1CCF385EBC8A0, &e);
+assert_eq(_io, 0, "the intensity refusal returns 0, not NaN");
+# The far-field fallback is even in z (|z|, not z): mpmath's w at -1e100 is the +1e100 value.
+# (-z evaluated on its own: arguments run left to right, so a combined call would
+# leave e holding the +z call's code and never check the -z point's.)
+var wnz = gaussian_beam_radius(0x20CA2FE76A3F9475, 0x3DDB7CDFD9D7BDBB, 0xD4B249AD2594C37D, &e);
+assert_eq(e, PK_ERR_NONE, "that -z point is not an error");
+assert_eq(wnz, gaussian_beam_radius(0x20CA2FE76A3F9475, 0x3DDB7CDFD9D7BDBB, 0x54B249AD2594C37D, &e),
+  "w(-z) == w(z) where z/z_R overflows");
+_wo = gaussian_beam_radius(F64_ONE, f64_from(100), 0xFFE1CCF385EBC8A0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "w beyond the double range refused at z = -1e308 too");
+assert_eq(_wo, 0, "and returns 0, not -inf");
+# The same refusal in the NEAR-field branch (|z/z_R| <= 2^27), which the pins above
+# do not reach: w0 = 1e307, lambda = z = 1e308, so z_R = 3.1e306, z/z_R = 31.8 and
+# mpmath's w = 3.18e308. The first 2.6.1 cut returned +inf there as success, and
+# the intensity a NaN.
 _wo = gaussian_beam_radius(0x7FAC7B1F3CAC7433, 0x7FE1CCF385EBC8A0, 0x7FE1CCF385EBC8A0, &e);
-assert_eq(e, PK_ERR_INVALID_PARAMETER, "near-field w beyond the double range refused");
-assert_eq(_wo, 0, "the near-field refusal returns 0, not +inf");
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "near field: w beyond the double range refused");
+assert_eq(_wo, 0, "near field: the refusal returns 0, not +inf");
 _io = gaussian_intensity(F64_ONE, 0x7FAC7B1F3CAC7433, 0x7FE1CCF385EBC8A0, 0, 0x7FE1CCF385EBC8A0, &e);
-assert_eq(e, PK_ERR_INVALID_PARAMETER, "near-field intensity refused, not NaN");
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "near field: the intensity refused, not NaN");
+_io = gaussian_beam_radius_m2(0x7FAC7B1F3CAC7433, 0x7FAC7B1F3CAC7433, 0x4024000000000000, 0x7FE1CCF385EBC8A0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "near field: the M^2 radius inherits it");
+# 1/R, R and the Gouy phase do not form w, so they do NOT share that refusal: at
+# w0 = 1, lambda = 100, z = 1e308 (w refused above) all three answer, R rounding to z.
+_io = gaussian_curvature(F64_ONE, f64_from(100), 0x7FE1CCF385EBC8A0, &e);
+assert_eq(e, PK_ERR_NONE, "1/R there is not refused");
+assert_eq(gaussian_radius_of_curvature(F64_ONE, f64_from(100), 0x7FE1CCF385EBC8A0, &e), 0x7FE1CCF385EBC8A0,
+  "R there is z (mpmath: z*(1 + (z_R/z)^2) rounds to z)");
+assert_eq(e, PK_ERR_NONE, "R there is not refused");
+_io = gaussian_gouy_phase(F64_ONE, f64_from(100), 0x7FE1CCF385EBC8A0, &e);
+assert_eq(e, PK_ERR_NONE, "the Gouy phase there is not refused");
 
 # DIVISION_BY_ZERO IS reachable with det = 1 (the 2.6.0 doc said it was not):
 # q = 2^100 + i*2^-1000 through f = 2^100 makes c*Re q + d exactly 0 and c*Im q
-# underflow — on the thin-lens shortcut path as on the general one.
+# underflow. The beam_abcd call (B = +0, A = 1) takes the same _bm_abcd_b0 shortcut
+# as the thin lens; the general path's DIVISION_BY_ZERO is pinned by the a = 0 case
+# at "c*q + d underflowing to 0 refused".
 var bdv = gaussian_beam_from_q(0x4630000000000000, 0x0170000000000000, F64_ONE, &e);
 assert_eq(e, PK_ERR_NONE, "q = 2^100 + i 2^-1000 accepted");
 assert_eq(beam_thin_lens(bdv, 0x4630000000000000), PK_ERR_DIVISION_BY_ZERO, "thin lens: c*q + d = 0 refused");
 assert_eq(beam_abcd(bdv, F64_ONE, 0, 0xB9B0000000000000, F64_ONE), PK_ERR_DIVISION_BY_ZERO, "abcd: same");
 assert_eq(GaussianBeam_q_re(bdv), 0x4630000000000000, "refusal left the beam alone");
 
-# The shortcuts' sign-of-zero details, pinned: free space turns a -0 Re q into +0
-# (propagate by -0); a lens keeps a -0 Re q as -0 only when a*qr + b is -0 + -0.
+# The shortcuts' sign-of-zero details: free space turns a -0 Re q into +0
+# (propagate by -0); _bm_abcd_b0 keeps a -0 Re q as -0 only when a*qr + b is
+# -0 + -0. bz1/bz2 pin the b = -0 half; bz3-bz8 below pin the AND of the sign
+# bits (b = +0) and the -0/NaN Gouy branch.
 var bz0 = gaussian_beam_from_q(0x8000000000000000, F64_ONE, F64_ONE, &e);
 assert_eq(beam_propagate(bz0, 0x8000000000000000), PK_ERR_NONE, "propagate -0 on Re q = -0");
 assert_eq(GaussianBeam_q_re(bz0), 0, "free space: -0 + -0 (+ c*qi*... = +0) gives +0, as 2.6.0");
 var bz1 = gaussian_beam_from_q(0x8000000000000000, F64_ONE, F64_ONE, &e);
 assert_eq(beam_abcd(bz1, F64_ONE, 0x8000000000000000, 0, F64_ONE), PK_ERR_NONE, "abcd [[1,-0],[+0,1]]");
-assert_eq(GaussianBeam_q_re(bz1), 0, "general free space with c = +0 also gives +0, as 2.6.0");
+assert_eq(GaussianBeam_q_re(bz1), 0,
+  "beam_abcd [[1,-0],[+0,1]] takes the B = 0 shortcut (not _bm_abcd_free) and also gives +0, as 2.6.0");
 var bz2 = gaussian_beam_from_q(0x8000000000000000, F64_ONE, F64_ONE, &e);
 assert_eq(beam_abcd(bz2, F64_ONE, 0x8000000000000000, 0x8000000000000000, F64_ONE), PK_ERR_NONE, "c = -0");
 assert_eq(GaussianBeam_q_re(bz2), 0x8000000000000000, "with c = -0 the sum stays -0, as 2.6.0");
+# b = +0 on a -0 Re q: a*qr + b = -0 + +0 = +0 (the AND), through a flat interface
+# (c = -0), through f = inf (c = -0), and on a +0 Re q with b = -0, c = -0.
+var bz3 = gaussian_beam_from_q(0x8000000000000000, F64_ONE, F64_ONE, &e);
+assert_eq(beam_interface(bz3, F64_ONE, N15), PK_ERR_NONE, "interface n1 < n2 (c = -0, b = +0)");
+assert_eq(GaussianBeam_q_re(bz3), 0, "-0 Re q: a*qr + b = -0 + +0 = +0, as 2.6.0");
+assert_eq(beam_curvature(bz3), 0, "and its curvature is +0, as 2.6.0");
+var bz4 = gaussian_beam_from_q(0x8000000000000000, F64_ONE, LAM, &e);
+assert_eq(beam_thin_lens(bz4, INF), PK_ERR_NONE, "f = inf ok");
+assert_eq(GaussianBeam_q_re(bz4), 0, "-0 Re q through f = inf is +0, as 2.6.0");
+var bz5 = gaussian_beam_from_q(0, F64_ONE, LAM, &e);
+assert_eq(beam_abcd(bz5, F64_ONE, 0x8000000000000000, 0x8000000000000000, F64_ONE), PK_ERR_NONE,
+  "abcd [[1,-0],[-0,1]] on Re q = +0");
+assert_eq(GaussianBeam_q_re(bz5), 0, "+0 + -0 = +0 in Re q', as 2.6.0");
+# The Gouy branch: from_q(-0, ...) starts at atan2(-0, qi) = -0, and the step a
+# lens or mirror adds is +0, so the sum is +0 — the one case _bm_abcd_b0 computes.
+var bz6 = gaussian_beam_from_q(0x8000000000000000, F64_ONE, F64_ONE, &e);
+assert_eq(GaussianBeam_gouy(bz6), 0x8000000000000000, "from_q(-0, 1) starts at Gouy -0");
+assert_eq(beam_thin_lens(bz6, F64_ONE), PK_ERR_NONE, "lens on it");
+assert_eq(GaussianBeam_gouy(bz6), 0, "lens: Gouy -0 + the +0 step = +0, as 2.6.0");
+var bz7 = gaussian_beam_from_q(0x8000000000000000, F64_ONE, LAM, &e);
+assert_eq(beam_mirror(bz7, F64_TWO), PK_ERR_NONE, "mirror on it");
+assert_eq(beam_gouy_phase(bz7), 0, "mirror: Gouy -0 + +0 = +0, as 2.6.0");
+# ... and a NaN Gouy: only a SIGNALLING NaN tells the branch from its absence, since
+# the add quiets it while a quiet NaN passes through the add unchanged.
+var bz8 = gaussian_beam_from_q(F64_ONE, F64_ONE, F64_ONE, &e);
+GaussianBeam_set_gouy(bz8, 0x7FF0000000000001);
+assert_eq(beam_thin_lens(bz8, F64_ONE), PK_ERR_NONE, "lens on a signalling-NaN Gouy");
+assert_eq(GaussianBeam_gouy(bz8), 0x7FF8000000000001, "the step quiets it, as 2.6.0");
+# [[1, b], [+-0, d]] with d != 1 is NOT free space: it is propagation followed by a
+# flat interface, [[1, L], [0, n1/n2]], and takes the general path: q' = (q + b)/d,
+# wavelength*d. Dyadic inputs keep every result exact; a dispatch that tested a == 1
+# alone sends it to _bm_abcd_free, which ignores d.
+var bfd = gaussian_beam_from_q(0, F64_ONE, LAM, &e);
+assert_eq(beam_abcd(bfd, F64_ONE, F64_ONE, 0, F64_HALF), PK_ERR_NONE, "[[1,1],[0,1/2]] ok");
+assert_eq(GaussianBeam_q_re(bfd), F64_TWO, "[[1,1],[0,1/2]]: Re q' = (0 + 1)/(1/2)");
+assert_eq(GaussianBeam_q_im(bfd), F64_TWO, "[[1,1],[0,1/2]]: Im q' = 1/(1/2)");
+assert_eq(GaussianBeam_wavelength(bfd), f64_mul(LAM, F64_HALF), "[[1,1],[0,1/2]]: wavelength*d");
+var bfn = gaussian_beam_from_q(_fd(1, 4), _fd(3, 1), LAM, &e);
+assert_eq(beam_abcd(bfn, F64_ONE, f64_neg(F64_HALF), 0x8000000000000000, _fd(3, 2)), PK_ERR_NONE,
+  "[[1,-1/2],[-0,3/2]] ok");
+assert_eq(GaussianBeam_q_im(bfn), F64_TWO, "[[1,-1/2],[-0,3/2]]: Im q' = 3/(3/2)");
+assert_eq(GaussianBeam_wavelength(bfn), f64_mul(LAM, _fd(3, 2)), "[[1,-1/2],[-0,3/2]]: wavelength*d");
+# B = 0 is |b| == 0, not an exponent-field test: B = 2^-1074 is free space.
+var bsb = gaussian_beam_from_q(0, F64_ONE, LAM, &e);
+assert_eq(beam_abcd(bsb, F64_ONE, 1, 0, F64_ONE), PK_ERR_NONE, "B = 2^-1074 ok");
+assert_eq(GaussianBeam_q_re(bsb), 1, "B = 2^-1074: Re q' = 2^-1074");
+assert_eq(GaussianBeam_gouy(bsb), 1, "B = 2^-1074: Gouy = 2^-1074");
+
+# The inline copies of _bm_scale2 and _bm_inv2 (listed there), at their edges, with
+# 2.6.0's bits. _bm_abcd_ihd against the reference on every exponent, both signs:
+var ihd_bad = 0;
+for (var ke = 0; ke <= 2046; ke = ke + 1) {
+    var xe = ke << 52;
+    if (ke == 0) { xe = 1; }
+    if (_bm_abcd_ihd(xe, 0) != _bm_inv2(_bm_scale2(xe, 0))) { ihd_bad = ihd_bad + 1; }
+    if (_bm_abcd_ihd(0, xe | 0x8000000000000000) != _bm_inv2(_bm_scale2(0, xe))) { ihd_bad = ihd_bad + 1; }
+}
+assert_eq(ihd_bad, 0, "_bm_abcd_ihd == _bm_inv2(_bm_scale2) on every exponent");
+assert_eq(_bm_abcd_ihd(0x7FF0000000000000, 0), 0, "_bm_abcd_ihd(inf) = 0, never a reciprocal");
+# _bm_abcd_ihd's e == 0 clamp (c*q + d with subnormal parts): Im q' = 2^1000/Im q.
+var bh0 = gaussian_beam_from_q(F64_ONE, 0x3E88000000000123, F64_ONE, &e);
+assert_eq(beam_abcd(bh0, F64_ONE, 0, 0x8170000000000000, 0x0170000000000000), PK_ERR_NONE,
+  "subnormal c*q + d accepted");
+assert_eq(GaussianBeam_q_im(bh0), 0x7FD5555555555452,
+  "Im q' = 2^1000/Im q: 2.6.0 bits (exact rounds to ..453; unclamped scale gives ..450)");
+# ... its 2^1023 branch: |c*q + d| = 2^1023, the tie to Im q' = 2^-1022 accepted.
+var bt1023 = gaussian_beam_from_q(0, F64_ONE, 0x3DDB7CDFD9D7BDBB, &e);
+assert_eq(beam_abcd(bt1023, 0x3FFFFFFFFFFFFFFF, 0, 0x01A56E1FC2F8F359, 0x7FE0000000000000), PK_ERR_NONE,
+  "ihd at |cq+d| = 2^1023: the tie to 2^-1022 is accepted");
+assert_eq(GaussianBeam_q_im(bt1023), 0x0010000000000000, "Im q' = 2^-1022 (2.6.0 bits)");
+# _bm_abcd_dpsi's 2^1023 branch: from |q| >= 2^1023 back through its waist.
+var bd1023 = gaussian_beam_from_q(0x7FE0000000000000, F64_ONE, LAM, &e);
+assert_eq(beam_propagate(bd1023, 0xFFE0000000000000), PK_ERR_NONE, "propagate -2^1023 ok");
+assert_eq(GaussianBeam_gouy(bd1023), 0, "Gouy returns to 0 at the waist from Re q = 2^1023");
+var bp308 = gaussian_beam_from_q(0x7FE1CCF385EBC8A0, F64_ONE, F64_ONE, &e);
+var g308 = GaussianBeam_gouy(bp308);
+assert_eq(beam_propagate(bp308, 0xFFE1CCF385EBC8A0), PK_ERR_NONE, "propagate -1e308");
+assert_eq(f64_sub(GaussianBeam_gouy(bp308), g308), 0xBFF921FB54442D18, "Gouy step -pi/2 (2.6.0 bits)");
+var bgq308 = gaussian_beam_from_q(0x7FE1CCF385EBC8A0, F64_ONE, F64_ONE, &e);
+g308 = GaussianBeam_gouy(bgq308);
+assert_eq(beam_abcd(bgq308, F64_ONE, 0xFFE1CCF385EBC8A0, 0x0010000000000000, F64_ONE), PK_ERR_NONE,
+  "general abcd at hq = 2^1023");
+assert_eq(f64_sub(GaussianBeam_gouy(bgq308), g308), 0xBFF921FB54442D18, "general Gouy step (2.6.0 bits)");
+# ... and its e == 0 clamp, which no beam reaches through the API (Im q is normal
+# there): at the helper, -arg(2^1020 + 2^-10/(i*2^-1028)) = atan(1/4).
+assert_eq(_bm_abcd_dpsi(0, 0x0000400000000000, 0x7FB0000000000000, 0x3F50000000000000), 0x3FCF5B75F92C80DD,
+  "dpsi at a subnormal q (the API-unreachable guard): atan(1/4)");
+# gaussian_radius_of_curvature's 1/h at h = 2^1023 (the subnormal 2^-1023), as
+# gaussian_curvature's is pinned in review_2_6_0_round2 (mpmath: R rounds to z).
+assert_eq(gaussian_radius_of_curvature(W0, LAM, 0x7FEE42D130773B76, &e), 0x7FEE42D130773B76,
+  "R at z = 1.7e308 is z (2.6.0 bits)");
+assert_eq(e, PK_ERR_NONE, "R there is not an error");
+# _bm_scaled_wcd's 2^1023 branch (its copy of the scale), through hg_mode_field.
+var bq308h = gaussian_beam_from_q(0x7FE1CCF385EBC8A0, F64_ONE, F64_ONE, &e);
+var fr308 = 0;
+var fi308 = 0;
+assert_eq(hg_mode_field(bq308h, 0, 0, 0, 0, &fr308, &fi308), PK_ERR_NONE, "HG00 at q = 1e308 + i");
+assert_eq(fr308, 0, "HG00 Re (2.6.0 bits)");
+assert_eq(fi308, 0x000A2B56762B0AFD, "HG00 Im (2.6.0 bits)");
 
 # ── 2.6.1: the LG amplitude after the performance rework and its review ────────
 #
@@ -1450,6 +1689,11 @@ assert_eq(GaussianBeam_q_re(bz2), 0x8000000000000000, "with c = -0 the sum stays
 #     six LG_400,5) through the log form it kept from 2.6.0, with 2.6.0's values bit
 #     for bit, and at 1 (LG_60,60 at w = 2^-1000) by returning +inf.
 #   - the ORDER BOUND through the public callers.
+#   - the SUBNORMAL rounding bit for bit, at the helpers (lg_2_6_1_subnormal_rounding):
+#     the public subnormal pins (_lg61_sub1) accept +-1 subnormal ulp, so they check
+#     the value, not the correct rounding the helpers promise.
+#   - one pin per mutant the review's suite let through (lg_2_6_1_mutants,
+#     lg_2_6_1_dekker_branch): each fails when its guard or correction is removed.
 
 fn _lg61_rel(v, ref, tol) { return f64_le(f64_abs(f64_sub(v, ref)), f64_mul(tol, f64_abs(ref))); }
 
@@ -1571,21 +1815,53 @@ assert_eq(f64_mul(_bm_lga_ln2lo(), f64_from(512)), 0x3D0ABC9E3B39803F,
 assert_eq(F64_DD_SPLIT, f64_from(134217729), "Veltkamp split 2^27 + 1");
 
 test_group("lg_2_6_1_thresholds");
-# The thresholds the LG code compares against (-1080, +-700, 1.5 and powers of two)
-# and the powers of two it scales by are written there as hex with the value beside
-# each. These pin that each hex IS what its label says. They check the LABELS, not
-# the module's copies: a threshold only picks between two paths that are both
-# right, so moving one does not change a value. The scale factors do, and the value
-# pins cross them: 2^64 (a subnormal w) the SUBNORMAL w pins, 2^-512 on C the
-# LG_400,4000 pin, 2^-512 and 2^512 on P and D the LG_400,5 and LG_400,1500 pins
-# (each fails with that factor doubled). The 2^64 for a subnormal P is reached by no
-# test, nor by any of the 3.9 million sweep and fuzz records: P came out of the
-# recurrence 0 or normal in every one.
+# The thresholds the LG code compares against (-1080, -700, 708, 1.5 and powers of
+# two) and the powers of two it scales by are written there as hex with the value
+# beside each. These pin that each hex IS what its label says. They check the
+# LABELS, not the module's copies, so they cannot fail on a module change: the
+# VALUE pins elsewhere hold the thresholds, each only as closely as a pin sits to
+# the threshold's true edge (2.6.1 review, checked by mutating each). Two kinds:
+#   - path pickers, between two forms that are both right: the s cap 2^200 and the
+#     Stirling term-count breakpoints (moving one gave equivalent mutants).
+#   - validity bounds: harmless to move one way, value-breaking the other.
+#     t >= 2^-100 in the a < 10 form: below it e^(-t^2) is taken as exactly 1 and
+#     t^a formed from t (the log form once that is below 2^-1000). Raised past
+#     ~2^-26.5, where e^(-t^2) stops rounding to 1, that drops a factor 1 - t^2:
+#     raised to 2^-10 it fails "LG_5,1 at w ~ 1.3e-308, t = 1e-5", to 2^-20 (2.3e-13
+#     off) or 2^-24 (7 ulps) the t = 2^-21 and 2^-25 pins in lg_2_6_1_mutants.
+#     Lowered past 2^-113.5, the fast form's g = t^9*e^(-t^2) is subnormal: 2^-200
+#     fails the t = 3.9e-36 pin there (2^-40 gave an equivalent mutant).
+#     tz >= 2^-1000 (t^a from t, below t = 2^-100): lowered into the subnormals it
+#     takes a t^a short of bits (6.8e-7 off at the t = 3.9e-36 pin); lowered to
+#     2^-1020 it is equivalent; raised, more points take the log form, whose
+#     larger error the REL15 pins at t ~ 1e-100 and r = 1e-300 w0 catch.
+#     a < 2^26 and |a*j| < 2^27 make the masked-split products exact. The first is
+#     pinned in lg_2_6_1_mutants (a bound raised to 2^27, 2^28, 2^30 or 2^31 is
+#     3.7e-9 to 7.5e-9 off at one of its pins); the second is reached by no test
+#     (lg_2_6_1_dekker_branch).
+#     E > -700 in both direct forms, E < -700 in _bm_lga_gen and t^2 < 708 keep g =
+#     e^E a normal double, which _bm_lga_out and _bm_lga_wide require
+#     (_bm_lga_wide reads g's exponent field: a subnormal g loses bits, g = 0 is
+#     read as 2^-1023). The a < 10 gate is pinned at t^2 = 708.89 with a = 0 (a
+#     gate raised to 709 is 32% off there), the a >= 10 direct form's threshold
+#     by LG_0,12 at 3.3e-309 (moved to -709, 40% off). Tightened, each only moves
+#     points to the general form (gates of 700 and 704, thresholds of -690 and
+#     -650 gave equivalent mutants).
+#     -1080 is a return-0 shortcut on an upper bound of log2|V|, not a path picker.
+#     Its margin is deliberate: the bound exceeds the true value by less than 3 for
+#     normal w, x and P, the cut sits 5 below 2^-1075, and -1074 is the lowest
+#     floor(log2 w) a subnormal w can have; lg_2_6_1_mutants pins values near it.
+# The scale factors change values too, and the value pins cross them: 2^64 (a
+# subnormal w) the SUBNORMAL w pins, 2^-512 on C the LG_400,4000 pin, 2^-512 and
+# 2^512 on P and D the LG_400,5 and LG_400,1500 pins (each fails with that factor
+# doubled). The 2^64 for a subnormal P is reached by no test, nor by any of the 3.9
+# million sweep and fuzz records: P came out of the recurrence 0 or normal in every
+# one.
 var p5061 = f64_from(1125899906842624);                        # 2^50
 var p10061 = f64_mul(p5061, p5061);                              # 2^100
 var m50061 = f64_div(F64_ONE, f64_mul(f64_mul(f64_mul(p10061, p10061), f64_mul(p10061, p10061)), p10061));
 assert_eq(0xC085E00000000000, f64_from(0 - 700), "-700");
-assert_eq(0x4085E00000000000, f64_from(700), "700");
+assert_eq(0x4086200000000000, f64_from(708), "708");
 assert_eq(0xC090E00000000000, f64_from(0 - 1080), "-1080");
 assert_eq(0x4080000000000000, f64_from(512), "512");
 assert_eq(0x3FF8000000000000, f64_div(f64_from(3), F64_TWO), "1.5");
@@ -1604,10 +1880,12 @@ assert_eq(0x10000000000000, 4503599627370496, "2^52 (an integer: the order bound
 
 test_group("lg_2_6_1_values");
 # Beams from the public constructors; each w is beam_radius's own double. At a
-# waist the phase is 0, so lg_mode_field's Re u is the amplitude. Beams whose
-# wavelength is below ~1e-307 are read through _bm_lg_amp: lg_mode_field's
-# curvature phase is k*r^2*0 with k = 2*pi/lambda = inf there, a NaN outside this
-# change (reported).
+# waist the phase is 0, so lg_mode_field's Re u is the amplitude. Some pins read
+# the amplitude through _bm_lg_amp: where k = 2*pi/lambda overflows (lambda <
+# 3.5e-308) or k*r^2 does (r past ~1e154, or an ordinary r once lambda is small),
+# lg_mode_field's curvature phase was inf*0 = NaN until the 2.6.1 review; it is now
+# re-formed from q and lambda there (_bm_curv_scaled), and the fields at such beams
+# are pinned in fields_2_6_1.
 # w0 = lambda = 2^-1020 (z_R = pi*2^-1020, normal)
 var b61t = gaussian_beam_new(0x0030000000000000, 0x0030000000000000, &e61);
 var w61t = beam_radius(b61t);
@@ -1740,7 +2018,9 @@ r61 = f64_mul(w61n, f64_sqrt(f64_from(56)));
 t61 = lg_mode_field(b61n, 7, 60, r61, 0, &fr61, &fi61);
 assert_eq(t61, PK_ERR_NONE, "LG_7,60 at s = 112: status");
 assert(_lg61_rel(fr61, 0xC05D46DFD42E1E68, REL15_61), "LG_7,60 at s = 112");
-# LG_0,10 at s = 4.5 < a/2 (where a - s rounds; 2.6.0: 3.5e-16)
+# LG_0,10 at s = 4.5 < a/2 (2.6.0: 3.5e-16). a - s is EXACT here — 4.5 and 5.5
+# share the binade [4, 8) — so this does not exercise the correction for a rounded
+# nd (s in [2, 4) for a = 10); LG_0,1600 in lg_2_6_1_mutants does.
 # mpmath: 81.46264924127153174877535
 r61 = f64_mul(w61n, 0x3FF8000000000000);
 t61 = lg_mode_field(b61n, 0, 10, r61, 0, &fr61, &fi61);
@@ -1791,7 +2071,7 @@ test_group("lg_2_6_1_scale");
 # At w = 2^k (q = i*2^k, lambda = pi*2^k: beam_radius is exactly 2^k) the amplitude
 # is 2^-k times its value at w = 1, bit for bit, wherever that is a normal double:
 # every path — the a < 10 fast form (t above and below 2^-100) and double-double
-# form (t^2 >= 700: LG_2,3 at t = 27; P rescaled: LG_400,5), a >= 10, and C past
+# form (t^2 >= 708: LG_2,3 at t = 27; P rescaled: LG_400,5), a >= 10, and C past
 # 2^512 (LG_400,4000).
 fn _lg61_scale(p, a, t, k) {
     var e = 0;
@@ -1906,5 +2186,744 @@ r61 = f64_mul(w61n, f64_sqrt(f64_from(2251799813685248)));
 t61 = lg_mode_field(b61n, 3, 0 - 4503599627370493, r61, 0, &fr61, &fi61);
 assert_eq(t61, PK_ERR_NONE, "p = 3, l = -(2^52 - 3): p + |l| = 2^52 accepted");
 assert(f64_lt(f64_abs(fr61), 0x7FF0000000000000), "p = 3, l = -(2^52 - 3): finite");
+
+# ── 2.6.1 review: pins that kill the mutants its suite let through ────────
+test_group("lg_2_6_1_mutants");
+var REL2E14_61 = f64_div(F64_TWO, f64_from(100000000000000));      # 2e-14
+var REL2E15_61 = f64_div(F64_TWO, f64_from(1000000000000000));     # 2e-15
+var REL2E16_61 = f64_div(F64_TWO, f64_from(10000000000000000));    # 2e-16
+var REL3E16_61 = f64_div(f64_from(3), f64_from(10000000000000000));  # 3e-16
+var REL1E10_61 = f64_div(F64_ONE, f64_from(10000000000));          # 1e-10
+# Each pin kills a mutant of _bm_lg_amp or its helpers that passed the whole suite
+# in the 2.6.1 review (named per line): a guard deleted or moved, a double-double
+# correction dropped. One beam re-pointed through the setters, its w's bits asserted
+# first. References: mpmath (60-90 digits) on the exact doubles the module sees.
+var mkb61 = gaussian_beam_from_q(0, F64_ONE, F64_ONE, &e61);
+fn _mkw61(qi, wl) {
+    GaussianBeam_set_q_im(mkb61, qi);
+    GaussianBeam_set_wavelength(mkb61, wl);
+    return beam_radius(mkb61);
+}
+assert_eq(_mkw61(0x07B0000000000000, f64_mul(F64_PI, 0x09D3333333333333)), 0x08C186F174F88472, "L24: beam radius bits");
+assert(_lg61_rel(_bm_lg_amp(mkb61, 1, 4000, 0x09112721A14F842E), 0x5293239A5E050C39, REL2E14_61),
+  "L24: LG_1,4000 = 6.0917160491357758e+89");
+assert(_lg61_rel(_bm_lg_amp(mkb61, 9, 15, 0x02A211090171020F), 0x1B1A971D71D578A6, REL14_61),
+  "GN5: LG_9,15 = 4.1011504266103587e-178");
+assert_eq(_mkw61(0x7E70000000000000, f64_mul(F64_PI, 0x7E70000000000000)), 0x7E70000000000000, "L30: beam radius bits");
+assert(_lg61_rel(_bm_lg_amp(mkb61, 2, 1500, 0x7EBE2CC6B10E2FA1), 0x003269DFCE14EC6B, REL2E15_61),
+  "L30: LG_2,1500 = 1.0242889003856421e-307");
+assert_eq(_mkw61(F64_ONE, f64_mul(F64_PI, 0x4007333333333333)), 0x3FFB3F3C957429DA, "L37: beam radius bits");
+# a = 1600 at s in [a/4, a/2): nd = a - s rounds, and its error is kept (the LG_0,10
+# pin in lg_2_6_1_values sits where nd is exact)
+assert(_lg61_rel(_bm_lg_amp(mkb61, 0, 1600, 0x4038173908037DE2), 0x11CAB9CC26980EEC, REL14_61),
+  "L37: LG_0,1600 = 5.7762165969931859e-223");
+assert_eq(_mkw61(0x0170000000000000, f64_mul(F64_PI, 0x0170000000000000)), 0x0170000000000000, "L39: beam radius bits");
+assert(_lg61_rel(_bm_lg_amp(mkb61, 0, 15, 0x0000000000000216), 0x40BF1DE504846101, REL15_61),
+  "L39: LG_0,15 = 7965.8946001755547");
+assert_eq(_mkw61(0x0010000000000000, f64_mul(F64_PI, 0x0000000000100000)), 0x0000001000000DEC, "GN3: beam radius bits");
+assert(_lg61_rel(_bm_lg_amp(mkb61, 20, 100, 0x0000000000580AFE), 0x2138B0F6A86A9805, REL14_61),
+  "GN3: LG_20,100 = 1.2068838294310355e-148");
+assert_eq(_mkw61(0x7E70000000000000, f64_mul(F64_PI, 0x7E82000000000000)), 0x7E78000000000000, "L26: beam radius bits");
+assert(_lg61_rel(_bm_lg_amp(mkb61, 0, 10, 0x7E924AE93D7F07B0), 0x012D2A53788897C7, REL3E16_61),
+  "L26: LG_0,10 = 5.3162006178007492e-303");
+# The g != 0 guard (L18): at t < 2^-100 with t^a below 2^-1000 the fast form gives
+# g = 0, which _bm_lga_out must not see. This point takes the log form, whose error
+# is up to a*|ln t|*2^-53 (~8.6e-14 here); the mutant is 1e30 off.
+assert_eq(_mkw61(0x39B0000000000000, f64_mul(F64_PI, 0x39B4CCCCCCCCCCCD)), 0x39B23E2896280F23, "L18: beam radius bits");
+assert(_lg61_rel(_bm_lg_amp(mkb61, 3, 2, 0x16991EC89E173D8A), 0x0017BC6BE6D08BAF, REL12_61),
+  "L18: LG_3,2 = 3.3009000518144224e-308");
+assert_eq(_mkw61(0x1F70000000000000, f64_mul(F64_PI, 0x1F7199999999999A)), 0x1F70C7EBC96A56F6,
+  "L18/L22: beam radius bits");
+assert_eq(lg_mode_intensity(mkb61, 400, 5, 0x0AF26BB6994F8D7F), 0,
+  "L18: LG_400,5 there is 0 (true 1.3084e-332 underflows)");
+# The a >= 10 subnormal-s return (L22): s = 0, and s = 2^-1073 (a guard narrowed to
+# s == 0 fails the second; the mutant returns +inf there).
+assert_eq(lg_mode_intensity(mkb61, 0, 1000000, 0x0000000000000002), 0, "L22: LG_0,1000000 at s = 0 is 0");
+assert_eq(lg_mode_intensity(b61o, 0, 10, 0x1E60000000000000), 0, "L22: LG_0,10 at w = 1, s = 2^-1073 is 0");
+# The E > -700 threshold of the a >= 10 direct form (L42): g = e^E must be normal.
+assert_eq(_mkw61(F64_ONE, f64_mul(F64_PI, 0x3BC79CA10C924223)), 0x3DDB7CDFD9D7BDBB, "L42: beam radius bits");
+assert(_lg61_rel(_bm_lg_amp(mkb61, 0, 60, 0x3E2920249D1F336D), 0x007A98C0DA95311B, REL12_61),
+  "L42: LG_0,60 = 2.3671842274091801e-306");
+# ... and at a smaller w, E ~ -738 and -748, where a threshold moved below -708 hands
+# the direct form a subnormal g, and below -745 a g of 0 (read as 2^-1023): 1e-5 and
+# 2.7e16 off. And the a >= 2^26 bound of the masked split (review): just off the
+# ring of LG_0,2^30+3 (on it ln q = 0 and both products agree) a bound raised to
+# 2^40 is 3e-8 off, 2.6.1 1.8e-12.
+var bk61 = gaussian_beam_from_q(0, 0x39B0000000000000, f64_mul(F64_PI, 0x39B0000000000000), &e61);
+assert_eq(beam_radius(bk61), 0x39B0000000000000, "w = 2^-100 exactly");
+assert(_lg61_rel(_bm_lg_amp(bk61, 0, 12, 0x39FBC934C2E60F11), 0x039F3D61543C1B8A, REL12_61),
+  "LG_0,12, w = 2^-100, E ~ -738");
+assert(_lg61_rel(_bm_lg_amp(bk61, 0, 12, 0x39FBF77AFFA3C4D0), 0x02B73CB5FD3C2565, REL12_61),
+  "LG_0,12, w = 2^-100, E ~ -748");
+assert(_lg61_rel(_bm_lg_amp(bk61, 0, 1000, 0x3A05D1FCDC506878), 0x039F3D61543C1EE7, REL12_61),
+  "LG_0,1000, w = 2^-100, E ~ -738");
+assert(_lg61_rel(_bm_lg_amp(bk61, 0, 1000, 0x3A05E5D049FECA03), 0x02B73CB5FD3C2760, REL12_61),
+  "LG_0,1000, w = 2^-100, E ~ -748");
+assert(_lg61_rel(_bm_lg_amp(b61o, 0, 1073741827, 0x40D6A0C103ED3EC3), 0x3F59696CC48E9876, REL1E10_61),
+  "LG_0,2^30+3 near its ring (the 2^26 split bound)");
+# ... and one in each binade the bound could be raised through. Whether a masked
+# product rounds depends on a's and q's bits (a = 2^26+3, 2^27+3, 2^27-1 and 2^28-1
+# at s = a*(1 + 2.2e-5) all multiplied exactly and let a raised bound through), so
+# these points come from a search of 20000 pairs against the raised bounds: 2.6.1
+# is within 1e-12 of mpmath at each, a bound of 2^27 or 2^28 3.7e-9 or 7.5e-9 off.
+assert(_lg61_rel(_bm_lg_amp(b61o, 0, 121897369, 0x40BE7E559236A080), 0x3F61C848271BB09A, REL1E10_61),
+  "LG_0,121897369 near its ring = 0.0021706971391407094 (a bound of 2^27)");
+assert(_lg61_rel(_bm_lg_amp(b61o, 0, 147758819, 0x40C0C78548DDB96E), 0x3C279B1E72E24685, REL1E10_61),
+  "LG_0,147758819 near its ring = 6.3984010584633762e-19 (a bound of 2^28)");
+assert(_lg61_rel(_bm_lg_amp(b61o, 0, 536870915, 0x40D0000B898616B7), 0x3F696A78E24B241C, REL1E10_61),
+  "LG_0,2^29+3 near its ring = 0.0031025277151894971 (a bound of 2^30)");
+# t < 2^-100 with t^a below 2^-1000: t^a from repeated products is subnormal there
+# and short of bits, and the log form is taken (tz >= 2^-1000). At t = 3.9e-36, a =
+# 9 (t^9 ~ 2^-1058.6) a switch lowered into the subnormals is 6.8e-7 off; 2.6.1
+# takes the log form, 4.4e-14 off (its bound a*|ln t|*2^-53 is 8e-14).
+assert(_lg61_rel(_bm_lg_amp(bk61, 0, 9, 0x3254CCCCCCCCCCCD), 0x03B4573149B4C4B3, REL12_61),
+  "LG_0,9 at w = 2^-100, t = 3.9e-36 = 8.1531957147948153e-291");
+# The a < 10 fast form's t >= 2^-100 switch: below it e^(-t^2) is taken as exactly
+# 1, which holds only while t^2 < ~2^-53. At t = 2^-21 and 2^-25 it is 1 - 2^-42 and
+# 1 - 2^-50 (7 ulps of sqrt(2/pi)): a switch raised past either fails there.
+assert(_lg61_rel(_bm_lg_amp(b61o, 0, 0, 0x3EA0000000000000), 0x3FE9884533D42FEE, REL14_61),
+  "LG_0,0 at t = 2^-21 = 0.79788456080268393793");
+assert(_lg61_rel(_bm_lg_amp(b61o, 0, 0, 0x3E60000000000000), 0x3FE9884533D4364A, REL2E16_61),
+  "LG_0,0 at t = 2^-25 = 0.79788456080286464722");
+# The E > -700 threshold of the a >= 10 direct form at w = 1: a subnormal value (a
+# threshold moved to -709 hands the direct form a subnormal g: 40% off here).
+assert(_lg61_sub1(_bm_lg_amp(b61o, 0, 12, 0x403B465000000000), 0x000264E3C7715992),
+  "LG_0,12 at w = 1, r = 27.27 = 3.3294067079699179e-309");
+# The a < 10 fast form's t^2 < 708 gate (e^-708 is still normal), at w = 1, t^2
+# exact at every point. Two inside [700, 708), where 2.6.1 before its review took
+# the double-double form, pin the fast form's values there. Past the gate the
+# double-double form must be taken: at a = 0 the value is e^(-t^2) itself, so a
+# gate raised past 708.4 hands the fast form a subnormal g and the pin at t^2 =
+# 708.89 fails (32% off with a gate of 709). At a = 9, t^9*e^(-t^2) is normal again
+# and the pins at 708.89 and 715.56 catch only a gate raised past 715.6, where
+# e^(-t^2) is 4.6e-13 short of its bits. mpmath.
+assert(_lg61_rel(_bm_lg_amp(b61o, 0, 1, 0x403A800000000000), 0x00EB46C0654C55FE, REL14_61),
+  "LG_0,1 at t = 26.5 (t^2 = 702.25) = 3.107427584952077503e-304");
+assert(_lg61_rel(_bm_lg_amp(b61o, 2, 3, 0x403A800000000000), 0x02A20AFED3277145, REL14_61),
+  "LG_2,3 at t = 26.5 = 5.517747673188027536e-296");
+assert(_lg61_rel(_bm_lg_amp(b61o, 0, 0, 0x403AA00000000000), 0x0007C9BDD8949719, REL12_61),
+  "LG_0,0 at t = 26.625 (t^2 = 708.89, past the gate) = 1.0830620809664665e-308");
+assert(_lg61_rel(_bm_lg_amp(b61o, 0, 9, 0x403AA00000000000), 0x025C9F62AA9EA1C7, REL14_61),
+  "LG_0,9 at t = 26.625 (t^2 = 708.89) = 2.735352890982638241e-297");
+assert(_lg61_rel(_bm_lg_amp(b61o, 0, 9, 0x403AC00000000000), 0x01C35A231F517893, REL14_61),
+  "LG_0,9 at t = 26.75 (t^2 = 715.56, past the gate) = 3.612121880224153601e-300");
+# The accuracy the module's comment states, directly at w = 1 (mpmath; 2.6.0's error beside).
+assert(_lg61_rel(_bm_lg_amp(b61o, 0, 1500, 0x403B600000000000), 0x3FB4B99390B32E31, REL15_61),
+  "LG_0,1500 at r = 27.375, inner side of the ring (2.6.0: 4.9e-15)");
+assert(_lg61_rel(_bm_lg_amp(b61o, 0, 4000, 0x4046480000000000), 0x3FAED89668A8E648, REL2E15_61),
+  "LG_0,4000 at r = 44.5625 (2.6.0: 1.1e-13)");
+assert(_lg61_rel(_bm_lg_amp(b61o, 400, 5, 0x403C700000000000), 0x3F98AC05AA0236B7, REL15_61),
+  "LG_400,5 at r = 28.4375, P rescaled (2.6.0: 6.6e-15)");
+assert(_lg61_rel(_bm_lg_amp(b61o, 0, 10, 0x4003000000000000), 0x3FD1642CF78D640F, REL2E16_61),
+  "LG_0,10 at r = 2.375, 7-term Stirling");
+# False zeros: _bm_lga_gen's "certainly 0" cut (-1080 on an upper bound of log2|V|),
+# its +2 slack, and the subnormal-w exponent. Each value is a representable
+# subnormal the module returns (within one subnormal ulp, _lg61_sub1): a cut made
+# too eager returns 0. The near-bottom pins (3 subnormal ulps) catch a tightening of
+# a bit or two, which the larger values (4474 to 157140 ulps) cannot.
+assert_eq(_mkw61(0x0170000000000000, f64_mul(F64_PI, 0x0170000000000000)), 0x0170000000000000, "GN2: w = 2^-1000");
+assert(_lg61_sub1(_bm_lg_amp(mkb61, 400, 1500, 0x01D0F5A27CB1909E), 0x000000000001C280),
+  "GN2: LG_400,1500 = 5.6979619570828835e-319");
+assert(_lg61_sub1(_bm_lg_amp(mkb61, 400, 1500, 0x01D0FC942088DFE5), 0x0000000000000003),
+  "GN2: LG_400,1500 = 1.2845706791865985e-323");
+assert_eq(_mkw61(0x43B0000000000000, f64_mul(F64_PI, 0x43B7000000000000)), 0x43B32EEE75770416,
+  "GN10: beam radius bits");
+assert(_lg61_sub1(_bm_lg_amp(mkb61, 3, 60, 0x44015942D647F6C3), 0x800000000000117A),
+  "GN10: LG_3,60 = -2.2106580291626379e-320");
+assert(_lg61_sub1(_bm_lg_amp(mkb61, 3, 60, 0x44016DC74822A839), 0x8000000000000003),
+  "GN10: LG_3,60 = -1.2845706791872125e-323");
+var zb61 = gaussian_beam_from_q(0, 0x0010000000000000, 0x0000000000000001, &e61);
+assert_eq(e61, PK_ERR_NONE, "GN1: from_q(0, 2^-1022, 2^-1074) accepted");
+assert_eq(beam_radius(zb61), 0x000000000241BAEA, "GN1: w ~ 2^-1048.8, subnormal");
+assert(_lg61_sub1(_bm_lg_amp(zb61, 0, 0, 0x0000000056354A84), 0x00000000000265D4),
+  "GN1: LG_0,0 = 7.7637408800055917e-319");
+assert(_lg61_sub1(_bm_lg_amp(zb61, 0, 0, 0x00000000568862F9), 0x0000000000000003),
+  "GN1: LG_0,0 = 1.284570720912854e-323");
+
+test_group("lg_2_6_1_dekker_branch");
+# |l| >= 2^26 takes the Dekker branch (pl and x2 by _bm_lga_tpe). The LG_0,-2^52 pin
+# sits at q = s/a = 1 exactly, where pl = x2 = 0: these two are off that fixed point.
+# Still not reached: the |a*j| >= 2^27 sub-branch, which needs p ~ 1e7 to be nonzero.
+# LG_0,150000000 at w = 1, s = 149998500.00375 (q = 0.99999, j = 0)
+# mpmath: 0.004536737721389909902602
+t61 = lg_mode_field(b61o, 0, 150000000, 0x40C0EA1AF96A8320, 0, &fr61, &fi61);
+assert_eq(t61, PK_ERR_NONE, "LG_0,150000000: status");
+assert(_lg61_rel(fr61, 0x3F72951D424D6945, REL14_61), "LG_0,150000000 at w = 1 (Dekker pl, x2)");
+# LG_2,67108869 at w = 0x1F70C7EBC96A56F6 (q = i*2^-520), s = 67108874
+# mpmath: -1.288505935965611705705e+154
+var b61dk = gaussian_beam_from_q(0, 0x1F70000000000000, f64_mul(F64_PI, 0x1F7199999999999A), &e61);
+assert_eq(beam_radius(b61dk), 0x1F70C7EBC96A56F6, "LG_2,67108869: beam radius bits");
+t61 = lg_mode_field(b61dk, 2, 67108869, 0x2037BB59AA32E48A, 0, &fr61, &fi61);
+assert_eq(t61, PK_ERR_NONE, "LG_2,67108869: status");
+assert(_lg61_rel(fr61, 0xDFEEC09B767CEB58, REL14_61), "LG_2,67108869 (Dekker product's ul*vl)");
+
+test_group("lg_2_6_1_subnormal_rounding");
+# Correct rounding of the subnormal path, bit for bit. References: the exact
+# rational x/w*g*|el| (times 2^k for _bm_lga_subn) rounded half-even onto the 2^-1074
+# grid (Python fractions). The public pins (_lg61_sub1) accept +-1 subnormal ulp and
+# so check only the public value: the rounding of g, el and t dominates there, and
+# a dropped correction step here is invisible to them.
+assert_eq(_bm_lga_subn(0x3F9AF6A3E79903E4, 0x3FF18972E466E0D4, 0x3FF91E4F835D6152, 0x3FF5B8ADC5D29F7A, 0 - 1018),
+  0x000D1B897BFDFF24, "subn: division remainder kept");
+assert_eq(_bm_lga_subn(0x47FC32C4DA843B36, 0x3FFE94AE4A3B8844, 0x3FFBE934937C6784, 0x3FFC72A38651F05C, 0 - 1152),
+  0x000B709638AF5FBD, "subn: up-correction, half step");
+assert_eq(_bm_lga_subn(0x4BB0947DF313C77F, 0x3FF6CB95D3225722, 0x3FF6FD2084CCCB7E, 0x3FF5EB49ECF862D9, 0 - 1211),
+  0x000B740A1CD2CFAF, "subn: mh*en low half kept");
+assert_eq(_bm_lga_subn(0x4014000000000000, 0x3FF0000000000000, 0x3FF0000000000000, 0x3FF0000000000000, 0 - 1075),
+  0x0000000000000002, "subn: exact tie 2.5 ulp -> even 2");
+assert_eq(_bm_lga_subn(0x4330000000000001, 0x3FF0000000000000, 0x3FF0000000000000, 0x3FF0000000000000, 0 - 1075),
+  0x0008000000000000, "subn: exact tie at km = -1023 -> even");
+assert_eq(_bm_lga_out(0x4BE48327C4C41677, 0x3ABBC708461DAA7B, 0x116DC5EDC896A722, 0x1D623C96F5E4C4E8),
+  0x000C879EA203ED21,
+  "out: subnormal result, correctly rounded (not the plain product)");
+assert_eq(_bm_lga_out(0x4029E42315458E28, 0x376373156E0C320C, 0x2EAC501DED724F72, 0x087EA54BDFCBDC3A),
+  0x00090613FDBC3B0B,
+  "out: km = -1023 goes to the subnormal path");
+assert_eq(_bm_lga_out(0x44720BD2758EF25F, 0x4E16CCA58A918C18, 0x256A9E6CDAD428C7, 0x20F6C1B6428503CA),
+  0x0000000000000001,
+  "out: km = -1075 above half of 2^-1074 rounds up, not to 0");
+
+test_group("fields_2_6_1");
+# The curvature phase where k = 2*pi/lambda or k*r^2 overflows (2.6.1 review): the
+# field was inf*0 = NaN, or cos(+-inf) = NaN, returned as success, by 2.6.0 and the
+# first 2.6.1 cut alike. Now re-formed there as -pi*r^2*Re q/(lambda*|q|^2), on
+# mantissas with the exponents applied last (_bm_curv_scaled). References: mpmath,
+# the phase from q and lambda, the amplitude at the module's own w (beam_radius).
+# lambda = 3e-308 is NORMAL, below 2*pi/DBL_MAX = 3.5e-308: w0 = 1e-154, z_R = 1.05.
+var fbB = gaussian_beam_new(0x1FF573D68F903EA2, 0x00159283684DBA77, &e);
+assert_eq(e, PK_ERR_NONE, "w0 = 1e-154, lambda = 3e-308 accepted");
+var fwB = beam_radius(fbB);
+t61 = hg_mode_field(fbB, 0, 0, f64_mul(fwB, F64_HALF), 0, &fr61, &fi61);
+assert_eq(t61, PK_ERR_NONE, "HG_00 at x = w/2, lambda = 3e-308: status");
+_assert_rel(fr61, 0x5FDDA94409027EBA, REL14, "HG_00 at x = w/2 = 6.2139312075385551e153 (was NaN)");
+assert_eq(fi61, 0, "... at a waist, Im u = 0");
+t61 = lg_mode_field(fbB, 0, 0, 0, 0, &fr61, &fi61);
+_assert_rel(fr61, 0x5FE30AF91E37DC15, REL14, "LG_00 on the axis = 7.9788456080286538e153 (k*0 = NaN before)");
+t61 = lg_mode_field(fbB, 0, 0, f64_mul(fwB, F64_HALF), 0, &fr61, &fi61);
+_assert_rel(fr61, 0x5FDDA94409027EBA, REL14, "LG_00 at r = w/2 = 6.2139312075385551e153");
+# ... one Rayleigh range past the waist, where the phase is -inf before (off axis)
+# and NaN (on it): true phases pi/4 (Gouy) and pi/4 - 1/4.
+var fbC = gaussian_beam_new(0x1FF573D68F903EA2, 0x00159283684DBA77, &e);
+_s = beam_propagate(fbC, GaussianBeam_q_im(fbC));
+var fwC = beam_radius(fbC);
+t61 = lg_mode_field(fbC, 0, 0, 0, 0, &fr61, &fi61);
+_assert_rel(fr61, 0x5FD30AF91E37DC16, REL14, "LG_00 on the axis at z = z_R: Re u");
+_assert_rel(fi61, 0x5FD30AF91E37DC15, REL14, "LG_00 on the axis at z = z_R: Im u");
+t61 = lg_mode_field(fbC, 0, 0, f64_mul(fwC, F64_HALF), 0, &fr61, &fi61);
+_assert_rel(fr61, 0x5FD209E821D06758, REL14, "LG_00 at r = w/2, z = z_R: Re u");
+_assert_rel(fi61, 0x5FC5669B02654F2C, REL14, "LG_00 at r = w/2, z = z_R: Im u");
+t61 = hg_mode_field(fbC, 0, 0, f64_mul(fwC, F64_HALF), 0, &fr61, &fi61);
+_assert_rel(fr61, 0x5FD209E821D06758, REL14, "HG_00 at x = w/2, z = z_R: Re u (as LG_00)");
+_assert_rel(fi61, 0x5FC5669B02654F2C, REL14, "HG_00 at x = w/2, z = z_R: Im u");
+# An ordinary lambda = 1 at z_R = 5e307: k*r^2 overflows at r = 1.5w.
+var fbE = gaussian_beam_from_q(0, 0x7FD1CCF385EBC8A0, F64_ONE, &e);
+var fwE = beam_radius(fbE);
+t61 = lg_mode_field(fbE, 0, 0, f64_mul(fwE, 0x3FF8000000000000), 0, &fr61, &fi61);
+_assert_rel(fr61, 0x1FD216AF1033B22F, REL14, "LG_00 at r = 1.5w, z_R = 5e307 = 2.1079844912372864e-155");
+t61 = hg_mode_field(fbE, 0, 0, f64_mul(fwE, 0x3FF8000000000000), 0, &fr61, &fi61);
+_assert_rel(fr61, 0x1FD216AF1033B22F, REL14, "HG_00 there (as LG_00)");
+# The suite's w = 2^1020 beam through the public field functions (k*r^2 overflows).
+t61 = lg_mode_field(b61m, 3, 2, f64_mul(w61m, 0x40129F4F52965E7A), 0, &fr61, &fi61);
+assert_eq(t61, PK_ERR_NONE, "LG_3,2 at w = 2^1020 through lg_mode_field: status");
+assert(_lg61_sub1(fr61, 0x80000074909B3CA9), "LG_3,2 at w = 2^1020 through lg_mode_field: the amplitude pin's value");
+t61 = lg_mode_field(b61m, 0, 0, f64_mul(w61m, F64_HALF), 0, &fr61, &fi61);
+assert_eq(fr61, _bm_lg_amp(b61m, 0, 0, f64_mul(w61m, F64_HALF)),
+  "LG_0,0 at w = 2^1020: Re u is _bm_lg_amp bit for bit");
+t61 = hg_mode_field(b61m, 1, 1, f64_mul(w61m, F64_HALF), f64_mul(w61m, F64_HALF), &fr61, &fi61);
+_assert_rel(fr61, 0x001EF8E58E331737, REL14, "HG_11 at (w/2, w/2), w = 2^1020 = 4.307221869212747e-308");
+# On the axis where k overflows (lambda = 1.5964e-310) AND Re q/Im q does (q = 1e300
+# + 1e-10 i): the re-formed phase is a zero, not 0*inf = NaN. The field is then
+# amp*e^(i*Gouy), Gouy = atan2(1e300, 1e-10) = pi/2: Im u = sqrt(2/pi)/w.
+var fbT = gaussian_beam_from_q(0x7E37E43C8800759C, 0x3DDB7CDFD9D7BDBB, 0x00001D6329F1C35D, &e);
+assert_eq(e, PK_ERR_NONE, "q = 1e300 + 1e-10 i, lambda = 1.5964e-310 accepted");
+t61 = lg_mode_field(fbT, 0, 0, 0, 0, &fr61, &fi61);
+assert_eq(t61, PK_ERR_NONE, "LG_00 on the axis there: status");
+_assert_rel(fi61, 0x20CD4F9C3397AB9D, REL14, "LG_00 on the axis there: Im u = sqrt(2/pi)/w = 1.119e-150 (was NaN)");
+# OFF the axis while Re q/Im q overflows (2.6.1 review, round 2): (r/w)^2 underflows
+# (x/w ~ 3e-301) and Re q/Im q = -1e600 overflows, their product a true phase of 0.1
+# rad. The first review cut treated the underflowed (r/w)^2 as the axis and
+# returned the on-axis field; 2.6.0 returned NaN. q = -1e300 + 1e-300 i, lambda =
+# 1e-320 (subnormal: k overflows), x = 1.784e-11. mpmath.
+var fbU = gaussian_beam_from_q(0xFE37E43C8800759C, 0x01A56E1FC2F8F359, 0x00000000000007E8, &e);
+assert_eq(e, PK_ERR_NONE, "q = -1e300 + 1e-300 i, lambda = 1e-320 accepted");
+_assert_rel(_bm_curv_scaled(fbU, 0x3DB39DD5C1AEBB14, 0, _PRK_NAN), 0x3FB9999999999999, REL2E15_61,
+  "curvature phase there = 0.09999999999999999002 (mpmath)");
+t61 = hg_mode_field(fbU, 0, 0, 0x3DB39DD5C1AEBB14, 0, &fr61, &fi61);
+assert_eq(t61, PK_ERR_NONE, "HG_00 there: status");
+_assert_rel(fr61, 0x038C2DB791DF493F, REL14, "HG_00 there: Re u = 1.4118655770425296e-291 (was NaN)");
+_assert_rel(fi61, 0x83C18D88D9192EF2, REL14, "HG_00 there: Im u = -1.4071562179822607e-290 (was NaN)");
+t61 = lg_mode_field(fbU, 0, 0, 0x3DB39DD5C1AEBB14, 0, &fr61, &fi61);
+_assert_rel(fr61, 0x038C2DB791DF493F, REL14, "LG_00 at the same r: Re u");
+_assert_rel(fi61, 0x83C18D88D9192EF2, REL14, "LG_00 at the same r: Im u");
+# (x, y) with both nonzero, at equal and at different binary exponents, and x = 0:
+# the sum of squares is split the same way (_bm_sq2).
+_assert_rel(_bm_curv_scaled(fbU, 0x3DB39DD5C1AEBB14, 0x3DB39DD5C1AEBB14, _PRK_NAN), 0x3FC9999999999999, REL2E15_61,
+  "curvature phase at (x, x) = 0.19999999999999998004 (mpmath)");
+_assert_rel(_bm_curv_scaled(fbU, 0x3DB39DD5C1AEBB14, 0x3D9A27C7ACE8F970, _PRK_NAN), 0x3FBC71C71C71C71C, REL2E15_61,
+  "curvature phase at (x, x/3) = 0.11111111111111110002 (mpmath)");
+_assert_rel(_bm_curv_scaled(fbU, 0, 0x3DB39DD5C1AEBB14, _PRK_NAN), 0x3FB9999999999999, REL2E15_61,
+  "curvature phase at (0, x) = 0.099999999999999990019 (mpmath)");
+# Its exponent handling: a phase below the subnormals is +0 (x = 1e-200: 3e-380; x =
+# 2^-1074: 7.7e-627, where the binary exponent would wrap); one past DBL_MAX is
+# +inf, so the field NaN (x = w/2: 2.5e599; x = 1e300: 3.1e620, where it would
+# wrap); and one below DBL_MAX but far past 2^63 is formed, not cut to inf.
+assert_eq(_bm_curv_scaled(fbU, 0x16687E92154EF7AC, 0, _PRK_NAN), 0, "phase ~3e-380 at x = 1e-200: +0");
+assert_eq(_bm_curv_scaled(fbU, 1, 0, _PRK_NAN), 0, "phase ~7.7e-627 at x = 2^-1074: +0");
+assert_eq(_bm_curv_scaled(fbU, 0x7E37E43C8800759C, 0, _PRK_NAN), INF, "phase ~3.1e620 at x = 1e300: +inf");
+_assert_rel(_bm_curv_scaled(fbU, 0x5BE8D4B07B3C07B2, 0, _PRK_NAN), 0x7C248255D5FBFEF2, REL2E15_61,
+  "phase at x = 5.64e134 = 9.9933918219685204e289 (mpmath)");
+t61 = hg_mode_field(fbU, 0, 0, f64_mul(beam_radius(fbU), F64_HALF), 0, &fr61, &fi61);
+assert((fr61 & _PRK_ABS) > _PRK_INF, "HG_00 at x = w/2 there (phase 2.5e599): NaN");
+# On the axis the phase is +0 before any exponent is formed: q = 2^-1022 (1 + i),
+# lambda = 2^-1074 would otherwise give a phase of -8.7e-17 from the exponent of 0.
+var fbZ = gaussian_beam_from_q(0x0010000000000000, 0x0010000000000000, 1, &e);
+assert_eq(_bm_curv_scaled(fbZ, 0, 0, _PRK_NAN), 0, "on the axis: +0");
+# ... and at a waist (Re q = 0) likewise: q = i*2^-100, lambda = 2^-1074 (k
+# overflows, 1/R = 0: inf*0 before). The Gouy phase is 0 there, so Im u is exactly 0.
+var fbY = gaussian_beam_from_q(0, 0x39B0000000000000, 1, &e);
+_assert_rel(beam_radius(fbY), 0x1B320DD750429B6D, REL14, "q = i*2^-100, lambda = 2^-1074: w = 1.1138266604141455e-177");
+t61 = hg_mode_field(fbY, 0, 0, f64_mul(beam_radius(fbY), F64_HALF), 0, &fr61, &fi61);
+assert_eq(fi61, 0, "HG_00 at x = w/2 at that waist: Im u = 0 (was NaN)");
+assert(f64_gt(fr61, 0) & _bm_finite(fr61), "... and Re u the amplitude, finite");
+# ... and where (r/w)^2 does not underflow but Re q/Im q still overflows (Im q =
+# 1e-20): a true phase of 1 rad, which the first review cut made inf, so NaN.
+var fbV = gaussian_beam_from_q(0xFE37E43C8800759C, 0x3BC79CA10C924223, 0x00000000000007E8, &e);
+_assert_rel(_bm_curv_scaled(fbV, 0x3DCF0437E23888DF, 0, _PRK_NAN), F64_ONE, REL2E15_61,
+  "curvature phase at q = -1e300 + 1e-20 i = 1.0000000000000000506 (mpmath)");
+t61 = hg_mode_field(fbV, 0, 0, 0x3DCF0437E23888DF, 0, &fr61, &fi61);
+_assert_rel(fr61, 0x20CF29D2720D022D, REL14, "HG_00 there: Re u = 1.1900263032499266e-150 (was NaN)");
+_assert_rel(fi61, 0xA0C40280295FE628, REL14, "HG_00 there: Im u = -7.6410710208440631e-151 (was NaN)");
+# k*r^2 past DBL_MAX at an ordinary length: q = 1e300 + 1e290 i, lambda = 1e-300
+# (normal) has w = 56418.96, and k*w^2/4 = 5e309 overflows at r = w/2, where the true
+# phase is -2.5e9 rad. At a phase that large the field carries its conditioning
+# (an ulp of the phase is 4.8e-7 rad), so it is pinned to 1e-5 of the amplitude,
+# and the phase itself tightly.
+var fbW = gaussian_beam_from_q(0x7E37E43C8800759C, 0x7C2485CE9E7A065F, 0x01A56E1FC2F8F359, &e);
+var fwW = beam_radius(fbW);
+_assert_rel(fwW, 0x40EB8C5EAAD7A269, REL14, "q = 1e300 + 1e290 i, lambda = 1e-300: w = 56418.958354775631");
+_assert_rel(_bm_curv_scaled(fbW, f64_mul(fwW, F64_HALF), 0, _PRK_NAN), 0xC1E2A05F1FFFFFFF, REL2E15_61,
+  "curvature phase at r = w/2 = -2499999999.9999996119 (mpmath)");
+var tolW = f64_div(F64_ONE, f64_from(10000000000));                 # 1e-10 = 1e-5 of |u| ~ 1.1e-5
+t61 = hg_mode_field(fbW, 0, 0, f64_mul(fwW, F64_HALF), 0, &fr61, &fi61);
+assert_eq(t61, PK_ERR_NONE, "HG_00 at x = w/2 there: status");
+_assert_near(fr61, 0xBEE6E931724F0C18, tolW, "HG_00 at x = w/2: Re u = -1.0924773571013539e-5 (was NaN)");
+_assert_near(fi61, 0xBEB775FA4010DBAF, tolW, "HG_00 at x = w/2: Im u = -1.3983756164245595e-6 (was NaN)");
+t61 = lg_mode_field(fbW, 0, 0, f64_mul(fwW, F64_HALF), 0, &fr61, &fi61);
+_assert_near(fr61, 0xBEE6E931724F0C18, tolW, "LG_00 at r = w/2: Re u (was NaN)");
+_assert_near(fi61, 0xBEB775FA4010DBAF, tolW, "LG_00 at r = w/2: Im u (was NaN)");
+# A true phase of 2^63 or more still gives the documented NaN field: 1.26e19 rad at
+# x = 0.2 on fbU (no double resolves it; _prk_cos). Below 2^63 (x = 0.12, 4.5e18
+# rad) the field is finite.
+t61 = hg_mode_field(fbU, 0, 0, 0x3FC999999999999A, 0, &fr61, &fi61);
+assert_eq(t61, PK_ERR_NONE, "HG_00 at a phase of 1.26e19: status");
+assert((fr61 & _PRK_ABS) > _PRK_INF, "... a NaN field, as 2.6.0");
+t61 = hg_mode_field(fbU, 0, 0, 0x3FBEB851EB851EB8, 0, &fr61, &fi61);
+assert(_bm_finite(fr61) & _bm_finite(fi61), "HG_00 at a phase of 4.5e18 (below 2^63): finite");
+# A beam whose fields no constructor or element makes keeps 2.6.0's NaN: Im q =
+# -2^-40 and lambda = -2^-1060, written directly, give a finite w (the two signs
+# cancel) and k = -inf, so the phase on the axis is inf*0 = NaN. Re-forming it
+# there would return a finite field for a beam that is not one.
+var fbG = gaussian_beam_from_q(0, F64_ONE, F64_ONE, &e);
+GaussianBeam_set_q_im(fbG, 0xBD70000000000000);
+GaussianBeam_set_wavelength(fbG, 0x8000000000004000);
+assert(_bm_finite(beam_radius(fbG)), "Im q = -2^-40, lambda = -2^-1060 written directly: w finite");
+t61 = hg_mode_field(fbG, 0, 0, 0, 0, &fr61, &fi61);
+assert((fr61 & _PRK_ABS) > _PRK_INF, "HG_00 on the axis there: NaN, as 2.6.0");
+t61 = lg_mode_field(fbG, 0, 0, 0, 0, &fr61, &fi61);
+assert((fr61 & _PRK_ABS) > _PRK_INF, "LG_00 on the axis there: NaN, as 2.6.0");
+
+test_group("queries_2_6_1");
+# beam_radius and beam_waist_radius where lambda*|q/h|^2/(pi*Im q) leaves the normal
+# range while w is an ordinary double (2.6.1 review; 2.6.0 had the same bits): pi*Im q
+# past DBL_MAX gave a false 0, the ratio's underflow a false 0 and before it wrong
+# values, its overflow a false +inf. mpmath, sqrt(lambda*|q|^2/(pi*Im q)) on the doubles.
+var qw1 = gaussian_beam_from_q(0, 0x7FAC7B1F3CAC7433, 0x01A56E1FC2F8F359, &e);
+_assert_rel(beam_radius(qw1), 0x409BE07F184E043B, REL14,
+  "Im q = 1e307, lambda = 1e-300: w = 1784.1241161527711 (was 0)");
+_assert_rel(beam_waist_radius(qw1), 0x409BE07F184E043B, REL14, "... and w0 (was 0)");
+var qw2 = gaussian_beam_from_q(0, 0x01C0D29B7E2C62DE, 0x4202A05F20000000, &e);
+_assert_rel(beam_radius(qw2), 0x21D3F9604EA3207A, REL14,
+  "Im q = 3.14e-300, lambda = 1e10: w = 9.9974648917468207e-146 (was +inf)");
+var qw3 = gaussian_beam_from_q(0, 0x7FE55C576D815726, 0x7FEFFFFFFFFFFFFF, &e);
+assert_eq(e, PK_ERR_NONE, "from_q(0, 1.2e308, DBL_MAX) accepted");
+_assert_rel(beam_waist_radius(qw3), 0x7FDD80469FFC1019, REL14,
+  "Im q = 1.2e308, lambda = DBL_MAX: w0 = 8.2865444944300314e307 (was inf/inf = NaN; the h = 2^1023 branch)");
+var qw4 = gaussian_beam_from_q(0, 0x7FE1CCF385EBC8A0, F64_ONE, &e);
+_assert_rel(beam_radius(qw4), 0x5FDAEE40CB146A04, REL14,
+  "Im q = 1e308, lambda = 1: w = 5.6418958354775629e153 (was 0)");
+var qw5 = gaussian_beam_from_q(F64_ONE, 0x0170000000000000, 0x4202A05F20000000, &e);
+_assert_rel(beam_radius(qw5), 0x602B8C5EAAD7A269, REL14,
+  "q = 1 + i 2^-1000, lambda = 1e10: w = 1.8468128838580611e155 (was +inf)");
+_assert_rel(beam_waist_radius(qw5), 0x21AB8C5EAAD7A269, REL14, "... w0 = 1.723563274687739e-146 (was +inf)");
+var qw6 = gaussian_beam_from_q(0, 0x05F82DB537B97A78, 0x53E51FAC5B725FBF, &e);
+_assert_rel(beam_waist_radius(qw6), 0x2CE208279E14DC89, REL14,
+  "Im q = 6.66e-280, lambda = 1.41e96: w0 = 1.7289e-92 (was +inf)");
+var qw7 = gaussian_beam_from_q(0, F64_ONE, 1, &e);
+_assert_rel(beam_radius(qw7), 0x1E520DD750429B6D, REL14, "lambda = 2^-1074: w = 1.2540573331991174e-162 (was 0)");
+# The beam object against the module's own closed form: gaussian_beam_new(w0, lambda)
+# then beam_waist_radius gives w0 back (was 0 at 1e-300; +inf for the two large ones).
+_assert_rel(beam_waist_radius(gaussian_beam_new(F64_ONE, 0x01A56E1FC2F8F359, &e)), F64_ONE, REL14,
+  "w0 = 1, lambda = 1e-300");
+_assert_rel(beam_radius(gaussian_beam_new(0x40B60A0000000000, 0x01A56E1FC2F8F359, &e)), 0x40B60A0000000000, REL14,
+  "w0 = 5642, lambda = 1e-300");
+_assert_rel(beam_radius(gaussian_beam_new(0x7F00550560F85065, 0x7FE1CCF385EBC8A0, &e)), 0x7F00550560F85065, REL14,
+  "w0 = 5.6e303, lambda = 1e308");
+_assert_rel(beam_radius(gaussian_beam_new(0x5FE7DDDF6B095FF1, 0x7FEE42D130773B76, &e)), 0x5FE7DDDF6B095FF1, REL14,
+  "w0 = 1e154, lambda = 1.7e308");
+# A subnormal lambda*q2s with a normal ratio lost bits: 0.8% here.
+var qsn = gaussian_beam_new(0x1CBCFBE97BBA6E07, 3, &e);
+_assert_rel(beam_waist_radius(qsn), 0x1CBCFBE97BBA6E07, REL14, "w0 = 3e-170, lambda = 3*2^-1074 (was 3.024e-170)");
+_assert_rel(beam_radius(qsn), 0x1CBCFBE97BBA6E07, REL14, "... and w at the waist (was 3.024e-170)");
+# ... and each case through hg_mode_field, whose _bm_scaled_wc hands it to
+# beam_radius's slow path: HG_00 on the axis at a waist is sqrt(2/pi)/w (mpmath at
+# the module's w).
+t61 = hg_mode_field(qsn, 0, 0, 0, 0, &fr61, &fi61);
+_assert_rel(fr61, 0x631C3068ECF601F4, REL14, "HG_00 on the axis, lambda*q2s subnormal: sqrt(2/pi)/w");
+t61 = hg_mode_field(qw1, 0, 0, 0, 0, &fr61, &fi61);
+_assert_rel(fr61, 0x3F3D4EFFC45A0A15, REL14, "HG_00 on the axis, pi*Im q past DBL_MAX: sqrt(2/pi)/w (was NaN)");
+t61 = hg_mode_field(qw2, 0, 0, 0, 0, &fr61, &fi61);
+_assert_rel(fr61, 0x5E0473CA340701E2, REL14, "HG_00 on the axis, the ratio past DBL_MAX: sqrt(2/pi)/w (was 0)");
+# The band BEFORE the false 0, at w0 = 1.2345678901234567 (w0 = 1 hides it: the ratio
+# is then a power of two, exact even when subnormal): 2.6.0 was 8e-15 off at lambda =
+# 1e-155, 1.2e-7 at 1e-158, 15% at 1e-161, and 0 from 1e-162.
+var qband = 0;
+var qlam = 0x1FC1297872D9CBB5;                                 # 1e-155
+for (var qk = 0; qk < 11; qk = qk + 1) {
+    var qb = gaussian_beam_new(0x3FF3C0CA428C59FB, qlam, &e);
+    if (_rel(beam_waist_radius(qb), 0x3FF3C0CA428C59FB, REL14) == 0) { qband = qband + 1; }
+    qlam = f64_div(qlam, f64_from(10));
+}
+assert_eq(qband, 0, "w0 = 1.2345678901234567 comes back at lambda = 1e-155 ... 1e-165");
+# The queries' inline scale copies at their edges, through fields written directly
+# (the struct is public): Re q = 2^-1039, Im q = 2^-1028 (the 2^-1022 floor), and a
+# q that is not finite (a reciprocal of 0: the divisions' NaN). 2.6.0's bits.
+var mq61 = gaussian_beam_from_q(0, F64_ONE, F64_ONE, &e);
+var mq61b = gaussian_beam_from_q(0, F64_ONE, F64_ONE, &e);
+GaussianBeam_set_q_re(mq61, 0x0000000800000000);
+GaussianBeam_set_q_im(mq61, 0x0000400000000000);
+GaussianBeam_set_q_re(mq61b, 0x0000000800000000);
+GaussianBeam_set_q_im(mq61b, 0x0000400000000000);
+assert_eq(beam_radius(mq61), 0x1FC20DD7745E49E7, "beam_radius at a subnormal q");
+assert_eq(beam_waist_radius(mq61), 0x1FC20DD750429B6A, "beam_waist_radius at a subnormal q");
+assert_eq(beam_coupling_efficiency(mq61, mq61b, &e), F64_ONE, "coupling at a subnormal q");
+t61 = hg_mode_field(mq61, 0, 0, 0, 0, &fr61, &fi61);
+assert_eq(fr61, 0x6016A09E393DFF8B, "HG00 on the axis at a subnormal q");
+GaussianBeam_set_q_re(mq61, INF);
+GaussianBeam_set_q_im(mq61, F64_ONE);
+assert_eq(beam_radius(mq61), 0xFFF8000000000000, "beam_radius at Re q = inf is NaN");
+t61 = hg_mode_field(mq61, 0, 0, F64_ONE, 0, &fr61, &fi61);
+assert_eq(fr61, 0xFFF8000000000000, "HG00 at Re q = inf is NaN");
+GaussianBeam_set_q_re(mq61, F64_ONE);
+GaussianBeam_set_q_im(mq61, INF);
+assert_eq(beam_curvature(mq61), 0xFFF8000000000000, "beam_curvature at Im q = inf is NaN");
+# Fields no constructor or element writes keep their 2.6.0 radius when the direct
+# form leaves the normal range (_bm_w_split does not re-read them): a zero
+# wavelength, a subnormal Im q, and a non-finite Re q, whose split exponent alone
+# (lambda = 1e300) would have read as +inf.
+GaussianBeam_set_q_re(mq61, 0);
+GaussianBeam_set_q_im(mq61, F64_ONE);
+GaussianBeam_set_wavelength(mq61, 0);
+assert_eq(beam_radius(mq61), 0, "lambda = 0 written directly: w = 0 (2.6.0 bits)");
+assert_eq(beam_waist_radius(mq61), 0, "... w0 = 0 (2.6.0 bits)");
+GaussianBeam_set_wavelength(mq61, 1);
+GaussianBeam_set_q_im(mq61, 0x0000000000004000);
+assert_eq(beam_radius(mq61), 0, "Im q = 2^-1060, lambda = 2^-1074 written directly: w = 0 (2.6.0 bits)");
+assert_eq(beam_waist_radius(mq61), 0, "... w0 = 0 (2.6.0 bits)");
+GaussianBeam_set_q_im(mq61, F64_ONE);
+GaussianBeam_set_q_re(mq61, INF);
+GaussianBeam_set_wavelength(mq61, 0x7E37E43C8800759C);
+assert_eq(beam_radius(mq61), 0xFFF8000000000000, "Re q = inf, lambda = 1e300: NaN, not +inf (2.6.0 bits)");
+# ... and a wavelength of +inf or NaN, whose split exponent alone would read as a
+# finite 2^1024 (a fabricated w of 7.6e153 for q = i, 9.3e153 for the NaN).
+GaussianBeam_set_q_re(mq61, 0);
+GaussianBeam_set_wavelength(mq61, INF);
+assert_eq(beam_radius(mq61), INF, "lambda = +inf written directly: w = +inf (2.6.0 bits)");
+assert_eq(beam_waist_radius(mq61), INF, "... w0 = +inf (2.6.0 bits)");
+GaussianBeam_set_wavelength(mq61, _PRK_NAN);
+assert_eq(beam_radius(mq61), _PRK_NAN, "lambda = NaN written directly: w = NaN (2.6.0 bits)");
+assert_eq(beam_waist_radius(mq61), _PRK_NAN, "... w0 = NaN (2.6.0 bits)");
+
+test_group("coupling_2_6_1");
+# Two identical far-field beams: pi*w1*w2/lambda overflows and 1/R1 - 1/R2 = 0, and
+# inf*0 was a NaN returned as success (w0 = 1e9, lambda = 1e-6, 1e300 from the waist).
+var cpa = gaussian_beam_from_q(0x7E37E43C8800759C, 0x4504CA10A1CD055F, 0x3EB0C6F7A0B5ED8D, &e);
+var cpb = gaussian_beam_from_q(0x7E37E43C8800759C, 0x4504CA10A1CD055F, 0x3EB0C6F7A0B5ED8D, &e);
+assert_eq(beam_coupling_efficiency(cpa, cpb, &e), F64_ONE, "identical far-field beams: exactly 1 (was NaN)");
+assert_eq(e, PK_ERR_NONE, "... not an error");
+# pi*w1*w2/lambda past DBL_MAX with the curvatures different: t = 1e79, eta =
+# 4.0000000000000042e-158 (mpmath), where 4/inf gave a false 0; and t = 1.6e156,
+# past the square's range, eta = 4.9382716049382709e-162.
+var cpc = gaussian_beam_from_q(0x6FB07D457124123D, 0x5F138D352E5096AF, F64_ONE, &e);
+var cpd = gaussian_beam_from_q(0x6FB22365FC747A76, 0x5F138D352E5096AF, F64_ONE, &e);
+_assert_rel(beam_coupling_efficiency(cpc, cpd, &e), 0x1F4192E9EE706E50, REL14,
+  "w ~ 6e154, t ~ 1e79: eta = 4.0e-158 (was 0)");
+var cpf = gaussian_beam_from_q(0x6FE49C96CD6D16CC, 0x5F138D352E5096AF, F64_ONE, &e);
+_assert_rel(beam_coupling_efficiency(cpc, cpf, &e), 0x1E71C60337B089D6, REL14, "t past 1e154: eta = 4.94e-162 (was 0)");
+# A true 0: eta ~ 1e-620 underflows.
+var cpg = gaussian_beam_from_q(0x7E37E43C8800759C, 0x3DDB7CDFD9D7BDBB, F64_ONE, &e);
+var cph = gaussian_beam_from_q(0xFE37E43C8800759C, 0x3DDB7CDFD9D7BDBB, F64_ONE, &e);
+assert_eq(beam_coupling_efficiency(cpg, cph, &e), 0, "eta ~ 1e-620 is 0");
+assert_eq(e, PK_ERR_NONE, "... and not an error");
+# A radius beyond the double range is refused, as gaussian_beam_radius refuses it
+# (Re q = 1e308, Im q = 2^-1022, lambda = 1: w ~ 3.8e461).
+var cpi = gaussian_beam_from_q(0x7FE1CCF385EBC8A0, 0x0010000000000000, F64_ONE, &e);
+assert_eq(beam_radius(cpi), INF, "w ~ 3.8e461 is +inf: beam_radius has no error channel");
+_cx = beam_coupling_efficiency(cpi, cpi, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "coupling with a w beyond the double range refused (was NaN)");
+assert_eq(_cx, 0, "... and returns 0");
+var cpj = gaussian_beam_from_q(0, F64_ONE, F64_ONE, &e);
+_cx = beam_coupling_efficiency(cpi, cpj, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "... as the first beam against a finite one (was 0 as success)");
+_cx = beam_coupling_efficiency(cpj, cpi, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "... and as the second");
+# Two waists (dc = 0) with w1/w2 = 1e155: ratio^2 overflows, eta = 4e-310 (mpmath:
+# 3.9999999999999999e-310), a subnormal, where 4/inf gave a false 0.
+var cpk = gaussian_beam_from_q(0, 0x7E37E43C8800759C, F64_ONE, &e);
+var cpl = gaussian_beam_from_q(0, 0x3DDB7CDFD9D7BDBB, F64_ONE, &e);
+assert_eq(beam_coupling_efficiency(cpk, cpl, &e), 0x000049A22DC398AC, "waists 1e155 apart in w: eta = 4e-310 (was 0)");
+# Past the direct form's range eta comes from q alone (2.6.1 review, round 2):
+# 4*Im q1*Im q2/((Re q1 - Re q2)^2 + (Im q1 + Im q2)^2). Two NON-identical beams
+# whose curvatures round to the same double while pi*w1*w2/lambda overflows: inf*0
+# was NaN (2.6.0), and treating the equal curvatures as zero dc gave 1.0, perfect
+# coupling (the first review cut). Re q = 1e200 and one ulp more, Im q = 1: the
+# exact eta is 1.38e-368, which rounds to 0.
+var cpm = gaussian_beam_from_q(0x6974E718D7D7625A, F64_ONE, 0x3F847AE147AE147B, &e);
+var cpn = gaussian_beam_from_q(0x6974E718D7D7625B, F64_ONE, 0x3F847AE147AE147B, &e);
+assert_eq(beam_curvature(cpm), beam_curvature(cpn), "Re q = 1e200 and one ulp more: the same rounded 1/R");
+assert_eq(beam_coupling_efficiency(cpm, cpn, &e), 0, "... eta = 1.38e-368 rounds to 0 (was NaN; 1.0 in the first cut)");
+assert_eq(e, PK_ERR_NONE, "... and not an error");
+# A radius outside the direct form (here lambda = 2^-1074: lambda*|q/h|^2 is
+# subnormal) takes the q form too: w1*w2 underflowed to 0 there, so the direct
+# form dropped t = pi*w1*w2*dc/lambda (2.6.1 review: the first cut's accurate
+# radii then gave 0.913730, 0.35% off). mpmath 0.91051981911784010388.
+var cpo = gaussian_beam_from_q(0x2D7E3A81972DEEDB, 0x2D4F775CE6D6BC24, 1, &e);
+var cpp = gaussian_beam_from_q(0x2D7E3A81972DEEDB, 0x2D40F9C7951FA6D5, 1, &e);
+_assert_rel(beam_coupling_efficiency(cpo, cpp, &e), 0x3FED22FA75AF1218, REL14,
+  "lambda = 2^-1074, w1*w2 = 0: eta = 0.91051981911784010 from q");
+# ... with both terms of the denominator in play, at different binary exponents:
+# q = 1e-90 + 3e-90 i and 4e-90 + 1e-90 i at lambda = 2^-1074, eta = 12/25 (mpmath
+# 0.48 on the doubles).
+var cpw = gaussian_beam_from_q(0x2D404BD984990E6F, 0x2D5871C646E595A7, 1, &e);
+var cpx = gaussian_beam_from_q(0x2D604BD984990E6F, 0x2D404BD984990E6F, 1, &e);
+_assert_rel(beam_coupling_efficiency(cpw, cpx, &e), 0x3FDEB851EB851EB8, REL14, "eta = 12/25 from q");
+# Regression pin on the bits (1 ulp above the correctly rounded 12/25): the physics
+# check above cannot see the q form's 4.0 literal moved by an ulp (2 ulps here).
+assert_eq(beam_coupling_efficiency(cpw, cpx, &e), 0x3FDEB851EB851EB9, "eta = 12/25: the q form's bits");
+# ... and where Re q1 - Re q2 and Im q1 + Im q2 themselves overflow (formed on the
+# halves): Re q = +-1.5e308, Im q = 1e308, eta = 4/13 (mpmath 0.30769230769230769).
+var cpy = gaussian_beam_from_q(0x7FEAB36D48E1ACF0, 0x7FE1CCF385EBC8A0, F64_ONE, &e);
+var cpz = gaussian_beam_from_q(0xFFEAB36D48E1ACF0, 0x7FE1CCF385EBC8A0, F64_ONE, &e);
+_assert_rel(beam_coupling_efficiency(cpy, cpz, &e), 0x3FD3B13B13B13B14, REL14, "Re q = +-1.5e308: eta = 4/13");
+assert_eq(e, PK_ERR_NONE, "... not an error");
+# Both radii direct and the sum finite: 2.6.0's bits are kept, the bits t loses
+# where w1*w2 < 2^-1022 included (here w1*w2 = 1.9e-319, subnormal: 0.8000007285
+# where the exact eta is 0.8 — the direct form's own limit, as in 2.6.0).
+var cpq = gaussian_beam_from_q(0, 0x1ED4D4E1FA89CF9E, f64_mul(F64_PI, 0x1ED4D4E1FA89CF9E), &e);
+var cpr = gaussian_beam_from_q(0x1ED4D4E1FA89CF9E, 0x1ED4D4E1FA89CF9E, f64_mul(F64_PI, 0x1ED4D4E1FA89CF9E), &e);
+assert_eq(beam_coupling_efficiency(cpq, cpr, &e), 0x3FE9999B20BBA749,
+  "q = i*3.7e-160 and (1+i)*3.7e-160: 2.6.0's bits");
+# eta <= 1, and the q form's roundings near two equal Im q can exceed it by an ulp
+# or two: returned as 1 (mpmath: 1 - 1.1e-29). Re q = -5.2e300 in both, Im q 31
+# ulps apart; equal rounded curvatures and pi*w1*w2/lambda overflowing.
+var cps = gaussian_beam_from_q(0xFE5F44874E99548A, 0x67F041770C7BB240, F64_ONE, &e);
+var cpt = gaussian_beam_from_q(0xFE5F44874E99548A, 0x67F041770C7BB221, F64_ONE, &e);
+assert_eq(beam_coupling_efficiency(cps, cpt, &e), F64_ONE, "Im q 31 ulps apart: eta = 1, not 1 + 2^-51");
+# Fields no constructor or element makes keep 2.6.0's 4/den past the range, not the
+# q form: Im q = 0x3FF and 0x75E (subnormal) written directly, Re q = 29.99, lambda
+# = 4.8e-191. The sum is NaN, as in 2.6.0 (the first review cut returned 0.912).
+var cpu = gaussian_beam_from_q(0x403DFE710CE9800A, F64_ONE, 0x186B5E9ACD2C4C22, &e);
+var cpv = gaussian_beam_from_q(0x403DFE710CE9800A, F64_ONE, 0x186B5E9ACD2C4C22, &e);
+GaussianBeam_set_q_im(cpu, 0x00000000000003FF);
+GaussianBeam_set_q_im(cpv, 0x000000000000075E);
+_cx = beam_coupling_efficiency(cpu, cpv, &e);
+assert((_cx & _PRK_ABS) > _PRK_INF, "subnormal Im q written directly: 2.6.0's NaN, not the q form's value");
+# ... and paired with a valid beam, in either order: 2.6.0's 4/inf = 0 (the q form
+# would read the subnormal Im q's bits as a normal double's).
+var cpvv = gaussian_beam_from_q(0x403DFE710CE9800A, F64_ONE, 0x186B5E9ACD2C4C22, &e);
+assert_eq(beam_coupling_efficiency(cpu, cpvv, &e), 0, "that beam against a valid one: 0, as 2.6.0");
+assert_eq(beam_coupling_efficiency(cpvv, cpu, &e), 0, "... and in the other order");
+
+test_group("intensity_2_6_1");
+# gaussian_intensity where peak*exp(-2r^2/w^2) is not normal at every step while the
+# intensity is (2.6.1 review; 2.6.0 had the same bits): the peak overflowed, 2P
+# overflowed, or exp underflowed. mpmath on the doubles. The tolerance on the far
+# tails is the conditioning of exp(-2t^2) in the rounding of t = r/w: ~4t^2 ulp.
+_v = gaussian_intensity(F64_ONE, 0x16687E92154EF7AC, 0x2B2BFF2EE48E0530, 0x16AE307A72952ADB, 0, &e);
+assert_eq(e, PK_ERR_NONE, "w0 = 1e-200, 2t^2 = 778: not an error");
+_assert_rel(_v, 0x4CD09BD0E513BF6E, REL12, "w0 = 1e-200, 2t^2 = 778: I = 1.0675632625407892e62 (was NaN)");
+_assert_rel(gaussian_intensity(F64_ONE, 0x16687E92154EF7AC, 0x2B2BFF2EE48E0530, 0x16A73948E7B91C6D, 0, &e),
+  0x69713EB07EC33D89, REL12, "w0 = 1e-200, 2t^2 = 460: I = 8.2500642361284046e199 (was +inf)");
+_assert_rel(gaussian_intensity(0x7FE1CCF385EBC8A0, F64_ONE, 0x3EB0C6F7A0B5ED8D, 0, 0, &e), 0x7FD6AA172E512D49, REL14,
+  "P = 1e308 (2P overflows), r = 0: I = 6.3661977236758135e307 (was +inf)");
+_assert_rel(gaussian_intensity(0x7FE1CCF385EBC8A0, F64_ONE, 0x3EB0C6F7A0B5ED8D, 0x4034000000000000, 0, &e),
+  0x37B45751070AD99E,
+  REL14, "P = 1e308, r = 20: I = 2.3350414828520363e-40 (was NaN)");
+_assert_rel(gaussian_intensity(F64_ONE, 0x20CA2FE76A3F9475, 0x3EB0C6F7A0B5ED8D, 0x210FB1C8AC41613B, 0, &e),
+  0x3A8DF968569772CD,
+  REL12, "w0 = 1e-150, 2t^2 = 750: I = 1.2106502485623973e-26 (was a false 0)");
+_assert_rel(gaussian_intensity(F64_ONE, 0x20CA2FE76A3F9475, 0x3EB0C6F7A0B5ED8D, 0x2114DD257C423B85, 0, &e),
+  0x08F5750096DAC320,
+  REL12, "w0 = 1e-150, 2t^2 = 1300: I = 1.6636181457489313e-265 (was a false 0)");
+_assert_rel(gaussian_intensity(1, 0x000000000C0FB3C3, 1, 0, 0, &e), 0x7F91ECB1D12AFB18, REL15_61,
+  "P = 2^-1074, w0 subnormal: I = 3.1467684847345037e306 (was 9.6 ulp off: q subnormal)");
+# q normal and the peak subnormal: peak*g rounded twice onto the subnormal grid. mpmath:
+# 92.853 subnormal ulps, correctly rounded 93 (0x5D); the double rounding gave 92.
+assert_eq(gaussian_intensity(0x3DFC608B81354F38, 0x604988DB5AAF01D9, 0x7E70000000000000, 0x60302D454E009197, 0, &e),
+  0x000000000000005D, "a subnormal intensity from a subnormal peak: correctly rounded (was 1 ulp low)");
+_v = gaussian_intensity(F64_ONE, 0x1EB67E9C127B6E74, 0x1CA3529BA7D19EAF, 0x1F0516B25153B78D, 0, &e);
+assert_eq(e, PK_ERR_NONE, "2t^2 = 1800 at w0 = 1e-160: not an error");
+assert_eq(_v, 0, "... and 0: the true 1.2e-462 underflows (was NaN)");
+_v = gaussian_intensity(F64_ONE, 0x1FC1297872D9CBB5, 0x1EB67E9C127B6E74, 0, 0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "I = 6.4e309 (w0 = 1e-155, r = 0) is refused (was +inf)");
+assert_eq(_v, 0, "... and returns 0");
+# The far tail of a physical beam (w0 = 1 mm, 1064 nm, z = 0.7 m: w = 1.0277 mm,
+# peak ~ 6.03e5 = 1.15*2^19). Where g = e^(-2t^2) is 0 and 2t^2 is past
+# (19 + 1077)*ln2 = 759.7, the result is certainly 0 and returned without the
+# exact tail; nearer, the tail runs. Subnormal values just inside the bound, from
+# the tail, correctly rounded (mpmath at the module's own 2t^2): P = 1 at r =
+# 19.43w, 14.87 subnormal ulps; P = 1.6527 (peak 1.9*2^19) at r = 19.475w, 0.74 of
+# one — a bound loosened to 1070 returns 0 for the first, to 1075 for the second.
+var itw0 = f64_div(F64_ONE, f64_from(1000));
+var itwl = f64_div(f64_from(1064), f64_from(1000000000));
+var itz = f64_div(f64_from(7), f64_from(10));
+var itw = gaussian_beam_radius(itw0, itwl, itz, &e);
+_v = gaussian_intensity(F64_ONE, itw0, itwl, f64_mul(itw, f64_div(f64_from(1943), f64_from(100))), itz, &e);
+assert_eq(_v, 0x000000000000000F, "r = 19.43w: I = 14.87 subnormal ulps, rounded to 15");
+_v = gaussian_intensity(f64_div(f64_from(16527), f64_from(10000)), itw0, itwl,
+  f64_mul(itw, f64_div(f64_from(194750), f64_from(10000))), itz, &e);
+assert_eq(_v, 0x0000000000000001, "P = 1.6527, r = 19.475w: I = 0.74 subnormal ulps, rounded to 1, not 0");
+_v = gaussian_intensity(F64_ONE, itw0, itwl, f64_mul(itw, f64_from(20)), itz, &e);
+assert_eq(e, PK_ERR_NONE, "r = 20w (2t^2 = 800): not an error");
+assert_eq(_v, 0, "... and 0: the true 2.3e-342 underflows");
+# Never NaN or inf as success over a grid of P, w0, lambda (so z_R) and r/w, from
+# 2^-1074 to near DBL_MAX: a refusal returns 0, a success a finite double.
+fn _isw_t(i) {
+    if (i == 0) { return 0x0000000000000000; }                         # 0
+    if (i == 1) { return 0x3FE0000000000000; }                         # 0.5
+    if (i == 2) { return 0x4008000000000000; }                         # 3
+    if (i == 3) { return 0x402A666666666666; }                         # 13.2
+    if (i == 4) { return 0x4032E66666666666; }                         # 18.9
+    if (i == 5) { return 0x40334CCCCCCCCCCD; }                         # 19.3
+    if (i == 6) { return 0x403B000000000000; }                         # 27
+    return 0x408F400000000000;                                   # 1000
+}
+var isw_bad = 0;
+var isw_ok = 0;
+var isw_p = 1;                                                  # P = 2^-1074 .. 2^1020
+for (var ip = 0; ip < 7; ip = ip + 1) {
+    var isw_w = 0x00000000000F4240;                             # w0 ~ 2^-1054 .. 2^1026 (past it: refused)
+    for (var iw = 0; iw < 9; iw = iw + 1) {
+        var isw_l = 1;                                          # lambda = 2^-1074 .. 2^991
+        for (var il = 0; il < 8; il = il + 1) {
+            for (var it = 0; it < 8; it = it + 1) {
+                var isw_v = gaussian_intensity(isw_p, isw_w, isw_l, f64_mul(isw_w, _isw_t(it)), 0, &e);
+                if (e == PK_ERR_NONE) {
+                    if ((isw_v & _PRK_ABS) >= INF) { isw_bad = isw_bad + 1; }
+                    isw_ok = isw_ok + 1;
+                } else {
+                    if (isw_v != 0) { isw_bad = isw_bad + 1; }
+                }
+            }
+            isw_l = f64_mul(isw_l, 0x5260000000000000);         # 2^295
+        }
+        isw_w = f64_mul(isw_w, 0x5030000000000000);             # 2^260
+    }
+    isw_p = f64_mul(isw_p, 0x55C0000000000000);                 # 2^349
+}
+assert_eq(isw_bad, 0, "intensity: no NaN or inf as success, no nonzero refusal");
+assert(isw_ok > 1000, "intensity: the grid reaches the success paths");
+
+test_group("abcd_free_refusals");
+# _bm_abcd_free reproduces the general path's refusal of a subnormal or infinite Im
+# q and a subnormal or infinite wavelength (the struct's fields are public), and
+# leaves the beam untouched: before these, all four checks could be dropped.
+fn _free_refused61(which, v, msg) {
+    var e2 = 0;
+    var bf = gaussian_beam_from_q(_fd(1, 4), F64_ONE, F64_ONE, &e2);
+    if (which == 0) { GaussianBeam_set_q_im(bf, v); }
+    if (which == 1) { GaussianBeam_set_wavelength(bf, v); }
+    var g = GaussianBeam_gouy(bf);
+    var qi = GaussianBeam_q_im(bf);
+    var wl = GaussianBeam_wavelength(bf);
+    assert_eq(beam_propagate(bf, F64_ONE), PK_ERR_INVALID_PARAMETER, msg);
+    assert_eq(GaussianBeam_q_re(bf), _fd(1, 4), msg);
+    assert_eq(GaussianBeam_q_im(bf), qi, msg);
+    assert_eq(GaussianBeam_wavelength(bf), wl, msg);
+    assert_eq(GaussianBeam_gouy(bf), g, msg);
+    return 0;
+}
+_s = _free_refused61(0, 0x000FFFFFFFFFFFFF, "propagate: subnormal Im q refused, beam untouched");
+_s = _free_refused61(0, 0x7FF0000000000000, "propagate: Im q = +inf refused, beam untouched");
+_s = _free_refused61(1, 0x000FFFFFFFFFFFFF, "propagate: subnormal wavelength refused, beam untouched");
+_s = _free_refused61(1, 0x7FF0000000000000, "propagate: wavelength = +inf refused, beam untouched");
+# The setter-free route to a subnormal wavelength: the constructors check only
+# finite and > 0.
+var frb = gaussian_beam_from_q(0, F64_ONE, 1, &e);
+assert_eq(e, PK_ERR_NONE, "from_q accepts wavelength 2^-1074");
+assert_eq(beam_propagate(frb, F64_ONE), PK_ERR_INVALID_PARAMETER, "... and propagate refuses it");
+assert_eq(GaussianBeam_q_re(frb), 0, "... leaving Re q");
+assert_eq(GaussianBeam_gouy(frb), 0, "... and the Gouy phase untouched");
+
+# ── 2.6.2: the 2.6.1 verification's remaining findings ────────
+test_group("release_2_6_2");
+
+# Coupling: pi*w1*w2/lambda below the normal range dropped t, and 2.6.0/2.6.1
+# returned 4/ratio^2 as success whatever the curvatures — 0.8667 for this pair,
+# whose true eta is 8.8227e-33 (mpmath, q form on the same doubles).
+var cu1 = gaussian_beam_from_q(0x896FBEA8D34FC83F, 0x05F56340C20B5152, 0x238DACFA60BABBE2, &e);
+var cu2 = gaussian_beam_from_q(0x89640B04201D4448, 0x05F254AA23F0FEC5, 0x238DACFA60BABBE2, &e);
+_assert_rel(beam_coupling_efficiency(cu1, cu2, &e), 0x3946E7B911D7DDF9, REL12,
+  "eta = 8.8227e-33 where w1*w2 underflows");
+assert_eq(e, PK_ERR_NONE, "that coupling is not an error");
+# The q form's two overflow triggers, each alone (the 4/13 pin trips both at once).
+var cq1a = gaussian_beam_from_q(0x7FE1CCF385EBC8A0, f64_mul(0x7FE1CCF385EBC8A0, F64_HALF), 0x01A56E1FC2F8F359, &e);
+var cq1b = gaussian_beam_from_q(0xFFE1CCF385EBC8A0, f64_mul(0x7FE1CCF385EBC8A0, F64_HALF), 0x01A56E1FC2F8F359, &e);
+_assert_rel(beam_coupling_efficiency(cq1a, cq1b, &e), _fd(1, 5), REL14,
+  "Re q = +-1e308 (d overflows alone): eta = 1/5");
+var cq2a = gaussian_beam_from_q(0, 0x7FE1CCF385EBC8A0, F64_ONE, &e);
+var cq2b = gaussian_beam_from_q(0, 0x7FE005419221015D, F64_ONE, &e);
+_assert_rel(beam_coupling_efficiency(cq2a, cq2b, &e), 0x3FEFE94EB6F55CE6, REL14,
+  "Im q 1e308, 0.9e308 (s overflows alone)");
+var cq3b = gaussian_beam_from_q(0, 0x7FEAB36D48E1ACF0, F64_ONE, &e);
+_assert_rel(beam_coupling_efficiency(cq2a, cq3b, &e), _fd(24, 25), REL14, "Im q 1e308, 1.5e308: eta = 24/25");
+# The q form's small-difference path (Re q 1e300 vs 1.0000653e300 at Im q 1e290).
+var cs1 = gaussian_beam_from_q(0x7E37E43C8800759C, 0x7C2485CE9E7A065F, F64_ONE, &e);
+var cs2 = gaussian_beam_from_q(0x7E37E4A2C670C99B, 0x7C2485CE9E7A065F, F64_ONE, &e);
+_assert_rel(beam_coupling_efficiency(cs1, cs2, &e), 0x3DA4A0D84E8C8251, REL12, "eta = 9.3807e-12 (mpmath)");
+# Refusals: a radius that truly overflows, and fields written out of range; and a
+# zero wavelength written directly keeps 2.6.0's NaN (not a made-up 1).
+var cv1 = gaussian_beam_from_q(0, F64_ONE, 0x7E37E43C8800759C, &e);
+var cv2 = gaussian_beam_from_q(0x6974E718D7D7625A, 0x0010000000000000, 0x7E37E43C8800759C, &e);
+var _cv = beam_coupling_efficiency(cv2, cv1, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "coupling refuses a radius beyond the double range");
+var cv3 = gaussian_beam_from_q(0, F64_ONE, F64_ONE, &e);
+var cv4 = gaussian_beam_from_q(0, F64_ONE, F64_ONE, &e);
+GaussianBeam_set_q_re(cv3, INF);
+_cv = beam_coupling_efficiency(cv3, cv4, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "coupling refuses Re q = +inf written directly");
+var cv5 = gaussian_beam_from_q(0, F64_ONE, F64_ONE, &e);
+var cv6 = gaussian_beam_from_q(0, F64_ONE, F64_ONE, &e);
+GaussianBeam_set_wavelength(cv5, 0);
+GaussianBeam_set_wavelength(cv6, 0);
+_cv = beam_coupling_efficiency(cv5, cv6, &e);
+assert(((_cv & _PRK_ABS) > INF) | prakash_is_err(e), "wavelength 0 written directly: no made-up eta");
+assert(_cv != F64_ONE, "wavelength 0: not 1");
+# _bm_scaled_wcd's ratio test: HG_00 on the axis at w0 = 1.2345678901234567,
+# lambda = 1.09e-161 is sqrt(2)/(w0*sqrt(pi)) (mpmath); dropping the test is 0.8% off.
+var bwd = gaussian_beam_new(0x3FF3C0CA428C59FB, 0x1E839D81F371C6B7, &e);
+_t = hg_mode_field(bwd, 0, 0, 0, 0, &fr, &fi);
+_assert_rel(fr, 0x3FE4AE6106B446BD, REL12, "HG_00 on axis at lambda = 1.09e-161");
+# _bm_scaled_wcd's h = 2^1023 branch, off the axis (on it the phase fallback hides it):
+# 2.6.0's bits, which the review re-derived.
+var fr62 = 0;
+var fi62 = 0;
+var bq308o = gaussian_beam_from_q(0xFFE138E2D5A4D189, 0x6DFC1907CA206DF9, 0x31A1827D721430FD, &e);
+_t = hg_mode_field(bq308o, 0, 1, 0x589000A5418C7800, f64_div(0x589000A5418C7800, f64_from(3)), &fr62, &fi62);
+assert_eq(fr62, 0x95127FB7A8FFA385, "HG_01 at |q| ~ 2^1023, off axis: Re (2.6.0 bits)");
+assert_eq(fi62, 0x94CB6FF7637A3806, "HG_01 at |q| ~ 2^1023, off axis: Im (2.6.0 bits)");
+var bq308p = gaussian_beam_from_q(0x7FE1CCF385EBC8A0, 0x7FAC7B1F3CAC7433, F64_ONE, &e);
+_t = hg_mode_field(bq308p, 0, 0, 0x5FD00C2D65A5960C, 0, &fr62, &fi62);
+assert_eq(fr62, 0x1FD01383053B9D14, "HG_00 at q = 1e308 + 1e307 i, off axis: Re (2.6.0 bits)");
+assert_eq(fi62, 0x1FE09685A71F2C05, "HG_00 at q = 1e308 + 1e307 i, off axis: Im (2.6.0 bits)");
 
 var r = assert_summary();
