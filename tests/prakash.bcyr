@@ -552,6 +552,13 @@ fn b_beam_interface() {
 # r is on the mode's bright region (s = 2r^2/w^2 = 300), not in the far tail where
 # the amplitude is an early 0.
 fn b_lg_mode_field_60() { var r = lg_mode_field(_gb_ref, 60, 60, _gb_r60, _gb_z, &_gb_re, &_gb_im); return 0; }
+# ── Aberrated OTF (2.7.0) ────────
+var _otf_wc = 0;
+var _otf_re = 0;
+var _otf_im = 0;
+# Aberrated OTF of a Seidel wavefront (0.5 waves coma + 1 wave defocus), tangential,
+# at v = 0.3 with 64 Gauss-Legendre nodes per axis: 8192 wavefront evaluations.
+fn b_lens_otf_seidel() { var r = lens_otf_seidel(_otf_wc, F64_ONE, _bf(3, 10), 1, 64, &_otf_re, &_otf_im); return 0; }
 # ISO 11146 second-moment radius of a 256-sample profile (two passes).
 fn b_second_moment_256() { var r = beam_second_moment_radius(_gb_prof, 256, 0, _bf(1, 100), _err); return 0; }
 
@@ -719,6 +726,12 @@ fn main() {
     _gb_ref = gaussian_beam_new(_bf(12, 10000), _gb_wl, _err);
     var _gp = beam_propagate(_gb_ref, F64_TWO);
     _gb_r60 = f64_mul(beam_radius(_gb_ref), f64_sqrt(f64_from(150)));
+    _otf_wc = alloc(sizeof(WavefrontCoefficients));
+    WavefrontCoefficients_set_w040(_otf_wc, 0);
+    WavefrontCoefficients_set_w131(_otf_wc, F64_HALF);
+    WavefrontCoefficients_set_w222(_otf_wc, 0);
+    WavefrontCoefficients_set_w220(_otf_wc, F64_ONE);
+    WavefrontCoefficients_set_w311(_otf_wc, 0);
     _gb_prof = alloc(256 * 8);
     for (var gi = 0; gi < 256; gi = gi + 1) {
         var gx = f64_mul(_bf(1, 100), f64_from(gi - 128));
@@ -894,6 +907,7 @@ fn main() {
     bench("beam/second_moment_256", &b_second_moment_256, 20000);
     bench("beam/interface", &b_beam_interface, 500000);
     bench("beam/lg_mode_field_60_60", &b_lg_mode_field_60, 50000);
+    bench("lens/otf_seidel_64", &b_lens_otf_seidel, 500);
     return 0;
 }
 

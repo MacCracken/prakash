@@ -284,6 +284,44 @@ Independent check (tests/ray_simulate.tcyr): the transverse ray error at the ima
 plane equals f·dW/dh (Hamilton), measured to 0.01–0.32% for h = 1..4 on the
 singlet above. The 2.4.9 form gives −0.333 there.
 
+### Wavefront Aberration Coefficients (2.7.0)
+From the Seidel sums at marginal height h and Lagrange invariant H (H = hθ > 0 for an
+object at infinity with the field on +y, stop at the lens), in
+`optical_path_difference`'s sign (ray OPL − chief OPL):
+
+W₀₄₀ = −S_I/8,  W₁₃₁ = +S_II/2,  W₂₂₂ = −S_III/2,  W₂₂₀ = −(S_III + S_IV)/4,  W₃₁₁ = +S_V/2
+
+Welford's W has the opposite overall sign, and his H = n′u′η′ is NEGATIVE for an
+image on +y, so the terms even in H flip against his relations and the terms odd in H
+(W₁₃₁, W₃₁₁) keep his sign. The first 2.7.0 cut flipped all five; W₁₃₁ then disagreed
+in sign with the traced OPD, and an OTF phase conjugated the other way hid it end to end.
+
+W(x, y) = W₀₄₀r⁴ + W₁₃₁yr² + W₂₂₂y² + W₂₂₀r² + W₃₁₁y at the field edge, (x, y)
+normalised to the pupil radius. W₂₂₀ carries the sagittal field curvature
+(S_III + S_IV); W₂₂₂ + W₂₂₀ the tangential (3S_III + S_IV)/4. tests/lens_otf.tcyr pins
+W₀₄₀ to the traced OPD at the pupil edge (0.2% at R = 400) and W₁₃₁, signed, to the odd
+part [W(+h) − W(−h)]/2 of a traced tilted fan (0.982 of the Seidel value at θ = 0.01).
+
+### Aberrated OTF (pupil autocorrelation, 2.7.0)
+OTF(v) = (1/π) ∬_overlap exp(ik[W(a − v) − W(a + v)]) dA, v = ν/ν_c, ν_c = 1/(λN)
+
+The standard OTF (Goodman eq. 6-25, ISO 9334): the Fourier transform with kernel
+e^(−2πiνx) of the PSF |FT{P}|² that `psf_from_wavefront` forms, P = exp(+ikW). A tilt
+W₃₁₁y gives MTF_dl·exp(−2πi·W₃₁₁·2v) along y. (Goodman's eq. 6-31 form
+W(a + v) − W(a − v) returns the conjugate; the first 2.7.0 cut used it.) The two unit
+pupils are shifted by ∓v along the frequency direction (x: sagittal, y: tangential),
+and the overlap is integrated exactly — y = √(1−v²)·sin t, then x across the chord —
+with n-point Gauss-Legendre in each. That converges exponentially once n resolves the
+phase: ~1e-12 at 8 nodes per wave of max|W(a − v) − W(a + v)| for v ≥ 0.02, and v < 0.02
+wants 128. The caller's n is a minimum, raised from a bound on that difference:
+Seidel min(Σ|Wᵢ|·span, 2v·Σ|Wᵢ|·max|∇|) with spans 1, 2, 1, 1, 2 and gradients 4, 3, 2,
+2, 1; Zernike Σ 2|cⱼ|·√(n+1) (m = 0) or √(2(n+1)). Past 256 nodes (32 waves) it is
+refused. With W = 0 it is (2/π)(acos v − v√(1−v²)).
+
+Polychromatic: OTF(ν) = Σ wᵢ·OTFᵢ(νλᵢN) / Σ wᵢ, summing the COMPLEX OTFs, so bands
+where some wavelengths' contrast reverses cancel. `lens_mtf_polychromatic`'s real
+mean of diffraction-limited MTFs equals it only while every OTF is real and ≥ 0.
+
 ### Shape Factor
 q = (R₂ + R₁) / (R₂ - R₁)
 

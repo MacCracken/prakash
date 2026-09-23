@@ -2,6 +2,78 @@
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-09-23 — aberrations → image quality
+
+Closes the 2.7.0 roadmap row: the third-order wavefront from the Seidel sums, the
+aberrated OTF/MTF by pupil autocorrelation (Zernike or Seidel, sagittal and
+tangential), and a polychromatic OTF that sums complex OTFs, so it can show the
+contrast reversal that `lens_mtf_polychromatic`'s real mean cannot. Suite
+**8204 → 8305 assertions across 33 suites**, 0 failed; `cyrius audit` exits 0;
+`#must_use` 461 → **464**, 0 lost. Benchmarks 151 → **152**.
+
+### Added — lens
+- **`WavefrontCoefficients` + `lens_wavefront_coefficients(seidel, h, H)`** —
+  W₀₄₀, W₁₃₁, W₂₂₂, W₂₂₀, W₃₁₁ at marginal height h and Lagrange invariant H = hθ,
+  in `optical_path_difference`'s sign: W₀₄₀ = −S_I/8, W₁₃₁ = +S_II/2,
+  W₂₂₂ = −S_III/2, W₂₂₀ = −(S_III + S_IV)/4, W₃₁₁ = +S_V/2. ⚠ Against Welford the
+  even-in-H terms flip and the odd ones do not: his W has the other overall sign and
+  his H = n′u′η′ is negative for an image on +y. W₀₄₀ is pinned to the traced OPD of
+  a real singlet at the pupil edge (0.2% at R = 400, the residual being thickness and
+  fifth order), W₁₃₁ — signed — to the odd part of a traced tilted fan (0.982).
+- **`lens_otf_zernike` / `lens_otf_seidel`** (Re/Im through out-pointers) and
+  **`lens_mtf_zernike` / `lens_mtf_seidel`** (|OTF|, NaN on refusal) — the standard
+  OTF (Goodman 6-25, ISO 9334) at normalised frequency v = ν/ν_c along x (sagittal)
+  or y (tangential), by autocorrelating P = exp(ikW) over the exact two-pupil
+  overlap with Gauss-Legendre in each direction. It converges exponentially once n
+  resolves the phase, and **n is a minimum**: it is raised to 8 nodes per wave of a
+  bound on max|W(a − v) − W(a + v)| (128 below v = 0.02), and a wavefront that would
+  need more than 256 is **refused**, not approximated. At that density it measures
+  ~1e-12 against independent quadrature.
+- **`lens_otf_polychromatic`** — Σ wᵢ·OTFᵢ(νλᵢN)/Σ wᵢ over a Zernike or Seidel
+  wavefront, complex. 0.9 µm of defocus at f/4, 200 cycles/mm over 450/550/650 nm:
+  the blue OTF is reversed and the complex sum falls below the mean |OTF| — the old
+  real-mean form's answer.
+
+### Fixed during the release's verification (never shipped)
+A literature audit, an FFT-of-the-PSF cross-check, mutation testing and a
+robustness sweep of the first cut found five defects; each has a test that fails
+on the first cut.
+- **W₁₃₁ and W₃₁₁ had the wrong sign** — all five coefficients had been flipped
+  against Welford, but his H is negative for an image on +y. The traced tilted fan
+  gives W₁₃₁ > 0 for an undercorrected singlet with the field on +y; the first cut
+  gave < 0.
+- **The OTF was the complex conjugate** — it used Goodman's eq. 6-31 form
+  W(a + v) − W(a − v), which drops a sign in H(f) = P(−λzf). An FFT of
+  `psf_from_wavefront`'s PSF gives 0.17666 − 0.46963i for 0.5 waves of coma at
+  v = 0.3; the first cut gave +0.46785i. The two sign errors cancelled end to end
+  for coma, which is why neither was visible alone: a tilt pin (W₃₁₁y →
+  MTF_dl·e^(−2πi·W₃₁₁·2v)) now fixes the convention independently.
+- **A fixed node count failed silently**: an f/4 singlet's 18.5 waves of spherical
+  at 550 nm came back at n = 64 as OTF(0.3) = −5.27e-3 (true +3.08e-4) with
+  PK_ERR_NONE. Hence the raised minimum and the refusal above; the 256 cap is also
+  the node buffer's size, and a mutant without it overwrites the stack.
+- **`lens_otf_polychromatic` read a `seidel` flag of 2 as Zernike** — Seidel
+  coefficients walked as a coefficient buffer (SIGSEGV or garbage). Now refused, as
+  are N or ν = +inf and a non-finite weight.
+- **A null `re_out`/`im_out` was stored through** (SIGSEGV) — all three OTF entry
+  points now refuse it without writing.
+
+### Tests — tests/lens_otf.tcyr, 101 assertions (new)
+Values against scipy's dblquad (QUADPACK) over the same overlap (defocus, coma
+sagittal and tangential, spherical, astigmatism) and numpy Gauss-Legendre at
+n = 256–512 (the f/4 singlet), the closed-form diffraction-limited
+MTF at v = 0.001…0.95, the tilt phase law, a Zernike re-expression of spherical and
+y-coma (a second evaluation path through `wave_zernike`, which also pins its angle
+convention to the Seidel y), wavelength scaling, convergence n = 64 vs 128 and odd n,
+the f/4 singlet at n = 64 asked, the polychromatic complex sum (including partial
+weights and the Zernike path), and every refusal. Mutation: all 11 mutants of the
+review fixes are killed.
+
+### Performance
+- `lens/otf_seidel_64` (new; coma + defocus, tangential, v = 0.3, n = 64): 613 µs (500 iters, two runs 612.9 / 612.8 µs).
+  Cost is n² wavefront pairs; the node-count bound adds one pass over the
+  coefficients.
+
 ## [2.6.2] - 2026-09-23 — the 2.6.1 verification's remaining findings
 
 The 28 findings the 2.6.1 verification confirmed, minus the one 2.6.1 already

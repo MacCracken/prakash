@@ -1,0 +1,436 @@
+# lens_otf test suite — wavefront aberration coefficients and the aberrated OTF
+# (new in 2.7.0).
+#
+# References: the Seidel coefficients against the TRACED OPD of a real singlet (the
+# 2.5.0 fixture), and the OTF against scipy's adaptive dblquad over the same
+# overlap region (QUADPACK — nothing shared with the module's Gauss-Legendre), the
+# closed-form diffraction-limited MTF, and a Zernike re-expression of a Seidel
+# wavefront (a second evaluation path through wave_zernike).
+
+include "src/error.cyr"
+include "src/ray_core.cyr"
+include "src/ray_fresnel.cyr"
+include "src/ray_trace.cyr"
+include "src/ray_simulate.cyr"
+include "src/wave_zernike.cyr"
+include "src/lens.cyr"
+
+fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _rel(a, b, tol) { return f64_le(f64_abs(f64_sub(a, b)), f64_mul(tol, f64_abs(b))); }
+fn _near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
+fn _assert_rel(a, b, tol, msg) { assert(_rel(a, b, tol), msg); }
+fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
+
+var Z = f64_from(0);
+var N15 = _fd(3, 2);
+var REL14 = _fd(1, 100000000000000);
+var REL12 = _fd(1, 1000000000000);
+var REL9 = _fd(1, 1000000000);
+var TOL12 = _fd(1, 1000000000000);
+var NAN = 0x7FF8000000000000;
+
+# A WavefrontCoefficients built directly (lengths in waves at wavelength 1).
+fn _wc(w040, w131, w222, w220, w311) {
+    var wc = alloc(sizeof(WavefrontCoefficients));
+    WavefrontCoefficients_set_w040(wc, w040);
+    WavefrontCoefficients_set_w131(wc, w131);
+    WavefrontCoefficients_set_w222(wc, w222);
+    WavefrontCoefficients_set_w220(wc, w220);
+    WavefrontCoefficients_set_w311(wc, w311);
+    return wc;
+}
+
+# A ray parallel to the axis at height y, starting at z.
+fn off_axis_ray(y, z) { return trace_ray_new(ray_vec3(Z, y, z), ray_vec3(Z, Z, F64_ONE), F64_ONE); }
+
+# The 2.5.0 traced singlet (tests/ray_simulate.tcyr): equiconvex, radii +-r, 1 thick,
+# n = 1.5, image plane at the traced paraxial focus.
+fn _w_singlet(r) {
+    var s = vec_new();
+    vec_push(s, surface_sphere(r, Z, N15, f64_from(20)));
+    vec_push(s, surface_sphere(f64_neg(r), F64_ONE, F64_ONE, f64_from(20)));
+    return s;
+}
+fn _w_last(r, h) {
+    var e = 0;
+    var hits = trace_sequential(off_axis_ray(h, f64_from(0 - 10)), _w_singlet(r), &e);
+    return TraceHit_ray_after(vec_get(hits, vec_len(hits) - 1));
+}
+fn _w_paraxial(r, out) {
+    var fr = _w_last(r, _fd(1, 10000));
+    var p = TraceRay_pos(fr);
+    var d = TraceRay_dir(fr);
+    store64(out, f64_sub(RayVec3_z(p), f64_div(f64_mul(RayVec3_y(p), RayVec3_z(d)), RayVec3_y(d))));
+    store64(out + 8, f64_div(f64_mul(_fd(1, 10000), RayVec3_z(d)), f64_neg(RayVec3_y(d))));
+    return 0;
+}
+# A ray through (0, ys, 0) at angle th, started on a common plane normal to its
+# direction (a plane incoming wavefront); th > 0 puts the image on +y.
+fn _w_tilt(ys, th) {
+    var st = f64_sin(th);
+    var ct = f64_cos(th);
+    var ll = f64_add(f64_from(10), f64_mul(ys, st));
+    var p0 = ray_vec3(Z, f64_sub(ys, f64_mul(ll, st)), f64_neg(f64_mul(ll, ct)));
+    return trace_ray_new(p0, ray_vec3(Z, st, ct), F64_ONE);
+}
+fn _w_traced_tilt(r, ys, th, zi) {
+    var e = 0;
+    return optical_path_difference(_w_tilt(ys, th), _w_tilt(Z, th), _w_singlet(r), zi, &e);
+}
+fn _w_traced(r, h, zi) {
+    var e = 0;
+    return optical_path_difference(off_axis_ray(h, f64_from(0 - 10)), off_axis_ray(Z, f64_from(0 - 10)),
+      _w_singlet(r), zi, &e);
+}
+
+alloc_init();
+var e = 0;
+var re = 0;
+var im = 0;
+
+# ── Wavefront coefficients from the Seidel sums ────────
+test_group("wavefront_coefficients");
+
+# W040 against the TRACED OPD at the pupil edge (paraxial focus): a separate code
+# path (ray_trace + ray_simulate) from lens_seidel_coefficients. The residual is the
+# lens's thickness and fifth order, so it shrinks as the lens thins.
+var par = alloc(16);
+var rr_i = 0;
+while (rr_i < 2) {
+    var rad = f64_from(100);
+    if (rr_i == 1) { rad = f64_from(400); }
+    _w_paraxial(rad, par);
+    var efl = load64(par + 8);
+    var sc = lens_seidel_coefficients(N15, efl, 0, f64_neg(F64_ONE));
+    var wc_h = lens_wavefront_coefficients(sc, F64_TWO, 0);
+    var ratio = f64_div(WavefrontCoefficients_w040(wc_h), _w_traced(rad, F64_TWO, load64(par)));
+    if (rr_i == 0) { _assert_near(ratio, F64_ONE, _fd(1, 100), "W040 / traced OPD at R = 100, h = 2 (1%)"); }
+    if (rr_i == 1) { _assert_near(ratio, F64_ONE, _fd(2, 1000), "W040 / traced OPD at R = 400, h = 2 (0.2%)"); }
+    rr_i = rr_i + 1;
+}
+# W040 = -S_I/8 exactly: at q = 0, p = -1 that is Welford's -B h^4/(32 f^3), B =
+# (3n+2)/n + n^2/(n-1)^2 = 40/3 at n = 1.5.
+var sc100 = lens_seidel_coefficients(N15, f64_from(100), 0, f64_neg(F64_ONE));
+var wc100 = lens_wavefront_coefficients(sc100, F64_TWO, 0);
+var book = f64_neg(f64_div(f64_mul(f64_from(16), _fd(40, 3)), f64_mul(f64_from(32), f64_from(1000000))));
+_assert_rel(WavefrontCoefficients_w040(wc100), book, REL14, "W040 = -B h^4/(32 f^3)");
+assert(f64_lt(WavefrontCoefficients_w040(wc100), 0), "undercorrected singlet: W040 < 0 in the OPD convention");
+# Field terms at H = h*theta (theta = 0.01 rad): W222 = -S_III/2 = -phi*H^2/2 and
+# W220 = -(S_III + S_IV)/4 = -(phi + phi/n)*H^2/4; tangential W222 + W220 is
+# -(3 S_III + S_IV)/4, the tangential field curvature.
+var hh = f64_mul(F64_TWO, _fd(1, 100));
+var wcf = lens_wavefront_coefficients(sc100, F64_TWO, hh);
+var phi = _fd(1, 100);
+var hh2 = f64_mul(hh, hh);
+_assert_rel(WavefrontCoefficients_w222(wcf), f64_neg(f64_div(f64_mul(phi, hh2), F64_TWO)), REL14, "W222 = -S_III/2");
+var w220_ref = f64_neg(f64_div(f64_mul(f64_add(phi, f64_div(phi, N15)), hh2), f64_from(4)));
+_assert_rel(WavefrontCoefficients_w220(wcf), w220_ref, REL14, "W220 = -(S_III + S_IV)/4");
+var wt_ref = f64_neg(f64_div(f64_mul(f64_add(f64_mul(f64_from(3), phi), f64_div(phi, N15)), hh2), f64_from(4)));
+_assert_rel(f64_add(WavefrontCoefficients_w222(wcf), WavefrontCoefficients_w220(wcf)), wt_ref, REL14,
+  "tangential W222 + W220 = -(3 S_III + S_IV)/4");
+# W131 = +S_II/2 = -coma*h^2*H/2, tied to the tangential coma that tests/lens.tcyr
+# pins against the tracer (1%): 3*W131*f/h = -(3/2)*coma*h^2*theta*f. SIGNED — the
+# first cut had it with |.| on both sides and the wrong sign in the module.
+var tco = f64_neg(f64_mul(f64_mul(_fd(3, 2), SeidelCoefficients_coma(sc100)), f64_from(4)));
+var w131_f = f64_div(f64_mul(f64_mul(f64_from(3), WavefrontCoefficients_w131(wcf)), f64_from(100)), F64_TWO);
+_assert_rel(w131_f, tco, REL14, "3 W131 f/h = -(3/2) coma h^2 theta f");
+# ... and against the TRACED OPD fan of the R = 100 singlet at theta = 0.01, field on
+# +y: the odd part [W(+h) - W(-h)]/2 at h = 2 is W131 (W311 = 0, stop at the lens).
+# Traced 0.982 of the Seidel value; the sign is the point.
+_w_paraxial(f64_from(100), par);
+var sct = lens_seidel_coefficients(N15, load64(par + 8), 0, f64_neg(F64_ONE));
+var wct3 = lens_wavefront_coefficients(sct, F64_TWO, _fd(2, 100));
+var opd_p = _w_traced_tilt(f64_from(100), F64_TWO, _fd(1, 100), load64(par));
+var opd_m = _w_traced_tilt(f64_from(100), f64_neg(F64_TWO), _fd(1, 100), load64(par));
+var odd = f64_div(f64_sub(opd_p, opd_m), F64_TWO);
+_assert_near(f64_div(WavefrontCoefficients_w131(wct3), odd), F64_ONE, _fd(3, 100), "W131 / traced odd OPD (3%)");
+assert(f64_gt(WavefrontCoefficients_w131(wct3), 0), "field on +y, undercorrected singlet: W131 > 0");
+assert_eq(WavefrontCoefficients_w311(wcf), 0, "no distortion for a thin lens, stop at the lens");
+# W311 = +S_V/2 (odd in H: Welford's sign).
+var scd = alloc(sizeof(SeidelCoefficients));
+SeidelCoefficients_set_spherical(scd, 0);
+SeidelCoefficients_set_coma(scd, 0);
+SeidelCoefficients_set_astigmatism(scd, 0);
+SeidelCoefficients_set_field_curvature(scd, 0);
+SeidelCoefficients_set_distortion(scd, _fd(1, 10));
+assert_eq(WavefrontCoefficients_w311(lens_wavefront_coefficients(scd, F64_TWO, _fd(2, 100))), _fd(1, 20),
+  "W311 = +S_V/2");
+assert_eq(lens_wavefront_coefficients(0, F64_TWO, hh), 0, "null seidel -> 0");
+
+# ── OTF: values ────────
+test_group("otf_values");
+
+# A perfect lens: the closed-form diffraction-limited MTF, Im 0.
+var wc0 = _wc(0, 0, 0, 0, 0);
+var vlist = alloc(40);
+store64(vlist, _fd(5, 100));
+store64(vlist + 8, _fd(3, 10));
+store64(vlist + 16, _fd(7, 10));
+store64(vlist + 24, _fd(95, 100));
+store64(vlist + 32, _fd(1, 1000));
+for (var iv = 0; iv < 5; iv = iv + 1) {
+    var vv = load64(vlist + iv * 8);
+    var nn = 64;
+    if (iv == 4) { nn = 256; }
+    assert_eq(lens_otf_seidel(wc0, F64_ONE, vv, 0, nn, &re, &im), PK_ERR_NONE, "perfect lens ok");
+    _assert_rel(re, lens_mtf_diffraction_limited(vv, F64_ONE), REL12,
+      "perfect lens: OTF = (2/pi)(acos v - v sqrt(1-v^2))");
+    assert_eq(im, 0, "perfect lens: Im OTF = 0");
+}
+# scipy dblquad references (wavelength 1, W in waves).
+var wcd = _wc(0, 0, 0, _fd(3, 2), 0);
+var _s = lens_otf_seidel(wcd, F64_ONE, _fd(1, 5), 0, 64, &re, &im);
+_assert_rel(re, 0xBFAECF44EF3E0CBC, REL9, "1.5 waves defocus, v = 0.2: OTF = -0.06018 (contrast reversed)");
+assert(f64_lt(re, 0), "defocus reverses contrast at v = 0.2");
+var wcc = _wc(0, F64_HALF, 0, 0, 0);
+_s = lens_otf_seidel(wcc, F64_ONE, _fd(3, 10), 0, 64, &re, &im);
+_assert_rel(re, 0x3FE1E92E09031E4A, REL9, "coma 0.5 waves, v = 0.3, sagittal: 0.559714");
+_assert_near(im, 0, TOL12, "coma sagittal: Im 0 (symmetric)");
+_s = lens_otf_seidel(wcc, F64_ONE, _fd(3, 10), 1, 64, &re, &im);
+_assert_rel(re, 0x3FC696EFF1E38824, REL9, "coma 0.5 waves, v = 0.3, tangential: Re 0.176481");
+_assert_rel(im, 0xBFDDF12C4AAD67DD, REL9, "coma 0.5 waves, v = 0.3, tangential: Im -0.467845 (a phase shift)");
+# The phase CONVENTION, independently of any dblquad: a tilt W311*y only shifts the
+# PSF, so along y W(a - v) - W(a + v) = -2v*W311 and the standard OTF is
+# MTF_dl*exp(-i*2*pi*W311*2v); an FFT of the PSF gives the same sign (0.17666 -
+# 0.46963i for the coma above). The first cut returned the conjugate.
+var wct = _wc(0, 0, 0, 0, _fd(1, 4));
+var mdl = lens_mtf_diffraction_limited(_fd(3, 10), F64_ONE);
+var tph = f64_mul(F64_TAU, _fd(15, 100));
+_s = lens_otf_seidel(wct, F64_ONE, _fd(3, 10), 1, 64, &re, &im);
+_assert_rel(re, f64_mul(mdl, f64_cos(tph)), REL12, "tilt W311 y, tangential: Re = MTF_dl cos(2 pi W311 2v)");
+_assert_rel(im, f64_neg(f64_mul(mdl, f64_sin(tph))), REL12, "tilt W311 y, tangential: Im = -MTF_dl sin(2 pi W311 2v)");
+_s = lens_otf_seidel(wct, F64_ONE, _fd(3, 10), 0, 64, &re, &im);
+_assert_rel(re, mdl, REL12, "tilt W311 y, sagittal: MTF_dl");
+# Past the cutoff: 0 + 0i, not a refusal.
+re = F64_ONE;
+im = F64_ONE;
+assert_eq(lens_otf_seidel(wcc, F64_ONE, N15, 1, 64, &re, &im), PK_ERR_NONE, "v = 1.5 ok");
+assert_eq(re, 0, "v = 1.5: Re 0");
+assert_eq(im, 0, "v = 1.5: Im 0");
+# MTF = |OTF| where Im != 0.
+_s = lens_otf_seidel(wcc, F64_ONE, _fd(3, 10), 1, 64, &re, &im);
+_assert_rel(lens_mtf_seidel(wcc, F64_ONE, _fd(3, 10), 1, 64), f64_sqrt(f64_add(f64_mul(re, re), f64_mul(im, im))),
+  REL14, "MTF = |OTF| with Im != 0");
+# Odd n: the Gauss-Legendre middle node at 0.
+_s = lens_otf_seidel(wc0, F64_ONE, _fd(3, 10), 0, 65, &re, &im);
+_assert_rel(re, mdl, REL12, "n = 65: perfect lens");
+var wcs = _wc(F64_ONE, 0, 0, 0, 0);
+_s = lens_otf_seidel(wcs, F64_ONE, _fd(2, 5), 0, 64, &re, &im);
+_assert_rel(re, 0x3FA5C50B0AD5A25E, REL9, "spherical 1 wave, v = 0.4: 0.042519");
+var wca = _wc(0, 0, F64_HALF, 0, 0);
+_s = lens_otf_seidel(wca, F64_ONE, _fd(1, 4), 1, 64, &re, &im);
+_assert_rel(re, 0x3FD44F2B6879BE9C, REL9, "astigmatism 0.5 waves, v = 0.25, tangential: 0.317332");
+_s = lens_otf_seidel(wca, F64_ONE, _fd(1, 4), 0, 64, &re, &im);
+_assert_rel(re, lens_mtf_diffraction_limited(_fd(1, 4), F64_ONE), REL12,
+  "astigmatism W222 y^2, sagittal: exactly the perfect-lens MTF");
+# Convergence: n = 64 and n = 128 agree to 1e-12 on the defocused pupil.
+var re64 = 0;
+var im64 = 0;
+_s = lens_otf_seidel(wcd, F64_ONE, _fd(3, 10), 0, 64, &re64, &im64);
+_s = lens_otf_seidel(wcd, F64_ONE, _fd(3, 10), 0, 128, &re, &im);
+_assert_near(re64, re, TOL12, "n = 64 vs 128: converged to 1e-12");
+# Wavelength scales the phase: W = 3 lengths at wavelength 2 is W = 1.5 waves.
+var wcd2 = _wc(0, 0, 0, f64_from(3), 0);
+var re2 = 0;
+var im2 = 0;
+_s = lens_otf_seidel(wcd2, F64_TWO, _fd(1, 5), 0, 64, &re2, &im2);
+_s = lens_otf_seidel(wcd, F64_ONE, _fd(1, 5), 0, 64, &re, &im);
+_assert_near(re2, re, TOL12, "k*W: 3 units at wavelength 2 == 1.5 units at wavelength 1");
+assert_eq(lens_mtf_seidel(wcd, F64_ONE, _fd(1, 5), 0, 64), f64_abs(re), "MTF = |OTF|");
+
+# n is a MINIMUM: an f/4 singlet (R = 100, h = 12.5, on axis) carries 18.5 waves of
+# spherical at 550 nm, which 64 nodes cannot resolve — the first cut returned
+# -5.27e-3 as success. The module raises n to resolve it (148 here). Reference:
+# numpy Gauss-Legendre over the same overlap at n = 256, 384, 512 (agreeing to 5e-12).
+var scf4 = lens_seidel_coefficients(N15, f64_from(100), 0, f64_neg(F64_ONE));
+var wcf4 = lens_wavefront_coefficients(scf4, _fd(25, 2), 0);
+var WL = _fd(55, 100000);
+assert_eq(lens_otf_seidel(wcf4, WL, _fd(3, 10), 0, 64, &re, &im), PK_ERR_NONE, "f/4 singlet ok");
+_assert_rel(re, 0x3F3431BAED272EED, REL9, "f/4 singlet, 18.5 waves: OTF(0.3) = +3.08e-4 at n = 64 asked");
+_assert_near(im, 0, TOL12, "f/4 singlet: Im 0");
+# Below v = 0.02 the chord is thin and n is raised to 128: a perfect lens at v = 0.005
+# asked at n = 64 is then 2e-14 from the closed form (64 itself is 5.7e-11).
+_s = lens_otf_seidel(wc0, F64_ONE, _fd(5, 1000), 0, 64, &re, &im);
+_assert_rel(re, lens_mtf_diffraction_limited(_fd(5, 1000), F64_ONE), REL12, "v = 0.005 at n = 64 asked: raised to 128");
+# Too aberrated for 256 nodes: refused, not approximated.
+re = F64_ONE;
+assert_eq(lens_otf_seidel(_wc(f64_from(40), 0, 0, 0, 0), F64_ONE, _fd(3, 10), 0, 64, &re, &im),
+  PK_ERR_INVALID_PARAMETER, "40 waves of spherical: refused");
+assert_eq(re, 0, "refused: Re 0");
+assert_eq(lens_otf_seidel(_wc(NAN, 0, 0, 0, 0), F64_ONE, _fd(3, 10), 0, 64, &re, &im), PK_ERR_INVALID_PARAMETER,
+  "NaN coefficient: refused");
+# Zernike: Z7 (m = 1) spans +-sqrt(8)*c, so 7 waves of it bounds the phase difference
+# by 2*7*sqrt(8) = 39.6 waves, past 256/8 — refused (sqrt(n+1) alone would say 28).
+var zbig = alloc(7 * 8);
+for (var ib = 0; ib < 7; ib = ib + 1) { store64(zbig + ib * 8, 0); }
+store64(zbig + 6 * 8, f64_from(7));
+assert_eq(lens_otf_zernike(zernike_wf_new(zbig, 7), F64_ONE, _fd(3, 10), 1, 64, &re, &im), PK_ERR_INVALID_PARAMETER,
+  "7 waves of Z7 coma: refused");
+
+# ── OTF: Zernike and Seidel describe one wavefront ────────
+test_group("otf_zernike_vs_seidel");
+
+# W040*r^4 = W040*(Z11/(6 sqrt5) + Z4/(2 sqrt3) + 1/3) in Noll-normalised Zernikes;
+# the piston drops out of W(a+v) - W(a-v). Zernike evaluation (wave_zernike) and
+# the Seidel polynomial share no code.
+var zc = alloc(11 * 8);
+for (var iz = 0; iz < 11; iz = iz + 1) { store64(zc + iz * 8, 0); }
+store64(zc + 3 * 8, f64_div(F64_ONE, f64_mul(F64_TWO, f64_sqrt(f64_from(3)))));
+store64(zc + 10 * 8, f64_div(F64_ONE, f64_mul(f64_from(6), f64_sqrt(f64_from(5)))));
+var zwf = zernike_wf_new(zc, 11);
+var zr = 0;
+var zi = 0;
+_s = lens_otf_zernike(zwf, F64_ONE, _fd(2, 5), 0, 64, &zr, &zi);
+_s = lens_otf_seidel(wcs, F64_ONE, _fd(2, 5), 0, 64, &re, &im);
+_assert_near(zr, re, TOL12, "spherical: Zernike and Seidel OTF agree (Re)");
+_assert_near(zi, im, TOL12, "spherical: Zernike and Seidel OTF agree (Im)");
+_s = lens_otf_zernike(zwf, F64_ONE, _fd(2, 5), 1, 64, &zr, &zi);
+_assert_near(zr, re, TOL12, "a rotationally symmetric W: direction does not matter");
+assert(f64_gt(lens_mtf_zernike(zwf, F64_ONE, _fd(2, 5), 0, 64), 0), "lens_mtf_zernike = |OTF| > 0");
+# An ASYMMETRIC one: W131*y*r^2 = W131*(Z7/(3 sqrt8) + Z3/3) — y-coma and its tilt,
+# which pins the Zernike angle convention (theta = atan2(y, x)) to the Seidel y.
+var zk = alloc(7 * 8);
+for (var ik = 0; ik < 7; ik = ik + 1) { store64(zk + ik * 8, 0); }
+store64(zk + 2 * 8, f64_div(F64_HALF, f64_from(3)));
+store64(zk + 6 * 8, f64_div(F64_HALF, f64_mul(f64_from(3), f64_sqrt(f64_from(8)))));
+var zwc = zernike_wf_new(zk, 7);
+_s = lens_otf_zernike(zwc, F64_ONE, _fd(3, 10), 1, 64, &zr, &zi);
+_s = lens_otf_seidel(wcc, F64_ONE, _fd(3, 10), 1, 64, &re, &im);
+_assert_near(zr, re, TOL12, "y-coma: Zernike == Seidel, tangential Re");
+_assert_near(zi, im, TOL12, "y-coma: Zernike == Seidel, tangential Im");
+_s = lens_otf_zernike(zwc, F64_ONE, _fd(3, 10), 0, 64, &zr, &zi);
+_s = lens_otf_seidel(wcc, F64_ONE, _fd(3, 10), 0, 64, &re, &im);
+_assert_near(zr, re, TOL12, "y-coma: Zernike == Seidel, sagittal Re");
+_s = lens_otf_zernike(zwc, F64_ONE, _fd(3, 10), 1, 64, &zr, &zi);
+_assert_rel(lens_mtf_zernike(zwc, F64_ONE, _fd(3, 10), 1, 64), f64_sqrt(f64_add(f64_mul(zr, zr), f64_mul(zi, zi))),
+  REL14, "lens_mtf_zernike = |OTF| with Im != 0");
+
+# ── Polychromatic OTF: complex sum ────────
+test_group("otf_polychromatic");
+
+var wls = alloc(24);
+store64(wls, _fd(45, 100000000));
+store64(wls + 8, _fd(55, 100000000));
+store64(wls + 16, _fd(65, 100000000));
+var wts = alloc(24);
+store64(wts, F64_ONE);
+store64(wts + 8, F64_TWO);
+store64(wts + 16, F64_ONE);
+var FN = f64_from(4);
+var NU = f64_from(200000);                       # 200 cycles/mm in metres
+# A perfect lens: the old real weighted mean is right there, and this reproduces it.
+var wz0 = _wc(0, 0, 0, 0, 0);
+assert_eq(lens_otf_polychromatic(wz0, 1, wls, 3, wts, 3, FN, NU, 0, 64, &re, &im), PK_ERR_NONE, "poly ok");
+_assert_rel(re, lens_mtf_polychromatic(wls, 3, wts, 3, FN, NU), REL12, "perfect lens: == lens_mtf_polychromatic");
+# 0.9 um of defocus: at 450 nm the OTF is reversed, at 650 nm it is not — the
+# complex sum cancels where the mean of |OTF| would add.
+var wzd = _wc(0, 0, 0, _fd(9, 10000000), 0);
+_s = lens_otf_polychromatic(wzd, 1, wls, 3, wts, 3, FN, NU, 0, 64, &re, &im);
+var mbar = 0;
+var osum = 0;
+for (var il = 0; il < 3; il = il + 1) {
+    var wl = load64(wls + il * 8);
+    var ore = 0;
+    var oim = 0;
+    _s = lens_otf_seidel(wzd, wl, f64_mul(f64_mul(NU, wl), FN), 0, 64, &ore, &oim);
+    mbar = f64_add(mbar, f64_mul(load64(wts + il * 8), f64_sqrt(f64_add(f64_mul(ore, ore), f64_mul(oim, oim)))));
+    osum = f64_add(osum, f64_mul(load64(wts + il * 8), ore));
+}
+mbar = f64_div(mbar, f64_from(4));
+osum = f64_div(osum, f64_from(4));
+_assert_rel(re, osum, REL14, "poly OTF = weighted sum of the complex OTFs");
+assert(f64_lt(f64_abs(re), mbar), "reversal cancels: |sum OTF| < mean |OTF| (the old form's answer)");
+# Missing weights default to 1.
+_s = lens_otf_polychromatic(wz0, 1, wls, 3, 0, 0, FN, NU, 0, 64, &re, &im);
+_assert_rel(re, lens_mtf_polychromatic(wls, 3, 0, 0, FN, NU), REL12, "no weights: equal weights");
+# ... including past n_weights: one weight 2, then 1, 1.
+var w1 = alloc(8);
+store64(w1, F64_TWO);
+_s = lens_otf_polychromatic(wzd, 1, wls, 3, w1, 1, FN, NU, 0, 64, &re, &im);
+var pacc = 0;
+for (var ip = 0; ip < 3; ip = ip + 1) {
+    var wlp = load64(wls + ip * 8);
+    var o1 = 0;
+    var o2 = 0;
+    _s = lens_otf_seidel(wzd, wlp, f64_mul(f64_mul(NU, wlp), FN), 0, 64, &o1, &o2);
+    var pw = F64_ONE;
+    if (ip == 0) { pw = F64_TWO; }
+    pacc = f64_add(pacc, f64_mul(pw, o1));
+}
+_assert_rel(re, f64_div(pacc, f64_from(4)), REL14, "partial weights: the missing ones are 1");
+# The Zernike path (seidel = 0), with a complex OTF.
+var zkr = 0;
+var zki = 0;
+var zlp = alloc(24);
+store64(zlp, _fd(8, 10));
+store64(zlp + 8, F64_ONE);
+store64(zlp + 16, _fd(12, 10));
+for (var iq = 0; iq < 3; iq = iq + 1) {
+    var wlq = load64(zlp + iq * 8);
+    var o3 = 0;
+    var o4 = 0;
+    _s = lens_otf_zernike(zwc, wlq, f64_mul(f64_mul(_fd(3, 10), wlq), F64_ONE), 1, 64, &o3, &o4);
+    zkr = f64_add(zkr, o3);
+    zki = f64_add(zki, o4);
+}
+_s = lens_otf_polychromatic(zwc, 0, zlp, 3, 0, 0, F64_ONE, _fd(3, 10), 1, 64, &re, &im);
+_assert_rel(re, f64_div(zkr, f64_from(3)), REL14, "poly, Zernike path: Re");
+_assert_rel(im, f64_div(zki, f64_from(3)), REL14, "poly, Zernike path: Im");
+
+# ── Error paths ────────
+test_group("otf_errors");
+
+re = F64_ONE;
+im = F64_ONE;
+assert_eq(lens_otf_seidel(0, F64_ONE, _fd(1, 5), 0, 64, &re, &im), PK_ERR_INVALID_PARAMETER, "null wc");
+assert_eq(re, 0, "refusal writes Re 0");
+assert_eq(lens_otf_zernike(0, F64_ONE, _fd(1, 5), 0, 64, &re, &im), PK_ERR_INVALID_PARAMETER, "null zernike");
+assert_eq(lens_otf_seidel(wc0, 0, _fd(1, 5), 0, 64, &re, &im), PK_ERR_INVALID_PARAMETER, "wavelength 0");
+assert_eq(lens_otf_seidel(wc0, F64_ONE, f64_neg(_fd(1, 5)), 0, 64, &re, &im), PK_ERR_INVALID_PARAMETER, "v < 0");
+assert_eq(lens_otf_seidel(wc0, F64_ONE, NAN, 0, 64, &re, &im), PK_ERR_INVALID_PARAMETER, "v NaN");
+assert_eq(lens_otf_seidel(wc0, F64_ONE, _fd(1, 5), 2, 64, &re, &im), PK_ERR_INVALID_PARAMETER, "direction 2");
+assert_eq(lens_otf_seidel(wc0, F64_ONE, _fd(1, 5), 0, 3, &re, &im), PK_ERR_INVALID_PARAMETER, "n = 3");
+assert_eq(lens_otf_seidel(wc0, F64_ONE, _fd(1, 5), 0, 257, &re, &im), PK_ERR_INVALID_PARAMETER, "n = 257");
+assert_eq(lens_otf_seidel(wc0, F64_ONE, F64_ONE, 0, 64, &re, &im), PK_ERR_NONE, "v = 1: at cutoff");
+assert_eq(re, 0, "v = 1: OTF 0");
+assert_eq(lens_mtf_seidel(0, F64_ONE, _fd(1, 5), 0, 64), NAN, "MTF of a null wc: NaN");
+assert_eq(lens_otf_polychromatic(wz0, 1, 0, 3, wts, 3, FN, NU, 0, 64, &re, &im), PK_ERR_INVALID_PARAMETER,
+  "poly: null wavelengths");
+assert_eq(lens_otf_polychromatic(wz0, 1, wls, 0, wts, 3, FN, NU, 0, 64, &re, &im), PK_ERR_INVALID_PARAMETER,
+  "poly: n_wl = 0");
+assert_eq(lens_otf_polychromatic(wz0, 1, wls, 3, wts, 3, 0, NU, 0, 64, &re, &im), PK_ERR_INVALID_PARAMETER,
+  "poly: N = 0");
+var INF = 0x7FF0000000000000;
+im = F64_ONE;
+assert_eq(lens_otf_seidel(0, F64_ONE, _fd(1, 5), 0, 64, &re, &im), PK_ERR_INVALID_PARAMETER, "null wc (Im)");
+assert_eq(im, 0, "refusal writes Im 0");
+assert_eq(lens_otf_seidel(wc0, INF, _fd(1, 5), 0, 64, &re, &im), PK_ERR_INVALID_PARAMETER, "wavelength inf");
+assert_eq(lens_otf_seidel(wc0, NAN, _fd(1, 5), 0, 64, &re, &im), PK_ERR_INVALID_PARAMETER, "wavelength NaN");
+# A null output pointer: refused, nothing written (the first cut stored through it).
+assert_eq(lens_otf_seidel(wc0, F64_ONE, _fd(1, 5), 0, 64, 0, &im), PK_ERR_INVALID_PARAMETER, "null re_out");
+assert_eq(lens_otf_zernike(zwf, F64_ONE, _fd(1, 5), 0, 64, &re, 0), PK_ERR_INVALID_PARAMETER, "null im_out");
+assert_eq(lens_otf_polychromatic(wz0, 1, wls, 3, wts, 3, FN, NU, 0, 64, 0, 0), PK_ERR_INVALID_PARAMETER,
+  "poly: null outputs");
+# `seidel` must be 0 or 1: 2 would read Seidel coefficients as a ZernikeWavefront.
+assert_eq(lens_otf_polychromatic(wz0, 2, wls, 3, wts, 3, FN, NU, 0, 64, &re, &im), PK_ERR_INVALID_PARAMETER,
+  "poly: seidel = 2");
+assert_eq(lens_otf_polychromatic(wz0, 1, wls, 3, wts, 3, INF, NU, 0, 64, &re, &im), PK_ERR_INVALID_PARAMETER,
+  "poly: N inf");
+assert_eq(lens_otf_polychromatic(wz0, 1, wls, 3, wts, 3, FN, INF, 0, 64, &re, &im), PK_ERR_INVALID_PARAMETER,
+  "poly: nu inf");
+var wbad = alloc(24);
+store64(wbad, F64_ONE);
+store64(wbad + 8, INF);
+store64(wbad + 16, F64_ONE);
+assert_eq(lens_otf_polychromatic(wz0, 1, wls, 3, wbad, 3, FN, NU, 0, 64, &re, &im), PK_ERR_INVALID_PARAMETER,
+  "poly: weight inf");
+store64(wbad + 8, NAN);
+assert_eq(lens_otf_polychromatic(wz0, 1, wls, 3, wbad, 3, FN, NU, 0, 64, &re, &im), PK_ERR_INVALID_PARAMETER,
+  "poly: weight NaN");
+store64(wbad + 8, f64_neg(F64_TWO));
+assert_eq(lens_otf_polychromatic(wz0, 1, wls, 3, wbad, 3, FN, NU, 0, 64, &re, &im), PK_ERR_INVALID_PARAMETER,
+  "poly: weights sum to 0");
+assert_eq(lens_otf_polychromatic(wz0, 1, wls, 3, 0, 3, FN, NU, 0, 64, &re, &im), PK_ERR_INVALID_PARAMETER,
+  "poly: null weights with n_weights 3");
+
+var r = assert_summary();

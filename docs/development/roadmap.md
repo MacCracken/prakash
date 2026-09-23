@@ -29,12 +29,12 @@ Rust→Cyrius port and the 2.2–2.5 correctness audits pushed back, plus the ga
 `docs/research/physics-completeness-audit.md` records as still open (absorbing thin
 films, fiber dispersion) and the 3×3 polarization ray tracing that document marked
 implemented but that was never built. 2.6.0 shipped the first of them — Gaussian
-beams, HG/LG modes, M² and OAM — 2.6.1 made it fast and 2.6.2 closed its edge cases; see `CHANGELOG.md`.
+beams, HG/LG modes, M² and OAM — 2.6.1 made it fast and 2.6.2 closed its edge cases;
+2.7.0 shipped wavefront coefficients and the aberrated OTF; see `CHANGELOG.md`.
 
 | Version | Release | Roadmap items it closes |
 |---|---|---|
-| **2.7.0** | Aberrations → image quality | wavefront coefficients from Seidel sums; aberrated MTF |
-| 2.8.0 | GRIN optics | gradient-index ray tracing |
+| **2.8.0** | GRIN optics | gradient-index ray tracing |
 | 2.9.0 | Diffractive optics | DOE: phase gratings, holographic elements |
 | 2.10.0 | Absorbing films + fiber dispersion | audit gaps: complex-index TMM, fiber dispersion |
 | 2.11.0 | 3×3 polarization ray tracing | audit gap: the PRT matrix never built |
@@ -45,22 +45,14 @@ beams, HG/LG modes, M² and OAM — 2.6.1 made it fast and 2.6.2 closed its edge
 | 2.16.0 | Negative-index media | metamaterials |
 | 2.17.0 | CIE 2006 observer | age-dependent observer |
 
-**Order is build order.** Only three edges constrain it: 2.7.0 builds on 2.5.0's OPD
-and the existing Zernike/FFT path; 2.13.0 needs 2.7.0's wavefront coefficients;
-2.12.0 uses 2.6.0's `GaussianBeam` as a pupil fill. Anything else can be swapped.
+**Order is build order.** Nothing left in it depends on anything else left in it:
+2.13.0 builds on 2.7.0's shipped wavefront coefficients, 2.12.0 on 2.6.0's
+`GaussianBeam` as a pupil fill. Anything can be swapped.
 Fixes found along the way ship as patches (2.6.1, …) of whichever minor is current.
 
 ⚠ **Keep rows SHORT.** A row says what the release delivers and what it will be
 pinned against. Measurements belong in `CHANGELOG.md`; a row that grows past ~8
 lines has started duplicating the release history and should be cut back.
-
-### 2.7.0 — Aberrations → image quality
-
-W₀₄₀, W₁₃₁, W₂₂₂, W₂₂₀, W₃₁₁ from the Seidel sums, pinned against the traced OPD
-that 2.5.0 repaired. Aberrated OTF/MTF by autocorrelating the generalised pupil
-function (Zernike or Seidel wavefront), sagittal and tangential. A polychromatic
-MTF that sums complex OTFs — `lens_mtf_polychromatic` is a real weighted mean and
-cannot show contrast reversal.
 
 ### 2.8.0 — GRIN optics
 
