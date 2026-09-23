@@ -31,8 +31,12 @@
 #
 # ⚠ The cost of point sampling is real and worth stating: structure narrower than
 # the step is aliased, not averaged. A laser line between two sample points is
-# missed entirely. Sample finely enough for the spectrum you have; that choice is
-# the caller's, which is why `n` is a parameter.
+# missed entirely. Sampling finely keeps the line in the Spd — `n` is the
+# caller's choice for that reason — but it does NOT carry it into colour:
+# spd_to_xyz and the photometry integrators read any SPD only at 380 + 5k nm, so
+# a line narrower than ~5 nm still reads 0 to 4.7x depending on where it falls
+# (see spd_to_xyz). For discrete lines, sum I_k * cie_cmf_at(lambda_k). (2.5.1:
+# this used to say "sample finely enough", which cannot fix that.)
 #
 # Sets err_out to PK_ERR_INVALID_PARAMETER for a null `fp`, n < 2, or
 # end_nm <= start_nm; PK_ERR_ALLOCATION if the sample buffer cannot be allocated.
@@ -1726,7 +1730,9 @@ fn cie_cmf_at(wavelength_nm) {
 struct Spd { start_nm; step_nm; values; len; }
 
 # Spd of `len` samples from start_nm every step_nm. `values` is borrowed, not
-# copied — the caller keeps it alive. 0 on allocation failure.
+# copied — the caller keeps it alive. 0 on allocation failure. Any grid is
+# accepted, but colour integration reads only 380 + 5k nm — see spd_to_xyz
+# before building a line spectrum on a fine grid.
 #must_use
 fn spd_new(start_nm, step_nm, values, len) {
     var s = alloc(sizeof(Spd));
@@ -1831,6 +1837,14 @@ fn _spd_integrate(s, cmf) {
 }
 
 # Integrate the SPD against the CIE 1931 2-degree CMFs -> Xyz.
+# ⚠ LINE SPECTRA DO NOT SURVIVE THIS. The integral is a 5 nm rectangle rule at
+# the 81 CIE wavelengths, and an SPD on any other grid is READ AT those points
+# through spd_at — so a feature narrower than ~5 nm is weighted by where it
+# happens to fall, not by its energy. Measured against a fine-grid integral of
+# the same samples (2.5.1): a 1 nm-FWHM Gaussian line reads 4.70x at 590.0 nm
+# (on a sample), 1.19x at 589.3 nm and 0 at 592.5 nm (between samples); a 0.1
+# nm line at 589.3 nm reads 0. A 10 nm line is right to 0.04%. For discrete
+# lines, sum I_k * cie_cmf_at(lambda_k) instead.
 #must_use
 fn spd_to_xyz(s) {
     _prk_trace("spd_to_xyz");

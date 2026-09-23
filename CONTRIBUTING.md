@@ -71,6 +71,11 @@ cyrius distlib && cyrius distlib ai
 ./scripts/sync-deps-sidecar.sh
 git diff --quiet dist/ || echo "dist/ stale — commit it"
 
+# The core bundle must link as a consumer links it: only dist/prakash.deps's
+# stdlib leaves, NO hisab. ranga depends on this, and the examples cannot see it
+# (they run inside this manifest, which declares hisab).
+./scripts/check-consumer-link.sh
+
 # Tests + benchmarks
 for f in tests/*.tcyr; do cyrius test "$f"; done
 cyrius bench tests/prakash.bcyr

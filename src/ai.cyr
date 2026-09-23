@@ -179,12 +179,65 @@ fn ai_hoosh_config_from_json(json, len, err_out) {
 
 # ── Agent registration (sandhi HTTP POST) ────────
 
+# Interpret daimon's answer to POST /v1/agents: 2xx with {"id":N,...} gives N as
+# a decimal cstring; anything else gives "unknown" with err_out set —
+#   non-2xx status                  PK_ERR_INVALID_PARAMETER (daimon refused it)
+#   2xx, body not a JSON object     PK_ERR_PARSE             (bad bytes)
+#   2xx, no integer "id"            PK_ERR_INVALID_PARAMETER (wrong schema)
+#   id buffer refused               PK_ERR_ALLOCATION
+# Split out of ai_register_agent so every branch is testable without a server.
+#must_use
+fn _ai_register_response(status, body, body_len, err_out) {
+    store64(err_out, PK_ERR_NONE);
+    if (status < 200) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return "unknown";
+    }
+    if (status >= 300) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return "unknown";
+    }
+    if (body == 0) {
+        store64(err_out, PK_ERR_PARSE);
+        return "unknown";
+    }
+    var data = bayan_json_v_parse_buf(body, body_len);
+    if (bayan_json_v_is_obj(data) == 0) {
+        store64(err_out, PK_ERR_PARSE);
+        return "unknown";
+    }
+    var id = bayan_json_v_obj_get(data, "id");
+    if (bayan_json_v_is_int(id) == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return "unknown";
+    }
+    var buf = alloc(32);
+    if (buf == 0) {
+        store64(err_out, PK_ERR_ALLOCATION);
+        return "unknown";
+    }
+    var n = fmt_int_buf(bayan_json_v_int(id), buf);
+    store8(buf + n, 0);
+    return buf;
+}
+
 # Register prakash as an agent with the daimon service. Blocking sandhi POST of
-# {"name":"prakash","capabilities":[...]} to <endpoint>/v1/agents/register;
-# returns the "agent_id" cstring ("unknown" if absent). Sets err_out on failure.
-#
-# Not unit-tested — needs a live daimon server (matches the Rust module, which
-# has no register_agent test).
+# {"name":"prakash","capabilities":[...]} to <endpoint>/v1/agents; returns
+# daimon's integer "id" as a decimal cstring, or "unknown" with err_out set on
+# any failure (see _ai_register_response above; an unreachable server is
+# PK_ERR_INVALID_PARAMETER, as before).
+# ⛔ 2.5.1: THIS POSTED TO /v1/agents/register AND REPORTED SUCCESS WHEN DAIMON
+# REFUSED IT. daimon has no such route: the path falls into its GET-only
+# /v1/agents/{id} branch and answers 405 {"error":"method not allowed"}. This
+# function never read the HTTP status, parsed that error body happily, found no
+# "agent_id" (a field daimon has never sent — it answers {"id":N,...}), and
+# returned "unknown" with err_out = PK_ERR_NONE: a fabricated success, against
+# CLAUDE.md's "report, don't fabricate". Reproduced against a live daimon 2.2.3:
+# 405 and 404 both came back as "unknown"/PK_ERR_NONE; only an unreachable port
+# reported an error. agnostic's ADR 0002 had recorded the dead path from outside.
+# ⚠ Registration is all daimon offers here: it has no heartbeat endpoint, so the
+# agent stays at its initial status. That is daimon's contract, not a gap in
+# this call.
 #must_use
 fn ai_register_agent(client, err_out) {
     store64(err_out, PK_ERR_NONE);
@@ -214,11 +267,11 @@ fn ai_register_agent(client, err_out) {
     bayan_json_v_arr_push(caps, bayan_json_v_str_new(str_from("wave_optics")));
     bayan_json_v_obj_set(body, str_from("capabilities"), caps);
     var body_str = bayan_json_v_build(body);
-    # URL: endpoint + "/v1/agents/register". `str_cat` returns a Str whose buffer
-    # is exactly la+lb bytes with NO terminator, but sandhi consumes the URL as a
+    # URL: endpoint + "/v1/agents". `str_cat` returns a Str whose buffer is
+    # exactly la+lb bytes with NO terminator, but sandhi consumes the URL as a
     # cstring (sandhi_url_parse_a runs off the end), so it must be terminated
     # explicitly — `str_cstr` copies into a len+1 buffer and stores the NUL.
-    var url_s = str_cat(str_from(DaimonConfig_endpoint(config)), str_from("/v1/agents/register"));
+    var url_s = str_cat(str_from(DaimonConfig_endpoint(config)), str_from("/v1/agents"));
     if (url_s == 0) {
         store64(err_out, PK_ERR_ALLOCATION);
         return "unknown";
@@ -238,15 +291,6 @@ fn ai_register_agent(client, err_out) {
         store64(err_out, PK_ERR_INVALID_PARAMETER);
         return "unknown";
     }
-    var data = bayan_json_v_parse_buf(sandhi_http_body(resp), sandhi_http_body_len(resp));
-    if (data == 0) {
-        # invalid registration response (parse failure) -> error, matches Rust
-        store64(err_out, PK_ERR_INVALID_PARAMETER);
-        return "unknown";
-    }
-    var aid = bayan_json_v_obj_get(data, "agent_id");
-    if (bayan_json_v_is_str(aid) == 1) {
-        return str_data(bayan_json_v_str(aid));
-    }
-    return "unknown";
+    return _ai_register_response(sandhi_http_status(resp), sandhi_http_body(resp),
+      sandhi_http_body_len(resp), err_out);
 }

@@ -36,6 +36,12 @@ var PK_ERR_ALLOCATION        = (0 - 8);
 # field was absent or of the wrong type — bad bytes vs. wrong schema.
 var PK_ERR_PARSE             = (0 - 9);
 
+# Cache epoch: prakash_reset_caches() increments it, and any cache defined in a
+# module that cannot see that function's own list (bundle order) compares against
+# it and drops itself when it moves. It lives here because this is the one module
+# every other module, and every test suite, includes. (2.5.1)
+var _prk_cache_epoch = 0;
+
 # 1 if `code` is an error (negative), else 0.
 #must_use
 fn prakash_is_err(code) {

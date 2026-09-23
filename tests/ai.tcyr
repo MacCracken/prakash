@@ -112,6 +112,61 @@ var _rid = ai_register_agent(0, &_re);
 assert_eq(_re, PK_ERR_INVALID_PARAMETER, "ai_register_agent(null) reports PK_ERR_INVALID_PARAMETER");
 assert_eq(streq(_rid, "unknown"), 1, "ai_register_agent(null) returns the \"unknown\" sentinel");
 
+# ── registration response (2.5.1) ────────
+test_group("ai_register_response");
+# ⛔ Through 2.5.0 ai_register_agent posted to /v1/agents/register, which daimon
+# answers 405 {"error":"method not allowed"}, never read the status, and returned
+# "unknown" with PK_ERR_NONE — reproduced against a live daimon 2.2.3. The null
+# path above was its only test, so the fabricated success was invisible. These
+# drive every branch of the response interpretation with the bytes daimon sends.
+fn _rr(status, body, err) {
+    var n = 0;
+    if (body != 0) { n = strlen(body); }
+    return _ai_register_response(status, body, n, err);
+}
+var _rre = 0;
+var _rr405 = _rr(405, "{\"error\":\"method not allowed\"}", &_rre);
+assert_eq(_rre, PK_ERR_INVALID_PARAMETER, "daimon's 405 JSON body is an error, not success (the 2.5.0 defect)");
+assert_eq(streq(_rr405, "unknown"), 1, "405 returns the \"unknown\" sentinel");
+var _rr404 = _rr(404, "{\"error\":\"not found\",\"code\":404}", &_rre);
+assert_eq(_rre, PK_ERR_INVALID_PARAMETER, "404 is an error");
+var _rr500 = _rr(500, "", &_rre);
+assert_eq(_rre, PK_ERR_INVALID_PARAMETER, "500 with an empty body is an error");
+var _rr201 = _rr(201, "{\"id\":7,\"name\":\"prakash\",\"status\":0}", &_rre);
+assert_eq(_rre, PK_ERR_NONE, "daimon's 201 {\"id\":7,...} succeeds");
+assert_eq(streq(_rr201, "7"), 1, "and returns the id as the cstring \"7\"");
+var _rrbig = _rr(200, "{\"id\":12345678901}", &_rre);
+assert_eq(_rre, PK_ERR_NONE, "200 is 2xx too");
+assert_eq(streq(_rrbig, "12345678901"), 1, "an id past 2^32 formats in full");
+var _rr299 = _rr(299, "{\"id\":3}", &_rre);
+assert_eq(streq(_rr299, "3"), 1, "299 is the last 2xx");
+# These two carry a VALID id, so they are the only cases that can tell a status
+# check that returns from one that sets err_out and falls through to the id.
+var _rr199 = _rr(199, "{\"id\":3}", &_rre);
+assert_eq(_rre, PK_ERR_INVALID_PARAMETER, "199 is not 2xx, even with a valid id");
+assert_eq(streq(_rr199, "unknown"), 1, "199 returns the sentinel, not the id in its body");
+var _rr300 = _rr(300, "{\"id\":3}", &_rre);
+assert_eq(_rre, PK_ERR_INVALID_PARAMETER, "300 is not 2xx, even with a valid id");
+assert_eq(streq(_rr300, "unknown"), 1, "300 returns the sentinel, not the id in its body");
+var _rrnoid = _rr(201, "{\"name\":\"prakash\"}", &_rre);
+assert_eq(_rre, PK_ERR_INVALID_PARAMETER, "2xx without an id is the wrong schema, not success");
+assert_eq(streq(_rrnoid, "unknown"), 1, "and returns the sentinel");
+var _rrold = _rr(201, "{\"agent_id\":\"a-1\"}", &_rre);
+assert_eq(_rre, PK_ERR_INVALID_PARAMETER, "the Rust-era \"agent_id\" field is not daimon's contract");
+var _rrsid = _rr(201, "{\"id\":\"7\"}", &_rre);
+assert_eq(_rre, PK_ERR_INVALID_PARAMETER, "a string id is the wrong schema");
+# bayan_json_v_int truncates a float, so accepting one would turn 7.9 into "7".
+var _rrfid = _rr(201, "{\"id\":7.9}", &_rre);
+assert_eq(_rre, PK_ERR_INVALID_PARAMETER, "a float id is the wrong schema, not a truncated success");
+assert_eq(streq(_rrfid, "unknown"), 1, "a float id returns the sentinel");
+var _rrtxt = _rr(201, "created", &_rre);
+assert_eq(_rre, PK_ERR_PARSE, "a 2xx body that is not JSON is PK_ERR_PARSE");
+var _rrarr = _rr(201, "[1,2]", &_rre);
+assert_eq(_rre, PK_ERR_PARSE, "a 2xx JSON array is PK_ERR_PARSE (not an object)");
+var _rrnull = _rr(201, 0, &_rre);
+assert_eq(_rre, PK_ERR_PARSE, "a 2xx with no body is PK_ERR_PARSE");
+assert_eq(streq(_rrnull, "unknown"), 1, "and returns the sentinel");
+
 # ── null handles (2.4.9) ────────
 test_group("ai_null_handle_sweep");
 # ⛔ All four exited 139 before 2.4.9. The two encoders were missed by the 2.2.7

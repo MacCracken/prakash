@@ -884,4 +884,41 @@ assert(lens_mtf_through_focus(0, 0, 0, 0, 4, _nb) == 0,
 assert(lens_petzval_sum(0, 4) == 0, "lens_petzval_sum(null) returns its sentinel, not a SIGSEGV");
 assert(lens_system_magnification(0, 4) == 0, "lens_system_magnification(null) returns its sentinel, not a SIGSEGV");
 
+# ── prakash_reset_caches covers the 2D-diffraction scratch (2.5.1) ────────
+test_group("reset_caches_pattern_scratch");
+# ⛔ 2.3.7 made prakash_reset_caches() the documented partner of alloc_reset();
+# 2.3.8 then gave wave_pattern six grow-only scratch pointers that it never
+# cleared. Following the recipe exactly — reset, forget, allocate — the next 2D
+# diffraction call wrote into a block the allocator had already handed to the
+# consumer: 12,416 of a fresh 16,384-word buffer overwritten, no error. This runs
+# the recipe and checks both halves: the consumer's memory is untouched, and the
+# pattern is still bit-identical to the one computed before the reset.
+var _rs_p1 = diffraction_pattern_circular(64, f64_from(10));
+assert(_rs_p1 != 0, "diffraction_pattern_circular(64) builds before the reset");
+var _rs_c = pattern2d_get(_rs_p1, 32, 32);
+var _rs_e = pattern2d_get(_rs_p1, 40, 29);
+var _rs_m = pattern2d_max_intensity(_rs_p1);
+alloc_reset();
+var _rs_rc = prakash_reset_caches();
+var _rs_n = 64 * 64 * 16 * 2;
+var _rs_mine = alloc(_rs_n);
+assert(_rs_mine != 0, "the consumer's post-reset buffer allocates");
+if (_rs_mine != 0) {
+    for (var _rs_i = 0; _rs_i < _rs_n; _rs_i = _rs_i + 8) { store64(_rs_mine + _rs_i, 0x5A5A5A5A5A5A5A5A); }
+}
+var _rs_p2 = diffraction_pattern_circular(64, f64_from(10));
+assert(_rs_p2 != 0, "diffraction_pattern_circular(64) builds after reset + forget");
+var _rs_hit = 0;
+if (_rs_mine != 0) {
+    for (var _rs_j = 0; _rs_j < _rs_n; _rs_j = _rs_j + 8) {
+        if (load64(_rs_mine + _rs_j) != 0x5A5A5A5A5A5A5A5A) { _rs_hit = _rs_hit + 1; }
+    }
+}
+assert_eq(_rs_hit, 0, "no word of memory allocated after the reset is written by the next diffraction call");
+if (_rs_p2 != 0) {
+    assert_eq(pattern2d_get(_rs_p2, 32, 32), _rs_c, "the centre value is bit-identical after reset + forget");
+    assert_eq(pattern2d_get(_rs_p2, 40, 29), _rs_e, "an off-axis value is bit-identical after reset + forget");
+    assert_eq(pattern2d_max_intensity(_rs_p2), _rs_m, "the peak is bit-identical after reset + forget");
+}
+
 var r = assert_summary();

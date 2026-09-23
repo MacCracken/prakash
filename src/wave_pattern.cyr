@@ -54,7 +54,9 @@ fn _pat_dims_bad(width, height, elem_bytes) {
 # ⚠ Every cell is garbage on return. This exists only for callers that write all
 # `width * height` cells before anything reads one, and it is private for exactly
 # that reason — `pattern2d_new` is public API and keeps its zero-fill, because a
-# consumer (soorat, kiran, ranga) may rely on a fresh pattern reading as zero.
+# consumer may rely on a fresh pattern reading as zero. (No current consumer calls
+# it: ranga uses only the spectral surface, and the Rust 1.x consumers cannot
+# reach the bundle. It is still public API; this used to name all three.)
 # Dropping the fill from the public constructor would be a silent contract
 # change, not an optimisation.
 #
@@ -238,12 +240,25 @@ var _pat_apert_c = 0;
 var _pat_apert_n = 0;
 var _pat_col_c = 0;
 var _pat_col_n = 0;
+# The _prk_cache_epoch these six blocks were allocated under. When
+# prakash_reset_caches() moves it on, all six belong to a heap alloc_reset()
+# already reclaimed, and they are dropped before any is reused (2.5.1).
+var _pat_epoch = 0;
 
 # Return a scratch block of at least `want` bytes from the cache at `cache_p` /
 # `size_p`, growing it if needed. Returns 0 if the allocation fails, leaving the
 # previous block intact.
 #must_use
 fn _pat_scratch(cache_p, size_p, want) {
+    if (_pat_epoch != _prk_cache_epoch) {
+        _pat_grid_c = 0;
+        _pat_grid_n = 0;
+        _pat_apert_c = 0;
+        _pat_apert_n = 0;
+        _pat_col_c = 0;
+        _pat_col_n = 0;
+        _pat_epoch = _prk_cache_epoch;
+    }
     if (load64(size_p) >= want) { return load64(cache_p); }
     var b = alloc(want);
     if (b == 0) { return 0; }

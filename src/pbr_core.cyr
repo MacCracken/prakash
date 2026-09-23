@@ -64,10 +64,13 @@ fn _pbr_pow5(x) {
 #must_use
 # ⚠ The clamp and the x^5 are written out rather than delegated to `f64_clamp`
 # and `_pbr_pow5`. Cyrius has no `#inline`, so a call here is a real call, and
-# this is the cheapest and most-called function in the PBR set — soorat evaluates
-# it per light per pixel. Measured same-binary with interleaved arms in 2.3.2:
-# 16.3 ns as written with both calls, 15 ns with only `_pbr_pow5` expanded,
-# **12 ns with both (−26%)**. Bit-identical, including at both clamp boundaries.
+# this is the cheapest and most-called function in the PBR set — every
+# pbr_cook_torrance and pbr_clearcoat_fresnel evaluation goes through it. (Until
+# 2.5.1 this said "soorat evaluates it per light per pixel"; soorat evaluates its
+# own WGSL copy and calls no prakash Fresnel.) Measured same-binary with
+# interleaved arms in 2.3.2: 16.3 ns as written with both calls, 15 ns with only
+# `_pbr_pow5` expanded, **12 ns with both (−26%)**. Bit-identical, including at
+# both clamp boundaries.
 # Keep the delegating form anywhere that is not hot; `_pbr_pow5` is still the
 # single definition of the square-and-multiply and the rest of the file uses it.
 fn pbr_fresnel_schlick(f0, cos_theta) {

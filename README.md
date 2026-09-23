@@ -4,7 +4,7 @@
 
 Physics of light: ray optics, wave optics, spectral math, lens geometry, atmospheric scattering, and physically-based rendering primitives. Written in [Cyrius](https://github.com/MacCracken/cyrius), ported from Rust (2.0.0). The 2D FFT behind `wave_pattern` comes from [hisab](https://github.com/MacCracken/hisab) — `num_fft` is prakash's single hisab entry point, and the rest, complex arithmetic included, is prakash's own.
 
-Consumed by [ranga](https://github.com/MacCracken/ranga) (spectral/colour — **already on Cyrius**, pulling `dist/prakash.cyr` as a git dep), [soorat](https://github.com/MacCracken/soorat) (PBR shading) and [kiran](https://github.com/MacCracken/kiran) (lighting). The latter two are still on the 1.x Rust crate; `dist/prakash*.cyr` is the interop surface as they port.
+Consumed by [ranga](https://github.com/MacCracken/ranga) (spectral/colour — **on Cyrius**, pulling `dist/prakash.cyr` as a git dep at 2.2.8; upgrade notes in [docs/guides/upgrading.md](docs/guides/upgrading.md)). [tanmatra](https://github.com/MacCracken/tanmatra), [soorat](https://github.com/MacCracken/soorat) and [kiran](https://github.com/MacCracken/kiran) use the frozen 1.x Rust crate; only tanmatra has a plan to move to the bundle. Details per consumer: [docs/architecture/overview.md](docs/architecture/overview.md#consumers).
 
 ## Modules
 
@@ -50,15 +50,16 @@ stdlib = [
 # ⚠ Only needed if you call the 2D-FFT surface — diffraction_pattern_2d,
 # diffraction_pattern_circular, psf_from_wavefront, psf_diffraction_limited.
 # Without it the bundle still builds and every other entry point works; you get
-# one `undefined function 'num_fft'` warning and those four functions are
-# unlinked. Everything else in prakash is self-contained.
+# one `undefined function 'num_fft'` warning, and calling one of those four
+# refuses to build. Everything else in prakash is self-contained. CI proves this
+# on every commit: scripts/check-consumer-link.sh.
 git     = "https://github.com/MacCracken/hisab.git"
 tag     = "3.2.1"
 modules = ["dist/hisab.cyr"]
 
 [deps.prakash]
 git     = "https://github.com/MacCracken/prakash.git"
-tag     = "2.5.0"
+tag     = "2.5.1"
 modules = ["dist/prakash.cyr"]        # math-only core (no TLS)
 # For the AI client instead, pull the ai bundle (adds the sandhi HTTP/TLS stack):
 # modules = ["dist/prakash-ai.cyr"]
@@ -114,7 +115,7 @@ prakash (Cyrius)
 
 ```sh
 cyrius deps                 # resolve the hisab git dep
-for f in tests/*.tcyr; do cyrius test "$f"; done   # 7171 assertions, 31 suites
+for f in tests/*.tcyr; do cyrius test "$f"; done   # 7201 assertions, 31 suites
 cyrius distlib              # regenerate dist/prakash.cyr
 cyrius distlib ai           # regenerate dist/prakash-ai.cyr
 cyrius bench tests/prakash.bcyr                     # 139 benchmarks

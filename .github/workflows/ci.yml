@@ -176,6 +176,12 @@ jobs:
           fi
           echo "dist/prakash.cyr is free of sandhi/TLS/net symbols"
 
+      - name: Core bundle links as a consumer links it (no hisab)
+        # README promises dist/prakash.cyr builds without hisab, with one
+        # num_fft warning. ranga depends on that and nothing else here checks it:
+        # the examples below run inside this manifest, which declares hisab.
+        run: ./scripts/check-consumer-link.sh
+
       - name: Build
         run: |
           mkdir -p build

@@ -79,6 +79,14 @@ var _r = prakash_reset_caches();   # ⛔ not optional
 the next call rebuilds each table from the compiled-in constants. Rebuilding all
 21 costs about 24 KB.
 
+⛔ **Before 2.5.1 it did not cover the 2D-diffraction scratch blocks**, which
+2.3.8 added one release after it. With the recipe above followed exactly, the next
+`diffraction_pattern_circular(64, 10)` wrote into memory the allocator had already
+handed back out: **12,416 of a fresh 16,384-word buffer overwritten**, and the
+pattern itself wrong. Those six pointers live in `wave_pattern`, which comes after
+the reset in the bundle, so since 2.5.1 the reset bumps an epoch and they drop
+themselves on their next use. Pinned in `tests/hardening.tcyr`.
+
 ## Thread safety
 
 prakash makes **no thread-safety guarantee**, and two things narrow it further:

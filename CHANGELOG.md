@@ -2,6 +2,119 @@
 
 ## [Unreleased]
 
+## [2.5.1] - 2026-09-22 — the roadmap's remaining work was consumer work: a fabricated registration, a reset that missed six pointers, and ranga's upgrade path proven
+
+"Continue the roadmap" started with a measurement, not a build: every open item
+(1–11) is demand-gated, so a survey of every local repo (plus kiran on GitHub)
+checked who actually consumes prakash and what they ask for. **Nobody asks for any of
+items 1–11**, and item 12 was wrong — it listed ranga as blocked on moving to Cyrius,
+when ranga already vendors `dist/prakash.cyr` (at 2.2.8), and it omitted tanmatra.
+The survey also turned up two live defects. Suite **7171 → 7201 assertions across 31
+suites**, 0 failed. Reference coverage **414/414**. `cyrius audit` exits 0; fmt, lint,
+`doc --check` (63 files), vet, deny clean; `deps --verify` 112/112; `#must_use`
+429 → **430**, 0 lost. Benchmarks 139.
+
+### Fixed
+- ⛔ **ai — `ai_register_agent` reported success when daimon refused it.** It posted to
+  `/v1/agents/register`, a path daimon does not have: the request falls into its
+  GET-only `/v1/agents/{id}` branch and gets **405 `{"error":"method not allowed"}`**.
+  The function never read the HTTP status, parsed that error body, found no
+  `"agent_id"` (a field daimon has never sent), and returned `"unknown"` with
+  **`PK_ERR_NONE`**. Reproduced against a live daimon 2.2.3: 405 and 404 both came back
+  as success; only an unreachable port reported an error. It now posts to
+  `POST /v1/agents` and returns daimon's integer `"id"` as a decimal cstring
+  (`"1"`, `"2"` against the live server, through the regenerated
+  `dist/prakash-ai.cyr`). Non-2xx is `PK_ERR_INVALID_PARAMETER`, a 2xx body that is
+  not a JSON object `PK_ERR_PARSE`, a missing or non-integer id
+  `PK_ERR_INVALID_PARAMETER`, per `src/error.cyr`'s bad-bytes / wrong-schema split.
+  ⚠ **The success value changes shape**: an id string such as `"7"` where the old
+  code could only ever return `"unknown"`. No repo consumes the ai bundle. The
+  response interpretation moved into `_ai_register_response` so every branch is
+  tested offline: tests/ai.tcyr **39 → 62**. Four mutants (status ceiling, status
+  floor, the Rust-era `"agent_id"` field, a non-object body) and the two the review
+  found (a status branch that falls through, a float id — bayan truncates 7.9 to 7)
+  each fail it.
+- ⛔ **spectral_photometry / wave_pattern — `prakash_reset_caches()` missed the
+  2D-diffraction scratch, so the documented `alloc_reset()` recipe corrupted memory.**
+  2.3.7 made it the required partner of `alloc_reset()`; 2.3.8 then gave
+  `wave_pattern` six grow-only scratch pointers that it never cleared. With the recipe
+  followed exactly, the next `diffraction_pattern_circular(64, 10)` wrote into a block
+  the allocator had already handed back: **12,416 of a fresh 16,384-word consumer
+  buffer overwritten**, and the returned pattern wrong, with no error. The reset
+  cannot call forward into `wave_pattern` (a spectral-only build would not link), so
+  it now bumps `_prk_cache_epoch` (in `error.cyr`, which every module and suite
+  includes) and `_pat_scratch` drops all six blocks when the epoch moves.
+  tests/hardening.tcyr runs the recipe and pins both halves — no post-reset word is
+  written (5,671 were, with either half of the fix removed) and the pattern stays
+  bit-identical. Found by this release's review, not by the survey; the reset's own
+  comment had said to "call it from here" if a third module ever cached, which a
+  later module cannot be.
+  **Swept as a class**: every module-level variable in `src/` that is assigned at run
+  time or has its address taken — 27 — is now covered: 21 tables cleared directly, 6
+  scratch pointers through the epoch.
+- **Stale comments that documented a defect or a false premise:**
+  `src/pbr_advanced.cyr` still said the split sum "needs k = alpha^2/2" and that A + B
+  = 1 at roughness 0 "settles it" — the 2.2.7 error 2.2.8 fixed, beside the correct
+  code. `src/pbr_core.cyr` said soorat evaluates `pbr_fresnel_schlick` per pixel
+  (soorat runs its own WGSL copy). `spd_from_function` advised sampling finely to
+  keep narrow lines, which cannot help colour (below). `src/wave_pattern.cyr` named
+  soorat, kiran and ranga as `pattern2d_new` users; none calls it.
+
+### Added
+- **`scripts/check-consumer-link.sh`** + a CI step — proves `dist/prakash.cyr` links as
+  a consumer links it: straight through `cycc` (no dependency resolution against this
+  manifest), only the 19 leaves in `dist/prakash.deps`, **no hisab**, over the surface
+  ranga calls and re-exports, with ranga's own pinned values (D65 6503.46 K, D50
+  5002.12 K). It requires `num_fft` to be the ONLY undefined function (proof hisab was
+  absent) and requires an FFT entry point called without hisab to be refused *for
+  num_fft*. Mutation-checked: hisab linked, a leaf missing from the sidecar, and a
+  renamed FFT function each fail it. `--root DIR` compiles against another project's
+  `lib/`: **ranga's own configuration — cyrius 6.6.2 and its vendored stdlib — passes**
+  (`--root ~/Repos/ranga ~/.cyrius/versions/6.6.2/bin/cycc`). CI runs it bare.
+- **`docs/guides/upgrading.md`** — what a consumer of the bundle sees from 2.2.8 to now.
+  Everything ranga calls is bit-identical apart from allocation guards; 24 global
+  names were added and none removed, with no collision against ranga's 784 names or
+  its `lib/`; `color_rendering_index` (re-exported by ranga) moved at 2.4.8; and the
+  reset hazard above, which 2.2.8 had in its worst form.
+- **A Consumers section in `docs/architecture/overview.md`**, which CLAUDE.md requires
+  and which did not exist: ranga (Cyrius, spectral), tanmatra, soorat and kiran (Rust
+  1.x; only tanmatra plans to move). Crate pins read from their `Cargo.lock`s, kiran's
+  from GitHub.
+- **A line-spectrum caveat on `spd_to_xyz`**, measured: an SPD off the 380 + 5k nm grid
+  is read only at those points, so a 1 nm-FWHM line reads **4.70×** on a sample (590.0
+  nm), 1.19× at 589.3 nm and **0** between samples (592.5 nm); a 0.1 nm line reads 0.
+  10 nm is right to 0.04%. tanmatra's planned M6 grid uses 0.1 and 1 nm lines.
+
+### Changed — documentation
+- **Every consumer statement was wrong in at least one way.** roadmap, README and
+  CLAUDE.md said ranga used lens effects (it uses spectral/colour only), soorat
+  prakash's Cook-Torrance (it hand-copies it into WGSL), kiran its lighting math (it
+  re-exports modules and calls none), and omitted tanmatra. Corrected from the repos
+  themselves. The roadmap also credited hisab with prakash's complex arithmetic;
+  `num_fft` is the only hisab function prakash calls (checked against every call).
+- **roadmap** — item 12 is "Consumers — their move", per consumer; the bucket table
+  gains a Consumers row; the survey is recorded (no ask for items 1–11; item 8's
+  joshua exists on GitHub and reaches prakash 1.x only through kiran). CLAUDE.md's
+  version line said 2.4.x.
+- `docs/guides/allocation.md` states the pre-2.5.1 reset gap.
+
+### Review
+An adversarial review of this diff (four lenses, one skeptic per finding) returned
+31 findings: **22 confirmed, 9 refuted**. Beyond the reset defect above it caught the
+upgrade guide claiming CI checked ranga's 6.6.2 setup (it checked neither the
+toolchain nor ranga's stdlib — now `--root`, and the wording says what CI holds), a
+missing 2.4.6 LSA row in the guide's value table, the gate's check 3 accepting a
+refusal for the wrong function, the gate going through dependency resolution, and
+"ranga reads Xyz with raw load64" (its source uses the accessors; its tests pin the
+layout). Two of this release's own rows were wrong before the review and were fixed
+by checking: 2.4.9 #16 was a leak, not a value change, and `coating_reflectance` is
+in `wave_diffraction`.
+
+### Performance
+- None claimed. The epoch check is one compare per scratch request:
+  `wave/diffraction_pattern_2d_8x8` 13,666 → 13,822 ns (+1.1%) and
+  `lens/seidel_coefficients` 56 → 58 ns, both inside this host's noise.
+
 ## [2.5.0] - 2026-09-22 — lens and OPD magnitudes: the 2.4.8 critic's five, confirmed against the tracer and fixed
 
 The five findings the 2.4.8 audit's completeness critic reported, which 2.4.8's

@@ -19,9 +19,9 @@ after the port-completeness review; recover it with
 | `atmosphere` | atmosphere.cyr | 378 | (free functions + constants) | Rayleigh/Mie scattering, King correction, sky color, air mass, optical depth, sunset model |
 | `bridge` | bridge.cyr | 28 | (free functions) | Primitive-value cross-crate hooks (bijli/tara/badal) — no dependency on sibling crates |
 | `serialize` | serialize.cyr | 55 | (free functions) | JSON roundtrips for the seven serde-tested types. ⚠ **Encode goes straight into a `str_builder`** since 2.3.4/2.3.5 — bayan is used only for Grisu2 float rendering; **decode** still walks a bayan value tree. The encoder emits round-trip-correct floats; bayan's decoder mis-rounds ~1 in 10⁵ doubles by 1 ULP (see serialize.cyr); every `*_from_json` reports via `err_out`; every wire format is pinned to exact bytes |
-| `ai` | ai.cyr | 39 | `DaimonClient`, `DaimonConfig`, `HooshConfig` | AI-assisted optics queries via sandhi HTTP POST — **not in the core bundle** |
+| `ai` | ai.cyr | 62 | `DaimonClient`, `DaimonConfig`, `HooshConfig` | AI-assisted optics queries via sandhi HTTP POST — **not in the core bundle** |
 
-**Total**: 25 science modules + error, **7171 test assertions across 31 suites**,
+**Total**: 25 science modules + error, **7201 test assertions across 31 suites**,
 139 benchmarks. (`tests/hardening.tcyr` is the cross-module regression suite for the
 2.0.2 audit repairs and the 2.1.0 error channels — see those CHANGELOG entries.)
 
@@ -151,3 +151,28 @@ the check that actually has teeth.
 The Rust build (`Cargo.toml`, criterion, bijli-backend, reqwest/tokio/serde) is
 gone — see the [2.0.0] CHANGELOG entry. The `bridge` module replaces the former
 `bijli-backend` feature with dependency-free primitive-value hooks.
+
+## Consumers
+
+Surveyed across every local repo at 2.5.1 (and kiran on GitHub, which has no local
+clone). Each consumer is in a different state, so there is no single "consumers
+move to Cyrius" milestone.
+
+| Consumer | Language | How it depends | What it uses |
+|----------|----------|----------------|--------------|
+| **ranga** | Cyrius | git dep on `dist/prakash.cyr`, tag **2.2.8**, optional `spectral` profile only; omits hisab on purpose | spectral / colour: the `Xyz` bridge (read through the accessors and copied; its tests pin the 0/8/16 layout with raw `load64`), `spd_to_xyz`, `cct_from_xy`, `cie_cmf_at`, `spd_blackbody`; its tests also call the white points and `illuminant_d65`. Re-exports ~15 more flat names (`color_rendering_index`, `wavelength_to_rgb`, …) without calling them |
+| **tanmatra** | Rust | crate `prakash = "1.1"` (locked 1.2.0) behind its `optics` feature | `Spd` (it builds Gaussian line SPDs as prakash `Spd`s, mapped to `spd_new` in its port plan), `Rgb` / `PrakashError`, `wavelength_to_rgb`. Its Cyrius port plan (not started) targets an opt-in `[lib.optics]` profile against the bundle |
+| **soorat** | Rust | crate `prakash = "1"` (locked 1.2.0) behind its `optics` feature | `Rgb`, `color_temperature_to_rgb`, `wavelength_to_rgb`, `ior_to_f0`, `integrate_brdf_lut` (bakes its IBL LUT). Its Cook-Torrance / GGX / Fresnel are hand-copied into WGSL, which no bundle can reach. No Cyrius plan |
+| **kiran** | Rust | crate `prakash` 1.2 (`pbr`, `atmosphere`) behind its `rendering` feature | re-exports six prakash modules wholesale; calls none of them. No Cyrius plan |
+
+- **ranga's upgrade path is verified, not assumed:** `docs/guides/upgrading.md`
+  (what moves between 2.2.8 and now), and `scripts/check-consumer-link.sh`, which CI
+  runs to prove the core bundle links without hisab over the surface ranga uses
+  (pinned toolchain, prakash's `lib/`; `--root` reproduces ranga's own setup).
+- ⚠ **The three Rust consumers are frozen on 1.x**, and a `"1"` / `"1.2"`
+  requirement never resolves to 2.x. They carry every value 2.x corrected — the
+  2.2.6 six, the 2.4.x coefficient and constant repairs, 2.5.0's Seidel/LSA/OPD —
+  and soorat's WGSL `distribution_ggx` still adds an absolute epsilon of the kind
+  2.2.6 removed (`+ 1e-7` in its f32 port; prakash's was `1e-15`), which at its
+  0.04 roughness floor leaves the specular peak ~4,900x low (25.6 against
+  1/(pi a^2) = 1.24e5). Nothing prakash releases reaches them.

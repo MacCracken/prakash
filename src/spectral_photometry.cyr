@@ -298,8 +298,18 @@ fn luminous_flux_scotopic(spd) {
 # ⚠ Placement is forced by bundle order, not by taste. All 21 cached tables live
 # in spectral_cie (19) and this module (2), and `cyrius distlib` concatenates
 # spectral_cie BEFORE spectral_photometry — so this is the earliest module that
-# can see both sets. If a third module ever caches a table, give it its own
-# `_*_reset_caches` and call it from here, keeping this the single public entry.
+# can see both sets.
+# ⛔ 2.5.1: A LATER MODULE'S CACHE CANNOT BE REACHED FROM HERE, AND ONE WAS MISSED.
+# This comment used to say "if a third module ever caches a table, give it its
+# own _*_reset_caches and call it from here". 2.3.8 then gave wave_pattern six
+# grow-only scratch pointers, and nothing cleared them: after alloc_reset() +
+# this function, the next diffraction_pattern_circular(64, 10) wrote into a block
+# the allocator had already handed back out — 12,416 of a fresh 16,384-word
+# consumer buffer overwritten, with no error. Calling forward into wave_pattern
+# is not an option (a spectral-only build would not link), so modules after this
+# one watch `_prk_cache_epoch` (error.cyr) instead: bumping it here makes every
+# such cache drop itself on its next use. A new cache in a LATER module must do
+# the same; one in an EARLIER module can be cleared directly, as above.
 #
 # This is a forget, not a free: prakash's allocator cannot free, and that is the
 # whole reason a consumer reaches for `alloc_reset()` in the first place.
@@ -307,5 +317,6 @@ fn prakash_reset_caches() {
     var _c = _cie_reset_caches();
     _vlambda_photopic_p = 0;
     _vlambda_scotopic_p = 0;
+    _prk_cache_epoch = _prk_cache_epoch + 1;
     return 0;
 }

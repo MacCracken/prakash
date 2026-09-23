@@ -1,6 +1,6 @@
 # Prakash Roadmap
 
-> **Prakash** is the optics/light-simulation library, written in [Cyrius](https://github.com/MacCracken/cyrius). Math foundations (Complex + FFT) come from [hisab](https://github.com/MacCracken/hisab). Consumed by soorat (PBR shading), kiran (lighting), and ranga (lens effects).
+> **Prakash** is the optics/light-simulation library, written in [Cyrius](https://github.com/MacCracken/cyrius). Its one external math call is hisab's FFT (`num_fft`); complex arithmetic and everything else is its own. Consumed by ranga (spectral/colour, on Cyrius) and, through the frozen Rust 1.x crate, tanmatra, soorat and kiran — see the consumers section of `docs/architecture/overview.md`.
 
 **This document is forward-facing.** It lists what is not done yet. Shipped work
 lives in `CHANGELOG.md`, which is the release history and the place to look for
@@ -16,9 +16,9 @@ the open item they govern, so the next attempt does not repeat a failed one.
 Prakash owns the **physics of light**: how light travels, bends, reflects, interferes, diffracts, polarizes, and interacts with materials. It provides the math; consumers decide what to do with it (render pixels, simulate experiments, process images).
 
 Prakash does NOT own:
-- **Rendering pipeline** → kiran/soorat (they consume prakash for lighting math)
+- **Rendering pipeline** → kiran/soorat (soorat bakes its IBL LUT with prakash and shades in its own WGSL; kiran re-exports prakash modules)
 - **Image processing** → ranga (pixel operations, color spaces, filters)
-- **Math primitives** → hisab (vectors, geometry, calculus, Complex, FFT)
+- **Math primitives** → hisab (vectors, geometry, calculus, FFT). prakash calls only `num_fft`; its complex arithmetic is its own
 - **Color science beyond spectral** → ranga (ICC profiles, gamut mapping)
 
 ## Open work at a glance
@@ -27,9 +27,19 @@ Prakash does NOT own:
 
 | # | Bucket | Item | State |
 |---|---|---|---|
-| 1–6 | 2.x | GRIN, DOE, Richards-Wolf, HG/LG beams, Buchdahl, aberrated MTF | demand-gated |
-| 7–11 | 2.x | Fluorescence, non-linear, OAM, metamaterials, CIE 2006 observer | demand-gated |
-| 12 | Blocked | soorat / kiran / ranga consume `dist/prakash.cyr` | waiting on the consumers |
+| 1–6 | 2.x | GRIN, DOE, Richards-Wolf, HG/LG beams, Buchdahl, aberrated MTF | demand-gated, no ask |
+| 7–11 | 2.x | Fluorescence, non-linear, OAM, metamaterials, CIE 2006 observer | demand-gated, no ask |
+| 12 | Consumers | ranga's bump from 2.2.8; tanmatra's planned `[lib.optics]` profile | their move; prakash's side done |
+
+⭐ **Demand was measured at 2.5.1, not assumed.** A survey of every local repo (plus
+kiran on GitHub) found **no consumer asking for any of items 1–11**. Item 7's only
+trace is a stale registry line in agnosticos written about prakash 1.1; item 8's
+named requester, joshua (GitHub-only, Rust 0.1.0), has no prakash dependency of its
+own — it reaches the 1.x crate only through kiran, behind its optional `engine` feature — and
+nothing in it mentions non-linear optics. Implicit signals, none of them a request:
+tanmatra builds Gaussian line SPDs itself (see the `spd_to_xyz` caveat), ranga
+inlines `xyz_to_xyy` to avoid an allocation, soorat carries a roughness-aware
+Fresnel in WGSL. Re-survey before starting any item.
 
 ⚠ **Items 1–11 are not a backlog anyone is working through.** Each is a subsystem,
 listed so the scope boundary stays visible. Do not start one without a consumer
@@ -45,7 +55,7 @@ anyone intends to do them:
 | **2.5.x — patch** | no public API moves | internals, perf, tests, docs, tooling, data fixes |
 | **2.6.x — minor** | adds public API | new entry points, new capability |
 | **2.x — demand-gated** | adds a subsystem | build when a consumer actually asks |
-| **Blocked** | not prakash's move | waiting on something external |
+| **Consumers** | not prakash's move | waiting on a consumer's own change |
 
 ⚠ **The bucket is a SemVer classification, not a queue.** Anything in 2.5.x can
 ship in any order, in any patch release, in any combination — the bucket only
@@ -78,9 +88,16 @@ someone needs it; all are listed so the scope boundary stays visible.
 - [ ] Metamaterials / negative refractive index
 - [ ] Age-dependent CIE observer (CIE 2006)
 
-## Blocked — not prakash's move
+## Consumers — their move
 
-- [ ] soorat / kiran / ranga: consume `dist/prakash.cyr` directly once they move to Cyrius
+- [ ] **ranga** already consumes `dist/prakash.cyr` (Cyrius, tag 2.2.8, `spectral`
+  profile). Bumping the tag is ranga's change; the path is verified in
+  `docs/guides/upgrading.md`. CI holds the hisab-free link on the pinned toolchain
+  via `scripts/check-consumer-link.sh`; ranga's exact 6.6.2 setup is `--root`.
+- [ ] **tanmatra** plans an opt-in `[lib.optics]` profile in its Cyrius port (not
+  started). If its M6 line-spectrum grid needs colour, a line-spectrum → XYZ entry
+  point is a 2.6.x minor — only when it asks.
+- soorat and kiran are Rust 1.x with no port plan, so there is no item for them.
 
 ## Constraints established by measurement — read before optimizing
 
@@ -282,11 +299,11 @@ someone needs it; all are listed so the scope boundary stays visible.
 
 ## Consumers
 
-| Consumer | What it uses |
-|----------|-------------|
-| **soorat** | PBR shading (Cook-Torrance, Fresnel-Schlick) |
-| **kiran** | Physically-based lighting math |
-| **ranga** | Lens effects (DoF, chromatic aberration) |
+Who uses what, how, and at which version is in the consumers section of
+`docs/architecture/overview.md`. Until 2.5.1 this table said soorat used prakash's
+Cook-Torrance (it hand-copies it into WGSL), kiran its lighting math (it re-exports
+modules and calls none) and ranga its lens effects (ranga uses only spectral/colour),
+and it omitted tanmatra.
 
 ## Boundary with Other Crates
 
@@ -296,7 +313,8 @@ someone needs it; all are listed so the scope boundary stays visible.
 | EM ↔ optics primitive bridge | Yes (`bridge`) | bijli (EM foundation) |
 | Pixel-level image filter | — | ranga |
 | 3D scene graph | — | kiran |
-| Vector/matrix math, Complex, FFT | — | hisab |
+| Complex arithmetic (complex Fresnel for absorbing media) | Yes (own) | — |
+| Vector/matrix math, FFT | — | hisab (prakash calls only `num_fft`) |
 | Color space conversion (ICC) | — | ranga |
 | Spectral → RGB conversion | Yes | — |
 | Polarization formalism (Jones/Stokes/Mueller) | Yes | — |
