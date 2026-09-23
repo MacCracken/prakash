@@ -141,8 +141,9 @@ fn pbr_distribution_ggx(n_dot_h, roughness) {
     # Sterbenz wherever it can be small (ndh^2 in [0.5, 2]); at ndh = 1 it is exactly
     # 0 and denom is exactly a2.
     # ⚠ THE FIRST 2.4.9 REWRITE COST 18% AND THIS ONE COSTS NOTHING. The obvious
-    # stable form, `ndh^2*a2 + (1-ndh)(1+ndh)`, adds a multiply and an add, and
-    # every f64_* op is a real call here (Cyrius has no #inline). Same-binary,
+    # stable form, `ndh^2*a2 + (1-ndh)(1+ndh)`, adds a multiply and an add, ~2 ns
+    # each of inline instructions (a movq pair around the SSE op — this said "a
+    # real call" until 2.6.1 disassembled one) on a ~16 ns function. Same-binary,
     # interleaved, 4 pairs x 2e6 iterations: original 16-17 ns, (1-ndh)(1+ndh) form
     # **19-20 ns**, this form **16 ns** — same op count as the original, and
     # 1.000000000000 of the exact value at the floor where the original gave 0.811.

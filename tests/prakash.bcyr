@@ -507,6 +507,7 @@ var _gb_re = 0;
 var _gb_im = 0;
 var _gb_prof = 0;
 var _gb_dx = 0;
+var _gb_r60 = 0;
 
 # TEM00 beam radius w(z) from the closed form.
 fn b_gaussian_beam_radius() { var r = gaussian_beam_radius(_gb_w0, _gb_wl, _gb_z, _err); return 0; }
@@ -537,6 +538,20 @@ fn b_laguerre_poly_10() { var r = laguerre_poly(10, 3, _gb_z); return 0; }
 fn b_hg_mode_field() { var r = hg_mode_field(_gb_ref, 3, 2, _gb_dx, _gb_dx, &_gb_re, &_gb_im); return 0; }
 # Complex LG_2,3 field at one point (helix + curvature + Gouy phase).
 fn b_lg_mode_field() { var r = lg_mode_field(_gb_ref, 2, 3, _gb_dx, _gb_z, &_gb_re, &_gb_im); return 0; }
+# A flat air -> glass interface on the q parameter (a B = 0 element), state reset
+# first. 2.6.1 took the B = 0 elements from ~125 to ~45 ns; this row keeps it seen.
+fn b_beam_interface() {
+    GaussianBeam_set_q_re(_gb, _gb_z);
+    GaussianBeam_set_q_im(_gb, _gb_w0);
+    GaussianBeam_set_wavelength(_gb, _gb_wl);
+    var r = beam_interface(_gb, F64_ONE, _bf(3, 2));
+    return 0;
+}
+# Complex LG_60,60 field at one point — a high order, where 2.6.1's LG rework
+# counts most (2.6 -> 1.1 us for the amplitude).
+# r is on the mode's bright region (s = 2r^2/w^2 = 300), not in the far tail where
+# the amplitude is an early 0.
+fn b_lg_mode_field_60() { var r = lg_mode_field(_gb_ref, 60, 60, _gb_r60, _gb_z, &_gb_re, &_gb_im); return 0; }
 # ISO 11146 second-moment radius of a 256-sample profile (two passes).
 fn b_second_moment_256() { var r = beam_second_moment_radius(_gb_prof, 256, 0, _bf(1, 100), _err); return 0; }
 
@@ -703,6 +718,7 @@ fn main() {
     _gb = gaussian_beam_new(_gb_w0, _gb_wl, _err);
     _gb_ref = gaussian_beam_new(_bf(12, 10000), _gb_wl, _err);
     var _gp = beam_propagate(_gb_ref, F64_TWO);
+    _gb_r60 = f64_mul(beam_radius(_gb_ref), f64_sqrt(f64_from(150)));
     _gb_prof = alloc(256 * 8);
     for (var gi = 0; gi < 256; gi = gi + 1) {
         var gx = f64_mul(_bf(1, 100), f64_from(gi - 128));
@@ -876,6 +892,8 @@ fn main() {
     bench("beam/hg_mode_field_3_2", &b_hg_mode_field, 200000);
     bench("beam/lg_mode_field_2_3", &b_lg_mode_field, 200000);
     bench("beam/second_moment_256", &b_second_moment_256, 20000);
+    bench("beam/interface", &b_beam_interface, 500000);
+    bench("beam/lg_mode_field_60_60", &b_lg_mode_field_60, 50000);
     return 0;
 }
 

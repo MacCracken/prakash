@@ -2,6 +2,75 @@
 
 ## [Unreleased]
 
+## [2.6.1] - 2026-09-23 — the Gaussian-beam module made fast, without moving a bit
+
+The roadmap's 2.6.x row: recover what the 2.6.0 review's range-safety fixes cost.
+Everything outside the LG amplitude is **bit-identical to 2.6.0** for every input —
+checked by the optimizers and by an independent verifier on ≥200k fuzz cases per
+public function plus exhaustive 24⁴ special-value grids (signed zeros, subnormals,
+NaN/inf in every argument and struct field, refusals), **0 unexplained
+differences**. The LG amplitude was rewritten and is faster AND more accurate.
+Suite **7656 → 7863 assertions across 32 suites**, 0 failed; `cyrius audit` exits 0;
+`#must_use` 461, 0 lost. Benchmarks 149 → 151.
+
+### Performance — same-binary A/B, interleaved, with an A/A control pair
+| Row | 2.6.0 | 2.6.1 |
+|---|---|---|
+| `beam/thin_lens` | 123 ns | 44 ns |
+| mirror / interface / curved interface | 123 / 131 / 132 | 45 / 46 / 54 |
+| `beam/propagate` | 149 | 90 |
+| general `beam_abcd` (b·c ≠ 0) | 146 | 118 |
+| `beam/coupling_efficiency` | 103 | 66 |
+| `gaussian_curvature` / R | 50 / 50 | 40 / 41 |
+| `beam_curvature` | 20 | 14 |
+| `beam/gaussian_intensity` | 106 | 100 |
+| `beam/hg_mode_field_3_2` | 296 | 261 |
+| `beam/lg_mode_field_2_3` | 418 | 271 |
+| LG amplitude LG₆₀,₆₀ / LG₂₀₀,₂₀₀ | 2598 / 8240 | 1119 / 3216 |
+
+How: B = 0 elements (lenses, mirrors, interfaces) skip an `atan2` that provably
+returns the zero it is added to; free space takes an exact shortcut; divisions by a
+power-of-two scale became multiplies by its exact reciprocal (`_bm_inv2`, identical
+bits in every case); validity tests became integer compares on the bit patterns;
+the LG amplitude lost most of its `ln` calls (a ln k! table, C(p+|l|, p) as one
+exact product, a double-double exponent). ⚠ **Two rows got slower, recorded:** the
+LG far-tail shell r/w ∈ [26.5, ~27.5] at low orders, up to 1.8× (amplitudes below
+1e-300 of peak, the cost of correctly rounded subnormals), and
+`gaussian_beam_radius`'s far field, +4% (the cost of the overflow fix below).
+
+### Fixed
+- **LG amplitude at extreme beam radii** — at w near 2^-1022 or above 2^60, 2.6.0
+  returned **13,447 false infinities and 3,880 false zeros** across an 800k-point
+  sweep (its "no NaN/inf/false zero" claim had only been measured at w = 1). 2.6.1
+  has none, and is at least as accurate per order everywhere: e.g. LG₀,₄₀₀₀ worst
+  error 2.2e-13 → **2.4e-15** of peak, LG₆₀,₆₀ 1.1e-14 → **2.2e-15**. Orders with
+  p + |l| > 2^52 are now refused (i64 sums could wrap into NaN as success).
+- **`gaussian_beam_radius` returned +inf as success** once z/z_R overflowed, even
+  where w = |z|·w0/z_R is representable (w0 = 1e-150, λ = 1e-10, z = 1e100: true w
+  3.2e239), and `gaussian_intensity` turned that into NaN as success. It now
+  computes that w, and refuses a w that is itself beyond the double range — in the
+  far AND near field.
+- `beam_abcd`'s doc said `PK_ERR_DIVISION_BY_ZERO` was unreachable; c·q + d can
+  underflow to 0 (q = 2^100 + i·2^-1000 through f = 2^100). Doc corrected and pinned.
+
+### Changed — documentation
+- ⛔ **"Every `f64_*` op is a real call" was wrong**, in the roadmap and in
+  `pbr_core.cyr`. Disassembly shows `f64_mul` compiles to `movq`/`mulsd`/`movq`
+  inline (~2.1 ns; `f64_div` ~4.5 ns); a user-function call adds ~1-3 ns; `ln`
+  ~43 ns and `atan2` ~53 ns are what cost. Recorded as a roadmap constraint, with the
+  same-binary A/B method (rename one module copy, include both, A/A pair).
+- roadmap: the 2.6.x row is done; a 2.6.2 row carries the verification's remaining
+  low-severity findings.
+
+### Review
+Three optimizer groups, each re-verified by two independent agents; the LG rework
+was rejected once (it overflowed at tiny w) and accepted in round 3; a final
+36-agent pass (bit-identity, LG accuracy, 135+ mutants, same-binary perf, code
+review) confirmed the claims above and raised 28 findings. The one that made a
+claim false (the near-field overflow) is fixed here; the rest — mostly test pins
+for mutants the suite does not kill, plus three pre-existing extreme-range
+defects — are the roadmap's 2.6.2 row.
+
 ## [2.6.0] - 2026-09-22 — Gaussian beam optics, and the roadmap pinned to releases
 
 The first release of the port-era capability work. Every open roadmap item is now

@@ -29,11 +29,11 @@ Rust→Cyrius port and the 2.2–2.5 correctness audits pushed back, plus the ga
 `docs/research/physics-completeness-audit.md` records as still open (absorbing thin
 films, fiber dispersion) and the 3×3 polarization ray tracing that document marked
 implemented but that was never built. 2.6.0 shipped the first of them — Gaussian
-beams, HG/LG modes, M² and OAM; see `CHANGELOG.md`.
+beams, HG/LG modes, M² and OAM — and 2.6.1 made it fast; see `CHANGELOG.md`.
 
 | Version | Release | Roadmap items it closes |
 |---|---|---|
-| 2.6.x | patch | recover the `beam/*` cost of the 2.6.0 range-safety fixes |
+| 2.6.2 | patch | 2.6.1 verification's remaining findings (test pins, 3 extreme-range defects) |
 | **2.7.0** | Aberrations → image quality | wavefront coefficients from Seidel sums; aberrated MTF |
 | 2.8.0 | GRIN optics | gradient-index ray tracing |
 | 2.9.0 | Diffractive optics | DOE: phase gratings, holographic elements |
@@ -55,15 +55,19 @@ Fixes found along the way ship as patches (2.6.1, …) of whichever minor is cur
 pinned against. Measurements belong in `CHANGELOG.md`; a row that grows past ~8
 lines has started duplicating the release history and should be cut back.
 
-### 2.6.x — patch: recover the range-safety cost in `beam/*`
+### 2.6.2 — patch: the 2.6.1 verification's remaining findings
 
-The 2.6.0 review made the module safe across the double range and it cost time
-against the pre-review draft: `lg_mode_field` 240 → 449 ns, `thin_lens` 87 → 121,
-`propagate` 115 → 147. Candidates, each to be proven same-binary (this host's noise
-reaches 40% below 100 ns): divide by the power-of-two scale h ONCE and multiply by
-1/h (exact, so the pinned "same bits" hold); a table of ln k! for |l| < 10 instead
-of the summed ln loop; C(p+|l|, p) as an exact integer product while it stays below
-2^53. The same-bits pins in tests/wave_beam.tcyr must stay green.
+The 2.6.1 verification confirmed 28 findings; the one that made a release claim
+false shipped in 2.6.1. The rest (re-derive the exact pins with a mutation run of
+the 2.6.1 diff against 2.6.0): test pins for
+~50 surviving mutants (beam_abcd's general-path range refusals, B = 0 with A ≠ 1,
+the free-space dispatch's d == 1 guard, the LG Dekker branch |l| ≥ 2^26, the
+subnormal rounding path, the inline scale copies' h = 2^1023 branches); a
+"keep in step" note at every inline copy of `_bm_scale2`/`_bm_inv2`; and three
+pre-existing extreme-range defects — `gaussian_intensity` NaN when the peak or 2P
+overflows, `beam_radius` a fabricated 0 when Im q > DBL_MAX/π, and a NaN field when
+k = 2π/λ overflows. Also: gate the LG fast path at t² < 708 (validated faster and
+more accurate in the far-tail shell).
 
 ### 2.7.0 — Aberrations → image quality
 
@@ -165,8 +169,10 @@ the reference age of 32.
   resolution (cyrius refuses the racing write safely and the build just fails).
 - ⚠ **A numerically-stable rewrite of a hot expression must be benchmarked same-binary,
   and the first stable form is not necessarily the right one.** 2.4.9's GGX repair:
-  `ndh²·α² + (1−ndh)(1+ndh)` was exact and cost **+18%** (every `f64_*` op is a real
-  call — Cyrius has no `#inline`); `ndh²·α² + (1−ndh²)` is equally exact and cost
+  `ndh²·α² + (1−ndh)(1+ndh)` was exact and cost **+18%** (two more `f64_*` ops at
+  ~2 ns each on a ~16 ns function — see the cost-model bullet below; this said "every
+  `f64_*` op is a real call" until 2.6.1 disassembled one and found it inline);
+  `ndh²·α² + (1−ndh²)` is equally exact and cost
   **nothing**, same op count as the original. Both were correct; only measurement
   told them apart.
 - ⭐ **Pin a known UPSTREAM defect at its defective value, so the note retires itself.**
@@ -293,6 +299,17 @@ the reference age of 32.
   returned vec. Check where the pointer ends up before reaching for a caller
   buffer.
 
+- ⭐ **Where the time goes, measured (2.6.1, cyrius 6.6.6).** `f64_mul` ~2.1 ns and
+  `f64_div` ~4.5 ns are INLINE instruction sequences — disassembly shows `movq` /
+  `mulsd` / `movq`, no call. A user-function call adds ~1-3 ns. The expensive
+  operations are the transcendental calls: `f64_ln` ~43 ns, `ganita_f64_atan2`
+  ~53 ns, exp ~20 ns. So a rewrite pays by removing those and user-function calls,
+  not arithmetic: 2.6.1's `beam/thin_lens` 123 → 44 ns was proving one `atan2`
+  always returns the zero it is added to, and the LG amplitude's 2.3x came from
+  removing `ln` calls. **Same-binary A/B method:** rename every function, struct and
+  accessor of one copy of a module with a suffix, include both copies in one bench
+  binary, interleave and rotate the rows, and run an A/A pair alongside — on this
+  host the A/A pair reads within ~2% where run-to-run spread reaches 40%.
 - **Hand-inlining pays at this scale, and only same-binary A/B can show it.**
   2.3.2 took `pbr/fresnel_schlick` 16.3 → 12 ns (−26%), `distribution_ggx`
   22 → 17 (−23%) and `cook_torrance` 93 → 79.7 (−14%) by writing out `f64_clamp`

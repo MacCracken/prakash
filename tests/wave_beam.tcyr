@@ -1357,4 +1357,554 @@ assert_eq(gaussian_curvature(W0, LAM, szz, &e), f64_div(szz, f64_add(f64_mul(szz
 assert_eq(gaussian_radius_of_curvature(W0, LAM, szz, &e), f64_div(f64_add(f64_mul(szz, szz), f64_mul(szr, szr)), szz),
   "gaussian_radius_of_curvature: same bits");
 
+# ── 2.6.1: performance patch — equivalence pins and two pre-existing fixes ────────
+# 2.6.1 made the ABCD elements, closed forms and queries faster WITHOUT moving a
+# bit: its optimizers and two independent verifiers compared them with 2.6.0 over
+# ~60M ABCD cases and ~800k closed-form/query cases (signed zeros, subnormal and
+# extreme magnitudes, NaN/inf, refusals) with 0 mismatches. The "same bits"
+# assertions above keep that true; these pin what those do not reach.
+test_group("release_2_6_1");
+
+# The exact reciprocal the hot paths write inline: 1/h for every power of two h in
+# [2^-1022, 2^1023], and x/h == x*(1/h) bit for bit.
+var inv_bad = 0;
+var inv_badm = 0;
+for (var ie = 1; ie <= 2046; ie = ie + 1) {
+    var hh = ie << 52;
+    var rr2 = _bm_inv2(hh);
+    if (rr2 != f64_div(F64_ONE, hh)) { inv_bad = inv_bad + 1; }
+    var xx = f64_mul(0x3FF3C0CA428C59FB, (((ie * 53) % 2046) + 1) << 52);
+    if (f64_div(xx, hh) != f64_mul(xx, rr2)) { inv_badm = inv_badm + 1; }
+    if (f64_div(f64_neg(xx), hh) != f64_mul(f64_neg(xx), rr2)) { inv_badm = inv_badm + 1; }
+}
+assert_eq(inv_bad, 0, "_bm_inv2(h) == 1/h for all 2046 powers of two");
+assert_eq(inv_badm, 0, "x/h == x*_bm_inv2(h) bit for bit");
+assert_eq(_bm_inv2(0x7FE0000000000000), 0x0008000000000000, "1/2^1023 is the subnormal 2^-1023");
+
+# Pre-existing, fixed: gaussian_beam_radius returned +inf as success when z/z_R
+# overflowed though w = w0*|z|/z_R is representable, and gaussian_intensity then
+# returned NaN as success. (mpmath: w0 = 1e-150, lambda = 1e-10, z = 1e100.)
+_assert_rel(gaussian_beam_radius(0x20CA2FE76A3F9475, 0x3DDB7CDFD9D7BDBB, 0x54B249AD2594C37D, &e),
+  0x71A870F64A594222, REL14, "w = 3.1831e239 where z/z_R overflows (was +inf)");
+assert_eq(e, PK_ERR_NONE, "that w is not an error");
+# A w that is itself beyond the double range is refused (w0 = 1, lambda = 100,
+# z = 1e308: w ~ 3.2e309), and the intensity with it — not NaN as success.
+var _wo = gaussian_beam_radius(F64_ONE, f64_from(100), 0x7FE1CCF385EBC8A0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "w beyond the double range refused");
+var _io = gaussian_intensity(F64_ONE, F64_ONE, f64_from(100), 0, 0x7FE1CCF385EBC8A0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "intensity there refused, not NaN");
+_io = gaussian_beam_radius_m2(F64_ONE, f64_from(100), F64_TWO, 0x7FE1CCF385EBC8A0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "the M^2 radius inherits it");
+# ...and in the NEAR field (|z/z_R| <= 2^27): w0 = 1e307, lambda = z = 1e308 gives
+# t ~ 32 and a true w of 3.2e308 — 2.6.0 and the first 2.6.1 cut returned +inf
+# as success there, and the intensity NaN.
+_wo = gaussian_beam_radius(0x7FAC7B1F3CAC7433, 0x7FE1CCF385EBC8A0, 0x7FE1CCF385EBC8A0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "near-field w beyond the double range refused");
+assert_eq(_wo, 0, "the near-field refusal returns 0, not +inf");
+_io = gaussian_intensity(F64_ONE, 0x7FAC7B1F3CAC7433, 0x7FE1CCF385EBC8A0, 0, 0x7FE1CCF385EBC8A0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "near-field intensity refused, not NaN");
+
+# DIVISION_BY_ZERO IS reachable with det = 1 (the 2.6.0 doc said it was not):
+# q = 2^100 + i*2^-1000 through f = 2^100 makes c*Re q + d exactly 0 and c*Im q
+# underflow — on the thin-lens shortcut path as on the general one.
+var bdv = gaussian_beam_from_q(0x4630000000000000, 0x0170000000000000, F64_ONE, &e);
+assert_eq(e, PK_ERR_NONE, "q = 2^100 + i 2^-1000 accepted");
+assert_eq(beam_thin_lens(bdv, 0x4630000000000000), PK_ERR_DIVISION_BY_ZERO, "thin lens: c*q + d = 0 refused");
+assert_eq(beam_abcd(bdv, F64_ONE, 0, 0xB9B0000000000000, F64_ONE), PK_ERR_DIVISION_BY_ZERO, "abcd: same");
+assert_eq(GaussianBeam_q_re(bdv), 0x4630000000000000, "refusal left the beam alone");
+
+# The shortcuts' sign-of-zero details, pinned: free space turns a -0 Re q into +0
+# (propagate by -0); a lens keeps a -0 Re q as -0 only when a*qr + b is -0 + -0.
+var bz0 = gaussian_beam_from_q(0x8000000000000000, F64_ONE, F64_ONE, &e);
+assert_eq(beam_propagate(bz0, 0x8000000000000000), PK_ERR_NONE, "propagate -0 on Re q = -0");
+assert_eq(GaussianBeam_q_re(bz0), 0, "free space: -0 + -0 (+ c*qi*... = +0) gives +0, as 2.6.0");
+var bz1 = gaussian_beam_from_q(0x8000000000000000, F64_ONE, F64_ONE, &e);
+assert_eq(beam_abcd(bz1, F64_ONE, 0x8000000000000000, 0, F64_ONE), PK_ERR_NONE, "abcd [[1,-0],[+0,1]]");
+assert_eq(GaussianBeam_q_re(bz1), 0, "general free space with c = +0 also gives +0, as 2.6.0");
+var bz2 = gaussian_beam_from_q(0x8000000000000000, F64_ONE, F64_ONE, &e);
+assert_eq(beam_abcd(bz2, F64_ONE, 0x8000000000000000, 0x8000000000000000, F64_ONE), PK_ERR_NONE, "c = -0");
+assert_eq(GaussianBeam_q_re(bz2), 0x8000000000000000, "with c = -0 the sum stays -0, as 2.6.0");
+
+# ── 2.6.1: the LG amplitude after the performance rework and its review ────────
+#
+# How these are built (CLAUDE.md: pin VALUES against an independent reference,
+# INVARIANTS separately, and not only at the points a bug survives):
+#   - CONSTANTS bit for bit, READ BACK FROM THE MODULE: every literal that enters an
+#     LG value, other than a power of two, is written once, inside a helper (_bm_lga_t,
+#     _bm_lga_t2, _bm_lga_ser, _bm_lga_k2pi3, _bm_lga_ln2lo), and each is asserted
+#     through that helper against its hex and mpmath's value (60 digits) or against
+#     the expression that defines it: each of
+#     the 25 changed by one ulp either way fails here (all 50 mutants checked). The
+#     round-1 pins allowed 3e-16 to 5e-16, which 45 of 52 single-ulp typos passed.
+#   - VALUES against mpmath (60-80 digits, exact rational r/w of the doubles the
+#     module sees, code that shares nothing with it), at the points each of the
+#     2.6.0 defects and the round-1 regression lived: w near 2^-1022 and below,
+#     w >= 2^60, subnormal results, large C, the log form. Most fail on 2.6.0 or
+#     on the rejected round-1 cut (noted per line); the rest pin neighbours the
+#     rework touched.
+#   - INVARIANT: at w = 2^k the amplitude is 2^-k times its value at w = 1, bit for
+#     bit, wherever that is a normal double — 2.6.1 applies w's exponent exactly.
+#     2.6.0 breaks it at 11 of these points: through its log form (LG_2,3 at t = 27,
+#     all six LG_400,5) and a subnormal intermediate at w = 2^1000 (LG_60,60,
+#     LG_3,2). The rejected round-1 cut breaks it at 10: at 9 (LG_2,3 at t = 27, the
+#     six LG_400,5) through the log form it kept from 2.6.0, with 2.6.0's values bit
+#     for bit, and at 1 (LG_60,60 at w = 2^-1000) by returning +inf.
+#   - the ORDER BOUND through the public callers.
+
+fn _lg61_rel(v, ref, tol) { return f64_le(f64_abs(f64_sub(v, ref)), f64_mul(tol, f64_abs(ref))); }
+
+# v within one subnormal ulp (2^-1074) of the correctly rounded subnormal ref, same sign.
+fn _lg61_sub1(v, ref) {
+    if ((v & 0x8000000000000000) != (ref & 0x8000000000000000)) { return 0; }
+    var d = (v & _PRK_ABS) - (ref & _PRK_ABS);
+    if (d > 1) { return 0; }
+    if (d < 0 - 1) { return 0; }
+    return 1;
+}
+
+var REL15_61 = f64_div(F64_ONE, f64_from(1000000000000000));   # 1e-15
+var REL14_61 = f64_div(F64_ONE, f64_from(100000000000000));    # 1e-14
+var REL12_61 = f64_div(F64_ONE, f64_from(1000000000000));      # 1e-12
+var REL3E14_61 = f64_div(f64_from(3), f64_from(100000000000000));  # 3e-14
+var e61 = 0;
+var fr61 = 0;
+var fi61 = 0;
+var t61 = 0;
+var r61 = 0;
+
+test_group("lg_2_6_1_tables");
+# T(a) = sqrt(2^(a+1)/(pi*a!)) and T(a)^2 = 2^(a+1)/(pi*a!), each correctly rounded:
+# the value beside each hex is mpmath's (60 digits).
+assert_eq(_bm_lga_t(0), 0x3FE9884533D43651, "T(0) = 0.7978845608028653558798921");
+assert_eq(_bm_lga_t(1), 0x3FF20DD750429B6D, "T(1) = 1.128379167095512573896159");
+assert_eq(_bm_lga_t(2), 0x3FF20DD750429B6D, "T(2) = 1.128379167095512573896159");
+assert_eq(_bm_lga_t(3), 0x3FED7B6F52FAC55A, "T(3) = 0.9213177319235612780406524");
+assert_eq(_bm_lga_t(4), 0x3FE4D8D7A58FA311, "T(4) = 0.6514700158705598954485128");
+assert_eq(_bm_lga_t(5), 0x3FDA5EA186A92BDF, "T(5) = 0.4120258154914022190316723");
+assert_eq(_bm_lga_t(6), 0x3FCE72F50B645EBB, "T(6) = 0.2378832154870361486051955");
+assert_eq(_bm_lga_t(7), 0x3FC0469473723218, "T(7) = 0.1271539272023722940112539");
+assert_eq(_bm_lga_t(8), 0x3FB0469473723218, "T(8) = 0.06357696360118614700562697");
+assert_eq(_bm_lga_t(9), 0x3F9EB09410A66866, "T(9) = 0.02997046805976601957311036");
+assert_eq(_bm_lga_t2(1), 0x3FF45F306DC9C883, "T(1)^2 = 1.27323954473516268615107");
+assert_eq(_bm_lga_t2(2), 0x3FF45F306DC9C883, "T(2)^2 = 1.27323954473516268615107");
+assert_eq(_bm_lga_t2(3), 0x3FEB2995E7B7B604, "T(3)^2 = 0.8488263631567751241007134");
+assert_eq(_bm_lga_t2(4), 0x3FDB2995E7B7B604, "T(4)^2 = 0.4244131815783875620503567");
+assert_eq(_bm_lga_t2(5), 0x3FC5BADE52F95E69, "T(5)^2 = 0.1697652726313550248201427");
+assert_eq(_bm_lga_t2(6), 0x3FACF9286EA1D337, "T(6)^2 = 0.05658842421045167494004756");
+assert_eq(_bm_lga_t2(7), 0x3F908E603F37E669, "T(7)^2 = 0.01616812120298619284001359");
+assert_eq(_bm_lga_t2(8), 0x3F708E603F37E669, "T(8)^2 = 0.004042030300746548210003397");
+assert_eq(_bm_lga_t2(9), 0x3F4D6EE3FE9C4448, "T(9)^2 = 0.0008982289557214551577785327");
+
+test_group("lg_2_6_1_constants");
+# The rest of the module's constants, each READ BACK through the helper that holds
+# it, bit for bit.
+fn _lg61_p2(e) { return (e + 1023) << 52; }                     # 2^e, e in [-1022, 1023]
+# sqrt(2/pi) = T(0) (the table group pins its hex): also 2.6.0's runtime expression.
+assert_eq(_bm_lga_t(0), f64_sqrt(f64_div(F64_TWO, F64_PI)), "sqrt(2/pi) = T(0) = fl(sqrt(fl(2/pi))), the 2.6.0 bits");
+# Stirling's coefficients |B_2k|/(2k(2k-1)), each the rational fl(num/den) (a
+# division of exact integers, so correctly rounded; mpmath's value in the label).
+# _bm_lga_ser(hi, x) is the Horner sum cut after hi terms, each coefficient written
+# once: at x = 0 it is the k = 1 one; at x = 2^e with e*(hi - 1) near 1000 every
+# lower coefficient is below half an ulp of the running term and the powers of x are
+# exact, so it is (-x)^(hi-1) times the TOP one, which _lg61_top scales back.
+fn _lg61_top(hi, e) {
+    var v = f64_mul(_bm_lga_ser(hi, _lg61_p2(e)), _lg61_p2(0 - e * (hi - 1)));
+    if ((hi & 1) == 0) { return f64_neg(v); }
+    return v;
+}
+assert_eq(_bm_lga_ser(2, 0), f64_div(F64_ONE, f64_from(12)), "k = 1: 1/12 = 0.08333333333333333333333333");
+assert_eq(_lg61_top(2, 1000), f64_div(F64_ONE, f64_from(360)), "k = 2: 1/360 = 0.002777777777777777777777778");
+assert_eq(_lg61_top(3, 500), f64_div(F64_ONE, f64_from(1260)), "k = 3: 1/1260 = 0.0007936507936507936507936508");
+assert_eq(_lg61_top(4, 333), f64_div(F64_ONE, f64_from(1680)), "k = 4: 1/1680 = 0.0005952380952380952380952381");
+assert_eq(_lg61_top(5, 250), f64_div(F64_ONE, f64_from(1188)), "k = 5: 1/1188 = 0.0008417508417508417508417508");
+assert_eq(_lg61_top(6, 200), f64_div(f64_from(691), f64_from(360360)),
+  "k = 6: 691/360360 = 0.001917526917526917526917527");
+# k = 7 enters as x/156 on top of k = 6 (absorbed there): 2^830 * fl(2^166/156).
+assert_eq(_bm_lga_ser(7, _lg61_p2(166)), f64_mul(_lg61_p2(830), f64_div(_lg61_p2(166), f64_from(156))),
+  "k = 7: x/156");
+# The whole sum against the same Horner on the defining rationals, at the x = 1/a^2
+# the module uses (every a from 10 to 1600 with its own cut), bit for bit.
+fn _lg61_ser_ref(hi, x) {
+    var c = 0;
+    if (hi > 6) { c = f64_div(x, f64_from(156)); }
+    if (hi > 5) { c = f64_sub(f64_div(f64_from(691), f64_from(360360)), c); }
+    if (hi > 4) { c = f64_sub(f64_div(F64_ONE, f64_from(1188)), f64_mul(x, c)); }
+    if (hi > 3) { c = f64_sub(f64_div(F64_ONE, f64_from(1680)), f64_mul(x, c)); }
+    if (hi > 2) { c = f64_sub(f64_div(F64_ONE, f64_from(1260)), f64_mul(x, c)); }
+    c = f64_sub(f64_div(F64_ONE, f64_from(360)), f64_mul(x, c));
+    return f64_sub(f64_div(F64_ONE, f64_from(12)), f64_mul(x, c));
+}
+fn _lg61_ser_diffs() {
+    var bad = 0;
+    for (var a = 10; a <= 1600; a = a + 1) {
+        var hi = 2;
+        if (a < 1514) { hi = 3; }
+        if (a < 180) { hi = 4; }
+        if (a < 59) { hi = 5; }
+        if (a < 31) { hi = 6; }
+        if (a < 20) { hi = 7; }
+        var ia = f64_div(F64_ONE, f64_from(a));
+        var x = f64_mul(ia, ia);
+        if (_bm_lga_ser(hi, x) != _lg61_ser_ref(hi, x)) { bad = bad + 1; }
+    }
+    return bad;
+}
+assert_eq(_lg61_ser_diffs(), 0, "Stirling sum at x = 1/a^2, a = 10..1600: the defining rationals' bits");
+# 2/pi^3 = 0.06450306886639897836884411 (mpmath), correctly rounded; the quotient
+# chain gives the same bits, the product form 2/(pi*pi*pi) one ulp more.
+assert_eq(_bm_lga_k2pi3(), 0x3FB08345EB45D77E, "2/pi^3 = 0.06450306886639897836884411");
+assert_eq(_bm_lga_k2pi3(), f64_div(f64_div(f64_div(F64_TWO, F64_PI), F64_PI), F64_PI), "2/pi^3 = 2/pi/pi/pi in f64");
+assert_eq(f64_div(F64_TWO, f64_mul(f64_mul(F64_PI, F64_PI), F64_PI)), 0x3FB08345EB45D77F,
+  "2/(pi*pi*pi) is one ulp above it");
+# ln2 - F64_LN2 = 2.319046813846299615494855e-17 (mpmath), correctly rounded, below
+# half an ulp of F64_LN2; with lnh = F64_LN2 to 26 bits (as the module masks it),
+# (F64_LN2 - lnh) + it = ln2 - lnh = 1.299650689388988837145818e-8 correctly rounded,
+# and 512 times it = 1.187351968689305403133366e-14 exactly (mpmath's bits).
+assert_eq(_bm_lga_ln2lo(), 0x3C7ABC9E3B39803F, "ln2 - F64_LN2 = 2.319046813846299615494855e-17");
+assert_eq(f64_add(F64_LN2, _bm_lga_ln2lo()), F64_LN2, "ln2 - F64_LN2 is below half an ulp of F64_LN2");
+var lnh61 = F64_LN2 & 0xFFFFFFFFF8000000;
+assert_eq(lnh61, 0x3FE62E42F8000000, "lnh = F64_LN2 to 26 significant bits");
+assert_eq(f64_add(f64_sub(F64_LN2, lnh61), _bm_lga_ln2lo()), 0x3E4BE8E7BCD5E4F2,
+  "ln2 - lnh = (F64_LN2 - lnh) + (ln2 - F64_LN2) = 1.299650689388988837145818e-8");
+assert_eq(f64_mul(_bm_lga_ln2lo(), f64_from(512)), 0x3D0ABC9E3B39803F,
+  "512 (ln2 - F64_LN2) = 1.187351968689305403133366e-14");
+assert_eq(F64_DD_SPLIT, f64_from(134217729), "Veltkamp split 2^27 + 1");
+
+test_group("lg_2_6_1_thresholds");
+# The thresholds the LG code compares against (-1080, +-700, 1.5 and powers of two)
+# and the powers of two it scales by are written there as hex with the value beside
+# each. These pin that each hex IS what its label says. They check the LABELS, not
+# the module's copies: a threshold only picks between two paths that are both
+# right, so moving one does not change a value. The scale factors do, and the value
+# pins cross them: 2^64 (a subnormal w) the SUBNORMAL w pins, 2^-512 on C the
+# LG_400,4000 pin, 2^-512 and 2^512 on P and D the LG_400,5 and LG_400,1500 pins
+# (each fails with that factor doubled). The 2^64 for a subnormal P is reached by no
+# test, nor by any of the 3.9 million sweep and fuzz records: P came out of the
+# recurrence 0 or normal in every one.
+var p5061 = f64_from(1125899906842624);                        # 2^50
+var p10061 = f64_mul(p5061, p5061);                              # 2^100
+var m50061 = f64_div(F64_ONE, f64_mul(f64_mul(f64_mul(p10061, p10061), f64_mul(p10061, p10061)), p10061));
+assert_eq(0xC085E00000000000, f64_from(0 - 700), "-700");
+assert_eq(0x4085E00000000000, f64_from(700), "700");
+assert_eq(0xC090E00000000000, f64_from(0 - 1080), "-1080");
+assert_eq(0x4080000000000000, f64_from(512), "512");
+assert_eq(0x3FF8000000000000, f64_div(f64_from(3), F64_TWO), "1.5");
+assert_eq(0x41A0000000000000, f64_from(134217728), "2^27");
+assert_eq(0x43F0000000000000, f64_mul(f64_from(4294967296), f64_from(4294967296)), "2^64");
+assert_eq(0x39B0000000000000, f64_div(F64_ONE, p10061), "2^-100");
+assert_eq(0x4C70000000000000, f64_mul(p10061, p10061), "2^200");
+assert_eq(0x0170000000000000, f64_mul(m50061, m50061), "2^-1000");
+assert_eq(0x0010000000000000, f64_div(f64_mul(m50061, m50061), f64_from(4194304)), "2^-1022 (DBL_MIN)");
+assert_eq(0x5FF0000000000000, f64_div(f64_from(4096), m50061), "2^512");
+assert_eq(0x1FF0000000000000, f64_div(m50061, f64_from(4096)), "2^-512");
+assert_eq(0x7FF0000000000000, f64_mul(0x7FE0000000000000, F64_TWO), "+inf");
+assert_eq(0x4000000, 67108864, "2^26 (an integer)");
+assert_eq(0x20000000000000, 9007199254740992, "2^53 (an integer)");
+assert_eq(0x10000000000000, 4503599627370496, "2^52 (an integer: the order bound)");
+
+test_group("lg_2_6_1_values");
+# Beams from the public constructors; each w is beam_radius's own double. At a
+# waist the phase is 0, so lg_mode_field's Re u is the amplitude. Beams whose
+# wavelength is below ~1e-307 are read through _bm_lg_amp: lg_mode_field's
+# curvature phase is k*r^2*0 with k = 2*pi/lambda = inf there, a NaN outside this
+# change (reported).
+# w0 = lambda = 2^-1020 (z_R = pi*2^-1020, normal)
+var b61t = gaussian_beam_new(0x0030000000000000, 0x0030000000000000, &e61);
+var w61t = beam_radius(b61t);
+# q = i*2^-1022, lambda subnormal: w ~ 8.5e-314, itself SUBNORMAL
+var b61s = gaussian_beam_from_q(0, 0x0010000000000000, 0x000000000003243F, &e61);
+var w61s = beam_radius(b61s);
+# w ~ 1.255e-308
+var b61u = gaussian_beam_from_q(0, 0x0010000000000000, 0x000FFDA0DA35B45A, &e61);
+var w61u = beam_radius(b61u);
+# w ~ 2.57e-305
+var b61v = gaussian_beam_from_q(0, 0x0010000000000000, 0x016FF9BA4CE7A571, &e61);
+var w61v = beam_radius(b61v);
+# w ~ 6.7e-272
+var b61x = gaussian_beam_from_q(0, 0x0010000000000000, 0x0F501F29BA3D9340, &e61);
+var w61x = beam_radius(b61x);
+# w = 2^-1022 exactly
+var b61z = gaussian_beam_from_q(0, 0x0010000000000000, 0x002921FB54442D18, &e61);
+var w61z = beam_radius(b61z);
+# w0 = 1e18, lambda = 1
+var b61g = gaussian_beam_new(0x43ABC16D674EC800, F64_ONE, &e61);
+var w61g = beam_radius(b61g);
+# w = 2^100 exactly
+var b61h = gaussian_beam_from_q(0, 0x4630000000000000, 0x464921FB54442D18, &e61);
+var w61h = beam_radius(b61h);
+# w = 2^1020 exactly
+var b61m = gaussian_beam_from_q(0, 0x7FB0000000000000, 0x7FC921FB54442D18, &e61);
+var w61m = beam_radius(b61m);
+# the suite's bw8: w0 = 1 mm, 632.8 nm
+var b61n = gaussian_beam_new(f64_div(F64_ONE, f64_from(1000)), f64_div(f64_from(6328), f64_from(10000000000)), &e61);
+var w61n = beam_radius(b61n);
+# LG_20,15 at w = 2^-1020 (round-1 cut: +inf as success; 2.6.0 8.8e-15)
+# mpmath: 2.330286540387843144827018e+291
+r61 = f64_div(w61t, f64_sqrt(f64_from(160)));
+t61 = lg_mode_field(b61t, 20, 15, r61, 0, &fr61, &fi61);
+assert_eq(t61, PK_ERR_NONE, "LG_20,15 at w = 2^-1020: status");
+assert(_lg61_rel(fr61, 0x7C6DE3CC284F399B, REL14_61), "LG_20,15 at w = 2^-1020");
+# LG_0,1 ring at w = 2^-1020
+# mpmath: 5.43736387882155820563703e+306
+r61 = f64_mul(w61t, 0x3FE6A09E667F3BCD);
+t61 = lg_mode_field(b61t, 0, 1, r61, 0, &fr61, &fi61);
+assert_eq(t61, PK_ERR_NONE, "LG_0,1 ring at w = 2^-1020: status");
+assert(_lg61_rel(fr61, 0x7F9EF8E58E331737, REL14_61), "LG_0,1 ring at w = 2^-1020");
+# LG_5,1 at w ~ 1.3e-308, t = 1e-5 (round-1 cut: +inf)
+# mpmath: 2.202353142713123230311578e+303
+r61 = f64_mul(w61u, 0x3EE4F8B588E368F1);
+fr61 = _bm_lg_amp(b61u, 5, _bm_iabs(1), r61);
+assert(_lg61_rel(fr61, 0x7EE9B134122ACC97, REL14_61), "LG_5,1 at w ~ 1.3e-308, t = 1e-5");
+# LG_100,9 at w ~ 2.6e-305, t = 1e-3 (round-1 cut: +inf; lg_mode_field returned it with status 0)
+# mpmath: 2.407855486372957960539399e+282
+r61 = f64_mul(w61v, 0x3F50624DD2F1A9FC);
+fr61 = _bm_lg_amp(b61v, 100, _bm_iabs(9), r61);
+assert(_lg61_rel(fr61, 0x7A9094C5CBA42E05, REL14_61), "LG_100,9 at w ~ 2.6e-305, t = 1e-3");
+# LG_200,200 at w ~ 6.7e-272, t = 24.5 (round-1 cut: +inf)
+# mpmath: 5.514150731815777612054995e+268
+r61 = f64_mul(w61x, 0x4038800000000000);
+fr61 = _bm_lg_amp(b61x, 200, _bm_iabs(200), r61);
+assert(_lg61_rel(fr61, 0x77BAB86A3C006539, REL12_61), "LG_200,200 at w ~ 6.7e-272, t = 24.5");
+# LG_2,60 at w = 2^-1022, t = 5.03 (2.6.0: +inf, pref*exp(E) overflowed before P;
+# round-1 cut: +inf)
+# mpmath: 4.106749533619182721723747e+306
+r61 = f64_mul(w61z, 0x401423B800000000);
+t61 = lg_mode_field(b61z, 2, 60, r61, 0, &fr61, &fi61);
+assert_eq(t61, PK_ERR_NONE, "LG_2,60 at w = 2^-1022, t = 5.03: status");
+assert(_lg61_rel(fr61, 0x7F97648FF8D5D3A9, REL14_61), "LG_2,60 at w = 2^-1022, t = 5.03");
+# LG_0,0 at a SUBNORMAL w, t = 30 (2.6.0 and round-1 cut: +inf, from sqrt(2/pi)/w)
+# mpmath: 1.282632611934626026748538e-78
+r61 = f64_mul(w61s, 0x403E000000000000);
+fr61 = _bm_lg_amp(b61s, 0, _bm_iabs(0), r61);
+assert(_lg61_rel(fr61, 0x2FC302A93CD895A0, REL14_61), "LG_0,0 at a SUBNORMAL w, t = 30");
+# LG_2,3 at a SUBNORMAL w, t = 8 (2.6.0 and round-1 cut: +inf)
+# mpmath: 2.131400932375921762477409e+291
+r61 = f64_mul(w61s, 0x4020000000000000);
+fr61 = _bm_lg_amp(b61s, 2, _bm_iabs(3), r61);
+assert(_lg61_rel(fr61, 0x7C6B56BB192156E8, REL14_61), "LG_2,3 at a SUBNORMAL w, t = 8");
+# LG_7,7 at w = 1e18, s = 1435 (2.6.0: 4.2e-6)
+# mpmath: -1.233975868761509639150649e-304
+r61 = 0x43F73BBAA509EFEA;
+t61 = lg_mode_field(b61g, 7, 7, r61, 0, &fr61, &fi61);
+assert_eq(t61, PK_ERR_NONE, "LG_7,7 at w = 1e18, s = 1435: status");
+assert(_lg61_rel(fr61, 0x80D5A9C65DDB6B76, REL12_61), "LG_7,7 at w = 1e18, s = 1435");
+# LG_22,2 at w = 1e18, s = 1404 (2.6.0: 1.4e-5)
+# mpmath: 6.743846334503824754314861e-274
+r61 = 0x43F6FB227255000A;
+t61 = lg_mode_field(b61g, 22, 2, r61, 0, &fr61, &fi61);
+assert_eq(t61, PK_ERR_NONE, "LG_22,2 at w = 1e18, s = 1404: status");
+assert(_lg61_rel(fr61, 0x07375947F2EBD4C1, REL12_61), "LG_22,2 at w = 1e18, s = 1404");
+# LG_18,0 at w = 1e18, s = 1390 (2.6.0: 6.2e-5)
+# mpmath: 5.403406618060016425336522e-280
+r61 = 0x43F6DDBAACFBBBEF;
+t61 = lg_mode_field(b61g, 18, 0, r61, 0, &fr61, &fi61);
+assert_eq(t61, PK_ERR_NONE, "LG_18,0 at w = 1e18, s = 1390: status");
+assert(_lg61_rel(fr61, 0x05F39DD91EE6D5B7, REL12_61), "LG_18,0 at w = 1e18, s = 1390");
+# LG_1,6 at w = 2^100, t = 26.43: a subnormal value (2.6.0: false 0)
+# mpmath: -1.300469759970073082685173e-323
+r61 = f64_mul(w61h, 0x403A6E8200000000);
+fr61 = _bm_lg_amp(b61h, 1, _bm_iabs(6), r61);
+assert(_lg61_sub1(fr61, 0x8000000000000003), "LG_1,6 at w = 2^100, t = 26.43: a subnormal value");
+# LG_3,2 at w = 2^1020, t = 4.66: a subnormal value (2.6.0: 462 subnormal ulps off)
+# mpmath: -2.473501608152625442424156e-312
+r61 = f64_mul(w61m, 0x40129F4F52965E7A);
+fr61 = _bm_lg_amp(b61m, 3, _bm_iabs(2), r61);
+assert(_lg61_sub1(fr61, 0x80000074909B3CA9), "LG_3,2 at w = 2^1020, t = 4.66: a subnormal value");
+# LG_0,1500 ring peak (2.6.0: 5.3e-14)
+# mpmath: 80.97672641574727141702943
+r61 = 0x3F9C0B1BEE5A6D84;
+t61 = lg_mode_field(b61n, 0, 1500, r61, 0, &fr61, &fi61);
+assert_eq(t61, PK_ERR_NONE, "LG_0,1500 ring peak: status");
+assert(_lg61_rel(fr61, 0x40543E82AF833186, REL15_61), "LG_0,1500 ring peak");
+# LG_0,1 at r = 1e-300 w0 (2.6.0: 3.7e-15)
+# mpmath: 1.12837916709551263118874e-297
+r61 = 0x0105F1CA820511C4;
+t61 = lg_mode_field(b61n, 0, 1, r61, 0, &fr61, &fi61);
+assert_eq(t61, PK_ERR_NONE, "LG_0,1 at r = 1e-300 w0: status");
+assert(_lg61_rel(fr61, 0x02479D5706DE768B, REL15_61), "LG_0,1 at r = 1e-300 w0");
+# LG_2,3 at t ~ 1e-100 (2.6.0: 6.7e-15)
+# mpmath: 2.913462481578877990826216e-297
+r61 = 0x2A8CAB3210F3BB96;
+t61 = lg_mode_field(b61n, 2, 3, r61, 0, &fr61, &fi61);
+assert_eq(t61, PK_ERR_NONE, "LG_2,3 at t ~ 1e-100: status");
+assert(_lg61_rel(fr61, 0x025E7C80149954F7, REL15_61), "LG_2,3 at t ~ 1e-100");
+# LG_60,60 at 7.5 w0 (2.6.0: 9.2e-15)
+# mpmath: -47.30937018637353439767914
+r61 = 0x3F7EB851EB851EB8;
+t61 = lg_mode_field(b61n, 60, 60, r61, 0, &fr61, &fi61);
+assert_eq(t61, PK_ERR_NONE, "LG_60,60 at 7.5 w0: status");
+assert(_lg61_rel(fr61, 0xC047A79971386A77, REL14_61), "LG_60,60 at 7.5 w0");
+# LG_7,60 at s = 112 (2.6.0: 1.3e-15)
+# mpmath: -117.1074114275339788067344
+r61 = f64_mul(w61n, f64_sqrt(f64_from(56)));
+t61 = lg_mode_field(b61n, 7, 60, r61, 0, &fr61, &fi61);
+assert_eq(t61, PK_ERR_NONE, "LG_7,60 at s = 112: status");
+assert(_lg61_rel(fr61, 0xC05D46DFD42E1E68, REL15_61), "LG_7,60 at s = 112");
+# LG_0,10 at s = 4.5 < a/2 (where a - s rounds; 2.6.0: 3.5e-16)
+# mpmath: 81.46264924127153174877535
+r61 = f64_mul(w61n, 0x3FF8000000000000);
+t61 = lg_mode_field(b61n, 0, 10, r61, 0, &fr61, &fi61);
+assert_eq(t61, PK_ERR_NONE, "LG_0,10 at s = 4.5 < a/2: status");
+assert(_lg61_rel(fr61, 0x40545D9C0B9031F3, REL15_61), "LG_0,10 at s = 4.5 < a/2");
+# LG_400,5 at s = 1600 (P rescaled: 2.6.0's log form, 5.6e-14)
+# mpmath: 43.17879591252550353330572
+r61 = f64_mul(w61n, f64_sqrt(f64_from(800)));
+t61 = lg_mode_field(b61n, 400, 5, r61, 0, &fr61, &fi61);
+assert_eq(t61, PK_ERR_NONE, "LG_400,5 at s = 1600: status");
+assert(_lg61_rel(fr61, 0x404596E2C8D27A4E, REL12_61), "LG_400,5 at s = 1600");
+# LG_400,4000 at w = 1, t = 61, its brightest ring: C(4400, 400) ~ 2^1928 is carried
+# as cf * 2^(512*cexp), so this crosses the 2^-512 rescale of C and the binary
+# exponent path (2.6.0: 6.6e-13; round-1 cut: 9.2e-14; 2.6.1: 7.5e-15)
+# mpmath: 0.02482924059935781062602155
+var b61o = gaussian_beam_from_q(0, F64_ONE, F64_PI, &e61);
+assert_eq(beam_radius(b61o), F64_ONE, "q = i, lambda = pi: w = 1 exactly");
+t61 = lg_mode_field(b61o, 400, 4000, f64_from(61), 0, &fr61, &fi61);
+assert_eq(t61, PK_ERR_NONE, "LG_400,4000 at w = 1, t = 61: status");
+assert(_lg61_rel(fr61, 0x3F996CD6216F5E0F, REL3E14_61), "LG_400,4000 at w = 1, t = 61");
+# LG_400,1500 at w = 1, t = 19.75: P falls below 2^-512 once in the recurrence and
+# is scaled UP by 2^512, so cnt = -1 takes the binary exponent path (2.6.0's log
+# form: 3.5e-13; 2.6.1: 2.5e-15)
+# mpmath: 0.01897460319821717900813974
+t61 = lg_mode_field(b61o, 400, 1500, 0x4033C00000000000, 0, &fr61, &fi61);
+assert_eq(t61, PK_ERR_NONE, "LG_400,1500 at w = 1, t = 19.75: status");
+assert(_lg61_rel(fr61, 0x3F936E1410C3807A, REL14_61), "LG_400,1500 at w = 1, t = 19.75");
+# LG_0,-2^52 on its ring (s = 2^52): the largest |l| allowed
+# mpmath: 0.06151841687948747740229603
+r61 = f64_mul(w61n, f64_sqrt(f64_from(2251799813685248)));
+t61 = lg_mode_field(b61n, 0, 0 - 4503599627370496, r61, 0, &fr61, &fi61);
+assert_eq(t61, PK_ERR_NONE, "LG_0,-2^52 on its ring: status");
+assert(_lg61_rel(fr61, 0x3FAF7F578932BC54, REL14_61), "LG_0,-2^52 on its ring");
+# LG_0,0 through the fast path is 2.6.0's direct form bit for bit wherever that
+# form's product is a normal double (the a = 0 path changed nothing there).
+fn _lg61_a00(b, w, t) {
+    var x = f64_mul(f64_div(f64_sqrt(f64_div(F64_TWO, F64_PI)), w), f64_exp(f64_neg(f64_mul(t, t))));
+    if (_bm_lg_amp(b, 0, 0, f64_mul(w, t)) == x) { return 1; }
+    return 0;
+}
+assert(_lg61_a00(b61n, w61n, 0x3FE0000000000000), "LG_0,0 = 2.6.0 bits at t = 0.5");
+assert(_lg61_a00(b61n, w61n, 0x3FF8000000000000), "LG_0,0 = 2.6.0 bits at t = 1.5");
+assert(_lg61_a00(b61n, w61n, 0x4014000000000000), "LG_0,0 = 2.6.0 bits at t = 5.0");
+# a >= 10 with a subnormal s: 0 (the true value is below 2^-3775).
+assert_eq(_bm_lg_amp(b61n, 0, 10, f64_mul(w61n, 0x1F80000000000000)), 0, "LG_0,10 at t = 2^-519: 0");
+
+test_group("lg_2_6_1_scale");
+# At w = 2^k (q = i*2^k, lambda = pi*2^k: beam_radius is exactly 2^k) the amplitude
+# is 2^-k times its value at w = 1, bit for bit, wherever that is a normal double:
+# every path — the a < 10 fast form (t above and below 2^-100) and double-double
+# form (t^2 >= 700: LG_2,3 at t = 27; P rescaled: LG_400,5), a >= 10, and C past
+# 2^512 (LG_400,4000).
+fn _lg61_scale(p, a, t, k) {
+    var e = 0;
+    var q = (k + 1023) << 52;                                   # 2^k
+    var b1 = gaussian_beam_from_q(0, F64_ONE, F64_PI, &e);
+    var bk = gaussian_beam_from_q(0, q, f64_mul(F64_PI, q), &e);
+    var v1 = _bm_lg_amp(b1, p, a, t);
+    var vk = _bm_lg_amp(bk, p, a, f64_mul(t, q));
+    if (vk == f64_mul(v1, (1023 - k) << 52)) { return 1; }
+    return 0;
+}
+assert(_lg61_scale(0, 0, 0x3FE0000000000000, -1000), "LG_0,0, t = 0.5, w = 2^-1000: exactly 2^-k times w = 1");
+assert(_lg61_scale(0, 0, 0x3FE0000000000000, -700), "LG_0,0, t = 0.5, w = 2^-700: exactly 2^-k times w = 1");
+assert(_lg61_scale(0, 0, 0x3FE0000000000000, -300), "LG_0,0, t = 0.5, w = 2^-300: exactly 2^-k times w = 1");
+assert(_lg61_scale(0, 0, 0x3FE0000000000000, 300), "LG_0,0, t = 0.5, w = 2^300: exactly 2^-k times w = 1");
+assert(_lg61_scale(0, 0, 0x3FE0000000000000, 700), "LG_0,0, t = 0.5, w = 2^700: exactly 2^-k times w = 1");
+assert(_lg61_scale(0, 0, 0x3FE0000000000000, 1000), "LG_0,0, t = 0.5, w = 2^1000: exactly 2^-k times w = 1");
+assert(_lg61_scale(0, 1, 0x3FE6A09E667F3BCD, -1000), "LG_0,1, t = 0.707107, w = 2^-1000: exactly 2^-k times w = 1");
+assert(_lg61_scale(0, 1, 0x3FE6A09E667F3BCD, -700), "LG_0,1, t = 0.707107, w = 2^-700: exactly 2^-k times w = 1");
+assert(_lg61_scale(0, 1, 0x3FE6A09E667F3BCD, -300), "LG_0,1, t = 0.707107, w = 2^-300: exactly 2^-k times w = 1");
+assert(_lg61_scale(0, 1, 0x3FE6A09E667F3BCD, 300), "LG_0,1, t = 0.707107, w = 2^300: exactly 2^-k times w = 1");
+assert(_lg61_scale(0, 1, 0x3FE6A09E667F3BCD, 700), "LG_0,1, t = 0.707107, w = 2^700: exactly 2^-k times w = 1");
+assert(_lg61_scale(0, 1, 0x3FE6A09E667F3BCD, 1000), "LG_0,1, t = 0.707107, w = 2^1000: exactly 2^-k times w = 1");
+assert(_lg61_scale(2, 3, 0x3FF8000000000000, -1000), "LG_2,3, t = 1.5, w = 2^-1000: exactly 2^-k times w = 1");
+assert(_lg61_scale(2, 3, 0x3FF8000000000000, -700), "LG_2,3, t = 1.5, w = 2^-700: exactly 2^-k times w = 1");
+assert(_lg61_scale(2, 3, 0x3FF8000000000000, -300), "LG_2,3, t = 1.5, w = 2^-300: exactly 2^-k times w = 1");
+assert(_lg61_scale(2, 3, 0x3FF8000000000000, 300), "LG_2,3, t = 1.5, w = 2^300: exactly 2^-k times w = 1");
+assert(_lg61_scale(2, 3, 0x3FF8000000000000, 700), "LG_2,3, t = 1.5, w = 2^700: exactly 2^-k times w = 1");
+assert(_lg61_scale(2, 3, 0x3FF8000000000000, 1000), "LG_2,3, t = 1.5, w = 2^1000: exactly 2^-k times w = 1");
+assert(_lg61_scale(2, 3, 0x3870000000000000, -700), "LG_2,3, t = 7.52316e-37, w = 2^-700: exactly 2^-k times w = 1");
+assert(_lg61_scale(2, 3, 0x3870000000000000, -300), "LG_2,3, t = 7.52316e-37, w = 2^-300: exactly 2^-k times w = 1");
+assert(_lg61_scale(2, 3, 0x3870000000000000, 300), "LG_2,3, t = 7.52316e-37, w = 2^300: exactly 2^-k times w = 1");
+assert(_lg61_scale(2, 3, 0x403B000000000000, -1000), "LG_2,3, t = 27, w = 2^-1000: exactly 2^-k times w = 1");
+assert(_lg61_scale(2, 3, 0x403B000000000000, -700), "LG_2,3, t = 27, w = 2^-700: exactly 2^-k times w = 1");
+assert(_lg61_scale(2, 3, 0x403B000000000000, -300), "LG_2,3, t = 27, w = 2^-300: exactly 2^-k times w = 1");
+assert(_lg61_scale(5, 1, 0x4007333333333333, -1000), "LG_5,1, t = 2.9, w = 2^-1000: exactly 2^-k times w = 1");
+assert(_lg61_scale(5, 1, 0x4007333333333333, -700), "LG_5,1, t = 2.9, w = 2^-700: exactly 2^-k times w = 1");
+assert(_lg61_scale(5, 1, 0x4007333333333333, -300), "LG_5,1, t = 2.9, w = 2^-300: exactly 2^-k times w = 1");
+assert(_lg61_scale(5, 1, 0x4007333333333333, 300), "LG_5,1, t = 2.9, w = 2^300: exactly 2^-k times w = 1");
+assert(_lg61_scale(5, 1, 0x4007333333333333, 700), "LG_5,1, t = 2.9, w = 2^700: exactly 2^-k times w = 1");
+assert(_lg61_scale(5, 1, 0x4007333333333333, 1000), "LG_5,1, t = 2.9, w = 2^1000: exactly 2^-k times w = 1");
+assert(_lg61_scale(20, 15, 0x4018000000000000, -1000), "LG_20,15, t = 6, w = 2^-1000: exactly 2^-k times w = 1");
+assert(_lg61_scale(20, 15, 0x4018000000000000, -700), "LG_20,15, t = 6, w = 2^-700: exactly 2^-k times w = 1");
+assert(_lg61_scale(20, 15, 0x4018000000000000, -300), "LG_20,15, t = 6, w = 2^-300: exactly 2^-k times w = 1");
+assert(_lg61_scale(20, 15, 0x4018000000000000, 300), "LG_20,15, t = 6, w = 2^300: exactly 2^-k times w = 1");
+assert(_lg61_scale(20, 15, 0x4018000000000000, 700), "LG_20,15, t = 6, w = 2^700: exactly 2^-k times w = 1");
+assert(_lg61_scale(20, 15, 0x4018000000000000, 1000), "LG_20,15, t = 6, w = 2^1000: exactly 2^-k times w = 1");
+assert(_lg61_scale(60, 60, 0x402A000000000000, -1000), "LG_60,60, t = 13, w = 2^-1000: exactly 2^-k times w = 1");
+assert(_lg61_scale(60, 60, 0x402A000000000000, -700), "LG_60,60, t = 13, w = 2^-700: exactly 2^-k times w = 1");
+assert(_lg61_scale(60, 60, 0x402A000000000000, -300), "LG_60,60, t = 13, w = 2^-300: exactly 2^-k times w = 1");
+assert(_lg61_scale(60, 60, 0x402A000000000000, 300), "LG_60,60, t = 13, w = 2^300: exactly 2^-k times w = 1");
+assert(_lg61_scale(60, 60, 0x402A000000000000, 700), "LG_60,60, t = 13, w = 2^700: exactly 2^-k times w = 1");
+assert(_lg61_scale(60, 60, 0x402A000000000000, 1000), "LG_60,60, t = 13, w = 2^1000: exactly 2^-k times w = 1");
+assert(_lg61_scale(0, 300, 0x4028800000000000, -1000), "LG_0,300, t = 12.25, w = 2^-1000: exactly 2^-k times w = 1");
+assert(_lg61_scale(0, 300, 0x4028800000000000, -700), "LG_0,300, t = 12.25, w = 2^-700: exactly 2^-k times w = 1");
+assert(_lg61_scale(0, 300, 0x4028800000000000, -300), "LG_0,300, t = 12.25, w = 2^-300: exactly 2^-k times w = 1");
+assert(_lg61_scale(0, 300, 0x4028800000000000, 300), "LG_0,300, t = 12.25, w = 2^300: exactly 2^-k times w = 1");
+assert(_lg61_scale(0, 300, 0x4028800000000000, 700), "LG_0,300, t = 12.25, w = 2^700: exactly 2^-k times w = 1");
+assert(_lg61_scale(0, 300, 0x4028800000000000, 1000), "LG_0,300, t = 12.25, w = 2^1000: exactly 2^-k times w = 1");
+assert(_lg61_scale(7, 60, 0x401E000000000000, -1000), "LG_7,60, t = 7.5, w = 2^-1000: exactly 2^-k times w = 1");
+assert(_lg61_scale(7, 60, 0x401E000000000000, -700), "LG_7,60, t = 7.5, w = 2^-700: exactly 2^-k times w = 1");
+assert(_lg61_scale(7, 60, 0x401E000000000000, -300), "LG_7,60, t = 7.5, w = 2^-300: exactly 2^-k times w = 1");
+assert(_lg61_scale(7, 60, 0x401E000000000000, 300), "LG_7,60, t = 7.5, w = 2^300: exactly 2^-k times w = 1");
+assert(_lg61_scale(7, 60, 0x401E000000000000, 700), "LG_7,60, t = 7.5, w = 2^700: exactly 2^-k times w = 1");
+assert(_lg61_scale(7, 60, 0x401E000000000000, 1000), "LG_7,60, t = 7.5, w = 2^1000: exactly 2^-k times w = 1");
+assert(_lg61_scale(400, 5, 0x403C4CCCCCCCCCCD, -1000), "LG_400,5, t = 28.3, w = 2^-1000: exactly 2^-k times w = 1");
+assert(_lg61_scale(400, 5, 0x403C4CCCCCCCCCCD, -700), "LG_400,5, t = 28.3, w = 2^-700: exactly 2^-k times w = 1");
+assert(_lg61_scale(400, 5, 0x403C4CCCCCCCCCCD, -300), "LG_400,5, t = 28.3, w = 2^-300: exactly 2^-k times w = 1");
+assert(_lg61_scale(400, 5, 0x403C4CCCCCCCCCCD, 300), "LG_400,5, t = 28.3, w = 2^300: exactly 2^-k times w = 1");
+assert(_lg61_scale(400, 5, 0x403C4CCCCCCCCCCD, 700), "LG_400,5, t = 28.3, w = 2^700: exactly 2^-k times w = 1");
+assert(_lg61_scale(400, 5, 0x403C4CCCCCCCCCCD, 1000), "LG_400,5, t = 28.3, w = 2^1000: exactly 2^-k times w = 1");
+assert(_lg61_scale(400, 4000, 0x4051533333333333, -1000),
+  "LG_400,4000, t = 69.3, w = 2^-1000: exactly 2^-k times w = 1");
+assert(_lg61_scale(400, 4000, 0x4051533333333333, -700), "LG_400,4000, t = 69.3, w = 2^-700: exactly 2^-k times w = 1");
+assert(_lg61_scale(400, 4000, 0x4051533333333333, -300), "LG_400,4000, t = 69.3, w = 2^-300: exactly 2^-k times w = 1");
+assert(_lg61_scale(400, 4000, 0x4051533333333333, 300), "LG_400,4000, t = 69.3, w = 2^300: exactly 2^-k times w = 1");
+assert(_lg61_scale(0, 10, 0x3FF8000000000000, -1000), "LG_0,10, t = 1.5, w = 2^-1000: exactly 2^-k times w = 1");
+assert(_lg61_scale(0, 10, 0x3FF8000000000000, -700), "LG_0,10, t = 1.5, w = 2^-700: exactly 2^-k times w = 1");
+assert(_lg61_scale(0, 10, 0x3FF8000000000000, -300), "LG_0,10, t = 1.5, w = 2^-300: exactly 2^-k times w = 1");
+assert(_lg61_scale(0, 10, 0x3FF8000000000000, 300), "LG_0,10, t = 1.5, w = 2^300: exactly 2^-k times w = 1");
+assert(_lg61_scale(0, 10, 0x3FF8000000000000, 700), "LG_0,10, t = 1.5, w = 2^700: exactly 2^-k times w = 1");
+assert(_lg61_scale(0, 10, 0x3FF8000000000000, 1000), "LG_0,10, t = 1.5, w = 2^1000: exactly 2^-k times w = 1");
+assert(_lg61_scale(3, 2, 0x40129F4F52965E7A, -1000), "LG_3,2, t = 4.65558, w = 2^-1000: exactly 2^-k times w = 1");
+assert(_lg61_scale(3, 2, 0x40129F4F52965E7A, -700), "LG_3,2, t = 4.65558, w = 2^-700: exactly 2^-k times w = 1");
+assert(_lg61_scale(3, 2, 0x40129F4F52965E7A, -300), "LG_3,2, t = 4.65558, w = 2^-300: exactly 2^-k times w = 1");
+assert(_lg61_scale(3, 2, 0x40129F4F52965E7A, 300), "LG_3,2, t = 4.65558, w = 2^300: exactly 2^-k times w = 1");
+assert(_lg61_scale(3, 2, 0x40129F4F52965E7A, 700), "LG_3,2, t = 4.65558, w = 2^700: exactly 2^-k times w = 1");
+assert(_lg61_scale(3, 2, 0x40129F4F52965E7A, 1000), "LG_3,2, t = 4.65558, w = 2^1000: exactly 2^-k times w = 1");
+
+test_group("lg_2_6_1_order_bound");
+# p + |l| <= 2^52 (_bm_lg_ok): past it the sums k + 1 + |l| and mhi + j could wrap
+# i64. 2.6.0 returned NaN with PK_ERR_NONE for |l| = INT64_MAX and p >= 1.
+var rr61 = f64_mul(w61n, F64_HALF);
+t61 = lg_mode_field(b61n, 1, 0x7FFFFFFFFFFFFFFF, rr61, 0, &fr61, &fi61);
+assert_eq(t61, PK_ERR_INVALID_PARAMETER, "l = INT64_MAX, p = 1 refused (2.6.0: NaN as success)");
+assert_eq(fr61, 0, "refused: Re u written 0");
+assert_eq(fi61, 0, "refused: Im u written 0");
+assert_eq(lg_mode_intensity(b61n, 1, 0x7FFFFFFFFFFFFFFF, rr61), 0x7FF8000000000000,
+  "l = INT64_MAX, p = 1: NaN intensity");
+t61 = lg_mode_field(b61n, 1, 0x10000000000000, rr61, 0, &fr61, &fi61);
+assert_eq(t61, PK_ERR_INVALID_PARAMETER, "p + |l| = 2^52 + 1 refused");
+assert_eq(lg_mode_intensity(b61n, 0x10000000000000, 1, 0), 0x7FF8000000000000, "p = 2^52, l = 1: NaN");
+assert_eq(lg_mode_intensity(b61n, 0x10000000000001, 0, 0), 0x7FF8000000000000, "p = 2^52 + 1: NaN");
+assert_eq(lg_mode_intensity(b61n, 0x7FFFFFFFFFFFFFFF, 0, 0), 0x7FF8000000000000, "p = INT64_MAX: NaN");
+t61 = lg_mode_field(b61n, 3, 0 - 4503599627370494, rr61, 0, &fr61, &fi61);
+assert_eq(t61, PK_ERR_INVALID_PARAMETER, "p = 3, l = -(2^52 - 2) refused");
+# At the bound itself: accepted, finite (r = 0 returns before the p-step recurrence).
+var a0w61 = f64_div(f64_sqrt(f64_div(F64_TWO, F64_PI)), w61n);
+assert_eq(lg_mode_intensity(b61n, 0x10000000000000, 0, 0), f64_mul(a0w61, a0w61),
+  "p = 2^52, l = 0, r = 0: (sqrt(2/pi)/w)^2");
+r61 = f64_mul(w61n, f64_sqrt(f64_from(2251799813685248)));
+t61 = lg_mode_field(b61n, 3, 0 - 4503599627370493, r61, 0, &fr61, &fi61);
+assert_eq(t61, PK_ERR_NONE, "p = 3, l = -(2^52 - 3): p + |l| = 2^52 accepted");
+assert(f64_lt(f64_abs(fr61), 0x7FF0000000000000), "p = 3, l = -(2^52 - 3): finite");
+
 var r = assert_summary();
