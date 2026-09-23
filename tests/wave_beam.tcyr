@@ -1,0 +1,1360 @@
+# wave_beam test suite — Gaussian beam optics (new in 2.6.0; there is no Rust
+# original to port tests from).
+#
+# ⚠ How the pins are built, per CLAUDE.md's "a test that samples only the points a
+# bug survives is worse than no test":
+#   - VALUES are pinned to mpmath at 50 significant digits, evaluated on the SAME
+#     double inputs these tests construct and rounded to the nearest double. They
+#     share no code with src/wave_beam.cyr. REL14 is a few ULP.
+#   - INVARIANTS (w(z_R) = sqrt2*w0, R's minimum at z_R, the Gouy limits, the 1/e^2
+#     definition of w) are pinned separately, because a value pin at one z cannot
+#     see a law that is wrong elsewhere.
+#   - INTEGRALS are the strongest check a distribution can be given (roadmap ⭐):
+#     the intensity integrates to the power, and the power fraction is pinned
+#     against that integral, so the two functions cannot drift apart.
+
+include "src/error.cyr"
+include "src/ray_fiber.cyr"
+include "src/lens.cyr"
+include "src/wave_beam.cyr"
+
+fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
+fn _rel(a, b, tol) { return f64_le(f64_abs(f64_sub(a, b)), f64_mul(tol, f64_abs(b))); }
+fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
+fn _assert_rel(a, b, tol, msg) { assert(_rel(a, b, tol), msg); }
+
+var REL14 = _fd(1, 100000000000000);      # 1e-14
+var REL12 = _fd(1, 1000000000000);        # 1e-12
+var REL9 = _fd(1, 1000000000);            # 1e-9
+var W0 = _fd(1, 1000);                    # 1 mm waist
+var LAM = _fd(6328, 10000000000);         # 632.8 nm (HeNe)
+var SQRT2 = f64_sqrt(F64_TWO);
+var INF = 0x7FF0000000000000;
+var NAN = 0x7FF8000000000000;
+
+# Composite Simpson over [0, b] of 2*pi*r*I(r) for a TEM00 of power P at z: the
+# power inside radius b. n must be even.
+fn _power_inside(power, w0, wl, z, b, n) {
+    var e = 0;
+    var h = f64_div(b, f64_from(n));
+    var s = 0;
+    for (var i = 0; i <= n; i = i + 1) {
+        var r = f64_mul(h, f64_from(i));
+        var f = f64_mul(f64_mul(F64_TWO, f64_mul(F64_PI, r)),
+          gaussian_intensity(power, w0, wl, r, z, &e));
+        var wt = f64_from(2);
+        if (i % 2 == 1) { wt = f64_from(4); }
+        if (i == 0) { wt = F64_ONE; }
+        if (i == n) { wt = F64_ONE; }
+        s = f64_add(s, f64_mul(wt, f));
+    }
+    return f64_div(f64_mul(s, h), f64_from(3));
+}
+
+# 2x2 product X*Y of [[a,b],[c,d]] matrices held in 4-slot buffers.
+fn _mat_mul(x, y, out) {
+    var a = f64_add(f64_mul(load64(x), load64(y)), f64_mul(load64(x + 8), load64(y + 16)));
+    var b = f64_add(f64_mul(load64(x), load64(y + 8)), f64_mul(load64(x + 8), load64(y + 24)));
+    var c = f64_add(f64_mul(load64(x + 16), load64(y)), f64_mul(load64(x + 24), load64(y + 16)));
+    var d = f64_add(f64_mul(load64(x + 16), load64(y + 8)), f64_mul(load64(x + 24), load64(y + 24)));
+    store64(out, a);
+    store64(out + 8, b);
+    store64(out + 16, c);
+    store64(out + 24, d);
+    return out;
+}
+fn _mat_set(m, a, b, c, d) {
+    store64(m, a);
+    store64(m + 8, b);
+    store64(m + 16, c);
+    store64(m + 24, d);
+    return m;
+}
+
+# Round trip of a two-mirror resonator from the plane just after mirror 1:
+# Mir(R1) * Free(L) * Mir(R2) * Free(L). Built by matrix algebra here, NOT by the
+# beam_* element functions, so the resonator pin does not test them against
+# themselves.
+fn _round_trip(r1, r2, len, out) {
+    var fr = alloc(32);
+    var m1 = alloc(32);
+    var m2 = alloc(32);
+    var t = alloc(32);
+    _mat_set(fr, F64_ONE, len, 0, F64_ONE);
+    _mat_set(m1, F64_ONE, 0, f64_div(f64_neg(F64_TWO), r1), F64_ONE);
+    _mat_set(m2, F64_ONE, 0, f64_div(f64_neg(F64_TWO), r2), F64_ONE);
+    _mat_mul(m2, fr, t);
+    _mat_mul(fr, t, out);
+    _mat_mul(m1, out, t);
+    _mat_set(out, load64(t), load64(t + 8), load64(t + 16), load64(t + 24));
+    return out;
+}
+
+# |overlap|^2 of two normalised TEM00 fields at one plane, by Simpson in r on
+# the complex integrand — shares nothing with beam_coupling_efficiency's closed
+# form. u_j = sqrt(2/pi)/w_j * exp(-r^2/w_j^2) * exp(-i*k*r^2*c_j/2).
+fn _overlap2(w1, c1, w2, c2, wl, n) {
+    var k = f64_div(f64_mul(F64_TWO, F64_PI), wl);
+    var a = f64_add(f64_div(F64_ONE, f64_mul(w1, w1)), f64_div(F64_ONE, f64_mul(w2, w2)));
+    var ph = f64_div(f64_mul(k, f64_sub(c1, c2)), F64_TWO);
+    var wmax = w1;
+    if (f64_gt(w2, w1) == 1) { wmax = w2; }
+    var b = f64_mul(f64_from(8), wmax);
+    var h = f64_div(b, f64_from(n));
+    var sr = 0;
+    var si = 0;
+    for (var i = 0; i <= n; i = i + 1) {
+        var r = f64_mul(h, f64_from(i));
+        var r2 = f64_mul(r, r);
+        var mag = f64_mul(f64_mul(F64_TWO, f64_mul(F64_PI, r)), _prk_exp(f64_neg(f64_mul(a, r2))));
+        var wt = f64_from(2);
+        if (i % 2 == 1) { wt = f64_from(4); }
+        if (i == 0) { wt = F64_ONE; }
+        if (i == n) { wt = F64_ONE; }
+        sr = f64_add(sr, f64_mul(wt, f64_mul(mag, _prk_cos(f64_mul(ph, r2)))));
+        si = f64_add(si, f64_mul(wt, f64_mul(mag, f64_neg(_prk_sin(f64_mul(ph, r2))))));
+    }
+    var norm = f64_div(f64_div(F64_TWO, F64_PI), f64_mul(w1, w2));
+    sr = f64_mul(norm, f64_div(f64_mul(sr, h), f64_from(3)));
+    si = f64_mul(norm, f64_div(f64_mul(si, h), f64_from(3)));
+    return f64_add(f64_mul(sr, sr), f64_mul(si, si));
+}
+
+# Integral of |u|^2 over the plane for HG_mn by a plain sum on an h-spaced grid
+# over +-ext. For a Gaussian-decaying analytic integrand the trapezoid rule is
+# spectrally accurate, and the edges carry < e^-90.
+fn _hg_power(beam, m, n, ext, steps) {
+    var h = f64_div(f64_mul(F64_TWO, ext), f64_from(steps));
+    var s = 0;
+    for (var i = 0; i <= steps; i = i + 1) {
+        var x = f64_sub(f64_mul(h, f64_from(i)), ext);
+        for (var j = 0; j <= steps; j = j + 1) {
+            var y = f64_sub(f64_mul(h, f64_from(j)), ext);
+            s = f64_add(s, hg_mode_intensity(beam, m, n, x, y));
+        }
+    }
+    return f64_mul(s, f64_mul(h, h));
+}
+
+# |integral of u1 * conj(u2)| over the plane for two HG modes (complex fields).
+fn _hg_overlap(beam, m1, n1, m2, n2, ext, steps) {
+    var h = f64_div(f64_mul(F64_TWO, ext), f64_from(steps));
+    var sr = 0;
+    var si = 0;
+    var ar = 0;
+    var ai = 0;
+    var br = 0;
+    var bi = 0;
+    for (var i = 0; i <= steps; i = i + 1) {
+        var x = f64_sub(f64_mul(h, f64_from(i)), ext);
+        for (var j = 0; j <= steps; j = j + 1) {
+            var y = f64_sub(f64_mul(h, f64_from(j)), ext);
+            hg_mode_field(beam, m1, n1, x, y, &ar, &ai);
+            hg_mode_field(beam, m2, n2, x, y, &br, &bi);
+            sr = f64_add(sr, f64_add(f64_mul(ar, br), f64_mul(ai, bi)));
+            si = f64_add(si, f64_sub(f64_mul(ai, br), f64_mul(ar, bi)));
+        }
+    }
+    var h2 = f64_mul(h, h);
+    sr = f64_mul(sr, h2);
+    si = f64_mul(si, h2);
+    return f64_sqrt(f64_add(f64_mul(sr, sr), f64_mul(si, si)));
+}
+
+# |integral of u1 * conj(u2)| for two LG modes on a Cartesian grid (so the
+# e^(-i*l*phi) factor is integrated, not assumed).
+fn _lg_overlap(beam, p1, l1, p2, l2, ext, steps) {
+    var h = f64_div(f64_mul(F64_TWO, ext), f64_from(steps));
+    var sr = 0;
+    var si = 0;
+    var ar = 0;
+    var ai = 0;
+    var br = 0;
+    var bi = 0;
+    for (var i = 0; i <= steps; i = i + 1) {
+        var x = f64_sub(f64_mul(h, f64_from(i)), ext);
+        for (var j = 0; j <= steps; j = j + 1) {
+            var y = f64_sub(f64_mul(h, f64_from(j)), ext);
+            var rr = f64_sqrt(f64_add(f64_mul(x, x), f64_mul(y, y)));
+            var ph = ganita_f64_atan2(y, x);
+            lg_mode_field(beam, p1, l1, rr, ph, &ar, &ai);
+            lg_mode_field(beam, p2, l2, rr, ph, &br, &bi);
+            sr = f64_add(sr, f64_add(f64_mul(ar, br), f64_mul(ai, bi)));
+            si = f64_add(si, f64_sub(f64_mul(ai, br), f64_mul(ar, bi)));
+        }
+    }
+    var h2 = f64_mul(h, h);
+    sr = f64_mul(sr, h2);
+    si = f64_mul(si, h2);
+    return f64_sqrt(f64_add(f64_mul(sr, sr), f64_mul(si, si)));
+}
+
+# 2*pi * integral of |u|^2 r dr for LG_pl (trapezoid in r, the integrand is 0 at 0).
+fn _lg_power(beam, p, l, rmax, steps) {
+    var h = f64_div(rmax, f64_from(steps));
+    var s = 0;
+    for (var i = 1; i <= steps; i = i + 1) {
+        var r = f64_mul(h, f64_from(i));
+        s = f64_add(s, f64_mul(lg_mode_intensity(beam, p, l, r), r));
+    }
+    return f64_mul(f64_mul(F64_TWO, F64_PI), f64_mul(s, h));
+}
+
+# Integral of |u_m0(x, 0)|^2 dx, which must be sqrt(2/pi)/w for EVERY m: the
+# y-factor at y = 0 is phi_0(0)^2 = 1/sqrt(pi), the x-factor integrates to 1.
+fn _hg_line_power(beam, m, ext, steps) {
+    var h = f64_div(f64_mul(F64_TWO, ext), f64_from(steps));
+    var s = 0;
+    for (var i = 0; i <= steps; i = i + 1) {
+        var x = f64_sub(f64_mul(h, f64_from(i)), ext);
+        s = f64_add(s, hg_mode_intensity(beam, m, 0, x, 0));
+    }
+    return f64_mul(s, h);
+}
+
+# |a - b| <= tol * scale, for complex parts compared against a field magnitude.
+fn _cnear(ar, ai, br, bi, scale, tol) {
+    var d = f64_add(f64_abs(f64_sub(ar, br)), f64_abs(f64_sub(ai, bi)));
+    return f64_le(d, f64_mul(tol, scale));
+}
+
+# Measured D4-sigma radius of HG_m0 along x: sample |u(x, 0)|^2 on +-ext and hand
+# the profile to beam_second_moment_radius, as a beam profiler would.
+fn _hg_measured_w(beam, m, ext, count) {
+    var buf = alloc(count * 8);
+    var dx = f64_div(f64_mul(F64_TWO, ext), f64_from(count - 1));
+    for (var i = 0; i < count; i = i + 1) {
+        var x = f64_sub(f64_mul(dx, f64_from(i)), ext);
+        store64(buf + i * 8, hg_mode_intensity(beam, m, 0, x, 0));
+    }
+    var e = 0;
+    return beam_second_moment_radius(buf, count, f64_neg(ext), dx, &e);
+}
+
+# Measured D4-sigma radius of LG_pl along x, from the MARGINAL: |u|^2 summed over y
+# on a 2D grid (an LG profile is not separable, so a single line would be wrong).
+fn _lg_measured_w(beam, p, l, ext, count) {
+    var buf = alloc(count * 8);
+    var dx = f64_div(f64_mul(F64_TWO, ext), f64_from(count - 1));
+    for (var i = 0; i < count; i = i + 1) {
+        var x = f64_sub(f64_mul(dx, f64_from(i)), ext);
+        var col = 0;
+        for (var j = 0; j < count; j = j + 1) {
+            var y = f64_sub(f64_mul(dx, f64_from(j)), ext);
+            var rr = f64_sqrt(f64_add(f64_mul(x, x), f64_mul(y, y)));
+            col = f64_add(col, lg_mode_intensity(beam, p, l, rr));
+        }
+        store64(buf + i * 8, col);
+    }
+    var e = 0;
+    return beam_second_moment_radius(buf, count, f64_neg(ext), dx, &e);
+}
+
+# M^2 from two measured radii, at the waist (W0) and one Rayleigh range of the
+# embedded Gaussian away (Wz), by inverting W(z)^2 = W0^2*(1 + (z*M^2*lambda/(pi*W0^2))^2).
+fn _m2_from_two(w_0, w_z, z, wl) {
+    var ratio = f64_sub(f64_div(f64_mul(w_z, w_z), f64_mul(w_0, w_0)), F64_ONE);
+    return f64_mul(f64_div(f64_mul(F64_PI, f64_mul(w_0, w_0)), f64_mul(wl, z)), f64_sqrt(ratio));
+}
+
+alloc_init();
+var e = 0;
+
+# ── TEM00 values (mpmath, 50 digits) ────────
+test_group("tem00_values");
+
+var zr = gaussian_rayleigh_range(W0, LAM, &e);
+assert_eq(e, PK_ERR_NONE, "z_R ok");
+_assert_rel(zr, 0x4013DBBD85E640C2, REL14, "z_R = pi w0^2/lambda = 4.964590160540128 m");
+var Z10 = f64_from(10);
+var ZM3 = f64_neg(f64_from(3));
+_assert_rel(gaussian_beam_radius(W0, LAM, Z10, &e), 0x3F626C26A18D9F00, REL14, "w(10 m) = 2.2488359940559 mm");
+_assert_rel(gaussian_beam_radius(W0, LAM, ZM3, &e), 0x3F53249DB6BC6DD7, REL14, "w(-3 m) = 1.1683979200318 mm");
+_assert_rel(gaussian_curvature(W0, LAM, Z10, &e), 0x3FB489B8A4E0D456, REL14, "1/R(10 m) = 0.0802264597449");
+_assert_rel(gaussian_curvature(W0, LAM, ZM3, &e), 0xBFB6D33A5C6C2B90, REL14, "1/R(-3 m) < 0: converging");
+_assert_rel(gaussian_radius_of_curvature(W0, LAM, Z10, &e), 0x4028EDEF3231DB59, REL14, "R(10 m) = 12.4647155462");
+_assert_rel(gaussian_radius_of_curvature(W0, LAM, F64_ONE, &e), 0x4039A5ABFAF948BB, REL14, "R(1 m) = 25.6471554621");
+_assert_rel(gaussian_gouy_phase(W0, LAM, Z10, &e), 0x3FF1C2802BF9082F, REL14, "Gouy(10 m) = 1.109985515374");
+_assert_rel(gaussian_gouy_phase(W0, LAM, ZM3, &e), 0xBFE164D8731AD8A2, REL14, "Gouy(-3 m) = -0.543560242476");
+_assert_rel(gaussian_divergence(W0, LAM, &e), 0x3F2A66C06CF020C9, REL14, "theta = lambda/(pi w0) = 201.43 urad");
+var P2 = F64_TWO;
+_assert_rel(gaussian_intensity(P2, W0, LAM, _fd(5, 10000), Z10, &e), 0x410BD7007D99357B, REL14,
+  "I(0.5 mm, 10 m) at 2 W");
+_assert_rel(gaussian_intensity(P2, W0, LAM, 0, 0, &e), 0x41336D978B73C37C, REL14, "peak 2P/(pi w0^2)");
+_assert_rel(gaussian_power_fraction(W0, W0, &e), 0x3FEBAB5557101F8D, REL14, "fraction inside w = 1 - e^-2");
+_assert_rel(gaussian_beam_radius_m2(W0, LAM, f64_from(3), Z10, &e), 0x3F7916819441E3B9, REL14,
+  "M^2 = 3: W(10 m) = 6.12497917984 mm");
+
+# ── TEM00 invariants ────────
+test_group("tem00_invariants");
+
+# w(z_R) = sqrt(2)*w0 — the definition of the Rayleigh range.
+_assert_rel(gaussian_beam_radius(W0, LAM, zr, &e), f64_mul(SQRT2, W0), REL14, "w(z_R) = sqrt2 w0");
+_assert_rel(gaussian_beam_radius(W0, LAM, 0, &e), W0, REL14, "w(0) = w0");
+# Symmetric about the waist, bit for bit (only z^2 enters).
+assert_eq(gaussian_beam_radius(W0, LAM, Z10, &e), gaussian_beam_radius(W0, LAM, f64_neg(Z10), &e),
+  "w(-z) == w(z)");
+# R has its minimum, 2*z_R, at z = z_R; curvature is odd in z.
+_assert_rel(gaussian_radius_of_curvature(W0, LAM, zr, &e), f64_mul(F64_TWO, zr), REL14, "R(z_R) = 2 z_R");
+var r_lo = gaussian_radius_of_curvature(W0, LAM, f64_mul(zr, _fd(99, 100)), &e);
+var r_hi = gaussian_radius_of_curvature(W0, LAM, f64_mul(zr, _fd(101, 100)), &e);
+assert(f64_gt(r_lo, f64_mul(F64_TWO, zr)), "R(0.99 z_R) > R(z_R)");
+assert(f64_gt(r_hi, f64_mul(F64_TWO, zr)), "R(1.01 z_R) > R(z_R)");
+assert_eq(gaussian_curvature(W0, LAM, f64_neg(Z10), &e), f64_neg(gaussian_curvature(W0, LAM, Z10, &e)),
+  "curvature odd in z");
+_assert_rel(f64_mul(gaussian_curvature(W0, LAM, Z10, &e), gaussian_radius_of_curvature(W0, LAM, Z10, &e)),
+  F64_ONE, REL14, "curvature * R = 1");
+# Plane wavefront at the waist: R = +inf is an answer, not an error.
+var r_waist = gaussian_radius_of_curvature(W0, LAM, 0, &e);
+assert_eq(r_waist, INF, "R(0) = +inf");
+assert_eq(e, PK_ERR_NONE, "R(0) is not an error");
+assert_eq(gaussian_curvature(W0, LAM, 0, &e), 0, "1/R(0) = 0");
+# Gouy phase: 0 at the waist, +-pi/4 at +-z_R, -> pi/2 far away, increasing.
+assert_eq(gaussian_gouy_phase(W0, LAM, 0, &e), 0, "Gouy(0) = 0");
+_assert_rel(gaussian_gouy_phase(W0, LAM, zr, &e), F64_PI_4, REL14, "Gouy(z_R) = pi/4");
+_assert_rel(gaussian_gouy_phase(W0, LAM, f64_neg(zr), &e), f64_neg(F64_PI_4), REL14, "Gouy(-z_R) = -pi/4");
+var far = f64_mul(zr, f64_from(100000000));
+_assert_near(gaussian_gouy_phase(W0, LAM, far, &e), F64_PI_2, _fd(2, 100000000), "Gouy(1e8 z_R) -> pi/2");
+assert(f64_lt(gaussian_gouy_phase(W0, LAM, F64_ONE, &e), gaussian_gouy_phase(W0, LAM, F64_TWO, &e)),
+  "Gouy increasing");
+# Far field: w(z)/z -> theta. Pins divergence to the propagation law it summarises.
+var zfar = f64_mul(zr, f64_from(1000000));
+_assert_rel(f64_div(gaussian_beam_radius(W0, LAM, zfar, &e), zfar), gaussian_divergence(W0, LAM, &e),
+  REL12, "w(z)/z -> lambda/(pi w0)");
+# w is the 1/e^2 INTENSITY radius, not the 1/e field radius (a factor-sqrt2 trap).
+var wz = gaussian_beam_radius(W0, LAM, Z10, &e);
+var i_axis = gaussian_intensity(F64_ONE, W0, LAM, 0, Z10, &e);
+_assert_rel(f64_div(gaussian_intensity(F64_ONE, W0, LAM, wz, Z10, &e), i_axis),
+  _prk_exp(f64_neg(F64_TWO)), REL14, "I(w)/I(0) = e^-2");
+# M^2 = 1 is TEM00 exactly; an M^2 beam's Rayleigh range is z_R/M^2 and its
+# far-field divergence M^2 times TEM00's.
+assert_eq(gaussian_beam_radius_m2(W0, LAM, F64_ONE, Z10, &e), gaussian_beam_radius(W0, LAM, Z10, &e),
+  "M^2 = 1 is TEM00 bit for bit");
+var m2 = _fd(27, 10);
+_assert_rel(gaussian_beam_radius_m2(W0, LAM, m2, f64_div(zr, m2), &e), f64_mul(SQRT2, W0), REL14,
+  "W(z_R/M^2) = sqrt2 W0");
+_assert_rel(f64_div(gaussian_beam_radius_m2(W0, LAM, m2, zfar, &e), zfar),
+  f64_mul(m2, gaussian_divergence(W0, LAM, &e)), REL12, "M^2 divergence = M^2 theta");
+
+# ── TEM00 integrals ────────
+test_group("tem00_integrals");
+
+# Intensity integrates to the power over the plane, at the waist and at 2 z_R.
+# Simpson with 4000 panels to 8w leaves ~1e-12; 8w cuts off e^-128.
+var p_waist = _power_inside(P2, W0, LAM, 0, f64_mul(f64_from(8), W0), 4000);
+_assert_rel(p_waist, P2, REL9, "integral of I over the plane = P (waist)");
+var z2 = f64_mul(F64_TWO, zr);
+var w_z2 = gaussian_beam_radius(W0, LAM, z2, &e);
+var p_z2 = _power_inside(P2, W0, LAM, z2, f64_mul(f64_from(8), w_z2), 4000);
+_assert_rel(p_z2, P2, REL9, "integral of I over the plane = P (z = 2 z_R)");
+# The power fraction is that same integral, cut at a.
+var a_half = f64_mul(W0, _fd(7, 10));
+var p_in = _power_inside(F64_ONE, W0, LAM, 0, a_half, 4000);
+_assert_rel(gaussian_power_fraction(W0, a_half, &e), p_in, REL9, "power_fraction == integral of I to a");
+# At a = 1e-9 w, x = 2e-18 and e^-x rounds to exactly 1: this reaches the u == 1
+# shortcut, NOT the Kahan correction (the review_2_6_0 group pins that regime).
+_assert_rel(gaussian_power_fraction(W0, _fd(1, 1000000000000), &e), 0x3C42725DD1D243AB, REL12,
+  "fraction at a = 1e-9 w is 2e-18, not 0");
+assert_eq(gaussian_power_fraction(W0, 0, &e), 0, "fraction inside 0 = 0");
+assert_eq(gaussian_power_fraction(W0, f64_mul(f64_from(10), W0), &e), F64_ONE, "fraction inside 10w = 1");
+
+# ── TEM00 error paths ────────
+test_group("tem00_errors");
+
+var _v = gaussian_rayleigh_range(0, LAM, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "w0 = 0 refused");
+assert_eq(_v, 0, "refusal returns 0");
+_v = gaussian_rayleigh_range(f64_neg(W0), LAM, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "w0 < 0 refused");
+_v = gaussian_rayleigh_range(NAN, LAM, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "w0 = NaN refused");
+_v = gaussian_rayleigh_range(INF, LAM, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "w0 = inf refused");
+_v = gaussian_rayleigh_range(W0, 0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "wavelength = 0 refused");
+_v = gaussian_divergence(W0, f64_neg(LAM), &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "divergence: wavelength < 0 refused");
+_v = gaussian_beam_radius(W0, LAM, NAN, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "z = NaN refused");
+_v = gaussian_curvature(W0, LAM, INF, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "z = inf refused");
+_v = gaussian_gouy_phase(0, LAM, F64_ONE, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "Gouy: w0 = 0 refused");
+_v = gaussian_radius_of_curvature(W0, LAM, NAN, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "R: z = NaN refused");
+_v = gaussian_intensity(F64_ONE, W0, 0, 0, 0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "intensity: wavelength = 0 refused");
+_v = gaussian_power_fraction(0, W0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "fraction: w = 0 refused");
+_v = gaussian_power_fraction(W0, NAN, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "fraction: a = NaN refused");
+_v = gaussian_beam_radius_m2(W0, LAM, _fd(9, 10), Z10, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "M^2 < 1 refused");
+_v = gaussian_beam_radius_m2(W0, LAM, NAN, Z10, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "M^2 = NaN refused");
+# A good call after a refusal reports success again (err_out is written on entry).
+_v = gaussian_beam_radius(W0, LAM, Z10, &e);
+assert_eq(e, PK_ERR_NONE, "err_out reset by the next good call");
+
+# ── q parameter: free space ────────
+test_group("q_free_space");
+
+var LAM2 = _fd(1064, 1000000000);          # 1064 nm (Nd:YAG)
+var b = gaussian_beam_new(W0, LAM, &e);
+assert_eq(e, PK_ERR_NONE, "beam_new ok");
+assert(b != 0, "beam_new returns a handle");
+assert_eq(GaussianBeam_q_re(b), 0, "at the waist Re q = 0");
+assert_eq(GaussianBeam_q_im(b), zr, "Im q = z_R, same bits as gaussian_rayleigh_range");
+assert_eq(beam_gouy_phase(b), 0, "Gouy starts at 0 at the waist");
+assert_eq(beam_propagate(b, Z10), PK_ERR_NONE, "propagate ok");
+assert_eq(GaussianBeam_q_re(b), Z10, "q' = q + d exactly");
+# The q-parameter path and the closed-form TEM00 path agree along the axis.
+_assert_rel(beam_radius(b), gaussian_beam_radius(W0, LAM, Z10, &e), REL14, "beam_radius == gaussian_beam_radius");
+_assert_rel(beam_curvature(b), gaussian_curvature(W0, LAM, Z10, &e), REL14, "beam_curvature == gaussian_curvature");
+_assert_rel(beam_gouy_phase(b), gaussian_gouy_phase(W0, LAM, Z10, &e), REL14, "accumulated Gouy == atan(z/z_R)");
+_assert_rel(beam_waist_radius(b), W0, REL14, "free space keeps the waist");
+_assert_rel(beam_waist_distance(b), f64_neg(Z10), REL14, "waist 10 m behind");
+_assert_rel(beam_rayleigh_range(b), zr, REL14, "free space keeps z_R");
+# Back again: q returns bit for bit, Gouy to within rounding.
+assert_eq(beam_propagate(b, f64_neg(Z10)), PK_ERR_NONE, "propagate back ok");
+assert_eq(GaussianBeam_q_re(b), 0, "back at the waist exactly");
+_assert_near(beam_gouy_phase(b), 0, _fd(1, 1000000000000000), "Gouy back to 0");
+# Through a focus: -10 z_R to +10 z_R in ONE step gains 2*atan(10) (> pi/2, so
+# the atan2 quadrant matters: a plain atan would give the wrong branch).
+var bf = gaussian_beam_from_q(f64_mul(f64_neg(f64_from(10)), zr), zr, LAM, &e);
+assert_eq(e, PK_ERR_NONE, "from_q ok");
+var psi0 = beam_gouy_phase(bf);
+assert_eq(beam_propagate(bf, f64_mul(f64_from(20), zr)), PK_ERR_NONE, "propagate through focus ok");
+_assert_rel(f64_sub(beam_gouy_phase(bf), psi0), f64_mul(F64_TWO, ganita_f64_atan2(f64_from(10), F64_ONE)), REL14,
+  "Gouy through a focus = 2 atan(10)");
+
+# ── q parameter: lenses, mirrors, interfaces ────────
+test_group("q_elements");
+
+# Self's formula (Appl. Opt. 22, 658, 1983) for a waist 2 m before a 0.5 m lens,
+# evaluated in mpmath — a closed form that shares nothing with beam_abcd.
+var bs = gaussian_beam_new(W0, LAM2, &e);
+assert_eq(beam_propagate(bs, F64_TWO), PK_ERR_NONE, "propagate 2 m");
+assert_eq(beam_thin_lens(bs, F64_HALF), PK_ERR_NONE, "thin lens f = 0.5 m");
+_assert_rel(beam_waist_distance(bs), 0x3FE1181674CC440A, REL12, "Self: image waist at 0.53419039547 m");
+_assert_rel(beam_waist_radius(bs), 0x3F23C9E589DF8F24, REL12, "Self: image waist 150.975 um");
+_assert_rel(beam_radius(bs), gaussian_beam_radius(W0, LAM2, F64_TWO, &e), REL14, "a thin lens keeps w");
+_assert_rel(GaussianBeam_wavelength(bs), LAM2, REL14, "a lens keeps the wavelength");
+# Fourier configuration: waist at the front focal plane -> waist at the back one,
+# w0' = lambda*f/(pi*w0).
+var bft = gaussian_beam_new(W0, LAM2, &e);
+var _s = beam_propagate(bft, F64_HALF);
+_s = beam_thin_lens(bft, F64_HALF);
+_assert_rel(beam_waist_distance(bft), F64_HALF, REL12, "2f: waist at the back focal plane");
+_assert_rel(beam_waist_radius(bft), 0x3F263222E80B93A3, REL12, "2f: w0' = lambda f/(pi w0)");
+# A lens changes only the curvature, never the Gouy phase (B = 0).
+var g_before = beam_gouy_phase(bs);
+_s = beam_thin_lens(bs, F64_ONE);
+assert_eq(beam_gouy_phase(bs), g_before, "a thin lens adds no Gouy phase");
+# A concave mirror of radius R is a thin lens of f = R/2, bit for bit.
+var bm1 = gaussian_beam_from_q(F64_ONE, F64_TWO, LAM2, &e);
+var bm2 = gaussian_beam_from_q(F64_ONE, F64_TWO, LAM2, &e);
+_s = beam_mirror(bm1, _fd(3, 10));
+_s = beam_thin_lens(bm2, _fd(3, 20));
+assert_eq(GaussianBeam_q_re(bm1), GaussianBeam_q_re(bm2), "mirror R == lens R/2 (Re q)");
+assert_eq(GaussianBeam_q_im(bm1), GaussianBeam_q_im(bm2), "mirror R == lens R/2 (Im q)");
+# A flat mirror changes nothing.
+var bm3 = gaussian_beam_from_q(F64_ONE, F64_TWO, LAM2, &e);
+_s = beam_mirror(bm3, INF);
+assert_eq(GaussianBeam_q_re(bm3), F64_ONE, "flat mirror keeps Re q");
+assert_eq(GaussianBeam_q_im(bm3), F64_TWO, "flat mirror keeps Im q");
+# Flat interface air -> glass: w continuous, z_R x n, wavelength / n, and the
+# far-field divergence in the glass is n times smaller.
+var N15 = _fd(3, 2);
+var bi = gaussian_beam_new(W0, LAM, &e);
+_s = beam_propagate(bi, F64_ONE);
+var w_air = beam_radius(bi);
+assert_eq(beam_interface(bi, F64_ONE, N15), PK_ERR_NONE, "interface ok");
+_assert_rel(beam_radius(bi), w_air, REL14, "w continuous across an interface");
+_assert_rel(beam_rayleigh_range(bi), f64_mul(zr, N15), REL14, "z_R scales by n2/n1");
+_assert_rel(GaussianBeam_wavelength(bi), f64_div(LAM, N15), REL14, "wavelength scales by n1/n2");
+_assert_rel(beam_waist_radius(bi), W0, REL14, "a flat interface keeps w0");
+_assert_rel(beam_waist_distance(bi), f64_neg(N15), REL14, "apparent waist 1.5 m behind (n*d)");
+# A thick lens built from two curved interfaces focuses a collimated beam at the
+# BACK FOCAL DISTANCE that lens_cardinal_points computes by paraxial optics — an
+# independent implementation. z_R = 157 m >> f, so the Gaussian focus sits
+# (f/z_R)^2 ~ 4e-7 from the geometric one.
+var bt = gaussian_beam_new(_fd(5, 1000), _fd(5, 10000000), &e);
+var R100 = _fd(1, 10);
+var TH = _fd(5, 1000);
+assert_eq(beam_curved_interface(bt, F64_ONE, N15, R100), PK_ERR_NONE, "front surface ok");
+_s = beam_propagate(bt, TH);
+assert_eq(beam_curved_interface(bt, N15, F64_ONE, f64_neg(R100)), PK_ERR_NONE, "back surface ok");
+var cp = lens_cardinal_points(N15, R100, f64_neg(R100), TH, &e);
+_assert_rel(beam_waist_distance(bt), CardinalPoints_bfd(cp), _fd(1, 100000), "Gaussian focus at the paraxial BFD");
+_assert_rel(GaussianBeam_wavelength(bt), _fd(5, 10000000), REL14, "wavelength restored leaving the glass");
+# The general matrix IS the element functions: [[1,0],[-1/f,1]] == thin lens.
+var ba = gaussian_beam_from_q(F64_ONE, F64_TWO, LAM2, &e);
+var bb = gaussian_beam_from_q(F64_ONE, F64_TWO, LAM2, &e);
+_s = beam_abcd(ba, F64_ONE, 0, f64_neg(F64_TWO), F64_ONE);
+_s = beam_thin_lens(bb, F64_HALF);
+assert_eq(GaussianBeam_q_re(ba), GaussianBeam_q_re(bb), "abcd == thin_lens (Re q)");
+assert_eq(GaussianBeam_q_im(ba), GaussianBeam_q_im(bb), "abcd == thin_lens (Im q)");
+
+# ── Resonator eigenmode ────────
+test_group("resonator");
+
+# Two-mirror cavity R1 = 2 m, R2 = 3 m, L = 1 m against Kogelnik & Li's closed
+# forms (mpmath): mirror-1 spot, waist, and waist position from mirror 1.
+var rt = alloc(32);
+_round_trip(F64_TWO, f64_from(3), F64_ONE, rt);
+var bres = beam_resonator_mode(load64(rt), load64(rt + 8), load64(rt + 16), load64(rt + 24), LAM2, &e);
+assert_eq(e, PK_ERR_NONE, "stable cavity has a mode");
+_assert_rel(beam_radius(bres), 0x3F46AD8C7B62D980, REL12, "K&L: spot on mirror 1 = 692.075 um");
+_assert_rel(beam_waist_radius(bres), 0x3F428435F1297870, REL12, "K&L: waist = 565.077 um");
+_assert_rel(beam_waist_distance(bres), 0x3FE5555555555555, REL12, "K&L: waist 2/3 m from mirror 1");
+# The mode's wavefront matches the mirror it has just left: 1/R = -1/R1.
+_assert_rel(beam_curvature(bres), f64_neg(F64_HALF), REL12, "wavefront matches mirror 1");
+# Self-consistency through the ELEMENT functions: one round trip returns q.
+var q_re0 = GaussianBeam_q_re(bres);
+var q_im0 = GaussianBeam_q_im(bres);
+_s = beam_propagate(bres, F64_ONE);
+_s = beam_mirror(bres, f64_from(3));
+_s = beam_propagate(bres, F64_ONE);
+_s = beam_mirror(bres, F64_TWO);
+_assert_rel(GaussianBeam_q_re(bres), q_re0, REL12, "round trip returns Re q");
+_assert_rel(GaussianBeam_q_im(bres), q_im0, REL12, "round trip returns Im q");
+# Symmetric cavity R1 = R2 = 1.25 m, L = 1 m (g = 0.2) against Siegman's symmetric
+# closed forms: w0^2 = (lambda L/2pi) sqrt((1+g)/(1-g)) at the centre and
+# w_m^2 = (lambda L/pi)/sqrt(1-g^2) on the mirrors.
+_round_trip(_fd(5, 4), _fd(5, 4), F64_ONE, rt);
+var bsym = beam_resonator_mode(load64(rt), load64(rt + 8), load64(rt + 16), load64(rt + 24), LAM2, &e);
+assert_eq(e, PK_ERR_NONE, "symmetric cavity has a mode");
+_assert_rel(beam_radius(bsym), 0x3F4343F12DA10A5F, REL12, "symmetric: mirror spot 587.933 um");
+_assert_rel(beam_waist_radius(bsym), 0x3F3DD8882762910D, REL12, "symmetric: waist 455.411 um");
+_assert_rel(beam_waist_distance(bsym), F64_HALF, REL12, "symmetric: waist at the centre");
+# ⚠ The CONFOCAL cavity (R1 = R2 = L) is degenerate, not a special case to pin:
+# its round trip is exactly -I, so EVERY q reproduces itself and the round trip
+# cannot select a mode. The textbook confocal spot is the g -> 0 limit of the
+# closed form, which the matrix does not carry. Refused, with b = 0.
+_round_trip(F64_ONE, F64_ONE, F64_ONE, rt);
+assert_eq(load64(rt + 8), 0, "confocal round trip has b = 0 (it is -I)");
+var bconf = beam_resonator_mode(load64(rt), load64(rt + 8), load64(rt + 16), load64(rt + 24), LAM2, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "confocal (degenerate) refused");
+assert_eq(bconf, 0, "confocal returns 0");
+# Unstable (R1 = R2 = 0.4 m, L = 1: g = -1.5, g1*g2 = 2.25 > 1) has no mode.
+_round_trip(_fd(4, 10), _fd(4, 10), F64_ONE, rt);
+var bun = beam_resonator_mode(load64(rt), load64(rt + 8), load64(rt + 16), load64(rt + 24), LAM2, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "unstable cavity refused");
+assert_eq(bun, 0, "unstable cavity returns 0");
+var _bz = beam_resonator_mode(F64_ONE, 0, 0, F64_ONE, LAM2, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "b = 0 refused");
+_bz = beam_resonator_mode(F64_ONE, F64_ONE, 0, F64_TWO, LAM2, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "trace 3 refused (unstable)");
+# ⚠ That matrix is ALSO unstable, so it could never tell whether the det check
+# exists (a surviving mutant proved it). These are stable-trace and finite, so
+# only the det check can refuse them.
+_bz = beam_resonator_mode(F64_HALF, F64_ONE, f64_neg(F64_ONE), F64_HALF, LAM2, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "stable trace, det = 1.25 refused");
+assert_eq(_bz, 0, "det != 1 returns 0");
+_bz = beam_resonator_mode(F64_HALF, F64_ONE, f64_neg(_fd(3, 4)), F64_HALF, LAM2, &e);
+assert_eq(e, PK_ERR_NONE, "control: the same matrix with det = 1 has a mode");
+# A NaN c passes a bare "|det - 1| > tol" test (NaN compares false) and c is not
+# used after it, so only the finite check refuses it.
+_bz = beam_resonator_mode(0, F64_ONE, NAN, 0, LAM2, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "c = NaN refused");
+_bz = beam_resonator_mode(0, F64_ONE, f64_neg(F64_ONE), 0, LAM2, &e);
+assert_eq(e, PK_ERR_NONE, "control: c = -1 has a mode");
+
+# ── Coupling efficiency (mode overlap) ────────
+test_group("coupling");
+
+# Two waists: this IS ray_fiber's coupling_efficiency_gaussian — two public
+# functions naming one quantity are pinned to each other (roadmap ⛔).
+var cw1 = gaussian_beam_new(_fd(5, 1000000), LAM2, &e);
+var cw2 = gaussian_beam_new(_fd(8, 1000000), LAM2, &e);
+_assert_rel(beam_coupling_efficiency(cw1, cw2, &e), coupling_efficiency_gaussian(_fd(5, 1000000), _fd(8, 1000000)),
+  REL14, "at two waists == coupling_efficiency_gaussian");
+_assert_rel(beam_coupling_efficiency(cw1, cw1, &e), F64_ONE, REL14, "a beam couples to itself fully");
+# Curvature mismatch: against the upper-half-plane form 4 Im q1 Im q2/|q1 - q2*|^2
+# and against a numerical overlap integral of the two complex fields.
+var cq1 = gaussian_beam_from_q(_fd(3, 10), _fd(2, 10), LAM2, &e);
+var cq2 = gaussian_beam_from_q(f64_neg(_fd(1, 10)), _fd(35, 100), LAM2, &e);
+var eta = beam_coupling_efficiency(cq1, cq2, &e);
+assert_eq(e, PK_ERR_NONE, "coupling ok");
+var dqr = f64_sub(_fd(3, 10), f64_neg(_fd(1, 10)));
+var sqi = f64_add(_fd(2, 10), _fd(35, 100));
+var eta_q = f64_div(f64_mul(f64_from(4), f64_mul(_fd(2, 10), _fd(35, 100))),
+  f64_add(f64_mul(dqr, dqr), f64_mul(sqi, sqi)));
+_assert_rel(eta, eta_q, REL12, "eta == 4 Im q1 Im q2/|q1 - q2*|^2");
+var eta_int = _overlap2(beam_radius(cq1), beam_curvature(cq1), beam_radius(cq2), beam_curvature(cq2), LAM2, 4000);
+_assert_rel(eta, eta_int, REL9, "eta == numerical overlap of the complex fields");
+assert(f64_lt(eta, F64_ONE), "mismatched beams couple < 1");
+_assert_rel(beam_coupling_efficiency(cq2, cq1, &e), eta, REL14, "coupling symmetric");
+# An overlap is invariant under any lossless system both beams pass through.
+_s = beam_propagate(cq1, _fd(7, 10));
+_s = beam_propagate(cq2, _fd(7, 10));
+_s = beam_thin_lens(cq1, _fd(25, 100));
+_s = beam_thin_lens(cq2, _fd(25, 100));
+_s = beam_interface(cq1, F64_ONE, N15);
+_s = beam_interface(cq2, F64_ONE, N15);
+_assert_rel(beam_coupling_efficiency(cq1, cq2, &e), eta, REL12, "coupling invariant through a common system");
+var cq3 = gaussian_beam_new(W0, LAM, &e);
+var _c = beam_coupling_efficiency(cw1, cq3, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "different wavelengths refused");
+
+# ── q parameter error paths ────────
+test_group("q_errors");
+
+var NB = 0;
+assert_eq(beam_propagate(NB, F64_ONE), PK_ERR_INVALID_PARAMETER, "propagate: null beam");
+assert_eq(beam_thin_lens(NB, F64_ONE), PK_ERR_INVALID_PARAMETER, "thin_lens: null beam");
+assert_eq(beam_mirror(NB, F64_ONE), PK_ERR_INVALID_PARAMETER, "mirror: null beam");
+assert_eq(beam_interface(NB, F64_ONE, N15), PK_ERR_INVALID_PARAMETER, "interface: null beam");
+assert_eq(beam_curved_interface(NB, F64_ONE, N15, F64_ONE), PK_ERR_INVALID_PARAMETER, "curved: null beam");
+assert_eq(beam_abcd(NB, F64_ONE, 0, 0, F64_ONE), PK_ERR_INVALID_PARAMETER, "abcd: null beam");
+assert_eq(beam_radius(NB), NAN, "radius: null -> NaN");
+assert_eq(beam_waist_radius(NB), NAN, "waist_radius: null -> NaN");
+assert_eq(beam_waist_distance(NB), NAN, "waist_distance: null -> NaN");
+assert_eq(beam_curvature(NB), NAN, "curvature: null -> NaN");
+assert_eq(beam_rayleigh_range(NB), NAN, "rayleigh_range: null -> NaN");
+assert_eq(beam_gouy_phase(NB), NAN, "gouy: null -> NaN");
+var _cn = beam_coupling_efficiency(NB, cw1, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "coupling: null first beam");
+_cn = beam_coupling_efficiency(cw1, NB, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "coupling: null second beam");
+# A refused element leaves the beam untouched.
+var be = gaussian_beam_from_q(F64_ONE, F64_TWO, LAM, &e);
+assert_eq(beam_thin_lens(be, 0), PK_ERR_DIVISION_BY_ZERO, "f = 0 refused");
+assert_eq(beam_mirror(be, 0), PK_ERR_DIVISION_BY_ZERO, "R = 0 refused");
+assert_eq(beam_mirror(be, NAN), PK_ERR_INVALID_PARAMETER, "R = NaN refused");
+assert_eq(beam_curved_interface(be, F64_ONE, N15, 0), PK_ERR_DIVISION_BY_ZERO, "interface R = 0 refused");
+assert_eq(beam_interface(be, 0, N15), PK_ERR_INVALID_PARAMETER, "n1 = 0 refused");
+assert_eq(beam_interface(be, F64_ONE, f64_neg(N15)), PK_ERR_INVALID_PARAMETER, "n2 < 0 refused");
+assert_eq(beam_abcd(be, F64_ONE, F64_ONE, F64_ONE, F64_ONE), PK_ERR_INVALID_PARAMETER, "det = 0 refused");
+assert_eq(beam_abcd(be, f64_neg(F64_ONE), 0, 0, F64_ONE), PK_ERR_INVALID_PARAMETER, "det < 0 refused");
+assert_eq(beam_abcd(be, NAN, 0, 0, F64_ONE), PK_ERR_INVALID_PARAMETER, "NaN entry refused");
+assert_eq(beam_propagate(be, INF), PK_ERR_INVALID_PARAMETER, "infinite distance refused");
+assert_eq(GaussianBeam_q_re(be), F64_ONE, "refusals left Re q alone");
+assert_eq(GaussianBeam_q_im(be), F64_TWO, "refusals left Im q alone");
+assert_eq(GaussianBeam_wavelength(be), LAM, "refusals left the wavelength alone");
+var _bq = gaussian_beam_from_q(F64_ONE, 0, LAM, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "from_q: Im q = 0 refused");
+assert_eq(_bq, 0, "from_q refusal returns 0");
+_bq = gaussian_beam_from_q(NAN, F64_ONE, LAM, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "from_q: Re q = NaN refused");
+_bq = gaussian_beam_new(W0, 0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "beam_new: wavelength = 0 refused");
+assert_eq(_bq, 0, "beam_new refusal returns 0");
+
+# ── Hermite and Laguerre polynomials ────────
+test_group("polynomials");
+
+var X07 = _fd(7, 10);
+assert_eq(hermite_poly(0, X07), F64_ONE, "H_0 = 1");
+_assert_rel(hermite_poly(1, X07), 0x3FF6666666666666, REL14, "H_1(0.7) = 1.4");
+_assert_rel(hermite_poly(2, X07), 0xBFA47AE147AE149F, REL12, "H_2(0.7) = -0.04 (cancels: 4x^2 - 2)");
+_assert_rel(hermite_poly(3, X07), 0xC0169FBE76C8B439, REL12, "H_3(0.7) = -5.656");
+_assert_rel(hermite_poly(5, X07), 0x40413FC6540CC78F, REL12, "H_5(0.7) = 34.49824");
+_assert_rel(hermite_poly(12, X07), 0xC1288064C7509D15, REL12, "H_12(0.7)");
+_assert_rel(hermite_poly(20, X07), 0xC247A03480F7DBA1, REL12, "H_20(0.7)");
+_assert_rel(hermite_poly(20, F64_HALF), 0xC2661BAB329FE000, REL12, "H_20(0.5) = -759627879679");
+assert_eq(hermite_poly(5, f64_neg(X07)), f64_neg(hermite_poly(5, X07)), "H_5 odd, bit for bit");
+assert_eq(hermite_poly(12, f64_neg(X07)), hermite_poly(12, X07), "H_12 even, bit for bit");
+assert_eq(f64_abs(hermite_poly(3, 0)), 0, "H_odd(0) = 0 (IEEE -0.0 is a zero)");
+assert_eq(hermite_poly(0 - 1, X07), NAN, "H_-1 -> NaN");
+_assert_rel(laguerre_poly(3, 2, _fd(13, 10)), 0x3FEB7B900AEC33E0, REL12, "L_3^2(1.3)");
+_assert_rel(laguerre_poly(5, 0, _fd(5, 2)), 0x3FF0855555555555, REL12, "L_5^0(2.5)");
+_assert_rel(laguerre_poly(10, 4, _fd(29, 4)), 0x403093CEF34F545C, REL12, "L_10^4(7.25)");
+_assert_rel(laguerre_poly(1, 7, _fd(3, 10)), 0x401ECCCCCCCCCCCD, REL14, "L_1^7(0.3) = 7.7");
+assert_eq(laguerre_poly(10, 4, 0), f64_from(1001), "L_10^4(0) = C(14, 10) = 1001");
+assert_eq(laguerre_poly(0, 3, X07), F64_ONE, "L_0 = 1");
+assert_eq(laguerre_poly(0 - 1, 0, X07), NAN, "L_-1 -> NaN");
+assert_eq(laguerre_poly(2, 0 - 1, X07), NAN, "alpha < 0 -> NaN");
+
+# ── Mode fields: values (mpmath, explicit factorial normalisation) ────────
+test_group("mode_values");
+
+# Beam from a 1 mm waist at 632.8 nm, 2 m downstream: the reference script uses
+# w(z), R(z) and Gouy = atan(z/z_R) directly, with mpmath's hermite/laguerre and
+# factorials — none of the recurrences the module uses.
+var bz = gaussian_beam_new(W0, LAM, &e);
+_s = beam_propagate(bz, F64_TWO);
+var fr = 0;
+var fi = 0;
+var XP = _fd(4, 10000);
+var YP = f64_neg(_fd(7, 10000));
+assert_eq(hg_mode_field(bz, 2, 1, XP, YP, &fr, &fi), PK_ERR_NONE, "HG_21 ok");
+_assert_rel(fr, 0x4046CBB850ECDB9B, REL12, "HG_21 Re");
+_assert_rel(fi, 0x4065103F45E8C016, REL12, "HG_21 Im");
+var _t = hg_mode_field(bz, 0, 0, XP, YP, &fr, &fi);
+_assert_rel(fr, 0x407A1D14F6556049, REL12, "HG_00 Re");
+_assert_rel(fi, 0x40509B7B8B23C4D8, REL12, "HG_00 Im");
+# HG_43 at this point is 1e-4 of the mode's field scale — close to a node, where
+# the recurrence's absolute error (~1e-16 of scale, measured) is a larger share
+# of the value. So it is pinned against the SCALE, which is what a field error
+# is measured by; a relative pin here would be testing the node, not the code.
+_t = hg_mode_field(bz, 4, 3, XP, YP, &fr, &fi);
+var FSCALE = f64_sqrt(hg_mode_intensity(bz, 0, 0, 0, 0));
+assert(_cnear(fr, fi, 0x3FA239DB45ECF8B9, 0xBF86CE4DF6E34367, FSCALE, REL14), "HG_43 near a node, to 1e-14 of scale");
+var RP = _fd(9, 10000);
+var PHP = _fd(8, 10);
+assert_eq(lg_mode_field(bz, 1, 3, RP, PHP, &fr, &fi), PK_ERR_NONE, "LG_13 ok");
+_assert_rel(fr, 0x4072B578A0206052, REL12, "LG_13 Re");
+_assert_rel(fi, 0xC05E25E744C434B1, REL12, "LG_13 Im");
+_t = lg_mode_field(bz, 0, 0 - 2, RP, PHP, &fr, &fi);
+_assert_rel(fr, 0xC071C02A49EC5C68, REL12, "LG_0,-2 Re");
+_assert_rel(fi, 0x406C537355322C98, REL12, "LG_0,-2 Im");
+_t = lg_mode_field(bz, 2, 0, RP, PHP, &fr, &fi);
+_assert_rel(fr, 0x403306FFE07333F8, REL12, "LG_20 Re");
+_assert_rel(fi, 0xC072C517EA201ED1, REL12, "LG_20 Im");
+# High order through the normalised recurrence: HG_40,0 at the waist, x = 1.1 mm,
+# where H_40 alone is ~1e29 and 40! ~ 8e47.
+var bw = gaussian_beam_new(W0, LAM, &e);
+_t = hg_mode_field(bw, 40, 0, _fd(11, 10000), 0, &fr, &fi);
+_assert_rel(fr, 0x404D1A759AB4D203, REL12, "HG_40,0 at 1.1 mm = 58.2067139991");
+assert_eq(fi, 0, "at the waist on a real mode the field is real");
+# TEM00 from the mode functions IS the closed-form TEM00 (two routes, one beam).
+var rq = f64_sqrt(f64_add(f64_mul(XP, XP), f64_mul(YP, YP)));
+_assert_rel(hg_mode_intensity(bz, 0, 0, XP, YP), gaussian_intensity(F64_ONE, W0, LAM, rq, F64_TWO, &e), REL12,
+  "|HG_00|^2 == gaussian_intensity at 1 W");
+_assert_rel(lg_mode_intensity(bz, 0, 0, rq), gaussian_intensity(F64_ONE, W0, LAM, rq, F64_TWO, &e), REL12,
+  "|LG_00|^2 == gaussian_intensity at 1 W");
+
+# ── Mode fields: normalisation and orthogonality integrals ────────
+test_group("mode_integrals");
+
+var wbz = beam_radius(bz);
+var EXT = f64_mul(f64_from(7), wbz);
+_assert_rel(_hg_power(bz, 0, 0, EXT, 112), F64_ONE, REL12, "HG_00 carries unit power");
+_assert_rel(_hg_power(bz, 2, 1, EXT, 112), F64_ONE, REL12, "HG_21 carries unit power");
+_assert_rel(_hg_power(bz, 5, 3, EXT, 112), F64_ONE, REL12, "HG_53 carries unit power");
+# Orthogonality with the curvature and Gouy phases present (z = 2 m, R finite).
+# HG_20 vs HG_00 is the non-trivial case: same parity, overlapping support.
+assert(f64_lt(_hg_overlap(bz, 2, 0, 0, 0, EXT, 112), REL12), "HG_20 _|_ HG_00");
+assert(f64_lt(_hg_overlap(bz, 1, 0, 0, 1, EXT, 112), REL12), "HG_10 _|_ HG_01");
+assert(f64_lt(_hg_overlap(bz, 3, 1, 1, 3, EXT, 112), REL12), "HG_31 _|_ HG_13 (same order)");
+_assert_rel(_hg_overlap(bz, 2, 1, 2, 1, EXT, 112), F64_ONE, REL12, "<HG_21|HG_21> = 1");
+# High orders, where the recurrence matters: the line integral of |u_m0(x,0)|^2
+# is sqrt(2/pi)/w for every m.
+var line_ref = f64_div(f64_sqrt(f64_div(F64_TWO, F64_PI)), wbz);
+_assert_rel(_hg_line_power(bz, 40, f64_mul(f64_from(12), wbz), 2400), line_ref, REL12, "HG_40 normalised");
+_assert_rel(_hg_line_power(bz, 60, f64_mul(f64_from(14), wbz), 2800), line_ref, REL12, "HG_60 normalised");
+var RMAX = f64_mul(f64_from(8), wbz);
+# ⚠ Low |l| is normalised on the 2D grid, not radially: r*|u|^2 has non-zero odd
+# derivatives at r = 0 for |l| <= 1, so a half-line trapezoid is only O(h^2) there
+# (measured ~1e-7 at 4000 panels). |l| >= 2 starts at r^5 and the radial rule is
+# fine, which is why the high-order case below stays radial.
+_assert_rel(_lg_overlap(bz, 0, 0, 0, 0, EXT, 112), F64_ONE, REL12, "LG_00 carries unit power");
+_assert_rel(_lg_overlap(bz, 0, 1, 0, 1, EXT, 112), F64_ONE, REL12, "LG_01 carries unit power");
+_assert_rel(_lg_power(bz, 1, 2, RMAX, 4000), F64_ONE, REL12, "LG_12 carries unit power");
+_assert_rel(_lg_power(bz, 3, 0 - 2, RMAX, 4000), F64_ONE, REL12, "LG_3,-2 carries unit power");
+_assert_rel(_lg_power(bz, 20, 15, f64_mul(f64_from(14), wbz), 14000), F64_ONE, REL12, "LG_20,15 normalised");
+assert(f64_lt(_lg_overlap(bz, 0, 1, 0, 0 - 1, EXT, 112), REL12), "LG_0,1 _|_ LG_0,-1 (the helix)");
+assert(f64_lt(_lg_overlap(bz, 1, 2, 0, 2, EXT, 112), REL12), "LG_12 _|_ LG_02 (the radial order)");
+_assert_rel(_lg_overlap(bz, 1, 2, 1, 2, EXT, 112), F64_ONE, REL12, "<LG_12|LG_12> = 1");
+
+# ── LG <-> HG: one basis in terms of the other (pins the OAM handedness) ────────
+test_group("mode_bases");
+
+# LG_0,+-1 = (HG_10 -+ i*HG_01)/sqrt2 and LG_10 = -(HG_20 + HG_02)/sqrt2, at three
+# points on the z = 2 m plane. The first pair is what fixes the sign of l: with
+# e^(-i*l*phi) the helix x - i*y is l = +1.
+var PTX = alloc(24);
+var PTY = alloc(24);
+store64(PTX, XP);
+store64(PTY, YP);
+store64(PTX + 8, f64_neg(_fd(12, 10000)));
+store64(PTY + 8, _fd(3, 10000));
+store64(PTX + 16, _fd(2, 10000));
+store64(PTY + 16, _fd(15, 10000));
+var h1r = 0;
+var h1i = 0;
+var h2r = 0;
+var h2i = 0;
+for (var ip = 0; ip < 3; ip = ip + 1) {
+    var px = load64(PTX + ip * 8);
+    var py = load64(PTY + ip * 8);
+    var pr = f64_sqrt(f64_add(f64_mul(px, px), f64_mul(py, py)));
+    var pphi = ganita_f64_atan2(py, px);
+    var sc = f64_sqrt(lg_mode_intensity(bz, 0, 0, 0));
+    _t = hg_mode_field(bz, 1, 0, px, py, &h1r, &h1i);
+    _t = hg_mode_field(bz, 0, 1, px, py, &h2r, &h2i);
+    _t = lg_mode_field(bz, 0, 1, pr, pphi, &fr, &fi);
+    # (h1 - i*h2)/sqrt2 = ((h1r + h2i) + i*(h1i - h2r))/sqrt2
+    assert(_cnear(fr, fi, f64_div(f64_add(h1r, h2i), SQRT2), f64_div(f64_sub(h1i, h2r), SQRT2), sc, REL12),
+      "LG_0,1 = (HG_10 - i HG_01)/sqrt2");
+    _t = lg_mode_field(bz, 0, 0 - 1, pr, pphi, &fr, &fi);
+    assert(_cnear(fr, fi, f64_div(f64_sub(h1r, h2i), SQRT2), f64_div(f64_add(h1i, h2r), SQRT2), sc, REL12),
+      "LG_0,-1 = (HG_10 + i HG_01)/sqrt2");
+    _t = hg_mode_field(bz, 2, 0, px, py, &h1r, &h1i);
+    _t = hg_mode_field(bz, 0, 2, px, py, &h2r, &h2i);
+    _t = lg_mode_field(bz, 1, 0, pr, pphi, &fr, &fi);
+    var sum_r = f64_neg(f64_div(f64_add(h1r, h2r), SQRT2));
+    var sum_i = f64_neg(f64_div(f64_add(h1i, h2i), SQRT2));
+    assert(_cnear(fr, fi, sum_r, sum_i, sc, REL12), "LG_10 = -(HG_20 + HG_02)/sqrt2");
+    _t = hg_mode_field(bz, 0, 0, px, py, &h1r, &h1i);
+    _t = lg_mode_field(bz, 0, 0, pr, pphi, &fr, &fi);
+    assert(_cnear(fr, fi, h1r, h1i, sc, REL12), "LG_00 == HG_00");
+}
+
+# ── Phases: the helix and the Gouy shift of higher orders ────────
+test_group("mode_phases");
+
+# Going counter-clockwise by dphi, the phase of LG_0l changes by -l*dphi.
+var ar0 = 0;
+var ai0 = 0;
+var DPHI = _fd(3, 10);
+_t = lg_mode_field(bz, 0, 3, wbz, 0, &ar0, &ai0);
+_t = lg_mode_field(bz, 0, 3, wbz, DPHI, &fr, &fi);
+var dph = ganita_f64_atan2(f64_sub(f64_mul(ar0, fi), f64_mul(ai0, fr)), f64_add(f64_mul(ar0, fr), f64_mul(ai0, fi)));
+_assert_rel(dph, f64_mul(f64_neg(f64_from(3)), DPHI), REL12, "LG_03 phase winds -3 dphi");
+# HG_20 on axis gains 3*atan(z/z_R) from the waist (order 2 -> factor N+1 = 3).
+var bg = gaussian_beam_new(W0, LAM, &e);
+_t = hg_mode_field(bg, 2, 0, 0, 0, &ar0, &ai0);
+assert(f64_lt(ar0, 0), "HG_20 on axis at the waist is negative real (H_2(0) = -2)");
+_s = beam_propagate(bg, f64_mul(zr, F64_HALF));
+_t = hg_mode_field(bg, 2, 0, 0, 0, &fr, &fi);
+dph = ganita_f64_atan2(f64_sub(f64_mul(ar0, fi), f64_mul(ai0, fr)), f64_add(f64_mul(ar0, fr), f64_mul(ai0, fi)));
+_assert_rel(dph, f64_mul(f64_from(3), ganita_f64_atan2(F64_HALF, F64_ONE)), REL12, "HG_20 Gouy = 3 atan(z/z_R)");
+# LG_0l ring: brightest at w*sqrt(|l|/2).
+var rpk = lg_mode_peak_radius(bz, 0 - 3);
+_assert_rel(rpk, f64_mul(wbz, f64_sqrt(_fd(3, 2))), REL14, "LG_0,-3 ring at w sqrt(3/2)");
+assert(f64_gt(lg_mode_intensity(bz, 0, 3, rpk), lg_mode_intensity(bz, 0, 3, f64_mul(rpk, _fd(99, 100)))),
+  "ring brighter than just inside");
+assert(f64_gt(lg_mode_intensity(bz, 0, 3, rpk), lg_mode_intensity(bz, 0, 3, f64_mul(rpk, _fd(101, 100)))),
+  "ring brighter than just outside");
+assert_eq(lg_mode_intensity(bz, 0, 2, 0), 0, "a vortex is dark on axis");
+assert_eq(lg_mode_peak_radius(bz, 0), 0, "LG_00 peaks on axis");
+
+# ── Mode field error paths ────────
+test_group("mode_errors");
+
+fr = F64_ONE;
+fi = F64_ONE;
+assert_eq(hg_mode_field(NB, 0, 0, 0, 0, &fr, &fi), PK_ERR_INVALID_PARAMETER, "HG: null beam");
+assert_eq(fr, 0, "HG refusal writes Re 0");
+assert_eq(fi, 0, "HG refusal writes Im 0");
+assert_eq(hg_mode_field(bz, 0 - 1, 0, 0, 0, &fr, &fi), PK_ERR_INVALID_PARAMETER, "HG: m < 0");
+assert_eq(hg_mode_field(bz, 0, 0 - 1, 0, 0, &fr, &fi), PK_ERR_INVALID_PARAMETER, "HG: n < 0");
+assert_eq(hg_mode_field(bz, 0, 0, NAN, 0, &fr, &fi), PK_ERR_INVALID_PARAMETER, "HG: x = NaN");
+assert_eq(hg_mode_field(bz, 0, 0, 0, INF, &fr, &fi), PK_ERR_INVALID_PARAMETER, "HG: y = inf");
+assert_eq(hg_mode_intensity(NB, 0, 0, 0, 0), NAN, "HG intensity: null -> NaN");
+assert_eq(hg_mode_intensity(bz, 0 - 2, 0, 0, 0), NAN, "HG intensity: m < 0 -> NaN");
+assert_eq(lg_mode_field(NB, 0, 0, 0, 0, &fr, &fi), PK_ERR_INVALID_PARAMETER, "LG: null beam");
+assert_eq(lg_mode_field(bz, 0 - 1, 0, 0, 0, &fr, &fi), PK_ERR_INVALID_PARAMETER, "LG: p < 0");
+assert_eq(lg_mode_field(bz, 0, 1, f64_neg(W0), 0, &fr, &fi), PK_ERR_INVALID_PARAMETER, "LG: r < 0");
+assert_eq(lg_mode_field(bz, 0, 1, W0, NAN, &fr, &fi), PK_ERR_INVALID_PARAMETER, "LG: phi = NaN");
+assert_eq(lg_mode_intensity(bz, 0, 1, INF), NAN, "LG intensity: r = inf -> NaN");
+assert_eq(lg_mode_intensity(NB, 0, 1, W0), NAN, "LG intensity: null -> NaN");
+assert_eq(lg_mode_peak_radius(NB, 1), NAN, "peak radius: null -> NaN");
+
+# ── M^2 by measurement: sampled profiles through ISO 11146 second moments ────────
+test_group("m2_measured");
+
+# The tabulated M^2 (2m+1, 2p+|l|+1) is only a claim until a profile says so. Each
+# mode is sampled at its waist and one Rayleigh range out, its D4-sigma radius
+# measured, and M^2 recovered from the pair — the pipeline a beam profiler runs.
+var bq0 = gaussian_beam_new(W0, LAM, &e);
+var bq1 = gaussian_beam_new(W0, LAM, &e);
+_s = beam_propagate(bq1, zr);
+var w_q1 = beam_radius(bq1);
+# TEM00: the D4-sigma radius IS the 1/e^2 radius w (the ISO and the Gaussian
+# definitions coincide only for TEM00, which is why it is pinned).
+_assert_rel(_hg_measured_w(bq0, 0, f64_mul(f64_from(8), W0), 801), W0, REL12, "D4sigma of TEM00 = w");
+for (var mm = 0; mm < 4; mm = mm + 1) {
+    var ext0 = f64_mul(f64_from(10), W0);
+    var ext1 = f64_mul(f64_from(10), w_q1);
+    var wm0 = _hg_measured_w(bq0, mm, ext0, 1001);
+    var wm1 = _hg_measured_w(bq1, mm, ext1, 1001);
+    _assert_rel(wm0, f64_mul(W0, f64_sqrt(hg_mode_m2(mm))), REL12, "HG_m0: W = w sqrt(2m+1) at the waist");
+    _assert_rel(_m2_from_two(wm0, wm1, zr, LAM), hg_mode_m2(mm), REL9, "HG_m0: measured M^2 = 2m+1");
+}
+var wl0 = _lg_measured_w(bq0, 1, 2, f64_mul(f64_from(8), W0), 241);
+var wl1 = _lg_measured_w(bq1, 1, 2, f64_mul(f64_from(8), w_q1), 241);
+_assert_rel(wl0, f64_mul(W0, f64_sqrt(lg_mode_m2(1, 2))), REL12, "LG_12: W = w sqrt(5)");
+_assert_rel(_m2_from_two(wl0, wl1, zr, LAM), lg_mode_m2(1, 2), REL9, "LG_12: measured M^2 = 5");
+_assert_rel(_lg_measured_w(bq0, 0, 0 - 3, f64_mul(f64_from(8), W0), 241), f64_mul(F64_TWO, W0), REL12,
+  "LG_0,-3: W = 2w (M^2 = 4)");
+
+# ── M^2, BPP, second moments: values and invariants ────────
+test_group("m2_values");
+
+assert_eq(hg_mode_m2(0), F64_ONE, "HG_0: M^2 = 1");
+assert_eq(hg_mode_m2(3), f64_from(7), "HG_3: M^2 = 7");
+assert_eq(lg_mode_m2(2, 0 - 3), f64_from(8), "LG_2,-3: M^2 = 8");
+assert_eq(lg_mode_m2(0, 0), F64_ONE, "LG_00: M^2 = 1");
+assert_eq(hg_mode_m2(0 - 1), NAN, "HG_-1 -> NaN");
+assert_eq(lg_mode_m2(0 - 1, 0), NAN, "LG p < 0 -> NaN");
+var th00 = gaussian_divergence(W0, LAM, &e);
+_assert_rel(beam_m2(W0, th00, LAM, &e), F64_ONE, REL14, "TEM00 waist x divergence: M^2 = 1");
+_assert_rel(beam_m2(W0, f64_mul(_fd(27, 10), th00), LAM, &e), _fd(27, 10), REL14, "M^2 recovers 2.7");
+_assert_rel(beam_parameter_product(F64_ONE, LAM, &e), f64_mul(W0, th00), REL14, "BPP of TEM00 = w0 theta");
+_assert_rel(beam_parameter_product(_fd(13, 10), LAM2, &e), 0x3E9D8C0F567C5D51, REL14, "BPP(1.3, 1064 nm)");
+# BPP and gaussian_beam_radius_m2 describe one beam: W0 * far-field slope = BPP.
+var zff = f64_mul(zr, f64_from(1000000));
+_assert_rel(f64_mul(W0, f64_div(gaussian_beam_radius_m2(W0, LAM, _fd(13, 10), zff, &e), zff)),
+  beam_parameter_product(_fd(13, 10), LAM, &e), REL12, "W0 * dW/dz = BPP");
+# Second moments of a discrete top hat of N samples: sigma^2 = dx^2*(N^2 - 1)/12
+# exactly, whatever the offset.
+var top = alloc(15 * 8);
+for (var it = 0; it < 15; it = it + 1) { store64(top + it * 8, 0); }
+for (var it2 = 2; it2 < 13; it2 = it2 + 1) { store64(top + it2 * 8, F64_ONE); }
+var DXT = _fd(1, 10);
+var w_top = f64_mul(F64_TWO, f64_sqrt(f64_div(f64_mul(f64_mul(DXT, DXT), f64_from(120)), f64_from(12))));
+_assert_rel(beam_second_moment_radius(top, 15, 0, DXT, &e), w_top, REL14, "top hat: W = 2 dx sqrt((N^2-1)/12)");
+_assert_rel(beam_second_moment_radius(top, 15, f64_from(-37), DXT, &e), w_top, REL14, "offset does not move W");
+
+# ── M^2 / second-moment error paths ────────
+test_group("m2_errors");
+
+var _m = beam_m2(W0, 0, LAM, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "beam_m2: theta = 0 refused");
+_m = beam_m2(0, th00, LAM, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "beam_m2: w0 = 0 refused");
+_m = beam_parameter_product(_fd(9, 10), LAM, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "BPP: M^2 < 1 refused");
+_m = beam_parameter_product(F64_ONE, NAN, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "BPP: wavelength NaN refused");
+_m = beam_second_moment_radius(0, 15, 0, DXT, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "second moment: null buffer");
+_m = beam_second_moment_radius(top, 2, 0, DXT, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "second moment: count < 3");
+_m = beam_second_moment_radius(top, 15, 0, 0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "second moment: dx = 0");
+_m = beam_second_moment_radius(top, 15, INF, DXT, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "second moment: x0 = inf");
+var spike = alloc(24);
+store64(spike, 0);
+store64(spike + 8, F64_ONE);
+store64(spike + 16, 0);
+_m = beam_second_moment_radius(spike, 3, 0, DXT, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "second moment: a single spike has no width");
+store64(spike + 8, 0);
+_m = beam_second_moment_radius(spike, 3, 0, DXT, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "second moment: zero total");
+store64(spike + 8, NAN);
+_m = beam_second_moment_radius(spike, 3, 0, DXT, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "second moment: NaN sample");
+
+# ── Orbital angular momentum ────────
+test_group("oam");
+
+_assert_rel(oam_flux(1, F64_ONE, LAM2, &e), 0x3CC459EAAFF8EE5C, REL14, "l = 1, 1 W, 1064 nm: 5.6486e-16 N m");
+_assert_rel(oam_flux(0 - 2, _fd(1, 4), LAM2, &e), 0xBCB459EAAFF8EE5C, REL14, "l = -2 reverses the torque");
+assert_eq(oam_flux(0, F64_ONE, LAM2, &e), 0, "l = 0 carries no OAM");
+_assert_rel(spiral_phase_plate_step(1, LAM, _fd(3, 2), &e), 0x3EB53BB5EA8666CF, REL14,
+  "SPP l = 1, n = 1.5 at 632.8 nm");
+# The plate's full turn delays by exactly l waves: 2*pi*(n-1)*h/lambda = 2*pi*l.
+var hstep = spiral_phase_plate_step(3, LAM, _fd(3, 2), &e);
+_assert_rel(f64_div(f64_mul(f64_mul(F64_TWO, F64_PI), f64_mul(F64_HALF, hstep)), LAM),
+  f64_mul(F64_TWO, f64_mul(F64_PI, f64_from(3))), REL14, "SPP delay = 2 pi l");
+_m = oam_flux(1, NAN, LAM2, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "oam: power NaN refused");
+_m = oam_flux(1, F64_ONE, 0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "oam: wavelength 0 refused");
+_m = spiral_phase_plate_step(1, LAM, F64_ONE, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "SPP: n = 1 refused");
+_m = spiral_phase_plate_step(1, LAM, _fd(9, 10), &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "SPP: n < 1 refused");
+_m = spiral_phase_plate_step(1, 0, _fd(3, 2), &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "SPP: wavelength 0 refused");
+
+# ── 2.6.0 review regressions ────────
+# Every assertion below answers a finding of the 2.6.0 adversarial review (55
+# agents: three literature audits, a mutation tester, a robustness prober, one
+# skeptic per finding). The audits confirmed every formula, sign and convention;
+# what they found were numerical edge cases and assertions that could not fail.
+test_group("review_2_6_0");
+
+# Power fraction: the Kahan correction in its own regime (x = 2e-16 .. 2e-6,
+# mpmath), and the subnormal band x ~ 708-745 where the first version returned up
+# to 1.00073. It must be exactly 1 there, and never above 1.
+_assert_rel(gaussian_power_fraction(F64_ONE, _fd(1, 100000000), &e), 0x3CACD2B297D889BC, REL14, "fraction a = 1e-8 w");
+_assert_rel(gaussian_power_fraction(F64_ONE, _fd(1, 1000000), &e), 0x3D819799812DD6B9, REL14, "fraction a = 1e-6 w");
+_assert_rel(gaussian_power_fraction(F64_ONE, _fd(1, 1000), &e), 0x3EC0C6F6873C61C7, REL14, "fraction a = 1e-3 w");
+assert_eq(gaussian_power_fraction(F64_ONE, f64_from(19), &e), F64_ONE, "fraction a = 19 w is 1 (u subnormal)");
+assert_eq(gaussian_power_fraction(F64_ONE, _fd(1924, 100), &e), F64_ONE, "fraction a = 19.24 w is 1");
+assert_eq(gaussian_power_fraction(F64_ONE, _fd(193, 10), &e), F64_ONE, "fraction a = 19.3 w is 1 (was 1.00073)");
+assert_eq(gaussian_power_fraction(F64_ONE, f64_from(25), &e), F64_ONE, "fraction a = 25 w is 1 (u = 0)");
+var fr_prev = 0;
+var fr_ok = 1;
+for (var ia = 0; ia <= 60; ia = ia + 1) {
+    var fa = gaussian_power_fraction(F64_ONE, f64_add(_fd(188, 10), f64_mul(_fd(1, 100), f64_from(ia))), &e);
+    if (f64_gt(fa, F64_ONE) == 1) { fr_ok = 0; }
+    if (f64_lt(fa, fr_prev) == 1) { fr_ok = 0; }
+    fr_prev = fa;
+}
+assert_eq(fr_ok, 1, "fraction <= 1 and non-decreasing over a = 18.8w .. 19.4w");
+# Only a/w matters: huge and tiny lengths no longer overflow to inf/inf = NaN.
+_assert_rel(gaussian_power_fraction(0x6974E718D7D7625A, 0x6974E718D7D7625A, &e), 0x3FEBAB5557101F8D, REL14,
+  "fraction(1e200, 1e200) = 1 - e^-2");
+_assert_rel(gaussian_power_fraction(0x1CC4C59A879AF0FC, 0x1CC4C59A879AF0FC, &e), 0x3FEBAB5557101F8D, REL14,
+  "fraction at w = a ~ 1e-170 = 1 - e^-2");
+# Intensity refuses what it cannot compute and what has no meaning.
+var _i = gaussian_intensity(NAN, W0, LAM, 0, 0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "intensity: power NaN refused");
+_i = gaussian_intensity(f64_neg(F64_ONE), W0, LAM, 0, 0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "intensity: negative power refused");
+_i = gaussian_intensity(INF, W0, LAM, F64_ONE, 0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "intensity: power inf refused");
+_i = gaussian_intensity(F64_ONE, W0, LAM, NAN, 0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "intensity: r NaN refused");
+assert_eq(gaussian_intensity(0, W0, LAM, 0, 0, &e), 0, "intensity: zero power is a zero intensity");
+assert_eq(e, PK_ERR_NONE, "intensity: zero power is not an error");
+# A z_R that is not representable is refused; an extreme one that is, is computed.
+_i = gaussian_rayleigh_range(0x1CA3529BA7D19EAF, F64_ONE, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "z_R underflow refused (w0 = 1e-170, lambda = 1)");
+var _bu = gaussian_beam_new(0x1CA3529BA7D19EAF, F64_ONE, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "beam_new refuses a z_R that underflows");
+_i = gaussian_rayleigh_range(0x6974E718D7D7625A, _fd(1, 10000000000), &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "z_R overflow refused (w0 = 1e200, lambda = 1e-10)");
+_assert_rel(gaussian_rayleigh_range(0x1EB67E9C127B6E74, 0x01A56E1FC2F8F359, &e), 0x3BE28B70CAA3E9F8, REL14,
+  "z_R(1e-160, 1e-300) = pi*1e-20, no intermediate underflow");
+# Scaled squaring: finite, correct answers where z^2 or |q|^2 over/underflows.
+_assert_rel(gaussian_curvature(F64_ONE, F64_ONE, 0x6126C2D4256FFCC3, &e), 0x1EB67E9C127B6E74, REL14,
+  "1/R at z = 1e160 is 1e-160, not 0");
+var bt1 = gaussian_beam_from_q(0x16687E92154EF7AC, 0x16687E92154EF7AC, F64_ONE, &e);
+_assert_rel(beam_curvature(bt1), 0x6964E718D7D7625A, REL14, "beam_curvature at q = (1e-200, 1e-200) is 5e199");
+var bt2 = gaussian_beam_from_q(0x6126C2D4256FFCC3, F64_ONE, _fd(1, 1000000), &e);
+_assert_rel(beam_radius(bt2), 0x607A4CAB4651EF87, REL14, "beam_radius at Re q = 1e160 is finite and right");
+assert_eq(gaussian_radius_of_curvature(W0, LAM, 0x8000000000000000, &e), INF, "R(-0.0) = +inf");
+assert_eq(e, PK_ERR_NONE, "R(-0.0) is not an error");
+
+# beam_abcd with b*c != 0 (every element function has b*c = 0, so det and a*d
+# were indistinguishable) and with A != 1, B != 0 (every Gouy pin had A = 1 or
+# B = 0). Values: mpmath; also checked against FFT propagation in the review.
+var LAM1U = _fd(1, 1000000);
+var bk1 = gaussian_beam_new(W0, LAM1U, &e);
+assert_eq(beam_abcd(bk1, f64_neg(F64_ONE), F64_ONE, f64_neg(F64_TWO), F64_ONE), PK_ERR_NONE, "composite ok");
+_assert_rel(beam_gouy_phase(bk1), 0x4006AAD9FBB38576, REL12, "[[-1,1],[-2,1]]: Gouy = pi - atan(1/pi) region");
+var bk2 = gaussian_beam_from_q(_fd(1, 10), gaussian_rayleigh_range(W0, LAM1U, &e), LAM1U, &e);
+var gk2 = beam_gouy_phase(bk2);
+assert_eq(beam_abcd(bk2, F64_HALF, _fd(1, 5), f64_neg(_fd(5, 3)), _fd(2, 3)), PK_ERR_NONE, "det 2/3 composite ok");
+_assert_rel(f64_sub(beam_gouy_phase(bk2), gk2), 0x3FC021206D40DCFB, REL12, "det 2/3: Gouy increment 0.12601094565");
+_assert_rel(GaussianBeam_wavelength(bk2), f64_mul(LAM1U, _fd(2, 3)), REL14, "det 2/3: wavelength x 2/3");
+# One matrix == the element sequence it stands for: free 0.3 m then lens 0.5 m is
+# Lens*Free = [[1, 0.3], [-2, 0.4]] (det 1, b*c = -0.6).
+var bs1 = gaussian_beam_new(W0, LAM2, &e);
+var bs2 = gaussian_beam_new(W0, LAM2, &e);
+_s = beam_propagate(bs1, _fd(3, 10));
+_s = beam_thin_lens(bs1, F64_HALF);
+assert_eq(beam_abcd(bs2, F64_ONE, _fd(3, 10), f64_neg(F64_TWO), _fd(2, 5)), PK_ERR_NONE, "Lens*Free ok");
+_assert_rel(GaussianBeam_q_re(bs2), GaussianBeam_q_re(bs1), REL14, "composite == sequence (Re q)");
+_assert_rel(GaussianBeam_q_im(bs2), GaussianBeam_q_im(bs1), REL14, "composite == sequence (Im q)");
+_assert_rel(beam_gouy_phase(bs2), beam_gouy_phase(bs1), REL14, "composite == sequence (Gouy)");
+_assert_rel(GaussianBeam_wavelength(bs2), LAM2, REL14, "composite det 1 keeps the wavelength");
+# An inverting relay [[-1, 0], [0, -1]]: q unchanged, Gouy + pi (B = 0, A < 0).
+var brl = gaussian_beam_new(W0, LAM, &e);
+_s = beam_propagate(brl, F64_ONE);
+var q_re_rl = GaussianBeam_q_re(brl);
+var g_rl = beam_gouy_phase(brl);
+assert_eq(beam_abcd(brl, f64_neg(F64_ONE), 0, 0, f64_neg(F64_ONE)), PK_ERR_NONE, "inverting relay ok");
+_assert_rel(GaussianBeam_q_re(brl), q_re_rl, REL14, "relay keeps q");
+_assert_rel(f64_sub(beam_gouy_phase(brl), g_rl), F64_PI, REL14, "relay adds pi of Gouy phase");
+# Starting Gouy phases are pinned, not only differences.
+_assert_rel(psi0, 0xBFF789BD2C160054, REL14, "from_q(-10 z_R) starts at -atan(10)");
+var bq12 = gaussian_beam_from_q(F64_ONE, F64_TWO, LAM, &e);
+_assert_rel(beam_gouy_phase(bq12), 0x3FDDAC670561BB4F, REL14, "from_q(1, 2) starts at atan(1/2)");
+var bq_10 = gaussian_beam_from_q(Z10, zr, LAM, &e);
+_assert_rel(beam_gouy_phase(bq_10), gaussian_gouy_phase(W0, LAM, Z10, &e), REL14, "from_q continues the TEM00 law");
+# Refusals at the edges of the double range, each leaving the beam untouched.
+var bov = gaussian_beam_from_q(0x7FE0000000000000, F64_ONE, LAM, &e);
+assert_eq(beam_propagate(bov, 0x7FE0000000000000), PK_ERR_INVALID_PARAMETER, "Re q' overflow refused");
+assert_eq(GaussianBeam_q_re(bov), 0x7FE0000000000000, "overflow refusal left Re q alone");
+var bun2 = gaussian_beam_from_q(F64_ONE, F64_TWO, LAM, &e);
+assert_eq(beam_thin_lens(bun2, 0x01A56E1FC2F8F359), PK_ERR_INVALID_PARAMETER, "Im q' underflow refused (f = 1e-300)");
+assert_eq(GaussianBeam_q_im(bun2), F64_TWO, "underflow refusal left Im q alone");
+# Im q = 1e-10 keeps q' itself representable, so ONLY the wavelength check can
+# refuse this (with Im q = 2 the Im q' check fired first and hid its absence).
+var bwl = gaussian_beam_from_q(F64_ONE, 0x3DDB7CDFD9D7BDBB, f64_from(10), &e);
+assert_eq(beam_abcd(bwl, 0x5FE7DDDF6B095FF1, 0, 0, 0x5FE7DDDF6B095FF1), PK_ERR_INVALID_PARAMETER,
+  "a wavelength that overflows is refused (det ~1e308)");
+assert_eq(GaussianBeam_wavelength(bwl), f64_from(10), "wavelength refusal left the beam alone");
+# An a = 0 element on a huge |q| used to form 0*inf = NaN in the Gouy phase.
+var bgn = gaussian_beam_from_q(0x601DD55745CBB7ED, F64_ONE, _fd(1, 1000000), &e);
+assert_eq(beam_abcd(bgn, 0, 0x4202A05F20000000, 0xBDDB7CDFD9D7BDBB, 0), PK_ERR_NONE, "a = 0 element on |q| ~ 1e155");
+_assert_rel(beam_gouy_phase(bgn), F64_PI_2, REL14, "its Gouy phase stays finite (pi/2)");
+
+# Resonator: negative-branch cavity (round-trip b < 0: the only case where |b|
+# selects the root), Kogelnik & Li values; the stability-edge refusals; the Gouy
+# phase a resonator mode starts with.
+_round_trip(_fd(6, 10), _fd(7, 10), F64_ONE, rt);
+assert(f64_lt(load64(rt + 8), 0), "negative-branch round trip has b < 0");
+var bneg = beam_resonator_mode(load64(rt), load64(rt + 8), load64(rt + 16), load64(rt + 24), LAM2, &e);
+assert_eq(e, PK_ERR_NONE, "negative-branch cavity has a mode");
+_assert_rel(beam_radius(bneg), 0x3F4292F4769CC071, REL12, "K&L g<0: spot on mirror 1 = 566.835 um");
+_assert_rel(beam_waist_radius(bneg), 0x3F33DB42B999A8EA, REL12, "K&L g<0: waist = 302.986 um");
+_assert_rel(beam_waist_distance(bneg), 0x3FDB6DB6DB6DB6DC, REL12, "K&L g<0: waist 3/7 m from mirror 1");
+_round_trip(F64_TWO, f64_from(3), F64_ONE, rt);
+var bkg = beam_resonator_mode(load64(rt), load64(rt + 8), load64(rt + 16), load64(rt + 24), LAM2, &e);
+_assert_rel(beam_gouy_phase(bkg), 0xBFE3B2028082E8D4, REL12, "K&L mode starts at the local Gouy phase");
+# Confocal built in floating point is -I PLUS NOISE (b ~ 4e-16): still refused.
+_round_trip(_fd(292, 100), _fd(292, 100), _fd(292, 100), rt);
+var bcf = beam_resonator_mode(load64(rt), load64(rt + 8), load64(rt + 16), load64(rt + 24), LAM2, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "noisy confocal (L = R = 2.92) refused");
+assert_eq(bcf, 0, "noisy confocal returns 0");
+_round_trip(_fd(495, 1000), _fd(495, 1000), _fd(99, 100), rt);
+var bcc = beam_resonator_mode(load64(rt), load64(rt + 8), load64(rt + 16), load64(rt + 24), LAM2, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "concentric edge (R = L/2) refused");
+# ...while a cavity 1e-3 inside the edge is accepted and right.
+var RG = f64_div(F64_ONE, f64_sub(F64_ONE, _fd(1, 1000)));
+_round_trip(RG, RG, F64_ONE, rt);
+var bge = beam_resonator_mode(load64(rt), load64(rt + 8), load64(rt + 16), load64(rt + 24), LAM2, &e);
+assert_eq(e, PK_ERR_NONE, "g = 1e-3 cavity accepted");
+_assert_rel(beam_rayleigh_range(bge), 0x3FE0041919CEDC23, _fd(1, 10000000000),
+  "g = 1e-3: z_R = (L/2) sqrt((1+g)/(1-g))");
+# A NaN determinant (a*d and b*c both -inf) is refused. The pre-review code
+# returned q = (-1, 1e-200) as a mode. Now more than one check refuses it: a NaN
+# det needs |a||d| > DBL_MAX, so the margin 1e-12*(|a|+|d|) > 1 exceeds any s
+# (round 2 found the f64_le form alone unreachable by a finite input) — this pins
+# the behaviour, and the f64_le form stays as defence in depth.
+var _bnd = beam_resonator_mode(0x6974E718D7D7625A, 0x6974E718D7D7625A, 0xE974E718D7D7625A, 0xE974E718D7D7625A,
+  LAM2, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "NaN determinant refused");
+
+# High orders, where the first recurrences failed silently (values: mpmath with
+# its own hermite/laguerre and factorials).
+# HG_800 at t = 39.2, an outer lobe past where e^(-t^2/2) underflows: was exact 0.
+var bw8 = gaussian_beam_new(W0, LAM, &e);
+_t = hg_mode_field(bw8, 800, 0, 0x3F9C6242CE65704A, 0, &fr, &fi);
+_assert_rel(fr, 0xC0711BF721785CB6, _fd(1, 100000000000), "HG_800 outer lobe = -273.748 (was 0)");
+# LG_400,0 at 27.5 w0 (s = 1512, an outer ring past where raw L_p overflowed:
+# was NaN), LG_0,4000 on its ring (was inf), LG_60,60, and LG_380,3 at s = 1458.
+_assert_rel(f64_sqrt(lg_mode_intensity(bw8, 400, 0, 0x3F9C28F5C28F5C29)), 0x4040823C69087359,
+  _fd(1, 10000000000), "LG_400,0 at 27.5 w0 (was NaN)");
+_assert_rel(f64_sqrt(lg_mode_intensity(bw8, 0, 4000, 0x3FA6E5B7D16657E1)), 0x404FAF35444A51A9,
+  _fd(1, 1000000000000), "LG_0,4000 on its ring (was inf; 2e-11 before Stirling's E)");
+_t = lg_mode_field(bw8, 60, 60, 0x3F7EB851EB851EB8, 0, &fr, &fi);
+_assert_rel(fr, 0xC047A79971386A77, REL12, "LG_60,60 at 7.5 w0");
+_t = lg_mode_field(bw8, 380, 3, 0x3F9BA5E353F7CED9, 0, &fr, &fi);
+_assert_rel(fr, 0xC02EC639CF5DBE05, _fd(1, 10000000000), "LG_380,3 at 27 w0 (was NaN)");
+# ...and still unit power: HG_760 along a line, LG_380,3 radially.
+_assert_rel(_hg_line_power(bw8, 760, f64_mul(f64_from(32), W0), 4000), f64_div(f64_sqrt(f64_div(F64_TWO, F64_PI)), W0),
+  _fd(1, 1000000000), "HG_760 normalised");
+_assert_rel(_lg_power(bw8, 380, 3, f64_mul(f64_from(32), W0), 24000), F64_ONE, _fd(1, 1000000000),
+  "LG_380,3 normalised");
+# Far off axis the field is exactly 0, not 0*NaN.
+fr = F64_ONE;
+fi = F64_ONE;
+assert_eq(hg_mode_field(bz, 3, 1, f64_from(100000), 0, &fr, &fi), PK_ERR_NONE, "HG far off axis ok");
+assert_eq(fr, 0, "HG far off axis: Re 0, not NaN");
+assert_eq(fi, 0, "HG far off axis: Im 0, not NaN");
+assert_eq(lg_mode_field(bz, 2, 1, f64_from(100000), F64_ONE, &fr, &fi), PK_ERR_NONE, "LG far off axis ok");
+assert_eq(fr, 0, "LG far off axis: Re 0, not NaN");
+# hermite_poly at x = 0 in closed form: exact 0 for odd n past the overflow.
+assert_eq(hermite_poly(271, 0), 0, "H_271(0) = 0 (was NaN)");
+assert_eq(hermite_poly(270, 0), 0xFFF0000000000000, "H_270(0) = -inf (true value overflows)");
+assert_eq(hermite_poly(272, 0), INF, "H_272(0) = +inf");
+assert_eq(hermite_poly(4, 0), f64_from(12), "H_4(0) = 12");
+
+# Orders at the edge of i64, and remaining untested guards.
+assert(f64_gt(hg_mode_m2(0x4000000000000000), 0), "HG M^2 at m = 2^62 stays positive");
+assert(f64_gt(lg_mode_m2(0, 0x8000000000000000), 0), "LG M^2 at l = INT64_MIN stays positive");
+assert_eq(lg_mode_field(bz, 0, 0x8000000000000000, W0, 0, &fr, &fi), PK_ERR_INVALID_PARAMETER, "l = INT64_MIN refused");
+assert_eq(lg_mode_peak_radius(bz, 0x8000000000000000), NAN, "peak radius: l = INT64_MIN -> NaN");
+_m = oam_flux(1, f64_neg(F64_ONE), LAM2, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "oam: negative power refused (the sign of l carries handedness)");
+_m = spiral_phase_plate_step(1, LAM, INF, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "SPP: n = inf refused (would give h = 0)");
+_m = spiral_phase_plate_step(1, LAM, NAN, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "SPP: n = NaN refused");
+_m = beam_parameter_product(NAN, LAM, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "BPP: M^2 = NaN refused");
+_m = beam_parameter_product(INF, LAM, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "BPP: M^2 = inf refused");
+# Second moments: a negative total (only the s0 check refuses it), count 2 and
+# dx < 0 on real profiles, and a narrow profile far from x0 — where one-pass
+# E[x^2] - mean^2 cancels (~3e-10 off) and the two-pass form is exact.
+var neg3 = alloc(24);
+store64(neg3, f64_neg(F64_ONE));
+store64(neg3 + 8, f64_neg(F64_TWO));
+store64(neg3 + 16, f64_neg(F64_ONE));
+_m = beam_second_moment_radius(neg3, 3, 0, DXT, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "second moment: negative total refused");
+_m = beam_second_moment_radius(top + 16, 2, 0, DXT, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "second moment: count = 2 on non-zero samples");
+_m = beam_second_moment_radius(top, 15, 0, f64_neg(DXT), &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "second moment: dx < 0 on a real profile");
+var farp = alloc(4096 * 8);
+for (var jf = 0; jf < 4096; jf = jf + 1) { store64(farp + jf * 8, 0); }
+store64(farp + 4091 * 8, F64_ONE);
+store64(farp + 4092 * 8, F64_TWO);
+store64(farp + 4093 * 8, f64_from(3));
+store64(farp + 4094 * 8, F64_TWO);
+store64(farp + 4095 * 8, F64_ONE);
+_assert_rel(beam_second_moment_radius(farp, 4096, f64_from(-37), F64_HALF, &e), f64_sqrt(_fd(4, 3)), REL14,
+  "narrow profile far from x0: W = 2 sqrt(4/3) dx exactly (two passes)");
+
+# ── 2.6.0 review, round 2 ────────
+# The fixes above re-verified by 24 agents: an accuracy sweep against mpmath, a
+# bit-identity comparison with the pre-review code (0 differences in ~50,000
+# chained normal-range cases), and 135 mutants of the changed lines.
+test_group("review_2_6_0_round2");
+
+# LG accuracy at large |l|: E by Stirling's ratio (the summed ln a! left 2.5e-12
+# at |l| = 1500, 18x the pre-review code), and near the axis by the difference
+# form (the three-term form left ~2e-12 at LG_400,0's brightest point).
+_t = lg_mode_field(bw8, 0, 300, 0x3F891530BD7C536F, 0, &fr, &fi);
+_assert_rel(fr, 0x405E44CCBA7D7021, _fd(1, 10000000000000), "LG_0,300 ring peak (1e-13)");
+_t = lg_mode_field(bw8, 0, 1500, 0x3F9C0B1BEE5A6D84, 0, &fr, &fi);
+_assert_rel(fr, 0x40543E82AF833186, _fd(1, 10000000000000), "LG_0,1500 ring peak (1e-13)");
+_t = lg_mode_field(bw8, 400, 0, 0x3EB0C6F7A0B5ED8D, 0, &fr, &fi);
+_assert_rel(fr, 0x4088E9F6F4586BCD, REL14, "LG_400,0 at W0/1000, near axis (1e-14)");
+_t = lg_mode_field(bw8, 400, 1, 0x3F1A36E2EB1C432D, 0, &fr, &fi);
+_assert_rel(fr, 0xC0705D7AB8481059, REL14, "LG_400,1 at W0/10 (1e-14)");
+# LG_0,1 does not drop to 0 where s = 2(r/w)^2 underflows: |LG_0,1|^2 = |HG_10|^2/2
+# on the x axis, and the HG route never forms s.
+# (Fields, not intensities: |u|^2 ~ 1e-600 underflows legitimately, and a
+# 0 == 0 comparison would pass vacuously.)
+var rsm = f64_mul(W0, 0x01A56E1FC2F8F359);
+var hsr = 0;
+var hsi = 0;
+_t = hg_mode_field(bw8, 1, 0, rsm, 0, &hsr, &hsi);
+_t = lg_mode_field(bw8, 0, 1, rsm, 0, &fr, &fi);
+assert(f64_gt(fr, 0), "LG_0,1 field at 1e-300 w is not 0 (s underflows there)");
+_assert_rel(fr, f64_div(hsr, SQRT2), REL12, "LG_0,1 at r = 1e-300 w == HG_10/sqrt2");
+# The LG direct/log switch at E = -700 and a value with E = -744 (mpmath).
+_t = lg_mode_field(bw8, 5, 0, f64_mul(W0, f64_sqrt(f64_from(744))), 0, &fr, &fi);
+_assert_rel(fr, 0x805071BE738C2DF3, REL12, "LG_5,0 at s = 1488 (E ~ -744, log form)");
+_t = lg_mode_field(bw8, 5, 0, f64_mul(W0, f64_sqrt(f64_from(719))), 0, &fr, &fi);
+_assert_rel(fr, 0x828D07C59F53783A, REL12, "LG_5,0 at s = 1438 (E ~ -719, direct form)");
+# The s cap: past 2^200 the answer is exactly 0 (s = 2^513 gave NaN, s = 2^1023 inf).
+assert_eq(lg_mode_intensity(bw8, 7, 3, f64_mul(W0, 0x4FF0000000000000)), 0, "LG_7,3 at s = 2^513 is 0, not NaN");
+fr = F64_ONE;
+fi = F64_ONE;
+assert_eq(lg_mode_field(bw8, 7, 3, f64_mul(W0, 0x4FF0000000000000), 0, &fr, &fi), PK_ERR_NONE, "LG_7,3 field there ok");
+assert_eq(fr, 0, "LG_7,3 field at s = 2^513: Re 0");
+assert_eq(fi, 0, "LG_7,3 field at s = 2^513: Im 0");
+assert_eq(lg_mode_intensity(bw8, 2, 0, f64_mul(W0, 0x5FE0000000000000)), 0, "LG_2,0 at s = 2^1023 is 0, not inf");
+assert_eq(lg_mode_intensity(bw8, 8, 0, f64_mul(W0, 0x4620000000000000)), 0, "LG_8,0 at s = 2^199 (under the cap) is 0");
+assert_eq(lg_mode_intensity(bz, 2, 1, 0x6126C2D4256FFCC3), 0, "LG at r = 1e160 m (s = inf) is 0");
+
+# HG far range: the |t| > 2^100 cutoff, the 2^512 rescale, the n = 0 log seed, the
+# seed-precision switch at |t| = 36 (a threshold of 38 is 6.6e-11 off at t = 37.99),
+# and H_n(-0.0). Values: mpmath.
+var bwp = gaussian_beam_new(W0, LAM, &e);
+fr = F64_ONE;
+fi = F64_ONE;
+_t = hg_mode_field(bwp, 3, 0, 0x630532A837EAE8A6, 0, &fr, &fi);
+assert_eq(fr, 0, "HG_30 at x = 1e172 w (|t| > 2^100): Re 0, not NaN");
+assert_eq(fi, 0, "HG_30 at x = 1e172 w: Im 0");
+fr = F64_ONE;
+_t = hg_mode_field(bwp, 12, 0, f64_mul(f64_from(7), 0x4554ADF4B7320335), 0, &fr, &fi);
+assert_eq(fr, 0, "HG_12 at t ~ 1e30: 0 (the rescale keeps h finite)");
+_t = hg_mode_field(bwp, 0, 0, 0, 0x3F9ACA75E9FF17B2, &fr, &fi);
+_assert_rel(fr, 0x02D154BAA235419A, REL12, "HG_00 at t = 37 (far path, n = 0) = 4.24e-295");
+_t = hg_mode_field(bw8, 800, 0, 0x3F9B81F883F9F2C3, 0, &fr, &fi);
+_assert_rel(fr, 0xC069DB9020195403, REL12, "HG_800 at t = 37.99 = -206.861 (path switch)");
+assert_eq(hermite_poly(271, 0x8000000000000000), 0, "H_271(-0.0) = 0, not NaN");
+assert_eq(hermite_poly(300, 0x8000000000000000), INF, "H_300(-0.0) = +inf, not NaN");
+# A -0.0 amplitude (+0 x factor times a negative phi_1(y)) short-circuits too.
+var bfar = gaussian_beam_new(W0, LAM, &e);
+_s = beam_propagate(bfar, F64_ONE);
+fr = F64_ONE;
+fi = F64_ONE;
+assert_eq(hg_mode_field(bfar, 0, 1, f64_from(10000000), f64_neg(W0), &fr, &fi), PK_ERR_NONE, "HG -0 amplitude ok");
+assert_eq(fr, 0, "HG -0 amplitude: Re +0, not NaN");
+assert_eq(fi, 0, "HG -0 amplitude: Im +0, not NaN");
+
+# Resonator: stability judged with the REAL determinant. This matrix has det
+# 1 - ~5e-10 (inside the 1e-9 det tolerance) and is unstable; assuming det = 1
+# accepted it. Control: the same a, b, d with det = 1 is stable.
+var _rq = beam_resonator_mode(0x3FEFFFFFFFF24190, F64_ONE, 0x3DF49DA7E361CE4C, 0x3FEFFFFFFFF24190, LAM2, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "unstable with det = 1 - 5e-10: refused");
+_rq = beam_resonator_mode(0x3FEFFFFFFFF24190, F64_ONE, 0xBDEB7CE000000000, 0x3FEFFFFFFFF24190, LAM2, &e);
+assert_eq(e, PK_ERR_NONE, "control: the same trace with det = 1 has a mode");
+# The margin and its |a| + |d| scaling (exact-integer matrices, det = 1 exactly).
+var MA = f64_from(1048576);
+var MD1 = f64_neg(f64_add(f64_from(1048574), _fd(1, 1048576)));
+_rq = beam_resonator_mode(MA, F64_ONE, f64_sub(f64_mul(MA, MD1), F64_ONE), MD1, LAM2, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "margin scales with |a|+|d|: s ~ 9.5e-7 < 2.1e-6 refused");
+var MD2 = f64_neg(f64_add(f64_from(1048574), _fd(1, 131072)));
+_rq = beam_resonator_mode(MA, F64_ONE, f64_sub(f64_mul(MA, MD2), F64_ONE), MD2, LAM2, &e);
+assert_eq(e, PK_ERR_NONE, "margin scales with |a|+|d|: s ~ 1.5e-5 > 2.1e-6 accepted");
+
+# Subnormal results are refused: a z_R or Im q with a few bits silently spoiled
+# everything built on it (1e-4 errors, a Gouy step of exactly 0).
+var _zs = gaussian_rayleigh_range(0x1EB67E9C127B6E74, F64_ONE, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "z_R = pi*1e-320 (subnormal) refused");
+var _bs = gaussian_beam_from_q(0, 0x0000000000002788, F64_ONE, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "from_q: Im q = 5e-320 (subnormal) refused");
+# ...while the lowest NORMAL binade works, and a subnormal matrix ENTRY is fine
+# (it reaches _bm_scale2's floor: Im q' = a*qi/d = 2^1010 exactly).
+var blo = gaussian_beam_from_q(0, 0x00159283684DBA77, F64_ONE, &e);
+assert_eq(e, PK_ERR_NONE, "from_q: Im q = 3e-308 (normal) accepted");
+_assert_rel(beam_radius(blo), 0x1FF4F6A6DCEF8DFF, REL14, "w at Im q = 3e-308 = sqrt(Im q/pi)");
+var bfl = gaussian_beam_from_q(0, 0x3870000000000000, F64_ONE, &e);
+assert_eq(beam_abcd(bfl, 0x4630000000000000, 0, 0, 0x0000100000000000), PK_ERR_NONE, "subnormal d entry ok");
+assert_eq(GaussianBeam_q_im(bfl), 0x7F10000000000000, "Im q' = 2^1010 exactly");
+assert_eq(GaussianBeam_wavelength(bfl), 0x05D0000000000000, "wavelength x det = 2^-930 exactly");
+# c*q + d underflowing to 0 with det = 1 is DIVISION_BY_ZERO (q' not representable).
+var bdz = gaussian_beam_from_q(0x16687E92154EF7AC, 0x16687E92154EF7AC, F64_ONE, &e);
+assert_eq(beam_abcd(bdz, 0, 0xE974E718D7D7625A, 0x16687E92154EF7AC, 0), PK_ERR_DIVISION_BY_ZERO,
+  "c*q + d underflowing to 0 refused");
+# |cq + d|^2 overflowing and underflowing while q' is representable (the unscaled
+# form refused both). Values: mpmath.
+var bdo = gaussian_beam_from_q(0, 0x4415AF1D78B58C40, LAM1U, &e);
+assert_eq(beam_abcd(bdo, F64_ONE, 0, 0xDD00CB70D24B7379, F64_ONE), PK_ERR_NONE, "|cq+d|^2 = 1e320: ok");
+_assert_rel(GaussianBeam_q_re(bdo), 0xA2DE7C5F127BD87E, REL14, "q' = -1e-140 + 1e-300 i (Re)");
+_assert_rel(GaussianBeam_q_im(bdo), 0x01A56E1FC2F8F359, REL14, "q' = -1e-140 + 1e-300 i (Im)");
+var bdu = gaussian_beam_from_q(F64_ONE, F64_ONE, LAM1U, &e);
+assert_eq(beam_abcd(bdu, F64_ONE, 0, 0x1CA3529BA7D19EAF, 0x1CA3529BA7D19EAF), PK_ERR_NONE, "|cq+d|^2 = 5e-340: ok");
+_assert_rel(GaussianBeam_q_re(bdu), 0x632FCBFC53E05CF8, REL14, "q' = 1e170(3+i)/5 (Re)");
+_assert_rel(GaussianBeam_q_im(bdu), 0x631532A837EAE8A5, REL14, "q' = 1e170(3+i)/5 (Im)");
+
+# Scaled squaring in the other direction and at the top exponent (mpmath).
+_assert_rel(gaussian_curvature(W0, LAM, 0x01A56E1FC2F8F359, &e), 0x015BD2C49B9B792D, REL14, "1/R at z = 1e-300");
+_assert_rel(gaussian_radius_of_curvature(W0, LAM, 0x01A56E1FC2F8F359, &e), 0x7E8266DEA5224881, REL14,
+  "R at z = 1e-300 is 2.465e301, not +inf");
+_assert_rel(gaussian_curvature(W0, LAM, 0x7FEE42D130773B76, &e), 0x00043AD882E2107C, REL14, "1/R at z = 1.7e308");
+var bt5 = gaussian_beam_from_q(0x7FE1CCF385EBC8A0, F64_ONE, F64_ONE, &e);
+_assert_rel(beam_curvature(bt5), 0x000730D67819E8D2, REL14, "beam_curvature at q = 1e308 + i");
+_assert_rel(beam_radius(bt5), 0x7FD415F807D944CC, REL14, "beam_radius at q = 1e308 + i");
+var bt4 = gaussian_beam_from_q(0x6974E718D7D7625A, 0x2B2BFF2EE48E0530, F64_ONE, &e);
+_assert_rel(beam_curvature(bt4), 0x16687E92154EF7AC, REL14, "beam_curvature at q = 1e200 + 1e-100 i");
+# gaussian_beam_radius past |t| = 2^27: the w0*|t| shortcut keeps the bits of the
+# full formula, takes |t| for negative z, and stays finite where t^2 overflows.
+var zsc = f64_mul(zr, f64_from(300000001));
+var tsc = f64_div(zsc, zr);
+assert_eq(gaussian_beam_radius(W0, LAM, f64_neg(zsc), &e), f64_mul(W0, f64_sqrt(f64_add(F64_ONE, f64_mul(tsc, tsc)))),
+  "w past |t| = 2^27 keeps the full formula's bits");
+_assert_rel(gaussian_beam_radius(W0, LAM, f64_neg(f64_from(1000000000)), &e), 0x41089693F7C2D7DE, REL14,
+  "w(-1e9 m) = 201426.495977 m, positive");
+_assert_rel(gaussian_beam_radius(W0, LAM, 0xFE37E43C8800759C, &e), 0x7D73B6285A32A593, REL14,
+  "w(-1e300 m) finite and positive");
+# Intensity: w^2 scaled too (mpmath; KP = 1e-200 W, w0 = 1e-160, lambda = 1e-300).
+_assert_rel(gaussian_intensity(0x16687E92154EF7AC, 0x1EB67E9C127B6E74, 0x01A56E1FC2F8F359, 0x1EAF7E0DB3799AA3, 0, &e),
+  0x58B7AFEA90759033, REL12, "intensity at w0 = 1e-160");
+_assert_rel(gaussian_intensity(F64_ONE, 0x601DD55745CBB7ED, 0x4202A05F20000000, 0x601DD55745CBB7ED, 0, &e),
+  0x0000019604EE928C, _fd(1, 1000000000), "intensity at w0 = 1e155 (subnormal answer, not 0)");
+
+# "Same bits in range": the scaled forms against the UNSCALED formulas written out
+# here, bit for bit, on ordinary inputs (c != 0, a != 1, b != 0, both signs of Re q).
+var sb = gaussian_beam_from_q(f64_neg(_fd(37, 10)), _fd(21, 100), _fd(633, 1000000000), &e);
+var sq_r = GaussianBeam_q_re(sb);
+var sq_i = GaussianBeam_q_im(sb);
+var sq2 = f64_add(f64_mul(sq_r, sq_r), f64_mul(sq_i, sq_i));
+var swl = GaussianBeam_wavelength(sb);
+assert_eq(beam_radius(sb), f64_sqrt(f64_div(f64_mul(swl, sq2), f64_mul(F64_PI, sq_i))), "beam_radius: same bits");
+assert_eq(beam_curvature(sb), f64_div(sq_r, sq2), "beam_curvature: same bits");
+var SA = _fd(13, 10);
+var SB = _fd(7, 10);
+var SC = f64_neg(_fd(9, 10));
+var SD = _fd(3, 10);
+var sdr = f64_add(f64_mul(SC, sq_r), SD);
+var sdi = f64_mul(SC, sq_i);
+var sden = f64_add(f64_mul(sdr, sdr), f64_mul(sdi, sdi));
+var snr = f64_add(f64_mul(SA, sq_r), SB);
+var sni = f64_mul(SA, sq_i);
+var sdet = f64_sub(f64_mul(SA, SD), f64_mul(SB, SC));
+var sg0 = beam_gouy_phase(sb);
+var sgp = ganita_f64_atan2(f64_mul(SB, sq_i), f64_add(f64_mul(SA, sq2), f64_mul(SB, sq_r)));
+assert_eq(beam_abcd(sb, SA, SB, SC, SD), PK_ERR_NONE, "general abcd ok");
+assert_eq(GaussianBeam_q_re(sb), f64_div(f64_add(f64_mul(snr, sdr), f64_mul(sni, sdi)), sden), "abcd Re q': same bits");
+assert_eq(GaussianBeam_q_im(sb), f64_div(f64_mul(sdet, sq_i), sden), "abcd Im q': same bits");
+assert_eq(beam_gouy_phase(sb), f64_add(sg0, sgp), "abcd Gouy: same bits");
+var szr = gaussian_rayleigh_range(W0, LAM, &e);
+var szz = f64_neg(_fd(173, 100));
+assert_eq(gaussian_curvature(W0, LAM, szz, &e), f64_div(szz, f64_add(f64_mul(szz, szz), f64_mul(szr, szr))),
+  "gaussian_curvature: same bits");
+assert_eq(gaussian_radius_of_curvature(W0, LAM, szz, &e), f64_div(f64_add(f64_mul(szz, szz), f64_mul(szr, szr)), szz),
+  "gaussian_radius_of_curvature: same bits");
+
+var r = assert_summary();

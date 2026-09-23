@@ -42,7 +42,8 @@
 > **Still genuinely open**, and these are the only entries worth mining for work:
 > complex refractive indices in the TMM (the layer buffer is `(n, d)` at a
 > 16-byte stride, so admitting `k` is a layout change), fiber dispersion, and
-> Gaussian-beam support from scratch. Everything else is either shipped or
+> Gaussian-beam support from scratch — **the last shipped in 2.6.0** (`wave_beam`:
+> TEM00, q/ABCD, HG/LG modes, M², OAM), so §6 is now implemented. Everything else is either shipped or
 > superseded. The forward-looking list is `docs/development/roadmap.md`, not this
 > file.
 

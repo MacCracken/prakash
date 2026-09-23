@@ -2,6 +2,196 @@
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-09-22 — Gaussian beam optics, and the roadmap pinned to releases
+
+The first release of the port-era capability work. Every open roadmap item is now
+pinned to the minor that ships it (2.6.0 → 2.17.0), and this one closes two of them:
+**Hermite-/Laguerre-Gaussian modes with M²**, and **orbital angular momentum**. It
+also rebuilds what 1.2.0 removed with the bijli re-exports: from 1.2.0 until now
+prakash had no Gaussian-beam support in any form. Suite **7201 → 7656
+assertions across 32 suites**, 0 failed. Reference coverage **453/453**. `cyrius audit`
+exits 0; fmt, lint, `doc --check`, vet, deny clean; `deps --verify` 112/112;
+`#must_use` 430 → **461**, 0 lost. Benchmarks 139 → **149**.
+
+### Added — `wave_beam` (new module, 39 public functions)
+Not a port: the Rust crate never had it natively, so there is no fidelity
+reference. Every formula is pinned against the literature or an independent
+implementation, never against itself.
+- **TEM00 closed forms** — `gaussian_rayleigh_range`, `gaussian_beam_radius`,
+  `gaussian_curvature` (1/R, finite everywhere), `gaussian_radius_of_curvature`
+  (+inf at the waist, as a value, not an error), `gaussian_gouy_phase`,
+  `gaussian_divergence`, `gaussian_intensity`, `gaussian_power_fraction`, and
+  `gaussian_beam_radius_m2` for real beams (ISO 11146).
+- **`GaussianBeam` — the q parameter through ABCD optics.** `gaussian_beam_new`,
+  `gaussian_beam_from_q`; elements `beam_propagate`, `beam_thin_lens`,
+  `beam_mirror`, `beam_interface`, `beam_curved_interface`, `beam_abcd`, each
+  updating the beam IN PLACE (the bump allocator never frees, so a per-element
+  builder would leak); queries `beam_radius`, `beam_waist_radius`,
+  `beam_waist_distance`, `beam_curvature`, `beam_rayleigh_range`, `beam_gouy_phase`.
+  The local wavelength follows the medium through det(ABCD) = n_in/n_out, and the
+  Gouy phase accumulates as −arg(A + B/q) per element, so mode superpositions stay
+  correct through lenses, not only in free space.
+- **`beam_resonator_mode`** — the self-consistent mode of a round-trip matrix
+  (Kogelnik & Li 1966). ⚠ A symmetric confocal cavity is **refused**: its round
+  trip is exactly −I, every q reproduces itself, and the textbook confocal spot is a
+  g → 0 limit the matrix does not carry. The first test written for it assumed
+  otherwise and was wrong; the function was right.
+- **`beam_coupling_efficiency`** — TEM00 mode overlap with size and curvature
+  mismatch. At two waists it IS `ray_fiber`'s `coupling_efficiency_gaussian`, and
+  the suite pins the two to each other.
+- **Modes** — `hermite_poly`, `laguerre_poly` (A&S 22.7 recurrences);
+  `hg_mode_field` / `hg_mode_intensity`, `lg_mode_field` / `lg_mode_intensity`,
+  normalised to unit power and evaluated on a `GaussianBeam`'s current plane
+  (curvature phase and (N+1)·Gouy included); `lg_mode_peak_radius`. The fields go
+  through rescaled normalised recurrences (Hermite functions; the difference form
+  of the Laguerre functions), never forming H_n, L_p or a factorial: HG₇₆₀ and
+  LG₃₈₀,₃ normalise to 1e-9 on a sampled grid, and HG to n = 2000 and LG to
+  |l| = 4000 match mpmath to ≤ 2.2e-13 of peak, where H₄₀ alone is ~1e29.
+- **Beam quality** — `hg_mode_m2`, `lg_mode_m2`, `beam_m2` (π W₀θ/λ),
+  `beam_parameter_product`, and `beam_second_moment_radius` (ISO 11146 D4σ from a
+  sampled profile, centroid removed in a second pass).
+- **Orbital angular momentum** — LG fields carry e^{−ilφ}, which in this module's
+  e^{+iωt} convention is **+lħ per photon**; `oam_flux` (lPλ₀/2πc, the torque on an
+  absorber) and `spiral_phase_plate_step` (lλ/(n_rel − 1)).
+- ⚠ **Conventions are stated in the module header because sources disagree on
+  every one**: e^{+iωt} time dependence (Siegman; Saleh & Teich), q = z + i·z_R, w as
+  the 1/e² intensity radius, `wavelength` as the in-medium wavelength, ABCD on
+  (height, real slope).
+
+### Tests — tests/wave_beam.tcyr, 455 assertions
+- **Values** against mpmath at 50 digits on the same double inputs (the reference
+  scripts share no code with the module), including Hermite/Laguerre and HG/LG
+  fields evaluated with mpmath's own polynomials and explicit factorials.
+- **Independent closed forms**: Self's lens formula (Appl. Opt. 22, 658) for the
+  image waist; Kogelnik & Li and Siegman's symmetric-cavity forms for resonator
+  modes; a thick lens built from two curved interfaces focusing at the back focal
+  distance `lens_cardinal_points` computes by paraxial optics.
+- **Integrals**: intensity → power, power fraction → that integral, unit power of
+  HG/LG modes (HG₆₀ and LG₂₀,₁₅ at 1e-12; HG₇₆₀ and LG₃₈₀,₃ at 1e-9), orthogonality with curvature and Gouy phases
+  present, and TEM00 coupling against a numerical overlap of the complex fields.
+- **Bases pinned against each other**: LG₀,±₁ = (HG₁₀ ∓ iHG₀₁)/√2 and
+  LG₁₀ = −(HG₂₀ + HG₀₂)/√2 at three points — the assertion that fixes the sign of l.
+- **M² by measurement**: each mode's intensity is sampled at its waist and one
+  Rayleigh range out, its D4σ radius measured by `beam_second_moment_radius`, and M²
+  recovered from the pair: 2m+1 for HG_m0 (m = 0..3), 5 for LG₁,₂.
+- A mechanical null-handle sweep (the 2.4.9 method) over all 39 public functions,
+  handles zeroed and then counts at 4: 78 probes, 0 crashes — run on the draft and
+  again on the final module.
+
+### Review — 2 rounds, before release
+**Round 1: 55 agents** — three literature audits (TEM00/M²; ABCD, Gouy, resonator,
+coupling; HG/LG/OAM), a mutation tester, a robustness prober, and one skeptic per
+finding. **Every formula, sign and convention was confirmed independently**:
+the Gouy rule −arg(A + B/q) and its sign against FFT angular-spectrum propagation
+through lenses, diverging lenses, virtual waists, A < 0 composites and curved
+interfaces into glass (phase, amplitude and q to 1e-12); the fields against the
+paraxial wave equation by finite differences (residual 1e-7 to 2.6e-6 with the
+e^{−ikz} carrier, 2.0 with the opposite one); the OAM sign and the spiral-plate
+direction by derivation; the coupling formula, the resonator formula and the
+ISO 11146 definitions against their sources. 50 findings, **46 confirmed, 4
+refuted** as equivalent mutants — all numerical edge cases or assertions that could
+not fail. Fixed:
+- **`gaussian_power_fraction` returned fractions above 1** (1.00073 at a = 19.3w).
+  The expm1 helper claimed to be "the same construction as spectral_core's
+  `_expm1`" and had dropped its saturation guard; for 2a²/w² in 708-745, e^{−x} is
+  subnormal and the Kahan ratio wandered either side of 1. Guard restored; exactly
+  1 there now, and a sweep pins ≤ 1 and monotone.
+- **HG_m silently lost its outer lobes for m ≳ 745**, and **LG_pl returned NaN
+  inside the mode for p ≳ 355** (inf for |l| ≳ 3850) — the seed e^{−t²/2} underflowed
+  past |t| ≈ 37.6, and the raw L_p^|l| overflowed on the outer rings. Both recurrences
+  are now rescaled (2^±512) with the Gaussian applied in log form; the old HG path is
+  kept where it cannot underflow (|t| < 36), so in-range values do not move. The
+  docstrings that claimed "high orders neither overflow nor underflow" were false and
+  are rewritten. HG₈₀₀, HG₇₆₀, LG₄₀₀,₀, LG₃₈₀,₃ and LG₀,₄₀₀₀ are pinned to mpmath.
+- **`beam_resonator_mode` returned a mode made of rounding error for a confocal
+  cavity** built in floating point (−I plus 1e-16 of noise passed `s > 0`), and let a
+  NaN determinant through. Stability edges are refused with a 1e-12·(|a|+|d|)
+  margin, NaN fails the det test, and q is built directly rather than as 1/(1/q).
+- **`beam_abcd`** stored a wavelength that had over/underflowed, and an a = 0 element
+  on |q| ≳ 1e154 put NaN into the Gouy phase through 0·inf. It now validates the new
+  wavelength and forms every square on power-of-two-scaled values — the same bits
+  wherever the old form was representable, finite answers where it was not. The same
+  scaling went into `gaussian_curvature`, `gaussian_radius_of_curvature`,
+  `beam_radius`, `beam_curvature`; `gaussian_rayleigh_range` now refuses a z_R that
+  is not representable (every closed form and `gaussian_beam_new` inherit it).
+- `hermite_poly(odd n ≥ 271, 0)` returned NaN for an exact 0 (closed form at x = 0
+  now); a zero-amplitude field far off axis came back as 0·NaN; `hg_mode_m2` /
+  `lg_mode_m2` wrapped negative for orders near 2^62 (now f64), and l = INT64_MIN is
+  refused; `gaussian_intensity` and `oam_flux` refuse a negative or non-finite power
+  (oam_flux(l, −P) was indistinguishable from oam_flux(−l, P)).
+- **Docs**: the Gouy phase of a B = 0 element is π, not 0, when A < 0 (an inverting
+  relay); `beam_gouy_phase` starts at atan(Re q/Im q) for `from_q` and resonator beams.
+- **Tests**: 95 assertions added in round 1. **38 of them fail against the pre-review module**
+  (run as a copy), which is what makes them regression pins rather than coverage.
+  Three existing assertions were VACUOUS — each input was also refused by an earlier
+  check, so deleting the guard it was named for left the suite green (the resonator
+  det test, and two second-moment refusals); each now has an input only its own guard
+  can refuse. One pin sat at a radius where the old code still worked and was moved
+  past the failure it claimed to cover.
+
+**Round 2: 24 agents** re-verified the fixes — an accuracy sweep against mpmath
+(HG to n = 2000, LG to p = 400 and |l| = 4000, every path switch and rescale point),
+a bit-identity comparison with the pre-review code (**0 differences in ~50,000
+chained normal-range cases**, so "same bits in range" holds), and 135 mutants of the
+changed lines. It confirmed six code defects in the round-1 fixes themselves:
+- **LG accuracy regressed at large |l|** — the new exponent summed ln a! term by term
+  and subtracted it from a·ln s and s, each ~1e4: 2.5e-12 at |l| = 1500, 18× the
+  pre-review code. E now uses Stirling's ratio for |l| ≥ 10, and the recurrence is the
+  DIFFERENCE form scipy's `eval_genlaguerre` uses (the three-term form cancels near
+  the axis: 3e-12 of peak for LG₄₀₀,₀). Measured, error as a fraction of peak:
+  LG₁₀₀,₀ 2.7e-13 → **4.8e-15**, LG₄₀₀,₀ 3.1e-12 → **1.9e-14**, LG₀,₁₅₀₀ 3.2e-12 →
+  **8.2e-14**, LG₀,₄₀₀₀ 2.0e-11 → **2.2e-13**; no NaN, inf or false zero at any of
+  ~24,000 radii across 13 modes.
+- **LG returned NaN/inf as success past s = 2^512** — s is now capped at 2^200, where
+  e^{−s/2} is below every double for any order.
+- **The resonator judged stability with det = 1 assumed** while the det check admits
+  1e-9 of slack, 500× the stability margin, so a slightly-unstable matrix got a mode.
+  It now uses the matrix's own determinant.
+- **Subnormal z_R and Im q were accepted** and spoiled what was built on them (1e-4
+  errors, a Gouy step of exactly 0); results must now be normal doubles.
+- `gaussian_intensity` still squared w (a spurious 0 for w ≈ 1e155); `beam_waist_radius`
+  was unscaled; LG_0,1 dropped to 0 for r/w < 1.6e-162 where s = 2(r/w)² underflows.
+- The Hermite |t| < 36 path was described as "unchanged" while it multiplied by the
+  reciprocal of π^{1/4} instead of dividing (1-ulp moves) — it divides again, and is
+  now unchanged bit for bit.
+Round 2 added 62 assertions; **16 fail against the round-1 code**. Two of this
+release's own test pins were vacuous and are corrected: an intensity compared as
+0 == 0 where |u|² legitimately underflows (now a field comparison), and a
+NaN-determinant input that the margin refuses before the guard it was named for.
+
+⚠ **A doc comment was displaced by an insertion, exactly as CLAUDE.md warns for
+`#must_use`.** Inserting the `beam/*` benches directly above `fn main` in
+tests/prakash.bcyr left main's doc line on the new block; `cyrius audit` caught it
+(1 undocumented function), `check-must-use.sh` could not.
+
+### Changed
+- **roadmap** — rewritten as a release plan: every open item is pinned to a minor
+  (2.6.0 Gaussian beams through 2.17.0 CIE 2006), with the three dependency edges
+  that constrain the order. The "demand-gated, do not start" framing and the
+  consumer-survey section are removed; the research audit's three still-open gaps
+  (Gaussian beams, absorbing thin films, fiber dispersion) and the 3×3 polarization
+  ray tracing it marked implemented but never built are now pinned items (2.6.0,
+  2.10.0, 2.11.0).
+- **scripts/check-must-use.sh** — the current side now includes untracked files.
+  With `git ls-files` alone a new module was invisible until staged: the gate said
+  430 while CLAUDE.md's grep reconciliation said 461, and a function moved into a new
+  unstaged file would have been reported lost.
+- `wave_beam` joins `[lib]` and `[lib.ai]` after `wave_pattern`; it needs no stdlib
+  fold beyond the existing sidecar (ganita for atan2) and no hisab.
+
+### Performance
+- New rows only (`beam/*`): `gaussian_beam_radius` 43 ns, `gaussian_intensity` 108 ns,
+  `thin_lens` 121 ns, `propagate` 147 ns, `coupling_efficiency` 106 ns,
+  `hermite_poly_20` 93 ns, `laguerre_poly_10` 93 ns, `hg_mode_field_3_2` 305 ns,
+  `lg_mode_field_2_3` 449 ns, `second_moment_256` 2.67 µs. No existing row is claimed
+  to move.
+- ⚠ **The review's range-safety cost time, and it is recorded rather than hidden.**
+  Against the pre-review draft of this module, in the same harness: `lg_mode_field`
+  240 → 449 ns (the normalised recurrence and its ln/exp exponent), `thin_lens`
+  87 → 121 and `propagate` 115 → 147 ns (scaled squaring: four divisions and two
+  normality checks). No release shipped the faster forms, so nothing regressed; the
+  recovery candidates are a 2.6.x patch row in the roadmap, to be proven same-binary.
+
 ## [2.5.1] - 2026-09-22 — the roadmap's remaining work was consumer work: a fabricated registration, a reset that missed six pointers, and ranga's upgrade path proven
 
 "Continue the roadmap" started with a measurement, not a build: every open item

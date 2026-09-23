@@ -105,6 +105,54 @@ t = λ / (4n)
 ### Mueller/Stokes Formalism
 S' = M · S (4x4 matrix times 4-vector)
 
+## Gaussian Beams (`wave_beam`, 2.6.0)
+
+⚠ **Conventions**, stated because sources disagree on every one of them:
+time dependence e^{+iωt} (Siegman; Saleh & Teich), so the omitted carrier is
+e^{−ikz}; q = z + i·z_R with z from the waist, positive downstream; w is the 1/e²
+**intensity** radius; `wavelength` is the wavelength in the medium, λ₀/n; ABCD
+matrices act on (height, **real** slope), so det = n_in/n_out.
+
+### TEM00
+z_R = π w₀² / λ,  w(z) = w₀ √(1 + (z/z_R)²),  1/R(z) = z / (z² + z_R²),
+ψ(z) = atan(z/z_R),  θ = λ / (π w₀),  I(r, z) = (2P / π w²) e^{−2r²/w²}.
+Power inside radius a: 1 − e^{−2a²/w²} (computed with Kahan's expm1 identity).
+
+### Real beams (ISO 11146)
+W(z) = W₀ √(1 + (z M² λ / π W₀²)²),  M² = π W₀ θ / λ,  BPP = W₀θ = M² λ / π.
+Second-moment radius W = 2σ, σ² = Σ I (x − x̄)² / Σ I.
+
+### q Parameter and ABCD Propagation
+1/q = 1/R − i λ / (π w²),  q' = (A q + B) / (C q + D),  λ' = λ · (AD − BC).
+Gouy phase through an element: Δψ = −arg(A + B/q) — 0 for B = 0 with A > 0 (lens, mirror,
+interface), π for B = 0 with A < 0 (an inverting relay: 4f telescope, 2f–2f imaging).
+Elements: free space [[1, d], [0, 1]]; thin lens [[1, 0], [−1/f, 1]]; mirror
+[[1, 0], [−2/R, 1]] (R > 0 concave); curved interface [[1, 0], [(n₁ − n₂)/(n₂R), n₁/n₂]]
+(R > 0 with the centre downstream).
+
+### Resonator Eigenmode (Kogelnik & Li 1966)
+For a round trip [[A, B], [C, D]] with AD − BC = 1 and |A + D| < 2:
+1/q = (D − A)/(2B) − i √(4 − (A + D)²) / (2|B|).
+Edges of stability (|A + D| → 2: confocal, concentric, planar) select no unique mode — a
+symmetric confocal round trip is −I — and are refused within 1e-12·(|A| + |D|).
+
+### Mode Overlap
+η = 4 / ((w₁/w₂ + w₂/w₁)² + (π w₁ w₂ / λ)² (1/R₁ − 1/R₂)²) = 4 Im q₁ Im q₂ / |q₁ − q₂*|².
+
+### Hermite-Gaussian and Laguerre-Gaussian Modes (unit power)
+HG_mn: u = (√2/w) φ_m(√2x/w) φ_n(√2y/w) e^{−ik(x²+y²)/2R} e^{i(m+n+1)Ψ},
+φ_k(t) = H_k(t) e^{−t²/2} / √(2^k k! √π).
+LG_pl: u = √(2 p! / π (p+|l|)!) (1/w) s^{|l|/2} L_p^{|l|}(s) e^{−s/2}
+e^{−ikr²/2R} e^{−ilφ} e^{i(2p+|l|+1)Ψ},  s = 2r²/w².
+Ψ is the accumulated Gouy phase. LG₀,±₁ = (HG₁₀ ∓ i HG₀₁)/√2;
+LG₁₀ = −(HG₂₀ + HG₀₂)/√2. M²: HG_mn → (2m+1, 2n+1); LG_pl → 2p + |l| + 1.
+Recurrences: H_{k+1} = 2x H_k − 2k H_{k−1} (A&S 22.7.13);
+(k+1) L_{k+1}^α = (2k+1+α−x) L_k^α − (k+α) L_{k−1}^α (A&S 22.7.12).
+
+### Orbital Angular Momentum
+e^{−ilφ} in this time convention carries +lħ per photon. Angular-momentum flux
+l P / ω = l P λ₀ / (2π c). Spiral phase plate step h = l λ / (n_rel − 1).
+
 ## Spectral
 
 ### Planck's Law

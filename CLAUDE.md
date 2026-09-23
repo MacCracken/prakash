@@ -9,7 +9,7 @@
   (math-only) and `dist/prakash-ai.cyr` (adds the sandhi HTTP/TLS AI client)
 - **License**: GPL-3.0
 - **Toolchain pin**: cyrius 6.6.6 — single source of truth is `cyrius = "..."` in `cyrius.cyml`
-- **Version**: SemVer, currently 2.5.x. `VERSION` is the single source; `cyrius.cyml`
+- **Version**: SemVer, currently 2.6.x. `VERSION` is the single source; `cyrius.cyml`
   reads it via `${file:VERSION}` and the release workflow fails if the tag disagrees
 
 ⚠ **The Rust original is a FIDELITY reference, not a CORRECTNESS one.** 2.2.6 found six
@@ -104,7 +104,7 @@ soorat, kiran on the frozen Rust 1.x crate. Per-consumer detail: `docs/architect
 - **No magic.** Every operation is measurable, auditable, traceable.
 - **`#must_use`** on all pure functions — the load-bearing attribute here.
   Count it, do not quote it: `grep -rhoE '^\s*#must_use' src/*.cyr | wc -l`
-  (430 at 2.5.1). ⚠ A hard-coded figure here has gone stale at three separate
+  (461 at 2.6.0). ⚠ A hard-coded figure here has gone stale at three separate
   releases; the command is the source of truth.
 - ⚠ **Inserting a function directly above another one STEALS its attributes.**
   A `#doc` + `#must_use` block binds to whatever declaration follows it, so a new

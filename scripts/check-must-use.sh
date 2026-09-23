@@ -82,7 +82,13 @@ for f in $(git ls-files 'src/*.cyr'); do
     git show "$BASE:$f" 2>/dev/null | marked
 done | sort -u > "$old"
 
-for f in $(git ls-files 'src/*.cyr'); do
+# ⚠ The CURRENT side must include untracked-but-not-ignored files (2.6.0). With
+# `git ls-files` alone a new module is invisible until it is staged, so the count
+# printed below disagreed with CLAUDE.md's `grep -rhoE '^\s*#must_use' src/*.cyr`
+# reconciliation (430 vs 461 for the new wave_beam.cyr), and a function MOVED into
+# a new unstaged file would have been reported lost. The BASE side needs no change:
+# an untracked file has nothing at the baseline to lose.
+for f in $(git ls-files --cached --others --exclude-standard 'src/*.cyr'); do
     marked < "$f"
 done | sort -u > "$new"
 

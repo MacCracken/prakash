@@ -22,6 +22,8 @@ include "src/wave_airy.cyr"
 include "src/wave_diffraction.cyr"
 include "src/wave_zernike.cyr"
 include "src/wave_pattern.cyr"
+# 2.6.0: Gaussian beam optics.
+include "src/wave_beam.cyr"
 include "src/pbr_core.cyr"
 include "src/pbr_advanced.cyr"
 include "src/lens.cyr"
@@ -495,6 +497,49 @@ fn b_optical_path_difference() {
     return 0;
 }
 
+# ── Gaussian beams (2.6.0) ────────
+var _gb = 0;
+var _gb_w0 = 0;
+var _gb_wl = 0;
+var _gb_z = 0;
+var _gb_ref = 0;
+var _gb_re = 0;
+var _gb_im = 0;
+var _gb_prof = 0;
+var _gb_dx = 0;
+
+# TEM00 beam radius w(z) from the closed form.
+fn b_gaussian_beam_radius() { var r = gaussian_beam_radius(_gb_w0, _gb_wl, _gb_z, _err); return 0; }
+# TEM00 intensity at one (r, z) for a given power.
+fn b_gaussian_intensity() { var r = gaussian_intensity(F64_ONE, _gb_w0, _gb_wl, _gb_w0, _gb_z, _err); return 0; }
+# One thin-lens element on the q parameter. The state is reset first (two stores),
+# so every iteration transforms the same q rather than walking it toward a focus.
+fn b_beam_thin_lens() {
+    GaussianBeam_set_q_re(_gb, _gb_z);
+    GaussianBeam_set_q_im(_gb, _gb_w0);
+    var r = beam_thin_lens(_gb, _bf(1, 2));
+    return 0;
+}
+# One free-space step on the q parameter (Gouy phase included), state reset first.
+fn b_beam_propagate() {
+    GaussianBeam_set_q_re(_gb, _gb_z);
+    GaussianBeam_set_q_im(_gb, _gb_w0);
+    var r = beam_propagate(_gb, F64_ONE);
+    return 0;
+}
+# TEM00 mode overlap between two beams with mismatched size and curvature.
+fn b_beam_coupling() { var r = beam_coupling_efficiency(_gb, _gb_ref, _err); return 0; }
+# Hermite polynomial H_20 by recurrence.
+fn b_hermite_poly_20() { var r = hermite_poly(20, _gb_z); return 0; }
+# Generalised Laguerre L_10^3 by recurrence.
+fn b_laguerre_poly_10() { var r = laguerre_poly(10, 3, _gb_z); return 0; }
+# Complex HG_32 field at one point (curvature + Gouy phase).
+fn b_hg_mode_field() { var r = hg_mode_field(_gb_ref, 3, 2, _gb_dx, _gb_dx, &_gb_re, &_gb_im); return 0; }
+# Complex LG_2,3 field at one point (helix + curvature + Gouy phase).
+fn b_lg_mode_field() { var r = lg_mode_field(_gb_ref, 2, 3, _gb_dx, _gb_z, &_gb_re, &_gb_im); return 0; }
+# ISO 11146 second-moment radius of a 256-sample profile (two passes).
+fn b_second_moment_256() { var r = beam_second_moment_radius(_gb_prof, 256, 0, _bf(1, 100), _err); return 0; }
+
 # Allocate the shared fixtures, then run every benchmark above in order.
 fn main() {
     alloc_init();
@@ -650,6 +695,19 @@ fn main() {
     _img_z = f64_from(50);
     _ray_marg = trace_ray_new(ray_vec3(f64_from(0), f64_from(3), f64_from(0)),
       ray_vec3(f64_from(0), f64_from(0), F64_ONE), F64_ONE);
+
+    _gb_w0 = _bf(1, 1000);
+    _gb_wl = _bf(1064, 1000000000);
+    _gb_z = _bf(7, 10);
+    _gb_dx = _bf(3, 10000);
+    _gb = gaussian_beam_new(_gb_w0, _gb_wl, _err);
+    _gb_ref = gaussian_beam_new(_bf(12, 10000), _gb_wl, _err);
+    var _gp = beam_propagate(_gb_ref, F64_TWO);
+    _gb_prof = alloc(256 * 8);
+    for (var gi = 0; gi < 256; gi = gi + 1) {
+        var gx = f64_mul(_bf(1, 100), f64_from(gi - 128));
+        store64(_gb_prof + gi * 8, _prk_exp(f64_neg(f64_mul(gx, gx))));
+    }
 
     bench("ray/fresnel_unpolarized", &b_fresnel_unpolarized, 500000);
     bench("ray/fiber_na", &b_fiber_na, 500000);
@@ -807,6 +865,17 @@ fn main() {
     bench("ray/find_system_properties", &b_find_system_properties, 20000);
     bench("ray/optical_path_length", &b_optical_path_length, 100000);
     bench("ray/optical_path_difference", &b_optical_path_difference, 100000);
+    # ── wave: Gaussian beams (2.6.0) ──
+    bench("beam/gaussian_beam_radius", &b_gaussian_beam_radius, 500000);
+    bench("beam/gaussian_intensity", &b_gaussian_intensity, 500000);
+    bench("beam/thin_lens", &b_beam_thin_lens, 500000);
+    bench("beam/propagate", &b_beam_propagate, 500000);
+    bench("beam/coupling_efficiency", &b_beam_coupling, 200000);
+    bench("beam/hermite_poly_20", &b_hermite_poly_20, 500000);
+    bench("beam/laguerre_poly_10", &b_laguerre_poly_10, 500000);
+    bench("beam/hg_mode_field_3_2", &b_hg_mode_field, 200000);
+    bench("beam/lg_mode_field_2_3", &b_lg_mode_field, 200000);
+    bench("beam/second_moment_256", &b_second_moment_256, 20000);
     return 0;
 }
 

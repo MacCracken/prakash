@@ -21,83 +21,118 @@ Prakash does NOT own:
 - **Math primitives** → hisab (vectors, geometry, calculus, FFT). prakash calls only `num_fft`; its complex arithmetic is its own
 - **Color science beyond spectral** → ranga (ICC profiles, gamut mapping)
 
-## Open work at a glance
+## Release plan
 
-**12 items, all demand-gated or waiting on a consumer.** No known defect is open.
+Every open item is **pinned to the minor release that ships it**. This is the
+remaining port-era capability work: the Rust 1.x roadmap's P2/P3 items, which the
+Rust→Cyrius port and the 2.2–2.5 correctness audits pushed back, plus the gaps
+`docs/research/physics-completeness-audit.md` records as still open (absorbing thin
+films, fiber dispersion) and the 3×3 polarization ray tracing that document marked
+implemented but that was never built. 2.6.0 shipped the first of them — Gaussian
+beams, HG/LG modes, M² and OAM; see `CHANGELOG.md`.
 
-| # | Bucket | Item | State |
-|---|---|---|---|
-| 1–6 | 2.x | GRIN, DOE, Richards-Wolf, HG/LG beams, Buchdahl, aberrated MTF | demand-gated, no ask |
-| 7–11 | 2.x | Fluorescence, non-linear, OAM, metamaterials, CIE 2006 observer | demand-gated, no ask |
-| 12 | Consumers | ranga's bump from 2.2.8; tanmatra's planned `[lib.optics]` profile | their move; prakash's side done |
-
-⭐ **Demand was measured at 2.5.1, not assumed.** A survey of every local repo (plus
-kiran on GitHub) found **no consumer asking for any of items 1–11**. Item 7's only
-trace is a stale registry line in agnosticos written about prakash 1.1; item 8's
-named requester, joshua (GitHub-only, Rust 0.1.0), has no prakash dependency of its
-own — it reaches the 1.x crate only through kiran, behind its optional `engine` feature — and
-nothing in it mentions non-linear optics. Implicit signals, none of them a request:
-tanmatra builds Gaussian line SPDs itself (see the `spd_to_xyz` caveat), ranga
-inlines `xyz_to_xyy` to avoid an allocation, soorat carries a roughness-aware
-Fresnel in WGSL. Re-survey before starting any item.
-
-⚠ **Items 1–11 are not a backlog anyone is working through.** Each is a subsystem,
-listed so the scope boundary stays visible. Do not start one without a consumer
-asking for it.
-
-## How this file is organised
-
-Items are grouped by the **release class their change implies**, not by the order
-anyone intends to do them:
-
-| Bucket | Means | Rule |
+| Version | Release | Roadmap items it closes |
 |---|---|---|
-| **2.5.x — patch** | no public API moves | internals, perf, tests, docs, tooling, data fixes |
-| **2.6.x — minor** | adds public API | new entry points, new capability |
-| **2.x — demand-gated** | adds a subsystem | build when a consumer actually asks |
-| **Consumers** | not prakash's move | waiting on a consumer's own change |
+| 2.6.x | patch | recover the `beam/*` cost of the 2.6.0 range-safety fixes |
+| **2.7.0** | Aberrations → image quality | wavefront coefficients from Seidel sums; aberrated MTF |
+| 2.8.0 | GRIN optics | gradient-index ray tracing |
+| 2.9.0 | Diffractive optics | DOE: phase gratings, holographic elements |
+| 2.10.0 | Absorbing films + fiber dispersion | audit gaps: complex-index TMM, fiber dispersion |
+| 2.11.0 | 3×3 polarization ray tracing | audit gap: the PRT matrix never built |
+| 2.12.0 | Vectorial focusing | Richards-Wolf |
+| 2.13.0 | Fifth-order aberrations | Buchdahl |
+| 2.14.0 | Fluorescence | Stokes shift, excitation/emission |
+| 2.15.0 | Nonlinear optics | SHG, Kerr |
+| 2.16.0 | Negative-index media | metamaterials |
+| 2.17.0 | CIE 2006 observer | age-dependent observer |
 
-⚠ **The bucket is a SemVer classification, not a queue.** Anything in 2.5.x can
-ship in any order, in any patch release, in any combination — the bucket only
-promises it will not force a minor bump. Reshuffling is free by construction.
+**Order is build order.** Only three edges constrain it: 2.7.0 builds on 2.5.0's OPD
+and the existing Zernike/FFT path; 2.13.0 needs 2.7.0's wavefront coefficients;
+2.12.0 uses 2.6.0's `GaussianBeam` as a pupil fill. Anything else can be swapped.
+Fixes found along the way ship as patches (2.6.1, …) of whichever minor is current.
 
-**Nothing here depends on anything else here.** ⚠ **Keep rows SHORT.** A row says
-what the work is and what would block it. Measurements belong in `CHANGELOG.md`;
-a row that grows past ~8 lines has started duplicating the release history and
-should be cut back.
+⚠ **Keep rows SHORT.** A row says what the release delivers and what it will be
+pinned against. Measurements belong in `CHANGELOG.md`; a row that grows past ~8
+lines has started duplicating the release history and should be cut back.
 
-## 2.x — demand-gated: build when a consumer asks
+### 2.6.x — patch: recover the range-safety cost in `beam/*`
 
-Each is a subsystem, not an afternoon. None is speculative work worth doing before
-someone needs it; all are listed so the scope boundary stays visible.
+The 2.6.0 review made the module safe across the double range and it cost time
+against the pre-review draft: `lg_mode_field` 240 → 449 ns, `thin_lens` 87 → 121,
+`propagate` 115 → 147. Candidates, each to be proven same-binary (this host's noise
+reaches 40% below 100 ns): divide by the power-of-two scale h ONCE and multiply by
+1/h (exact, so the pinned "same bits" hold); a table of ln k! for |l| < 10 instead
+of the summed ln loop; C(p+|l|, p) as an exact integer product while it stays below
+2^53. The same-bits pins in tests/wave_beam.tcyr must stay green.
 
-### Optics capability
+### 2.7.0 — Aberrations → image quality
 
-- [ ] Gradient-index (GRIN) optics: curved ray paths through variable-n media
-- [ ] Diffractive optical elements (DOE): phase gratings, holographic elements
-- [ ] Vectorial diffraction (Richards-Wolf): high-NA focusing beyond scalar theory
-- [ ] Hermite-Gaussian / Laguerre-Gaussian beam modes; M² beam quality
-- [ ] Higher-order (5th-order Buchdahl) aberrations; wavefront coefficients from Seidel sums
-- [ ] Aberrated MTF from generalized pupil-function autocorrelation
+W₀₄₀, W₁₃₁, W₂₂₂, W₂₂₀, W₃₁₁ from the Seidel sums, pinned against the traced OPD
+that 2.5.0 repaired. Aberrated OTF/MTF by autocorrelating the generalised pupil
+function (Zernike or Seidel wavefront), sagittal and tangential. A polychromatic
+MTF that sums complex OTFs — `lens_mtf_polychromatic` is a real weighted mean and
+cannot show contrast reversal.
 
-### Advanced
+### 2.8.0 — GRIN optics
 
-- [ ] Fluorescence (Stokes shift, excitation/emission spectra)
-- [ ] Non-linear optics (SHG, Kerr) — if joshua needs it
-- [ ] Orbital angular momentum (Laguerre-Gaussian modes)
-- [ ] Metamaterials / negative refractive index
-- [ ] Age-dependent CIE observer (CIE 2006)
+Ray tracing through a continuously varying index — radial (SELFOC), axial, and
+spherical (Luneburg, Maxwell fish-eye) profiles — by RK4 on the ray equation
+d/ds(n dr/ds) = ∇n (Sharma, Kumar & Ghatak 1982). Pinned against the paraxial
+SELFOC pitch and the Luneburg lens's perfect focus.
 
-## Consumers — their move
+### 2.9.0 — Diffractive optics
 
-- [ ] **ranga** already consumes `dist/prakash.cyr` (Cyrius, tag 2.2.8, `spectral`
-  profile). Bumping the tag is ranga's change; the path is verified in
-  `docs/guides/upgrading.md`. CI holds the hisab-free link on the pinned toolchain
-  via `scripts/check-consumer-link.sh`; ranga's exact 6.6.2 setup is `--root`.
-- [ ] **tanmatra** plans an opt-in `[lib.optics]` profile in its Cyrius port (not
-  started). If its M6 line-spectrum grid needs colour, a line-spectrum → XYZ entry
-  point is a 2.6.x minor — only when it asks.
-- soorat and kiran are Rust 1.x with no port plan, so there is no item for them.
+Blazed-grating scalar efficiency sinc²(m − λ₀/λ), multilevel kinoform efficiency
+sinc²(1/N), diffractive-lens phase and its negative Abbe number (≈ −3.45), binary
+and Dammann gratings, volume holograms by Kogelnik's coupled-wave theory.
+
+### 2.10.0 — Absorbing thin films and fiber dispersion
+
+A complex-index transfer-matrix entry point taking (n, k, d) per layer — the
+current buffer is (n, d) at a 16-byte stride, so this is a new function, not a
+layout change. Fiber chromatic dispersion: material D = −(λ/c)·d²n/dλ² from the
+Sellmeier presets plus step-index waveguide dispersion; fused silica's zero near
+1.27 µm is the pin.
+
+### 2.11.0 — 3×3 polarization ray tracing
+
+Chipman's polarization ray-tracing matrix per surface, accumulated through the
+sequential tracer with the complex Fresnel coefficients. What ships today
+(`trace_sequential_polarized`) tracks scalar s/p transmittance from the real
+coefficients only.
+
+### 2.12.0 — Vectorial focusing (Richards-Wolf)
+
+The Richards-Wolf integrals I₀, I₁, I₂ for high-NA focusing of linear, radial and
+azimuthal polarization, with a Gaussian pupil fill from 2.6.0. The scalar Airy
+pattern is the low-NA limit it must reproduce.
+
+### 2.13.0 — Fifth-order aberrations (Buchdahl)
+
+Buchdahl's fifth-order sums for a surface sequence, pinned against the real-ray
+residual that remains after 2.7.0's third-order wavefront is subtracted.
+
+### 2.14.0 — Fluorescence
+
+Excitation and emission spectra as `Spd`s, Stokes shift, quantum yield, the
+re-radiation (Donaldson) matrix for spectral rendering, FRET efficiency.
+
+### 2.15.0 — Nonlinear optics
+
+SHG with phase mismatch — sinc²(ΔkL/2), coherence length, undepleted-pump
+efficiency — and the Kerr effect: n = n₀ + n₂I, self-phase modulation, B-integral,
+critical power for self-focusing.
+
+### 2.16.0 — Negative-index media
+
+Snell and Fresnel for ε, μ < 0; Drude-Lorentz effective ε(ω), μ(ω); the
+Veselago-Pendry flat lens.
+
+### 2.17.0 — CIE 2006 physiological observer
+
+Age- and field-size-dependent cone fundamentals (CIE 170-1:2006): lens and macular
+pigment optical densities, LMS → XYZ. Pinned to the published 2° and 10° tables at
+the reference age of 32.
 
 ## Constraints established by measurement — read before optimizing
 
@@ -299,11 +334,8 @@ someone needs it; all are listed so the scope boundary stays visible.
 
 ## Consumers
 
-Who uses what, how, and at which version is in the consumers section of
-`docs/architecture/overview.md`. Until 2.5.1 this table said soorat used prakash's
-Cook-Torrance (it hand-copies it into WGSL), kiran its lighting math (it re-exports
-modules and calls none) and ranga its lens effects (ranga uses only spectral/colour),
-and it omitted tanmatra.
+Who uses what, how, and at which version: the consumers section of
+`docs/architecture/overview.md`.
 
 ## Boundary with Other Crates
 
@@ -318,3 +350,4 @@ and it omitted tanmatra.
 | Color space conversion (ICC) | — | ranga |
 | Spectral → RGB conversion | Yes | — |
 | Polarization formalism (Jones/Stokes/Mueller) | Yes | — |
+| Gaussian beams: q/ABCD, resonator modes, HG/LG modes, M², OAM | Yes (`wave_beam`, 2.6.0) | — |
