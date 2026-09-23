@@ -2,6 +2,153 @@
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-09-23 — gradient-index (GRIN) ray tracing
+
+Closes the 2.8.0 roadmap row: ray tracing through a continuously varying index —
+radial (SELFOC), axial and spherical (Luneburg, Maxwell fish-eye) — by RK4 on the ray
+equation (Sharma, Kumar & Ghatak 1982), pinned against the SELFOC pitch and the
+Luneburg lens's perfect focus. Two rounds of adversarial verification. Suite
+**8305 → 8826 assertions across 34 suites**, 0 failed; `cyrius audit` exits 0;
+`#must_use` 464 → **475**, 0 lost. Benchmarks 152 → **155**.
+
+### Added — `ray_grin` (new module)
+Not a port (the Rust crate had no GRIN), so nothing here is checked against itself:
+every trajectory is pinned to a closed form or to mpmath's Taylor-series ODE solver.
+- **Profiles** — `grin_selfoc(n0, g, h4, h6)` in the SELFOC manufacturer's form
+  n² = n₀²[1 − (gr)² + h₄(gr)⁴ + h₆(gr)⁶]; `grin_sech(n0, g)` (n₀ sech gr, whose
+  meridional rays are all exactly periodic); `grin_polynomial` (the "gradient 3"
+  radial + axial polynomial — axial GRIN is its z terms); `grin_luneburg(n_s, R, cz)`;
+  `grin_maxwell_fisheye(n0, R, cz)`. `GrinProfile` with tags `GRIN_*`;
+  `grin_index`, `grin_gradient`.
+- **The integrator** — Sharma's Runge-Kutta-Nyström in t = ∫ds/n, fourth order with
+  three index evaluations per step, carrying the optical path by a Hermite rule of
+  the same order at no extra cost. `step` is the arc length of every step. A trace
+  lands EXACTLY on its boundary: the crossing step is re-taken at the length Newton
+  finds.
+- **Traces** — `grin_trace_to_plane` and `grin_trace_to_sphere` (a ray inside the
+  medium), `grin_rod_trace` (flat faces, refraction in and out, the gap before the
+  front face in the optical path, and the rod's RADIUS: a ray that reaches the wall
+  anywhere inside is vignetted) and `grin_ball_trace` (a sphere, refraction in and
+  out — the Luneburg lens as a lens). Each returns a `TraceRay` and the optical path,
+  and allocates nothing else. A ray that approaches a plane and turns back in the
+  gradient (a mirage) is `PK_ERR_TIR`.
+- **SELFOC paraxial optics** — `grin_selfoc_pitch` (2π/g) and `grin_selfoc_abcd`
+  (height, real slope — the convention `beam_abcd` takes, so a Gaussian beam goes
+  through a GRIN rod with 2.6.0's `wave_beam`).
+
+### Fixed during the release's verification (never shipped)
+Round 1 was a literature audit, an independent mpmath tracer over randomised rays, a
+robustness fuzz (80,000 calls), mutation testing and an API review. It confirmed
+46 findings against the first cut. Round 2 re-ran the same harnesses on the reworked
+code. Every fix has a test that fails on the first cut.
+- **The step was not an arc length.** Δt was fixed at step/n(start), so a ray
+  starting in low index took steps n_max/n_start times too long. There was no check
+  on the result, so garbage came back as success. Examples:
+  - a fish-eye traced from outside its core returned TIR for an on-axis ray, or an
+    optical path 0.5% off at a fine step;
+  - the fuzz found 218 successes with a NEGATIVE optical path;
+  - a coarse SELFOC step returned n = 6.7e20 and an optical path of −2.5e69.
+
+  Now Δt = min(step/n(start), step/n(here)). A step that isn't a step of a ray (T
+  turning more than 0.5 rad, n² changing more than 2×, the path not growing, or a
+  stage point with no index) is re-taken shorter. A trace whose |T| = n invariant
+  drifted is refused.
+- **A step longer than the path overshot the boundary.** Its stage points could leave
+  the profile's domain, which gave INVALID_INDEX for a ray that stayed at g r < 0.06.
+  For a sphere, the Newton landing on one huge step could "exit" at the ENTRY point
+  as success. Steps are now clamped to just past the straight-line boundary estimate.
+- **Error codes followed the budget, not the physics.** TIR ("it turned back") was
+  reported for rays that never turned: a ray heading away, one parallel to the plane,
+  or one in a homogeneous medium. The code for an unreachable plane flipped with
+  max_steps. A mirage became INVALID_INDEX by 1e6 steps once its turned-back T
+  overflowed. The suite's "n → 0 is INVALID_INDEX" assertion passed only through that
+  overflow. Now:
+  - TIR means the ray approached and turned;
+  - a ray heading away in a profile with no axial gradient is refused at once;
+  - a ray running head-on into n → 0 is refused, the same way at every budget;
+  - a step too small to move the ray is refused at once (a subnormal step with 2^40
+    steps would have spun for days).
+- **Spheres far from the origin failed.** The landing tolerance ignored the centre's
+  offset, so a ball more than ~2000 radii from z = 0 was refused. It now scales with
+  R(R + |c|).
+- **The ball-entry intersection cancelled.** Using b² − c₀ put a grazing ray from 1e5
+  away 1.4e-4 off the focus, and a ray from 1e8 away 0.28 off, both as success. It now
+  uses the perpendicular-distance discriminant (Haines et al., *Ray Tracing Gems* ch. 7).
+  A start on the sphere is accepted; the first cut rejected a third of them on rounding.
+- **The rod had no radius,** and its advice to "check the exit height" missed rays that
+  hit the wall mid-rod. It now takes one.
+- **`grin_selfoc_abcd` used the raw x87 sine**, returning A = gL for |gL| ≥ 2^63, and
+  B = inf when n₀g underflowed, both as success. It now uses `_prk_sin`/`_prk_cos` and
+  refuses non-finite entries.
+- **Round 2 fixes** (the round-1 rework, re-verified):
+  - The new rod wall check took the wrong root of the cubic's derivative, so it only
+    ever looked at step ends, and a vignetted ray came back as transmitted.
+  - A crossing between two step ends, such as a sphere left through a thin cap, was
+    missed, and the ray was traced on as if it never left. It is now found from the
+    same cubic.
+  - The boundary clamp used the straight chord, which made rays skimming a sphere's
+    rim 1000× slower. It now uses the step's own curvature.
+  - A fish-eye orbit that never meets the plane "arrived" once max_steps let the
+    integrator's precession carry it there. Fish-eye traces are now capped at one
+    loop (2πn₀R of optical path).
+  - A ray tangent to a ball (h = R) returned a different exit at every step. It is
+    now a miss, like a tangent start on a sphere.
+  - Half the rays from 1e7 radii away were refused, because the entry point's
+    rounding read as "outside"; the entry is now snapped onto the sphere. The
+    on-sphere tolerance was 10⁶× rounding; it now matches the run's own.
+  - Constructors now also refuse products that leave the normal range (n₀g, n₀/R),
+    and `grin_selfoc_abcd` refuses |gL| ≥ 2^53, where the double carries no phase.
+  - A collapsed trace stops early instead of running its budget.
+- **Smaller fixes:**
+  - rod and ball traces leaked 144 B of scratch per call through `ray_refract_3d`, and
+    reported an allocation failure as a bad argument; they now refract on the stack;
+  - directions of scale 1e154 or 1e-162 were refused or lost bits;
+  - constructors accepted n₀, g or R whose squares overflow (the index was then NaN
+    everywhere);
+  - z = −0.0 was "not on" the plane z = 0;
+  - an unknown profile tag was evaluated as a fish-eye.
+
+### Tests — tests/ray_grin.tcyr, 521 assertions (new)
+- **Closed forms:**
+  - skew rays in the parabolic-n² SELFOC (position, direction and optical path);
+  - its exact pitch 2πβ/(n₀g), and the paraxial 2π/g;
+  - sech meridional fans focusing on axis at a quarter pitch at every height, and
+    sinh(gy) = C sin(gz);
+  - the linear axial profile's y(z) and optical path;
+  - the Luneburg lens focusing at c + Rd for every height and beam direction, leaving
+    along −P/R, with equal optical paths R(1 + π/2) (Fermat), including from 1e5 and
+    1e8 radii away and 1e4 radii off the origin;
+  - the fish-eye imaging surface, interior and exterior points to their inversions,
+    optical path n₀πR/2.
+- **Refraction at real index steps:** homogeneous ball and rod lenses with
+  n_in ≠ n ≠ n_after and R ≠ 1, and a Luneburg exiting into n = 1.5, all against
+  40-digit vector Snell.
+- **mpmath** (34-digit Taylor ODE solver) for SELFOC with h₄/h₆, an axial quadratic,
+  a mixed radial + axial polynomial, a skew ray in the sech rod, and the review's
+  sweep cases.
+- **The method:**
+  - error ratio 14–19 per step halving, for the ray and the optical path;
+  - step-is-arc-length pinned exactly;
+  - gradients against fourth-order finite differences;
+  - the skew invariant, and Snell in the axial profile;
+  - a 240-trace fuzz asserting that every success is a ray.
+- **Rods:** the quarter-pitch sech rod's exact focus; paraxial and skew rays and a
+  displaced rod against `grin_selfoc_abcd` in air and water; oblique entry; the wall
+  (a peak between steps counts); total internal reflection at the back face. Every
+  refusal, with its code.
+
+### Performance (new benchmarks)
+- `grin/index` 69 ns; `grin/selfoc_100_steps` 35.3 µs (a skew ray through a quarter
+  pitch); `grin/luneburg_ball` 36.6 µs (entry, ~97 steps of arc 0.02, the landing,
+  exit).
+- The guards and arc-length steps are paid for here. The first cut ran these at
+  25.5 µs and 18.0 µs, with a fixed Δt, no guards, and wrong answers at the edges.
+  The guarded code started at 43.9 µs and 44.0 µs. Skipping the wall check for
+  unbounded traces, reusing each step's optical path, and bounding the crossing
+  estimate before solving it brought the same-binary A/B down 20% (45.3 → 35.9 µs and
+  45.0 → 36.2 µs). The Luneburg's remaining 2× is mostly its ~40% more steps: `step`
+  is now arc length in a core where n reaches √2.
+
 ## [2.7.0] - 2026-09-23 — aberrations → image quality
 
 Closes the 2.7.0 roadmap row: the third-order wavefront from the Seidel sums, the

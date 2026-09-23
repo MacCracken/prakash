@@ -11,6 +11,8 @@ include "src/ray_dispersion.cyr"
 include "src/ray_fiber.cyr"
 include "src/ray_system.cyr"
 include "src/ray_simulate.cyr"
+# 2.8.0: gradient-index ray tracing.
+include "src/ray_grin.cyr"
 include "src/spectral_cie.cyr"
 include "src/spectral_photometry.cyr"
 include "src/wave_core.cyr"
@@ -559,6 +561,25 @@ var _otf_im = 0;
 # Aberrated OTF of a Seidel wavefront (0.5 waves coma + 1 wave defocus), tangential,
 # at v = 0.3 with 64 Gauss-Legendre nodes per axis: 8192 wavefront evaluations.
 fn b_lens_otf_seidel() { var r = lens_otf_seidel(_otf_wc, F64_ONE, _bf(3, 10), 1, 64, &_otf_re, &_otf_im); return 0; }
+# ── GRIN ray tracing (2.8.0) ────────
+var _grin_sf = 0;
+var _grin_lu = 0;
+var _grin_ray = 0;
+var _grin_lray = 0;
+var _grin_opl = 0;
+# One index evaluation of a SELFOC rod (n^2 = n0^2 [1 - (g r)^2 + ...]).
+fn b_grin_index() { var r = grin_index(_grin_sf, _bf(3, 10), _bf(1, 10), F64_TWO); return 0; }
+# A skew ray through a quarter pitch (pi) of a SELFOC rod in 100 RKN steps.
+fn b_grin_selfoc_100() {
+    var r = grin_trace_to_plane(_grin_sf, _grin_ray, F64_PI, f64_div(F64_PI, f64_from(100)), 1000, &_grin_opl, _err);
+    return 0;
+}
+# A collimated ray at h = 0.5 through a unit Luneburg ball: entry, ~97 RKN steps of arc
+# 0.02 (arc 1.95), the Newton landing on the sphere, exit.
+fn b_grin_luneburg() {
+    var r = grin_ball_trace(_grin_lu, _grin_lray, 0, F64_ONE, F64_ONE, _bf(2, 100), 1000, &_grin_opl, _err);
+    return 0;
+}
 # ISO 11146 second-moment radius of a 256-sample profile (two passes).
 fn b_second_moment_256() { var r = beam_second_moment_radius(_gb_prof, 256, 0, _bf(1, 100), _err); return 0; }
 
@@ -732,6 +753,10 @@ fn main() {
     WavefrontCoefficients_set_w222(_otf_wc, 0);
     WavefrontCoefficients_set_w220(_otf_wc, F64_ONE);
     WavefrontCoefficients_set_w311(_otf_wc, 0);
+    _grin_sf = grin_selfoc(_bf(16, 10), F64_HALF, 0, 0, _err);
+    _grin_lu = grin_luneburg(F64_ONE, F64_ONE, 0, _err);
+    _grin_ray = trace_ray_new(ray_vec3(_bf(3, 10), _bf(1, 10), 0), ray_vec3(_bf(1, 10), _bf(2, 10), F64_ONE), F64_ONE);
+    _grin_lray = trace_ray_new(ray_vec3(0, F64_HALF, f64_from(0 - 1)), ray_vec3(0, 0, F64_ONE), F64_ONE);
     _gb_prof = alloc(256 * 8);
     for (var gi = 0; gi < 256; gi = gi + 1) {
         var gx = f64_mul(_bf(1, 100), f64_from(gi - 128));
@@ -908,6 +933,9 @@ fn main() {
     bench("beam/interface", &b_beam_interface, 500000);
     bench("beam/lg_mode_field_60_60", &b_lg_mode_field_60, 50000);
     bench("lens/otf_seidel_64", &b_lens_otf_seidel, 500);
+    bench("grin/index", &b_grin_index, 1000000);
+    bench("grin/selfoc_100_steps", &b_grin_selfoc_100, 20000);
+    bench("grin/luneburg_ball", &b_grin_luneburg, 20000);
     return 0;
 }
 

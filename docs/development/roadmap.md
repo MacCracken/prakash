@@ -30,12 +30,12 @@ Rust→Cyrius port and the 2.2–2.5 correctness audits pushed back, plus the ga
 films, fiber dispersion) and the 3×3 polarization ray tracing that document marked
 implemented but that was never built. 2.6.0 shipped the first of them — Gaussian
 beams, HG/LG modes, M² and OAM — 2.6.1 made it fast and 2.6.2 closed its edge cases;
-2.7.0 shipped wavefront coefficients and the aberrated OTF; see `CHANGELOG.md`.
+2.7.0 shipped wavefront coefficients and the aberrated OTF, and 2.8.0 GRIN ray tracing;
+see `CHANGELOG.md`.
 
 | Version | Release | Roadmap items it closes |
 |---|---|---|
-| **2.8.0** | GRIN optics | gradient-index ray tracing |
-| 2.9.0 | Diffractive optics | DOE: phase gratings, holographic elements |
+| **2.9.0** | Diffractive optics | DOE: phase gratings, holographic elements |
 | 2.10.0 | Absorbing films + fiber dispersion | audit gaps: complex-index TMM, fiber dispersion |
 | 2.11.0 | 3×3 polarization ray tracing | audit gap: the PRT matrix never built |
 | 2.12.0 | Vectorial focusing | Richards-Wolf |
@@ -53,13 +53,6 @@ Fixes found along the way ship as patches (2.6.1, …) of whichever minor is cur
 ⚠ **Keep rows SHORT.** A row says what the release delivers and what it will be
 pinned against. Measurements belong in `CHANGELOG.md`; a row that grows past ~8
 lines has started duplicating the release history and should be cut back.
-
-### 2.8.0 — GRIN optics
-
-Ray tracing through a continuously varying index — radial (SELFOC), axial, and
-spherical (Luneburg, Maxwell fish-eye) profiles — by RK4 on the ray equation
-d/ds(n dr/ds) = ∇n (Sharma, Kumar & Ghatak 1982). Pinned against the paraxial
-SELFOC pitch and the Luneburg lens's perfect focus.
 
 ### 2.9.0 — Diffractive optics
 

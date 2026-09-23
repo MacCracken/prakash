@@ -46,6 +46,90 @@ V = (n_d - 1) / (n_F - n_C)
 ### Prism Deviation
 δ = 2 arcsin(n sin(α/2)) - α
 
+## GRIN Ray Tracing (`ray_grin`, 2.8.0)
+
+### The ray equation (Sharma, Kumar & Ghatak 1982)
+d/ds(n dr/ds) = ∇n, rewritten with dt = ds/n and the optical direction T = n dr/ds:
+
+d²R/dt² = D(R),  D = n∇n = ½∇(n²),  T = dR/dt,  |T| = n.
+
+Integrated with their Runge-Kutta-Nyström scheme, fourth order, three D
+evaluations per step (the end point's D is the next step's first):
+
+A = Δt D(R),  B = Δt D(R + (Δt/2)T + (Δt/8)A),  C = Δt D(R + Δt T + (Δt/2)B)
+R′ = R + Δt [T + (A + 2B)/6],  T′ = T + (A + 4B + C)/6
+
+Optical path: OPL = ∫n ds = ∫n² dt, by the two-point Hermite rule
+Δt/2 (f₀ + f₁) + Δt²/12 (f₀′ − f₁′) with f = n², f′ = 2 D·T. That is also fourth order and
+costs nothing, because n² and D at both ends are already known.
+
+**The step is an arc length, every step:** Δt = min(step/n(start), step/n(here)). The cap
+stops Δt growing where n falls towards 0. The global error is O(step⁴), with measured
+ratios of 16.3–16.9 per halving.
+
+A step is re-taken at half the length, up to 40 times, when it does not behave like a
+step of a ray:
+- a stage point has no index;
+- T turns by more than 0.5 rad;
+- n² changes by more than 2×;
+- the optical path does not grow.
+
+A trace stops at once if |T| drifts 10% from n. It is refused if |T|²/n² is more than
+2·10⁻³ from 1 at its end. That end check is **relative to the index at the end**:
+drift made where n is large reads (n_max/n_end)² larger where the ray lands. So a trace
+landing in much lower index than it crossed needs a proportionally smaller step, and
+may be refused even when its result would have been accurate. Rescaling the check by
+n_max instead let 0.29 rad direction errors through. A fish-eye trace is capped at an
+optical path of 2πn₀R: every fish-eye ray is a closed circle of optical length πn₀R.
+None of this is error control: it keeps a coarse step from returning garbage as success.
+
+A trace ends exactly on its boundary (a plane z = z_end, or a sphere left from inside):
+- the step before is clamped to 9/8 of the crossing that the step's own quadratic
+  g + g′t + g″t²/2 predicts (curvature included, so a ray skimming a sphere's rim
+  from inside is not slowed to a crawl);
+- a crossing inside a step whose ends are both inside, such as a thin cap grazed on
+  the way out, is found as a peak of the cubic Hermite interpolant of g, from g and
+  dg/dt at the step ends;
+- the crossing step is then re-taken with Δt = τ, and τ is found by safeguarded
+  Newton on g(step(τ)) = 0.
+
+The sphere's tolerances scale with R(R + |c|), the rounding of |X − c|² − R². A rod's
+wall is a cylinder r = a, checked the same way: the largest r² within a step is the
+peak of the Hermite cubic of r², with d(r²)/dt = 2(xT_x + yT_y).
+
+### Profiles
+| Profile | n | D = ½∇n² |
+|---|---|---|
+| SELFOC (NSG form) | n² = n₀²[1 − (gr)² + h₄(gr)⁴ + h₆(gr)⁶] | n₀²g²(−1 + 2h₄u + 3h₆u²)(x, y, 0), u = (gr)² |
+| sech | n₀ sech(gr) | −n² g² (tanh(gr)/(gr)) (x, y, 0) |
+| polynomial ("gradient 3") | n₀ + n_r2 r² + n_r4 r⁴ + n_r6 r⁶ + n_z1 z + n_z2 z² + n_z3 z³ | n∇n |
+| Luneburg | n_s √(2 − ρ²/R²) | −n_s² (R − c)/R² |
+| Maxwell fish-eye | n₀ / (1 + ρ²/R²) | −2n₀² (R − c) / (R² (1 + ρ²/R²)³) |
+
+### Closed forms the tests pin
+- **Parabolic-n² SELFOC** (h₄ = h₆ = 0): D is linear, so x and y are harmonic in t
+  with ω = n₀g and T_z is constant. Every ray, meridional or skew, is exact.
+  Pitch 2πβ/(n₀g) with β = T_z, and 2π/g paraxially.
+- **sech:** meridional rays satisfy sinh(gy) = C sin(gz + φ). Every one is periodic
+  with period 2π/g, so a collimated fan focuses exactly on axis at a quarter pitch.
+  SELFOC with h₄ = 2/3, h₆ = −17/45 matches it through (gr)⁶.
+- **Linear axial n = n₀ + az:** transverse T is conserved (Snell) and
+  y(z) = (β/a)[acosh(n/β)]. OPL = [n√(n² − β²) + β² acosh(n/β)]/(2a) between the
+  end indices.
+- **Luneburg:** a harmonic oscillator with ω = n_s/R. A collimated beam, at any height
+  and in any direction d, focuses at c + Rd and leaves along −P/R (P the entry point).
+  OPL from the tangent plane is n_s R(1 + π/2) on every ray.
+- **Maxwell fish-eye:** every ray from P meets again at −R²P/|P|² (relative to the
+  centre), with OPL n₀πR/2. A point on ρ = R images to its antipode.
+
+### SELFOC paraxial optics
+Pitch 2π/g. A rod of length L between flat faces, index n_ext outside, on
+(height, real slope):
+
+[ cos gL, sin gL · n_ext/(n₀g) ; −sin gL · n₀g/n_ext, cos gL ]
+
+So a quarter-pitch rod has A = D = 0 and focal length 1/(n₀g) in air.
+
 ## Wave Optics
 
 ### Interference

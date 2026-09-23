@@ -1,0 +1,1334 @@
+# ray_grin test suite — gradient-index ray tracing (new in 2.8.0).
+#
+# References, none of them the module's own integrator:
+# - CLOSED-FORM trajectories: the parabolic-n^2 SELFOC and the Luneburg lens are
+#   harmonic oscillators in Sharma's t (D is linear in R), the sech rod's meridional
+#   rays satisfy sinh(g y) = C sin(g z + phi), a linear axial profile has
+#   y(z) = (beta/a)[acosh(n/beta)] and a closed-form optical path, and Maxwell's
+#   fish-eye images every point to its inversion with optical path n0*pi*R/2.
+# - mpmath's Taylor-series ODE solver at 34 digits (odefun + findroot for the
+#   plane) for the profiles with no closed form: SELFOC with h4/h6, an axial
+#   quadratic, a mixed radial+axial polynomial and a skew ray in the sech rod.
+# - Fourth-order finite differences of grin_index for every gradient.
+
+include "src/error.cyr"
+include "src/ray_core.cyr"
+include "src/ray_fresnel.cyr"
+include "src/ray_trace.cyr"
+include "src/ray_grin.cyr"
+
+fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _near(a, b, tol) { return f64_le(f64_abs(f64_sub(a, b)), tol); }
+fn _rel(a, b, tol) { return f64_le(f64_abs(f64_sub(a, b)), f64_mul(tol, f64_abs(b))); }
+fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
+fn _assert_rel(a, b, tol, msg) { assert(_rel(a, b, tol), msg); }
+
+fn _ray(x, y, z, dx, dy, dz, n) { return trace_ray_new(ray_vec3(x, y, z), ray_vec3(dx, dy, dz), n); }
+fn _px(r) { return RayVec3_x(TraceRay_pos(r)); }
+fn _py(r) { return RayVec3_y(TraceRay_pos(r)); }
+fn _pz(r) { return RayVec3_z(TraceRay_pos(r)); }
+fn _dx(r) { return RayVec3_x(TraceRay_dir(r)); }
+fn _dy(r) { return RayVec3_y(TraceRay_dir(r)); }
+fn _dz(r) { return RayVec3_z(TraceRay_dir(r)); }
+
+var Z = f64_from(0);
+var ONE = F64_ONE;
+var NAN = 0x7FF8000000000000;
+var INF = 0x7FF0000000000000;
+var T9 = _fd(1, 1000000000);
+var T10 = _fd(1, 10000000000);
+var T11 = _fd(1, 100000000000);
+var T12 = _fd(1, 1000000000000);
+var REL14 = _fd(1, 100000000000000);
+
+# The parabolic-n^2 SELFOC in closed form: D = -n0^2 g^2 (x, y, 0), so x and y are
+# harmonic in t with omega = n0*g and T_z is constant. Ray from (x0, y0, 0) along
+# (ddx, ddy, ddz) to the plane z = zend; writes x, y, dir x/y/z and the optical path
+# n0^2 t - n0^2 g^2 integral (x^2 + y^2) dt.
+fn _sf_exact(n0, g, x0, y0, ddx, ddy, ddz, zend, out) {
+    var n = f64_mul(n0, f64_sqrt(f64_sub(ONE, f64_mul(f64_mul(g, g), f64_add(f64_mul(x0, x0), f64_mul(y0, y0))))));
+    var dl = f64_sqrt(f64_add(f64_add(f64_mul(ddx, ddx), f64_mul(ddy, ddy)), f64_mul(ddz, ddz)));
+    var tx = f64_div(f64_mul(n, ddx), dl);
+    var ty = f64_div(f64_mul(n, ddy), dl);
+    var tz = f64_div(f64_mul(n, ddz), dl);
+    var w = f64_mul(n0, g);
+    var t = f64_div(zend, tz);
+    var c = f64_cos(f64_mul(w, t));
+    var s = f64_sin(f64_mul(w, t));
+    var bx = f64_div(tx, w);
+    var by = f64_div(ty, w);
+    var x = f64_add(f64_mul(x0, c), f64_mul(bx, s));
+    var y = f64_add(f64_mul(y0, c), f64_mul(by, s));
+    var vx = f64_add(f64_mul(f64_neg(f64_mul(x0, w)), s), f64_mul(tx, c));
+    var vy = f64_add(f64_mul(f64_neg(f64_mul(y0, w)), s), f64_mul(ty, c));
+    var vl = f64_sqrt(f64_add(f64_add(f64_mul(vx, vx), f64_mul(vy, vy)), f64_mul(tz, tz)));
+    store64(out, x);
+    store64(out + 8, y);
+    store64(out + 16, f64_div(vx, vl));
+    store64(out + 24, f64_div(vy, vl));
+    store64(out + 32, f64_div(tz, vl));
+    # integral (A cos + B sin)^2 dt = (A^2+B^2) t/2 + (A^2-B^2) sin(2wt)/(4w) + AB (1 - cos 2wt)/(2w)
+    var s2 = f64_sin(f64_mul(F64_TWO, f64_mul(w, t)));
+    var c2 = f64_cos(f64_mul(F64_TWO, f64_mul(w, t)));
+    var a2 = f64_add(f64_mul(x0, x0), f64_mul(y0, y0));
+    var b2 = f64_add(f64_mul(bx, bx), f64_mul(by, by));
+    var ab = f64_add(f64_mul(x0, bx), f64_mul(y0, by));
+    var ii = f64_add(f64_add(f64_mul(f64_add(a2, b2), f64_mul(F64_HALF, t)), f64_div(f64_mul(f64_sub(a2, b2), s2),
+          f64_mul(f64_from(4), w))), f64_div(f64_mul(ab, f64_sub(ONE, c2)), f64_mul(F64_TWO, w)));
+    var n02 = f64_mul(n0, n0);
+    store64(out + 40, f64_sub(f64_mul(n02, t), f64_mul(f64_mul(n02, f64_mul(g, g)), ii)));
+    return 0;
+}
+
+alloc_init();
+var e = 0;
+var opl = 0;
+var r = 0;
+var _s = 0;
+var ex[48];
+
+# ── Profiles: the index each constructor describes ────────
+test_group("grin_profiles");
+
+var N16 = _fd(16, 10);
+var G5 = F64_HALF;
+var psf = grin_selfoc(N16, G5, 0, 0, &e);
+assert_eq(e, PK_ERR_NONE, "grin_selfoc ok");
+assert_eq(GrinProfile_kind(psf), GRIN_SELFOC, "SELFOC tag");
+var ph = grin_selfoc(N16, G5, _fd(3, 10), _fd(0 - 1, 10), &e);
+# n^2 = n0^2 [1 - u + h4 u^2 + h6 u^3], u = (g r)^2, at r = (0.6, 0.8): u = 0.25.
+var nh = f64_mul(N16, f64_sqrt(f64_add(f64_add(f64_sub(ONE, _fd(1, 4)), f64_mul(_fd(3, 10), _fd(1, 16))),
+      f64_mul(_fd(0 - 1, 10), _fd(1, 64)))));
+_assert_rel(grin_index(ph, _fd(6, 10), _fd(8, 10), f64_from(5)), nh, REL14, "SELFOC h4/h6 index at gr = 0.5");
+_assert_rel(grin_index(psf, Z, Z, f64_from(9)), N16, REL14, "SELFOC on axis: n0 (z-independent)");
+var N15 = _fd(15, 10);
+var G4 = _fd(4, 10);
+var psc = grin_sech(N15, G4, &e);
+# sech through ganita's cosh — a different evaluation from the module's e^(-2u).
+_assert_rel(grin_index(psc, _fd(1, 2), _fd(3, 2), Z), f64_div(N15, f64_cosh(f64_mul(G4, f64_sqrt(_fd(10, 4))))), REL14,
+  "sech index = n0 / cosh(g r)");
+_assert_rel(grin_index(psc, _fd(1, 1000000000), Z, Z), N15, REL14, "sech index near the axis");
+# SELFOC with h4 = 2/3, h6 = -17/45 is sech through sixth order: |dn| <= n0 (g r)^8.
+var psq = grin_selfoc(N15, G4, _fd(2, 3), _fd(0 - 17, 45), &e);
+var dsq = f64_abs(f64_sub(grin_index(psq, _fd(1, 4), Z, Z), grin_index(psc, _fd(1, 4), Z, Z)));
+assert(f64_le(dsq, f64_mul(N15, 0x3E45798EE2308C3A)), "SELFOC(2/3, -17/45) = sech to (g r)^8 (1e-8 at g r = 0.1)");
+assert(f64_gt(dsq, 0), "... and not identical (the eighth-order term)");
+var ppl = grin_polynomial(N15, _fd(0 - 1, 100), _fd(5, 10000), _fd(0 - 1, 100000), _fd(4, 1000), _fd(0 - 2, 10000),
+  _fd(1, 100000), &e);
+assert_eq(e, PK_ERR_NONE, "grin_polynomial ok");
+# n = n0 + nr2 r^2 + nr4 r^4 + nr6 r^6 + nz1 z + nz2 z^2 + nz3 z^3 at r^2 = 4, z = 3.
+var npl = f64_add(f64_add(f64_add(N15, f64_mul(_fd(0 - 1, 100), f64_from(4))), f64_mul(_fd(5, 10000), f64_from(16))),
+  f64_mul(_fd(0 - 1, 100000), f64_from(64)));
+npl = f64_add(f64_add(f64_add(npl, f64_mul(_fd(4, 1000), f64_from(3))), f64_mul(_fd(0 - 2, 10000), f64_from(9))),
+  f64_mul(_fd(1, 100000), f64_from(27)));
+_assert_rel(grin_index(ppl, F64_TWO, Z, f64_from(3)), npl, REL14, "polynomial index");
+# A quadratic polynomial IS a SELFOC with g^2 = -2 nr2/n0, h4 = 1/4: the same n^2.
+var peq = grin_polynomial(N16, _fd(0 - 2, 10), 0, 0, 0, 0, 0, &e);
+var psf4 = grin_selfoc(N16, G5, _fd(1, 4), 0, &e);
+_assert_rel(grin_index(peq, _fd(7, 10), _fd(0 - 9, 10), Z), grin_index(psf4, _fd(7, 10), _fd(0 - 9, 10), Z), REL14,
+  "n0 - 0.2 r^2 == SELFOC(g = 0.5, h4 = 1/4)");
+var R25 = _fd(5, 2);
+var N133 = _fd(133, 100);
+var plw = grin_luneburg(N133, R25, f64_from(3), &e);
+_assert_rel(grin_index(plw, Z, Z, f64_from(3)), f64_mul(N133, f64_sqrt(F64_TWO)), REL14, "Luneburg centre: n_s sqrt 2");
+_assert_rel(grin_index(plw, _fd(3, 2), F64_TWO, f64_from(3)), N133, REL14, "Luneburg rim (rho = R): n_s");
+_assert_rel(grin_index(plw, ONE, Z, _fd(7, 2)), f64_mul(N133, f64_sqrt(f64_sub(F64_TWO, _fd(125, 625)))), REL14,
+  "Luneburg at rho^2 = 1.25: n_s sqrt(2 - 0.2)");
+var pfe = grin_maxwell_fisheye(F64_TWO, ONE, Z, &e);
+_assert_rel(grin_index(pfe, Z, ONE, Z), ONE, REL14, "fish-eye n0 = 2 at rho = R: 1");
+_assert_rel(grin_index(pfe, _fd(1, 2), Z, _fd(1, 2)), _fd(4, 3), REL14, "fish-eye at rho^2 = 1/2: 2/1.5");
+assert_eq(grin_index(psf, f64_from(3), Z, Z), NAN, "SELFOC past n^2 = 0 (g r = 1.5): NaN, not a number");
+assert_eq(grin_index(0, Z, Z, Z), NAN, "null profile: NaN");
+assert_eq(grin_index(psf, NAN, Z, Z), NAN, "NaN coordinate: NaN");
+assert_eq(grin_index(psf, Z, INF, Z), NAN, "inf coordinate: NaN");
+
+# ── Gradients against fourth-order finite differences of grin_index ────────
+test_group("grin_gradient");
+
+var gv = alloc(24);
+var gp = alloc(40);
+store64(gp, psf);
+store64(gp + 8, ph);
+store64(gp + 16, psc);
+store64(gp + 24, ppl);
+store64(gp + 32, plw);
+var ip = 0;
+while (ip < 6) {
+    var pp = pfe;
+    if (ip < 5) { pp = load64(gp + ip * 8); }
+    var qx = _fd(3, 10);
+    var qy = _fd(0 - 4, 10);
+    var qz = _fd(27, 10);
+    assert_eq(grin_gradient(pp, qx, qy, qz, gv), PK_ERR_NONE, "grin_gradient ok");
+    var hh = _fd(1, 1000);
+    var ax = 0;
+    while (ax < 3) {
+        var fp1 = 0;
+        var fp2 = 0;
+        var fm1 = 0;
+        var fm2 = 0;
+        if (ax == 0) {
+            fp1 = grin_index(pp, f64_add(qx, hh), qy, qz);
+            fp2 = grin_index(pp, f64_add(qx, f64_mul(F64_TWO, hh)), qy, qz);
+            fm1 = grin_index(pp, f64_sub(qx, hh), qy, qz);
+            fm2 = grin_index(pp, f64_sub(qx, f64_mul(F64_TWO, hh)), qy, qz);
+        }
+        if (ax == 1) {
+            fp1 = grin_index(pp, qx, f64_add(qy, hh), qz);
+            fp2 = grin_index(pp, qx, f64_add(qy, f64_mul(F64_TWO, hh)), qz);
+            fm1 = grin_index(pp, qx, f64_sub(qy, hh), qz);
+            fm2 = grin_index(pp, qx, f64_sub(qy, f64_mul(F64_TWO, hh)), qz);
+        }
+        if (ax == 2) {
+            fp1 = grin_index(pp, qx, qy, f64_add(qz, hh));
+            fp2 = grin_index(pp, qx, qy, f64_add(qz, f64_mul(F64_TWO, hh)));
+            fm1 = grin_index(pp, qx, qy, f64_sub(qz, hh));
+            fm2 = grin_index(pp, qx, qy, f64_sub(qz, f64_mul(F64_TWO, hh)));
+        }
+        var fnum = f64_add(f64_sub(fm2, fp2), f64_mul(f64_from(8), f64_sub(fp1, fm1)));
+        var fdv = f64_div(fnum, f64_mul(f64_from(12), hh));
+        _assert_near(load64(gv + ax * 8), fdv, T10, "grad n = 4th-order finite difference of grin_index");
+        ax = ax + 1;
+    }
+    ip = ip + 1;
+}
+# Signs, independently of any difference: SELFOC and sech fall off the axis, the
+# Luneburg and fish-eye off the centre, and the axial part is nz1 + 2 nz2 z + 3 nz3 z^2.
+_s = grin_gradient(psf, ONE, Z, Z, gv);
+assert(f64_lt(load64(gv), 0), "SELFOC: dn/dx < 0 at x > 0");
+assert_eq(load64(gv + 16), 0, "SELFOC: no axial gradient");
+_s = grin_gradient(psc, Z, Z, Z, gv);
+_assert_near(load64(gv), Z, 0, "sech: grad n = 0 on the axis");
+_s = grin_gradient(ppl, Z, Z, F64_TWO, gv);
+_assert_rel(load64(gv + 16), f64_add(f64_add(_fd(4, 1000), f64_mul(_fd(0 - 4, 10000), F64_TWO)), f64_mul(_fd(3, 100000),
+      f64_from(4))), REL14, "polynomial on axis: dn/dz = nz1 + 2 nz2 z + 3 nz3 z^2");
+_s = grin_gradient(plw, Z, Z, f64_from(4), gv);
+assert(f64_lt(load64(gv + 16), 0), "Luneburg: dn/dz < 0 above the centre");
+assert_eq(grin_gradient(psf, Z, Z, Z, 0), PK_ERR_INVALID_PARAMETER, "null out");
+assert_eq(grin_gradient(0, Z, Z, Z, gv), PK_ERR_INVALID_PARAMETER, "null profile");
+assert_eq(grin_gradient(psf, NAN, Z, Z, gv), PK_ERR_INVALID_PARAMETER, "NaN coordinate");
+assert_eq(grin_gradient(psf, f64_from(3), Z, Z, gv), PK_ERR_INVALID_INDEX, "SELFOC past its zero: invalid index");
+
+# ── SELFOC: closed-form rays, the order of the method, the pitch ────────
+test_group("grin_selfoc");
+
+# A SKEW ray in the parabolic-n^2 rod, against the closed form at z = 7.
+var r0 = _ray(_fd(3, 10), _fd(1, 10), Z, _fd(1, 10), _fd(2, 10), ONE, ONE);
+_sf_exact(N16, G5, _fd(3, 10), _fd(1, 10), _fd(1, 10), _fd(2, 10), ONE, f64_from(7), &ex);
+r = grin_trace_to_plane(psf, r0, f64_from(7), _fd(1, 80), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "skew ray traced");
+_assert_near(_px(r), load64(&ex), T11, "skew ray x vs closed form (step 1/80)");
+_assert_near(_py(r), load64(&ex + 8), T11, "skew ray y vs closed form");
+assert_eq(_pz(r), f64_from(7), "the ray ends ON the plane");
+_assert_near(_dx(r), load64(&ex + 16), T11, "skew ray direction x");
+_assert_near(_dy(r), load64(&ex + 24), T11, "skew ray direction y");
+_assert_near(_dz(r), load64(&ex + 32), T11, "skew ray direction z");
+_assert_near(opl, load64(&ex + 40), T10, "optical path vs closed form");
+_assert_rel(TraceRay_n(r), grin_index(psf, _px(r), _py(r), f64_from(7)), REL14, "the ray carries n(end)");
+# Fourth order: halving the step divides the error by ~16 (Sharma's RKN), for the
+# ray AND the optical path (the Hermite rule).
+var e20 = 0;
+var e40 = 0;
+var o20 = 0;
+var o40 = 0;
+r = grin_trace_to_plane(psf, r0, f64_from(7), _fd(1, 20), 100000, &opl, &e);
+e20 = f64_abs(f64_sub(_px(r), load64(&ex)));
+o20 = f64_abs(f64_sub(opl, load64(&ex + 40)));
+r = grin_trace_to_plane(psf, r0, f64_from(7), _fd(1, 40), 100000, &opl, &e);
+e40 = f64_abs(f64_sub(_px(r), load64(&ex)));
+o40 = f64_abs(f64_sub(opl, load64(&ex + 40)));
+var ord = f64_div(e20, e40);
+assert(f64_gt(ord, f64_from(14)), "fourth order: err(1/20)/err(1/40) > 14");
+assert(f64_lt(ord, f64_from(19)), "fourth order: err(1/20)/err(1/40) < 19");
+var oo = f64_div(o20, o40);
+assert(f64_gt(oo, f64_from(12)), "optical path fourth order: ratio > 12");
+assert(f64_lt(oo, f64_from(20)), "optical path fourth order: ratio < 20");
+# The exact pitch of the parabolic-n^2 profile is 2*pi*beta/(n0 g), beta = T_z: a
+# parallel ray from y0 = 0.4 is back at y0 after one, on axis after a quarter.
+var y04 = _fd(4, 10);
+var beta = f64_mul(N16, f64_sqrt(f64_sub(ONE, f64_mul(_fd(1, 4), f64_mul(y04, y04)))));
+var pex = f64_div(f64_mul(F64_TAU, beta), f64_mul(N16, G5));
+var rp = _ray(Z, y04, Z, Z, Z, ONE, ONE);
+r = grin_trace_to_plane(psf, rp, pex, _fd(1, 100), 100000, &opl, &e);
+_assert_near(_py(r), y04, T11, "one exact pitch 2 pi beta/(n0 g): back at y0");
+_assert_near(_dy(r), Z, T11, "... and parallel again");
+r = grin_trace_to_plane(psf, rp, f64_mul(_fd(1, 4), pex), _fd(1, 100), 100000, &opl, &e);
+_assert_near(_py(r), Z, T11, "a quarter of it: on the axis");
+# The paraxial pitch: grin_selfoc_pitch = 2 pi/g, and a ray of amplitude 1e-4 is on
+# the axis at a quarter of it (the non-paraxial shift is (g y0)^2 relative).
+assert_eq(grin_selfoc_pitch(G5), f64_mul(F64_TWO, F64_TAU), "pitch(g = 0.5) = 4 pi");
+_assert_rel(grin_selfoc_pitch(_fd(2, 10)), f64_div(F64_TAU, _fd(2, 10)), REL14, "pitch = 2 pi/g");
+r = grin_trace_to_plane(psf, _ray(Z, _fd(1, 10000), Z, Z, Z, ONE, ONE), f64_mul(_fd(1, 4), grin_selfoc_pitch(G5)),
+  _fd(1, 100), 100000, &opl, &e);
+_assert_near(_py(r), Z, T12, "paraxial ray on the axis at pitch/4 (|y| < 1e-12 of 1e-4)");
+# h4/h6 and a skew ray: mpmath's Taylor ODE solver (34 digits).
+var sh = grin_trace_to_plane(ph, r0, f64_from(7), _fd(1, 100), 100000, &opl, &e);
+_assert_near(_px(sh), 0xBFD67925DE67223E, T10, "SELFOC h4/h6 skew ray: x vs mpmath");
+_assert_near(_py(sh), 0xBFD08E156E1E01E3, T10, "... y vs mpmath");
+_assert_near(_dx(sh), 0xBF98637EAFC035B8, T10, "... direction x vs mpmath");
+_assert_near(_dy(sh), 0xBFC43CC6464DB795, T10, "... direction y vs mpmath");
+_assert_near(_dz(sh), 0x3FEF969C4BAF29C5, T10, "... direction z vs mpmath");
+_assert_near(opl, 0x402668DBE27FC21A, T10, "... optical path vs mpmath");
+# The skew invariant x T_y - y T_x of any radial profile.
+var lz0 = f64_mul(grin_index(ph, _fd(3, 10), _fd(1, 10), Z), f64_div(f64_sub(f64_mul(_fd(3, 10), _fd(2, 10)),
+      f64_mul(_fd(1, 10), _fd(1, 10))), f64_sqrt(_fd(105, 100))));
+var lz1 = f64_mul(TraceRay_n(sh), f64_sub(f64_mul(_px(sh), _dy(sh)), f64_mul(_py(sh), _dx(sh))));
+_assert_near(lz1, lz0, T10, "skew invariant x T_y - y T_x conserved");
+
+# ── sech: exact meridional focusing ────────
+test_group("grin_sech");
+
+# A collimated meridional fan at g y0 up to 0.96 all cross the axis at pi/(2 g).
+var qz = f64_div(F64_PI, f64_mul(F64_TWO, G4));
+var iy = 0;
+while (iy < 4) {
+    var yy = _fd(2, 10);
+    if (iy == 1) { yy = _fd(8, 10); }
+    if (iy == 2) { yy = _fd(16, 10); }
+    if (iy == 3) { yy = _fd(24, 10); }
+    r = grin_trace_to_plane(psc, _ray(Z, yy, Z, Z, Z, ONE, ONE), qz, _fd(1, 100), 100000, &opl, &e);
+    assert_eq(e, PK_ERR_NONE, "sech fan ok");
+    _assert_near(_py(r), Z, T10, "sech: every collimated meridional ray on axis at a quarter pitch");
+    assert_eq(_px(r), 0, "meridional stays meridional");
+    # ... and along the way sinh(g y) = sinh(g y0) cos(g z).
+    r = grin_trace_to_plane(psc, _ray(Z, yy, Z, Z, Z, ONE, ONE), _fd(13, 10), _fd(1, 100), 100000, &opl, &e);
+    var shy = f64_mul(f64_sinh(f64_mul(G4, yy)), f64_cos(f64_mul(G4, _fd(13, 10))));
+    _assert_near(f64_sinh(f64_mul(G4, _py(r))), shy, T11, "sech: sinh(g y) = sinh(g y0) cos(g z) at z = 1.3");
+    iy = iy + 1;
+}
+# From an axial point at any angle: sinh(g y) = tan(theta) sin(g z), all back on
+# the axis at pi/g.
+var ia = 0;
+while (ia < 3) {
+    var th = _fd(1, 6);
+    if (ia == 1) { th = _fd(1, 2); }
+    if (ia == 2) { th = _fd(9, 10); }
+    var rs = _ray(Z, Z, Z, Z, f64_sin(th), f64_cos(th), ONE);
+    r = grin_trace_to_plane(psc, rs, f64_div(F64_PI, G4), _fd(1, 100), 100000, &opl, &e);
+    _assert_near(_py(r), Z, T10, "sech: rays from an axial point refocus at pi/g");
+    r = grin_trace_to_plane(psc, rs, F64_TWO, _fd(1, 100), 100000, &opl, &e);
+    var tt = f64_div(f64_sin(th), f64_cos(th));
+    _assert_near(f64_sinh(f64_mul(G4, _py(r))), f64_mul(tt, f64_sin(f64_mul(G4, F64_TWO))), T11,
+      "sech: sinh(g y) = tan(theta) sin(g z)");
+    ia = ia + 1;
+}
+# A skew ray has no closed form: mpmath.
+var sk = grin_trace_to_plane(psc, _ray(_fd(8, 10), _fd(5, 10), Z, _fd(1, 10), _fd(0 - 5, 100), ONE, ONE), f64_from(5),
+  _fd(1, 100), 100000, &opl, &e);
+_assert_near(_px(sk), 0xBFBD977FF0BB1840, T10, "sech skew ray: x vs mpmath");
+_assert_near(_py(sk), 0xBFD416B8DC3010FC, T10, "... y vs mpmath");
+_assert_near(_dx(sk), 0xBFD49D0D91D3286B, T10, "... direction x vs mpmath");
+_assert_near(_dy(sk), 0xBFC2BC28C12FC861, T10, "... direction y vs mpmath");
+_assert_near(opl, 0x401E19E7E8AD9FC1, T10, "... optical path vs mpmath");
+
+# ── Polynomial and axial profiles ────────
+test_group("grin_polynomial");
+
+# The quadratic polynomial and its SELFOC twin trace the same ray (two evaluations).
+var ra = grin_trace_to_plane(peq, r0, f64_from(5), _fd(1, 50), 100000, &opl, &e);
+var o_a = opl;
+var rb = grin_trace_to_plane(psf4, r0, f64_from(5), _fd(1, 50), 100000, &opl, &e);
+_assert_near(_px(ra), _px(rb), T12, "polynomial == SELFOC(h4 = 1/4): x");
+_assert_near(_py(ra), _py(rb), T12, "polynomial == SELFOC(h4 = 1/4): y");
+_assert_near(o_a, opl, T12, "polynomial == SELFOC(h4 = 1/4): optical path");
+# Linear axial n = n0 + a z: the transverse T is conserved (Snell) and
+#   y(z) = (beta/a) [acosh(n(z)/beta) - acosh(n0/beta)],
+#   OPL = [n sqrt(n^2 - beta^2) + beta^2 acosh(n/beta)] / (2a) between n0 and n(z).
+var AA = _fd(5, 100);
+var pax = grin_polynomial(N15, 0, 0, 0, AA, 0, 0, &e);
+var th4 = _fd(4, 10);
+var bt = f64_mul(N15, f64_sin(th4));
+r = grin_trace_to_plane(pax, _ray(Z, Z, Z, Z, f64_sin(th4), f64_cos(th4), ONE), f64_from(4), _fd(1, 100), 100000, &opl,
+  &e);
+var nz4 = f64_add(N15, f64_mul(AA, f64_from(4)));
+var yax = f64_mul(f64_div(bt, AA), f64_sub(f64_acosh(f64_div(nz4, bt)), f64_acosh(f64_div(N15, bt))));
+_assert_near(_py(r), yax, T11, "linear axial: y(z) = (beta/a)[acosh(n/beta)] closed form");
+_assert_near(f64_mul(TraceRay_n(r), _dy(r)), bt, T12, "linear axial: n sin(theta) = beta (Snell)");
+var ob = f64_div(f64_add(f64_mul(nz4, f64_sqrt(f64_sub(f64_mul(nz4, nz4), f64_mul(bt, bt)))), f64_mul(f64_mul(bt, bt),
+      f64_acosh(f64_div(nz4, bt)))), f64_mul(F64_TWO, AA));
+var oa = f64_div(f64_add(f64_mul(N15, f64_sqrt(f64_sub(f64_mul(N15, N15), f64_mul(bt, bt)))), f64_mul(f64_mul(bt, bt),
+      f64_acosh(f64_div(N15, bt)))), f64_mul(F64_TWO, AA));
+_assert_near(opl, f64_sub(ob, oa), T11, "linear axial: optical path closed form");
+# Axial quadratic and mixed radial + axial: mpmath.
+var paq = grin_polynomial(N15, 0, 0, 0, _fd(2, 100), _fd(0 - 3, 1000), 0, &e);
+r = grin_trace_to_plane(paq, _ray(Z, _fd(2, 10), Z, Z, _fd(3, 10), ONE, ONE), f64_from(5), _fd(1, 100), 100000, &opl,
+  &e);
+_assert_near(_py(r), 0x3FFAC5EC33652D9F, T10, "axial quadratic: y vs mpmath");
+_assert_near(_dy(r), 0x3FD216BA9BE7CC3A, T10, "axial quadratic: direction y vs mpmath");
+_assert_near(opl, 0x401FCBE7A713C61A, T10, "axial quadratic: optical path vs mpmath");
+var pmx = grin_polynomial(_fd(155, 100), _fd(0 - 1, 100), _fd(5, 10000), 0, _fd(4, 1000), _fd(0 - 2, 10000), 0, &e);
+r = grin_trace_to_plane(pmx, _ray(_fd(5, 10), _fd(0 - 3, 10), Z, _fd(0 - 5, 100), _fd(8, 100), ONE, ONE), f64_from(6),
+  _fd(1, 100), 100000, &opl, &e);
+_assert_near(_px(r), 0x3FBD3C0D8AA1B0D8, T10, "mixed polynomial: x vs mpmath");
+_assert_near(_py(r), 0x3FCA85C779D24972, T10, "mixed polynomial: y vs mpmath");
+_assert_near(_dx(r), 0xBFB2C582BE0470F6, T10, "mixed polynomial: direction x vs mpmath");
+_assert_near(_dy(r), 0x3FB5099B6148115A, T10, "mixed polynomial: direction y vs mpmath");
+_assert_near(opl, 0x4022CDEF1AE4DEC0, T10, "mixed polynomial: optical path vs mpmath");
+# A mirage: the index falls with z and a shallow ray turns back — reported, not
+# traced forever.
+var pmi = grin_polynomial(N15, 0, 0, 0, _fd(0 - 1, 10), 0, 0, &e);
+r = grin_trace_to_plane(pmi, _ray(Z, Z, Z, Z, _fd(99, 100), _fd(14, 100), ONE), f64_from(10), _fd(1, 100), 3000, &opl,
+  &e);
+assert_eq(e, PK_ERR_TIR, "axial mirage: the ray turns back: PK_ERR_TIR");
+assert_eq(r, 0, "... and no ray");
+assert_eq(opl, 0, "... and no optical path");
+# A ray running HEAD-ON into n -> 0 (n = 1 - z/2 on the axis) never arrives in
+# Sharma's t, and its T reverses in any step that follows it: refused, the SAME way
+# at any budget. (The first cut's INVALID_INDEX here came from the turned-back
+# ray's T overflowing — at 1e5 steps; at 1e4 it was TIR, at 1e3 INVALID_PARAMETER.)
+var pz0 = grin_polynomial(ONE, 0, 0, 0, f64_neg(F64_HALF), 0, 0, &e);
+var ez1 = 0;
+var ez2 = 0;
+r = grin_trace_to_plane(pz0, _ray(Z, Z, Z, Z, Z, ONE, ONE), f64_from(3), _fd(1, 100), 10000, &opl, &ez1);
+r = grin_trace_to_plane(pz0, _ray(Z, Z, Z, Z, Z, ONE, ONE), f64_from(3), _fd(1, 100), 1000000, &opl, &ez2);
+assert_eq(ez1, PK_ERR_INVALID_PARAMETER, "head-on into n -> 0: refused");
+assert_eq(ez2, ez1, "... the same at 1e4 and 1e6 steps");
+# Where n <= 0 there is no index (not |n|).
+assert_eq(grin_index(pz0, Z, Z, f64_from(3)), NAN, "polynomial n = 1 - z/2 at z = 3: NaN, not |n| = 0.5");
+assert_eq(grin_gradient(pz0, Z, Z, f64_from(3), gv), PK_ERR_INVALID_INDEX, "polynomial n < 0: gradient invalid index");
+# The mirage is TIR at any budget (the first cut's turned-back ray overflowed into
+# INVALID_INDEX by 1e6 steps), and toward -z too.
+var rv1 = _ray(Z, Z, Z, Z, _fd(99, 100), _fd(14, 100), ONE);
+r = grin_trace_to_plane(pmi, rv1, f64_from(10), _fd(1, 100), 1000000, &opl, &e);
+assert_eq(e, PK_ERR_TIR, "the mirage is TIR at 1e6 steps");
+var pmb = grin_polynomial(N15, 0, 0, 0, _fd(1, 10), 0, 0, &e);
+r = grin_trace_to_plane(pmb, _ray(Z, Z, Z, Z, _fd(99, 100), _fd(0 - 14, 100), ONE), f64_from(0 - 10), _fd(1, 100), 3000,
+  &opl, &e);
+assert_eq(e, PK_ERR_TIR, "the mirror mirage toward -z: TIR");
+
+# ── Luneburg: perfect focus ────────
+test_group("grin_luneburg");
+
+# R = 1 in air: a collimated beam focuses at (0, 0, R) at every height, leaving
+# along -P/R (P the entry point), with optical path R(1 + pi/2) from the plane z = -R.
+var plu = grin_luneburg(ONE, ONE, Z, &e);
+var lopl = f64_add(ONE, f64_mul(F64_HALF, F64_PI));
+var il = 0;
+while (il < 6) {
+    var hl = Z;
+    if (il == 1) { hl = _fd(25, 100); }
+    if (il == 2) { hl = _fd(5, 10); }
+    if (il == 3) { hl = _fd(75, 100); }
+    if (il == 4) { hl = _fd(95, 100); }
+    if (il == 5) { hl = _fd(999, 1000); }
+    r = grin_ball_trace(plu, _ray(Z, hl, f64_from(0 - 1), Z, Z, ONE, ONE), Z, ONE, ONE, _fd(1, 200), 100000, &opl, &e);
+    assert_eq(e, PK_ERR_NONE, "Luneburg ok");
+    _assert_near(_py(r), Z, T9, "Luneburg: every height focuses on the far pole (y)");
+    _assert_near(_pz(r), ONE, T12, "Luneburg: ... on the sphere");
+    _assert_near(_dy(r), f64_neg(hl), T9, "Luneburg: leaves along -P/R (y)");
+    _assert_near(_dz(r), f64_sqrt(f64_sub(ONE, f64_mul(hl, hl))), T9, "Luneburg: leaves along -P/R (z)");
+    _assert_near(opl, lopl, T9, "Luneburg: equal optical paths R(1 + pi/2) (Fermat)");
+    il = il + 1;
+}
+# Scaled, displaced and immersed: R = 2.5 about z = 3, n_s = 1.33 in water.
+r = grin_ball_trace(plw, _ray(_fd(1, 2), ONE, _fd(1, 2), Z, Z, ONE, N133), f64_from(3), R25, N133, _fd(1, 100), 100000,
+  &opl, &e);
+_assert_near(_px(r), Z, T9, "immersed Luneburg: focus x");
+_assert_near(_py(r), Z, T9, "immersed Luneburg: focus y");
+_assert_near(_pz(r), _fd(11, 2), T12, "immersed Luneburg: focus z = cz + R");
+_assert_near(opl, f64_mul(f64_mul(N133, R25), lopl), T9, "immersed Luneburg: optical path n_s R (1 + pi/2)");
+assert_eq(TraceRay_n(r), N133, "the ray leaves in n_after");
+# Any beam direction: spherical symmetry puts the focus at c + R d.
+var dd = f64_sqrt(_fd(105, 100));
+var ddx = f64_div(_fd(2, 10), dd);
+var ddy = f64_div(_fd(0 - 1, 10), dd);
+var ddz = f64_div(ONE, dd);
+var io = 0;
+while (io < 3) {
+    # Offset the ray perpendicular to d: (0.3, 0.6, 0) - ((0.3, 0.6, 0).d) d, times io/2.
+    var pd = f64_add(f64_mul(_fd(3, 10), ddx), f64_mul(_fd(6, 10), ddy));
+    var ox = f64_mul(_fd(io, 2), f64_sub(_fd(3, 10), f64_mul(pd, ddx)));
+    var oy = f64_mul(_fd(io, 2), f64_sub(_fd(6, 10), f64_mul(pd, ddy)));
+    var oz = f64_mul(_fd(io, 2), f64_neg(f64_mul(pd, ddz)));
+    var sx = f64_sub(ox, f64_mul(f64_from(3), ddx));
+    var sy = f64_sub(oy, f64_mul(f64_from(3), ddy));
+    var sz = f64_sub(oz, f64_mul(f64_from(3), ddz));
+    r = grin_ball_trace(plu, _ray(sx, sy, sz, ddx, ddy, ddz, ONE), Z, ONE, ONE, _fd(1, 200), 100000, &opl, &e);
+    _assert_near(_px(r), ddx, T9, "oblique beam: focus at c + R d (x)");
+    _assert_near(_py(r), ddy, T9, "oblique beam: focus at c + R d (y)");
+    _assert_near(_pz(r), ddz, T9, "oblique beam: focus at c + R d (z)");
+    io = io + 1;
+}
+# Inside, the Luneburg is a harmonic oscillator, X = X0 cos(w t) + (T0/w) sin(w t)
+# with w = n_s/R: a skew interior trace to the plane z = 0.4, against it.
+var lx0 = _fd(1, 10);
+var ly0 = _fd(2, 10);
+var lz0 = _fd(0 - 5, 10);
+var ldl = f64_sqrt(_fd(113, 100));
+var ln0 = grin_index(plu, lx0, ly0, lz0);
+var ltx = f64_div(f64_mul(ln0, _fd(3, 10)), ldl);
+var lty = f64_div(f64_mul(ln0, _fd(0 - 2, 10)), ldl);
+var ltz = f64_div(ln0, ldl);
+# z(t) = A cos(t - phi) (w = 1): the first t > 0 with z = 0.4.
+var amp = f64_sqrt(f64_add(f64_mul(lz0, lz0), f64_mul(ltz, ltz)));
+var phi = f64_atan2(ltz, lz0);
+var tl = f64_sub(phi, f64_acos(f64_div(_fd(4, 10), amp)));
+if (f64_le(tl, 0) == 1) { tl = f64_add(phi, f64_acos(f64_div(_fd(4, 10), amp))); }
+r = grin_trace_to_plane(plu, _ray(lx0, ly0, lz0, _fd(3, 10), _fd(0 - 2, 10), ONE, ONE), _fd(4, 10), _fd(1, 200), 100000,
+  &opl, &e);
+var lxe = f64_add(f64_mul(lx0, f64_cos(tl)), f64_mul(ltx, f64_sin(tl)));
+var lye = f64_add(f64_mul(ly0, f64_cos(tl)), f64_mul(lty, f64_sin(tl)));
+_assert_near(_px(r), lxe, T10, "Luneburg interior: x closed form");
+_assert_near(_py(r), lye, T10, "Luneburg interior: y closed form");
+
+# ── Maxwell's fish-eye: perfect imaging ────────
+test_group("grin_fisheye");
+
+# n0 = 2, R = 1: from P = (0, 1, 0) on the sphere, any ray exits at -P, with optical
+# path n0 pi R/2 = pi.
+var ifx = 0;
+while (ifx < 5) {
+    var fdx = Z;
+    var fdy = f64_neg(ONE);
+    var fdz = Z;
+    if (ifx == 1) {
+        fdy = f64_neg(f64_cos(_fd(3, 10)));
+        fdz = f64_sin(_fd(3, 10));
+    }
+    if (ifx == 2) {
+        fdy = f64_neg(f64_cos(_fd(8, 10)));
+        fdz = f64_sin(_fd(8, 10));
+    }
+    if (ifx == 3) {
+        fdy = f64_neg(f64_cos(_fd(12, 10)));
+        fdz = f64_neg(f64_sin(_fd(12, 10)));
+    }
+    if (ifx == 4) {
+        fdx = _fd(3, 10);
+        fdy = _fd(0 - 8, 10);
+        fdz = _fd(4, 10);
+    }
+    r = grin_trace_to_sphere(pfe, _ray(Z, ONE, Z, fdx, fdy, fdz, ONE), Z, ONE, _fd(1, 200), 100000, &opl, &e);
+    assert_eq(e, PK_ERR_NONE, "fish-eye ok");
+    _assert_near(_px(r), Z, T9, "fish-eye: every ray from P exits at -P (x)");
+    _assert_near(_py(r), f64_neg(ONE), T9, "fish-eye: every ray from P exits at -P (y)");
+    _assert_near(_pz(r), Z, T9, "fish-eye: every ray from P exits at -P (z)");
+    _assert_near(opl, F64_PI, T9, "fish-eye: optical path n0 pi R/2");
+    ifx = ifx + 1;
+}
+# An interior point images to its inversion: P = (0, 0, -0.5) -> (0, 0, 2).
+var ifi = 0;
+while (ifi < 3) {
+    var fth = _fd(1, 10);
+    if (ifi == 1) { fth = _fd(5, 10); }
+    if (ifi == 2) { fth = ONE; }
+    var rfi = _ray(Z, Z, _fd(0 - 1, 2), Z, f64_sin(fth), f64_cos(fth), ONE);
+    r = grin_trace_to_plane(pfe, rfi, F64_TWO, _fd(1, 200), 100000, &opl, &e);
+    _assert_near(_py(r), Z, T9, "fish-eye: an interior point images to -R^2 P/|P|^2");
+    _assert_near(opl, F64_PI, T9, "fish-eye: ... with optical path n0 pi R/2");
+    ifi = ifi + 1;
+}
+# Off-centre and scaled: R = 2 about z = 1.5, n0 = 1.8.
+var pfo = grin_maxwell_fisheye(_fd(18, 10), F64_TWO, _fd(3, 2), &e);
+var rfo = _ray(F64_TWO, Z, _fd(3, 2), _fd(0 - 6, 10), _fd(3, 10), _fd(2, 10), ONE);
+r = grin_trace_to_sphere(pfo, rfo, _fd(3, 2), F64_TWO, _fd(1, 100), 100000, &opl, &e);
+_assert_near(_px(r), f64_neg(F64_TWO), T9, "off-centre fish-eye: antipode x");
+_assert_near(_py(r), Z, T9, "off-centre fish-eye: antipode y");
+_assert_near(_pz(r), _fd(3, 2), T9, "off-centre fish-eye: antipode z");
+_assert_near(opl, f64_mul(_fd(18, 10), F64_PI), T9, "off-centre fish-eye: optical path n0 pi R/2");
+
+# ── Rods between flat faces ────────
+test_group("grin_rod");
+
+# A quarter-pitch sech rod focuses a collimated meridional beam on its back face.
+var ir = 0;
+while (ir < 3) {
+    var hr = _fd(3, 10);
+    if (ir == 1) { hr = _fd(9, 10); }
+    if (ir == 2) { hr = _fd(18, 10); }
+    var rv2 = _ray(Z, hr, f64_from(0 - 1), Z, Z, ONE, ONE);
+    r = grin_rod_trace(psc, rv2, Z, qz, INF, ONE, _fd(1, 100), 100000, &opl, &e);
+    assert_eq(e, PK_ERR_NONE, "rod ok");
+    _assert_near(_py(r), Z, T10, "quarter-pitch sech rod: on axis at the back face");
+    _assert_near(_pz(r), qz, T12, "... at z = z_front + length");
+    assert_eq(TraceRay_n(r), ONE, "... leaving in air");
+    # Leaving the axis at the angle the refraction says: n0 sin(inside) = sin(outside).
+    var nexit = grin_index(psc, Z, Z, qz);
+    r0 = grin_trace_to_plane(psc, _ray(Z, hr, Z, Z, Z, ONE, ONE), qz, _fd(1, 100), 100000, &opl, &e);
+    _assert_near(_dy(r), f64_mul(nexit, _dy(r0)), T10, "the back face refracts: sin(out) = n sin(in)");
+    ir = ir + 1;
+}
+# Paraxial rays through a SELFOC rod follow grin_selfoc_abcd.
+var abcd = alloc(32);
+var LR = _fd(37, 10);
+assert_eq(grin_selfoc_abcd(N16, G5, LR, ONE, abcd), PK_ERR_NONE, "abcd ok");
+var yi = _fd(1, 100000);
+var ui = _fd(2, 100000);
+var rv3 = _ray(Z, yi, f64_neg(F64_HALF), Z, ui, ONE, ONE);
+r = grin_rod_trace(psf, rv3, Z, LR, INF, ONE, _fd(1, 100), 100000, &opl, &e);
+var yf = f64_add(yi, f64_mul(F64_HALF, ui));
+var yo = f64_add(f64_mul(load64(abcd), yf), f64_mul(load64(abcd + 8), ui));
+var uo = f64_add(f64_mul(load64(abcd + 16), yf), f64_mul(load64(abcd + 24), ui));
+_assert_rel(_py(r), yo, _fd(1, 100000000), "paraxial rod trace: height = A y + B u");
+_assert_rel(f64_div(_dy(r), _dz(r)), uo, _fd(1, 100000000), "paraxial rod trace: slope = C y + D u");
+# A quarter-pitch rod: A = D = 0, focal length 1/(n0 g) — and a collimated
+# paraxial ray lands on the axis.
+_s = grin_selfoc_abcd(N16, G5, f64_mul(_fd(1, 4), grin_selfoc_pitch(G5)), ONE, abcd);
+_assert_near(load64(abcd), Z, T12, "quarter pitch: A = 0");
+_assert_rel(load64(abcd + 8), f64_div(ONE, f64_mul(N16, G5)), REL14, "quarter pitch: B = 1/(n0 g)");
+_assert_rel(load64(abcd + 16), f64_neg(f64_mul(N16, G5)), REL14, "quarter pitch: C = -n0 g (f = 1/(n0 g))");
+_s = grin_selfoc_abcd(N16, G5, LR, N133, abcd);
+_assert_rel(f64_sub(f64_mul(load64(abcd), load64(abcd + 24)), f64_mul(load64(abcd + 8), load64(abcd + 16))), ONE, REL14,
+  "det ABCD = 1 (same medium both sides)");
+_assert_rel(load64(abcd + 8), f64_div(f64_mul(f64_sin(f64_mul(G5, LR)), N133), f64_mul(N16, G5)), REL14,
+  "B = sin(gL) n_ext/(n0 g)");
+var qps = f64_mul(_fd(1, 4), grin_selfoc_pitch(G5));
+var rq = _ray(Z, _fd(1, 1000), f64_neg(ONE), Z, Z, ONE, ONE);
+r = grin_rod_trace(psf, rq, Z, qps, INF, ONE, _fd(1, 100), 100000, &opl, &e);
+_assert_near(_py(r), Z, _fd(1, 100000000), "quarter-pitch SELFOC: a collimated paraxial ray on axis");
+# The rod's optical path = the gap in n_in + the traced path from the front face.
+var rodp = 0;
+var rrp = _ray(Z, _fd(3, 10), f64_neg(F64_TWO), Z, Z, ONE, N133);
+r = grin_rod_trace(psf, rrp, Z, LR, INF, ONE, _fd(1, 100), 100000, &rodp, &e);
+r0 = grin_trace_to_plane(psf, _ray(Z, _fd(3, 10), Z, Z, Z, ONE, ONE), LR, _fd(1, 100), 100000, &opl, &e);
+_assert_rel(rodp, f64_add(f64_mul(N133, F64_TWO), opl), REL14, "rod optical path = n_in gap + traced path");
+# Total internal reflection at the back face: a ray entering far off-axis crosses
+# the axis steeply (T_t^2 = n0^2 - n(y0)^2 = 2.07 > 1) and cannot leave there.
+var ytir = _fd(18, 10);
+var btir = f64_mul(N16, f64_sqrt(f64_sub(ONE, f64_mul(_fd(1, 4), f64_mul(ytir, ytir)))));
+var qtir = f64_div(f64_mul(F64_TAU, btir), f64_mul(f64_from(4), f64_mul(N16, G5)));
+r = grin_rod_trace(psf, _ray(Z, ytir, f64_neg(ONE), Z, Z, ONE, ONE), Z, qtir, INF, ONE, _fd(1, 100), 100000, &opl, &e);
+assert_eq(e, PK_ERR_TIR, "steep ray at the back face: PK_ERR_TIR");
+assert_eq(r, 0, "... no ray");
+
+# ── Step control (2.8.0 review) ────────
+test_group("grin_steps");
+
+# The step is an ARC length at every step. The first cut fixed dt = step/n(start):
+# a ray starting in low index ran steps n/n_start times too long. Fish-eye n0 = 2,
+# R = 0.25, on axis from z = -3 (n = 0.0138) to 0.5: the exact optical path is
+# (atan 2 + atan 12)/2 (mpmath, 40 digits). The first cut said TIR at step 0.05 and
+# was 0.48% off at step 0.001, as success.
+var pfq = grin_maxwell_fisheye(F64_TWO, _fd(1, 4), Z, &e);
+r = grin_trace_to_plane(pfq, _ray(Z, Z, f64_from(0 - 3), Z, Z, ONE, ONE), F64_HALF, _fd(1, 20), 2000000, &opl, &e);
+assert(e != PK_ERR_TIR, "an on-axis fish-eye ray cannot turn back");
+r = grin_trace_to_plane(pfq, _ray(Z, Z, f64_from(0 - 3), Z, Z, ONE, ONE), F64_HALF, _fd(1, 1000), 2000000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "fish-eye from far outside its core: ok");
+_assert_near(opl, 0x3FF4C2288058ADFC, T9, "... optical path (atan 2 + atan 12)/2");
+# An exterior point images to its inversion too, with optical path n0 pi R/2: P =
+# (0, 0, -10), R = 1 -> (0, 0, 0.1). The first cut was 1-1.7% off at step 0.01.
+r = grin_trace_to_plane(pfe, _ray(Z, Z, f64_from(0 - 10), Z, _fd(1, 100), ONE, ONE), _fd(1, 10), _fd(1, 100), 2000000,
+  &opl, &e);
+assert_eq(e, PK_ERR_NONE, "fish-eye exterior point: ok");
+_assert_near(opl, F64_PI, _fd(1, 100000000), "fish-eye exterior point: optical path n0 pi R/2");
+_assert_near(_py(r), Z, _fd(1, 100000000), "... imaged to its inversion");
+# Every step covers at most `step` of arc: on the SELFOC axis 10 steps of 0.1 reach
+# z = 0.95 but not z = 1.05, for the plane and the sphere alike.
+r = grin_trace_to_sphere(psf, _ray(Z, Z, Z, Z, Z, ONE, ONE), Z, _fd(95, 100), _fd(1, 10), 10, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "10 steps of arc 0.1 reach radius 0.95");
+r = grin_trace_to_sphere(psf, _ray(Z, Z, Z, Z, Z, ONE, ONE), Z, _fd(105, 100), _fd(1, 10), 10, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "... but not radius 1.05");
+r = grin_trace_to_plane(psf, _ray(Z, Z, Z, Z, Z, ONE, ONE), _fd(95, 100), _fd(1, 10), 10, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "10 steps of arc 0.1 reach z = 0.95");
+r = grin_trace_to_plane(psf, _ray(Z, Z, Z, Z, Z, ONE, ONE), _fd(105, 100), _fd(1, 10), 10, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "... but not z = 1.05");
+r = grin_trace_to_plane(psf, _ray(Z, Z, Z, Z, Z, ONE, ONE), _fd(5, 100), _fd(1, 10), 1, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "max_steps 1 is a valid budget");
+# A step past the whole path is shortened to just past the boundary, so a ray that
+# stays at g r < 0.06 never meets SELFOC's zero (the first cut: INVALID_INDEX), and
+# any step that long gives the same answer.
+var rsh = _ray(Z, _fd(1, 10), Z, Z, Z, ONE, ONE);
+r = grin_trace_to_plane(psf, rsh, ONE, f64_from(10), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "step 10 on a path of 1: traced, not INVALID_INDEX");
+var ysh = _py(r);
+r = grin_trace_to_plane(psf, rsh, ONE, f64_from(100), 100000, &opl, &e);
+assert_eq(_py(r), ysh, "... step 100: the same answer");
+_sf_exact(N16, G5, Z, _fd(1, 10), Z, Z, ONE, ONE, &ex);
+_assert_near(ysh, load64(&ex + 8), _fd(1, 1000), "... within the single step's error of the closed form");
+# The review's sweep case 0: step 11.3 on a 4.6 path.
+var p0s = grin_selfoc(N16, _fd(35, 100), Z, Z, &e);
+var r0s = _ray(0x3FD8F08AF751BEC5, Z, 0xBFE894EC5963003C, 0xBF8A4214D027E611, Z, 0xBFEB73A8F408EBBF, ONE);
+var x0a = grin_trace_to_plane(p0s, r0s, 0xC012E627F179035E, 0x4026AFB86F205848, 1000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "sweep case 0 at step 11.3: traced");
+if (x0a != 0) { _assert_near(_px(x0a), 0x3F99EE9154626B4A, _fd(1, 100), "... near the mpmath exit 0.02532"); }
+# A step far too coarse for the profile is re-taken shorter, never returned as
+# garbage: the review's sweep case 2 (step 4.5 = 57% of a pitch) came back as
+# n = 6.7e20 and optical path -2.5e69 with PK_ERR_NONE.
+var p2s = grin_selfoc(_fd(3, 2), _fd(4, 5), _fd(2, 5), _fd(1, 10), &e);
+var r2s = _ray(0xBFDFDD16D0CA4EE6, 0xBFCA580C43BEE4C8, 0xBFF6BD674747CEFC, 0x3F8410FC149AA4EB, 0x3FC4F76698F2CAAB,
+  0xBFEF90F4E38FF42C, ONE);
+var x2s = grin_trace_to_plane(p2s, r2s, 0xC01D45EAAB1C5FA3, 0x401204B0934187E5, 100000, &opl, &e);
+if (e == PK_ERR_NONE) {
+    _assert_near(TraceRay_n(x2s), 0x3FF7810F0373AC2F, _fd(1, 10), "coarse step: a physical exit index (mpmath 1.469)");
+    assert(f64_gt(opl, 0), "coarse step: a positive optical path");
+}
+x2s = grin_trace_to_plane(p2s, r2s, 0xC01D45EAAB1C5FA3, _fd(1, 100), 100000, &opl, &e);
+_assert_near(_px(x2s), 0xBFBFA35E0F8473AB, T9, "sweep case 2 at step 0.01: x vs mpmath");
+_assert_near(opl, 0x4021E4A566824DC0, T9, "sweep case 2 at step 0.01: optical path vs mpmath");
+# A coarse sphere step never lands on the ENTRY point (the first cut: fish-eye
+# from (0, 1, 0) at step 1.5 'exited' at (0, +1, 0) with an optical path of 24.8).
+var ist = 0;
+while (ist < 3) {
+    var stc = _fd(3, 2);
+    if (ist == 1) { stc = F64_TWO; }
+    if (ist == 2) { stc = f64_from(3); }
+    r = grin_trace_to_sphere(pfe, _ray(Z, ONE, Z, Z, f64_neg(ONE), Z, ONE), Z, ONE, stc, 100000, &opl, &e);
+    if (e == PK_ERR_NONE) {
+        _assert_near(_py(r), f64_neg(ONE), _fd(1, 1000), "coarse fish-eye step: exits at -P or is refused");
+    }
+    ist = ist + 1;
+}
+# A step too small to move the ray is refused at once, not after the budget (a
+# subnormal step with 2^40 steps would have spun for days).
+r = grin_trace_to_plane(psf, _ray(Z, _fd(1, 10), Z, Z, Z, ONE, ONE), ONE, 1, 1099511627776, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "a step that cannot move the ray: refused at once");
+# Budgets: TIR only for a ray that approached the plane and turned away.
+r = grin_trace_to_plane(psf, _ray(Z, _fd(1, 10), Z, Z, Z, f64_neg(ONE), ONE), ONE, _fd(1, 10), 1000, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "radial profile, heading away: it can never arrive (not TIR)");
+r = grin_trace_to_plane(psf, _ray(Z, _fd(1, 10), Z, Z, ONE, Z, ONE), ONE, _fd(1, 10), 100, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "a ray parallel to the plane (T_z = 0): not TIR");
+var phom = grin_polynomial(N15, 0, 0, 0, 0, 0, 0, &e);
+r = grin_trace_to_plane(phom, _ray(Z, Z, Z, Z, Z, ONE, ONE), f64_from(0 - 1), _fd(1, 10), 1000, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "a homogeneous medium cannot turn a ray back: not TIR");
+var elu1 = 0;
+var elu2 = 0;
+var rlu = _ray(Z, _fd(1, 10), Z, ONE, Z, _fd(1, 100), ONE);
+r = grin_trace_to_plane(plu, rlu, _fd(9, 10), _fd(1, 20), 100, &opl, &elu1);
+r = grin_trace_to_plane(plu, rlu, _fd(9, 10), _fd(1, 20), 150, &opl, &elu2);
+assert_eq(elu1, PK_ERR_TIR, "Luneburg interior orbit short of the plane: it turned back (TIR)");
+assert_eq(elu2, elu1, "... the same at 100 and 150 steps");
+# z = -0.0 is on the plane z = +0.0.
+var rv4 = _ray(Z, _fd(1, 10), 0x8000000000000000, Z, Z, f64_neg(ONE), ONE);
+r = grin_trace_to_plane(psf, rv4, Z, _fd(1, 10), 1000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "z = -0.0 is on the plane z = +0.0");
+# Directions of any finite scale: 2^512 and 2^-1070.
+var rv5 = _ray(Z, Z, Z, 0x5FF0000000000000, Z, 0x5FF0000000000000, ONE);
+r = grin_trace_to_plane(phom, rv5, ONE, _fd(1, 10), 1000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "a direction of scale 2^512 traces");
+_assert_near(opl, f64_mul(N15, f64_sqrt(F64_TWO)), T12, "... 45 degrees: optical path 1.5 sqrt 2");
+r = grin_trace_to_plane(phom, _ray(Z, Z, Z, 3, Z, 3, ONE), ONE, _fd(1, 10), 1000, &opl, &e);
+_assert_near(opl, f64_mul(N15, f64_sqrt(F64_TWO)), T12, "a subnormal direction: the same path");
+# The plane snap: this landing converges an ulp off z = 2 without it.
+r = grin_trace_to_plane(pfe, _ray(Z, Z, _fd(0 - 1, 2), Z, f64_sin(ONE), f64_cos(ONE), ONE), F64_TWO, _fd(1, 10), 100000,
+  &opl, &e);
+assert_eq(e, PK_ERR_NONE, "fish-eye to z = 2 at step 0.1");
+if (r != 0) { assert_eq(_pz(r), F64_TWO, "ends exactly on z = 2 (snapped)"); }
+# A trace ending on z = 0 (the landing tolerance has a step term, not |z_end| alone):
+# fish-eye axial optical path from z = -0.5 is 2 atan(1/2) (mpmath). (Step 1/200:
+# the error is 9e-12 there, 1.5e-10 at 1/100 — fourth order, ratio 16.3.)
+r = grin_trace_to_plane(pfe, _ray(Z, Z, _fd(0 - 1, 2), Z, Z, ONE, ONE), Z, _fd(1, 200), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "fish-eye axial ray to z = 0: ok");
+_assert_near(opl, 0x3FEDAC670561BB4F, T10, "optical path 2 atan(1/2)");
+# A skew chord that needs four Newton iterations to land.
+r = grin_trace_to_sphere(pfe, _ray(Z, ONE, Z, _fd(1, 10), f64_neg(ONE), Z, ONE), Z, ONE, _fd(1, 100), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "fish-eye skew chord at step 0.01");
+if (r != 0) {
+    _assert_near(_px(r), Z, _fd(1, 100000000), "exits at -P (x)");
+    _assert_near(_py(r), f64_neg(ONE), _fd(1, 100000000), "exits at -P (y)");
+}
+_assert_near(opl, F64_PI, _fd(1, 100000000), "optical path pi");
+# A small fuzz: coarse and fine steps through every profile. Whatever succeeds is a
+# ray: a unit direction, a finite positive index, a positive optical path.
+var seed = 12345;
+var fz = 0;
+var fbad = 0;
+while (fz < 240) {
+    seed = (seed * 1103515245 + 12345) & 0x7FFFFFFF;
+    var ua = _fd(seed % 1000, 1000);
+    seed = (seed * 1103515245 + 12345) & 0x7FFFFFFF;
+    var ub = _fd(seed % 1000, 1000);
+    seed = (seed * 1103515245 + 12345) & 0x7FFFFFFF;
+    var uc = _fd(seed % 1000, 1000);
+    var pf = psf;
+    if (fz % 6 == 1) { pf = ph; }
+    if (fz % 6 == 2) { pf = psc; }
+    if (fz % 6 == 3) { pf = pmx; }
+    if (fz % 6 == 4) { pf = plu; }
+    if (fz % 6 == 5) { pf = pfq; }
+    var fst = f64_mul(f64_from(1 + (fz % 5) * 5), _fd(1 + seed % 7, 20));
+    var fdy = f64_sub(ua, uc);
+    var fr = _ray(f64_sub(ua, F64_HALF), f64_sub(ub, F64_HALF), f64_from(0 - 2), f64_sub(uc, F64_HALF), fdy, ONE, ONE);
+    var fo = 0;
+    var fe = 0;
+    var fx = grin_trace_to_plane(pf, fr, F64_TWO, fst, 20000, &fo, &fe);
+    if (fe == PK_ERR_NONE) {
+        var dd2 = f64_add(f64_add(f64_mul(_dx(fx), _dx(fx)), f64_mul(_dy(fx), _dy(fx))), f64_mul(_dz(fx), _dz(fx)));
+        if (_near(dd2, ONE, T12) == 0) { fbad = fbad + 1; }
+        if (f64_gt(fo, 0) == 0) { fbad = fbad + 1; }
+        if (_grin_pos(TraceRay_n(fx)) == 0) { fbad = fbad + 1; }
+    }
+    fz = fz + 1;
+}
+assert_eq(fbad, 0, "fuzz: every success is a ray (unit direction, n > 0, optical path > 0)");
+
+# ── Boundaries: refraction at real index steps (2.8.0 review) ────────
+test_group("grin_boundaries");
+
+# A HOMOGENEOUS ball is a ball lens — Snell at both curved faces and a straight
+# chord — so it pins the ball's refraction, not the integrator. R = 1.7 (a normal of
+# the wrong length hides at R = 1), n_in 1.1 != n 1.5 != n_after 1.2. mpmath, 40
+# digits. (Every earlier ball test was index-matched, where ANY normal facing the
+# ray leaves it unchanged.)
+var phb = grin_polynomial(N15, 0, 0, 0, 0, 0, 0, &e);
+r = grin_ball_trace(phb, _ray(_fd(3, 10), _fd(4, 10), f64_from(0 - 2), _fd(1, 10), _fd(0 - 5, 100), ONE, _fd(11, 10)),
+  F64_HALF, _fd(17, 10), _fd(12, 10), _fd(1, 50), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "ball lens ok");
+if (r != 0) {
+    _assert_near(_px(r), 0x3FDAB47A3B373CA9, T12, "ball lens: exit x vs vector Snell");
+    _assert_near(_py(r), 0x3FA678F6D6848E3F, T12, "ball lens: exit y");
+    _assert_near(_pz(r), 0x40012DE5D37DCFAF, T12, "ball lens: exit z");
+    _assert_near(_dx(r), 0xBFAB4059A50D84A1, T12, "ball lens: exit direction x");
+    _assert_near(_dy(r), 0xBFC0162E49CDDCB8, T12, "ball lens: exit direction y");
+    _assert_near(_dz(r), 0x3FEFB357B4EE6E59, T12, "ball lens: exit direction z");
+    assert_eq(TraceRay_n(r), _fd(12, 10), "ball lens: leaves in n_after");
+}
+_assert_near(opl, 0x401795B7D47A325C, T12, "ball lens: 1.1 gap + 1.5 chord");
+var pu = grin_polynomial(N15, 0, 0, 0, 0, 0, 0, &e);
+r = grin_ball_trace(pu, _ray(_fd(3, 10), _fd(4, 10), f64_from(0 - 3), _fd(5, 100), _fd(0 - 2, 100), ONE, ONE), F64_HALF,
+  N15, N133, _fd(1, 100), 100000, &opl, &e);
+if (r != 0) {
+    _assert_near(_px(r), 0x3FCCFF62DCDBB073, T12, "second ball lens: exit x");
+    _assert_near(_py(r), 0x3FB38A8625E5506A, T12, "second ball lens: exit y");
+    _assert_near(_pz(r), 0x3FFFB17899488DF8, T12, "second ball lens: exit z");
+    _assert_near(_dx(r), 0xBFB6E98B0BFBE4A0, T12, "second ball lens: dir x");
+    _assert_near(_dy(r), 0xBFBDC7650F7E5B03, T12, "second ball lens: dir y");
+    _assert_near(_dz(r), 0x3FEFA748F40FAEF7, T12, "second ball lens: dir z");
+}
+_assert_near(opl, 0x4019CF9D9A150A17, T12, "second ball lens: optical path");
+var rv6 = _ray(_fd(2, 10), _fd(0 - 1, 10), f64_from(0 - 1), _fd(3, 10), _fd(1, 10), ONE, ONE);
+r = grin_rod_trace(pu, rv6, Z, F64_TWO, INF, N133, _fd(1, 100), 100000, &opl, &e);
+if (r != 0) {
+    _assert_near(_px(r), 0x3FEC7567258A4945, T12, "homogeneous rod: exit x");
+    _assert_near(_py(r), 0x3FC09C8987630C5D, T12, "homogeneous rod: exit y");
+    _assert_near(_dx(r), 0x3FCB874EA7AE4583, T12, "homogeneous rod: dir x");
+    _assert_near(_dy(r), 0x3FB25A346FC983AD, T12, "homogeneous rod: dir y");
+    _assert_near(_dz(r), 0x3FEF2AB7C168C7BE, T12, "homogeneous rod: dir z");
+}
+_assert_near(opl, 0x401071FCB4DE8E3D, T12, "homogeneous rod: optical path");
+# A Luneburg exiting into n = 1.5 (not index-matched): the focus is still c + R d,
+# and the exit direction is vector Snell's (mpmath).
+var plz = grin_luneburg(ONE, ONE, F64_TWO, &e);
+var rv7 = _ray(_fd(0 - 18, 10), _fd(4, 10), _fd(0 - 4, 10), _fd(6, 10), Z, _fd(8, 10), ONE);
+r = grin_ball_trace(plz, rv7, F64_TWO, ONE, N15, _fd(1, 200), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "Luneburg exit into n = 1.5: ok");
+if (r != 0) {
+    _assert_near(_px(r), _fd(6, 10), T9, "focus x");
+    _assert_near(_pz(r), _fd(28, 10), T9, "focus z = cz + 0.8");
+    _assert_near(_dx(r), 0x3FE28136FD8CB4CD, T9, "refracted dir x");
+    _assert_near(_dy(r), 0xBFD1111111111111, T9, "refracted dir y = -4/15");
+    _assert_near(_dz(r), 0x3FE8AC495210F111, T9, "refracted dir z");
+}
+# The ABCD's n_ext scaling against a trace in water, and against mpmath.
+_s = grin_selfoc_abcd(N16, G5, LR, N133, abcd);
+_assert_near(load64(abcd + 8), 0x3FF991E64DA3A471, T12, "abcd in water: B (mpmath 1.59812...)");
+_assert_near(load64(abcd + 16), 0xBFE280B39E235065, T12, "abcd in water: C (mpmath -0.578210...)");
+var rv8 = _ray(Z, yi, f64_neg(F64_HALF), Z, ui, ONE, N133);
+r = grin_rod_trace(psf, rv8, Z, LR, INF, N133, _fd(1, 100), 100000, &opl, &e);
+var yw = f64_add(f64_mul(load64(abcd), yf), f64_mul(load64(abcd + 8), ui));
+var uw = f64_add(f64_mul(load64(abcd + 16), yf), f64_mul(load64(abcd + 24), ui));
+_assert_rel(_py(r), yw, _fd(1, 100000000), "paraxial rod in water: height = A y + B u");
+_assert_rel(f64_div(_dy(r), _dz(r)), uw, _fd(1, 100000000), "paraxial rod in water: slope = C y + D u");
+# A rod displaced to z_front = 2.5, and a skew paraxial ray (the x plane).
+_s = grin_selfoc_abcd(N16, G5, LR, ONE, abcd);
+var ZF = _fd(5, 2);
+var rv9 = _ray(Z, yi, f64_sub(ZF, F64_HALF), Z, ui, ONE, ONE);
+r = grin_rod_trace(psf, rv9, ZF, LR, INF, ONE, _fd(1, 100), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "displaced rod ok");
+if (r != 0) {
+    _assert_rel(_py(r), yo, _fd(1, 100000000), "displaced rod: height = A y + B u");
+    _assert_rel(f64_div(_dy(r), _dz(r)), uo, _fd(1, 100000000), "displaced rod: slope = C y + D u");
+    _assert_near(_pz(r), f64_add(ZF, LR), T12, "displaced rod: exits at z_front + length");
+}
+var xi = _fd(2, 100000);
+var uxi = _fd(0 - 1, 100000);
+var rv10 = _ray(xi, yi, f64_neg(F64_HALF), uxi, ui, ONE, ONE);
+r = grin_rod_trace(psf, rv10, Z, LR, INF, ONE, _fd(1, 100), 100000, &opl, &e);
+var xfr = f64_add(xi, f64_mul(F64_HALF, uxi));
+_assert_rel(_px(r), f64_add(f64_mul(load64(abcd), xfr), f64_mul(load64(abcd + 8), uxi)), _fd(1, 100000000),
+  "skew paraxial rod: x = A x + B u_x");
+_assert_rel(f64_div(_dx(r), _dz(r)), f64_add(f64_mul(load64(abcd + 16), xfr), f64_mul(load64(abcd + 24), uxi)),
+  _fd(1, 100000000), "skew paraxial rod: u_x = C x + D u_x");
+# An oblique ray through a homogeneous gap: it meets the face at y = 1.5 (gap/dz,
+# not gap), refracts (n(1.5) sin = 0.6), and follows the closed form.
+var y15 = _fd(3, 2);
+var n15 = f64_mul(N16, f64_sqrt(f64_sub(ONE, f64_mul(_fd(1, 4), f64_mul(y15, y15)))));
+var sin_in = f64_div(_fd(6, 10), n15);
+_sf_exact(N16, G5, Z, y15, Z, sin_in, f64_sqrt(f64_sub(ONE, f64_mul(sin_in, sin_in))), LR, &ex);
+var rv11 = _ray(Z, Z, f64_neg(F64_TWO), Z, _fd(6, 10), _fd(8, 10), ONE);
+r = grin_rod_trace(psf, rv11, Z, LR, INF, ONE, _fd(1, 100), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "oblique rod ray ok");
+if (r != 0) { _assert_near(_py(r), load64(&ex + 8), T10, "oblique rod ray: exit height vs closed form"); }
+var orod = f64_add(_fd(5, 2), load64(&ex + 40));
+_assert_near(opl, orod, T10, "oblique rod ray: optical path 2.5 (gap/dz) + closed form");
+# The rod's wall: a ray outside the rod's NA reaches r = sin(0.4)/(n0 g) = 0.487
+# inside a half-pitch rod and exits near the axis — the exit height alone (the
+# first cut's advice) accepted it for a rod of radius 0.3.
+var hp = f64_mul(F64_HALF, grin_selfoc_pitch(G5));
+var rw = _ray(Z, Z, Z, Z, f64_sin(_fd(4, 10)), f64_cos(_fd(4, 10)), ONE);
+r = grin_rod_trace(psf, rw, Z, hp, _fd(3, 10), ONE, _fd(1, 100), 100000, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "a ray that reaches the wall mid-rod: vignetted");
+r = grin_rod_trace(psf, rw, Z, hp, _fd(5, 10), ONE, _fd(1, 100), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "... and clears a rod of radius 0.5");
+r = grin_rod_trace(psf, rw, Z, hp, _fd(4867, 10000), ONE, _fd(1, 100), 100000, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "... the peak between steps counts: radius 0.4867 < 0.48677");
+var rv12 = _ray(Z, ONE, f64_neg(ONE), Z, Z, ONE, ONE);
+r = grin_rod_trace(psf, rv12, Z, ONE, _fd(5, 10), ONE, _fd(1, 100), 100000, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "a ray that meets the front face outside the rod");
+# A rod trace allocates only its result (the first cut: 216 bytes, 144 of scratch).
+var hb0 = _heap_used;
+r = grin_rod_trace(psf, rq, Z, qps, INF, ONE, _fd(1, 100), 100000, &opl, &e);
+assert(_heap_used - hb0 <= 72, "a rod trace allocates only its returned ray (3 x 24 bytes)");
+var rbh = _ray(Z, _fd(1, 2), f64_neg(F64_TWO), Z, Z, ONE, ONE);
+hb0 = _heap_used;
+r = grin_ball_trace(plu, rbh, Z, ONE, ONE, _fd(1, 100), 100000, &opl, &e);
+assert(_heap_used - hb0 <= 72, "a ball trace allocates only its returned ray");
+# Spheres far from the origin (the landing tolerance scales with the centre's
+# offset): the same exit as at the origin — the Luneburg in t is a unit oscillator,
+# exit at t = pi/4, (0.1, 0.05, sqrt(1.9875))/sqrt 2, optical path pi/4 + 0.49375.
+var czf = f64_from(10000);
+var plf = grin_luneburg(ONE, ONE, czf, &e);
+var rv13 = _ray(_fd(1, 10), _fd(1, 20), czf, Z, Z, ONE, ONE);
+r = grin_trace_to_sphere(plf, rv13, czf, ONE, _fd(1, 100), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "a sphere 1e4 radii from the origin: traceable");
+if (r != 0) {
+    _assert_near(_px(r), f64_div(_fd(1, 10), f64_sqrt(F64_TWO)), T9, "far sphere: exit x");
+    var zfar = f64_div(f64_sqrt(_fd(19875, 10000)), f64_sqrt(F64_TWO));
+    _assert_near(f64_sub(_pz(r), czf), zfar, T9, "far sphere: exit z - cz");
+}
+_assert_near(opl, f64_add(f64_mul(_fd(1, 4), F64_PI), _fd(49375, 100000)), T9, "far sphere: optical path");
+var plm = grin_luneburg(ONE, _fd(1, 1000), f64_from(10), &e);
+r = grin_ball_trace(plm, _ray(Z, _fd(5, 10000), f64_from(9), Z, Z, ONE, ONE), f64_from(10), _fd(1, 1000), ONE,
+  _fd(1, 100000), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "a 1 mm Luneburg 10 units out: traceable");
+if (r != 0) { _assert_near(_pz(r), _fd(10001, 1000), T12, "... focus on the far pole"); }
+var omm = f64_add(ONE, f64_mul(_fd(1, 1000), f64_mul(F64_HALF, F64_PI)));
+_assert_near(opl, omm, T9, "... optical path (1 - R) + R(1 + pi/2)");
+# A ball trace may start ON the sphere (to rounding): a radial ray through the
+# centre of a Luneburg is straight and exits at the antipode.
+var plb = grin_luneburg(ONE, _fd(13, 10), Z, &e);
+r = grin_ball_trace(plb, _ray(_fd(5, 10), _fd(12, 10), Z, _fd(0 - 5, 10), _fd(0 - 12, 10), Z, ONE), Z, _fd(13, 10), ONE,
+  _fd(1, 100), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "ball trace starting on the sphere (5-12-13): accepted");
+if (r != 0) {
+    _assert_near(_px(r), _fd(0 - 5, 10), T12, "radial Luneburg ray: antipode x");
+    _assert_near(_py(r), _fd(0 - 12, 10), T12, "radial Luneburg ray: antipode y");
+}
+r = grin_ball_trace(plb, _ray(_fd(5, 10), _fd(12, 10), Z, _fd(5, 10), _fd(12, 10), Z, ONE), Z, _fd(13, 10), ONE,
+  _fd(1, 100), 100000, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "... heading OUT from the sphere: a miss");
+# Far starts: the intersection from the perpendicular distance, not b^2 - c0 (a
+# grazing ray from 1e5 away was 1.4e-4 off the focus; from 1e8, 0.28 off, as success).
+var pgz = grin_luneburg(ONE, F64_TWO, f64_from(3), &e);
+var hgz = f64_mul(F64_TWO, f64_sub(ONE, _fd(1, 100000000)));
+var rv14 = _ray(hgz, Z, f64_from(3 - 100000), Z, Z, ONE, ONE);
+r = grin_ball_trace(pgz, rv14, f64_from(3), F64_TWO, ONE, _fd(1, 400), 10000000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "grazing ray from 1e5 away: traced");
+if (r != 0) { _assert_near(_px(r), Z, T9, "... still lands on the Luneburg focus"); }
+var rv15 = _ray(Z, _fd(5, 10), f64_from(0 - 100000000), Z, Z, ONE, ONE);
+r = grin_ball_trace(plu, rv15, Z, ONE, ONE, _fd(1, 200), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "a ray from 1e8 radii away: traced");
+if (r != 0) { _assert_near(_py(r), Z, T9, "... to the Luneburg focus"); }
+# A start just outside the sphere — less than one step — is refused, not traced as
+# if inside.
+var rv16 = _ray(Z, Z, _fd(10001, 10000), Z, Z, f64_neg(ONE), ONE);
+r = grin_trace_to_sphere(pfe, rv16, Z, ONE, _fd(1, 100), 100000, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "trace_to_sphere from 1e-4 R outside: refused");
+
+# ── Round 2 of the 2.8.0 verification ────────
+test_group("grin_review2");
+
+# The rod wall between steps: the NA-edge ray's largest radius is sin(0.4)/(n0 g)
+# (closed form). The cubic's peak root had the wrong sign, so only step ENDS were
+# checked: at step 0.2 none is within 1.3e-4 of the peak.
+var pk = f64_div(f64_sin(_fd(4, 10)), f64_mul(N16, G5));
+r = grin_rod_trace(psf, rw, Z, hp, _fd(48660, 100000), ONE, _fd(2, 10), 100000, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "wall 0.48660 < peak 0.4867729 at step 0.2: vignetted");
+r = grin_rod_trace(psf, rw, Z, hp, _fd(48680, 100000), ONE, _fd(2, 10), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "wall 0.48680 > peak at step 0.2: clear");
+r = grin_rod_trace(psf, rw, Z, hp, _fd(48685, 100000), ONE, _fd(4, 10), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "wall 0.48685 at step 0.4: clear (the cubic term counts)");
+var iwl = 0;
+while (iwl < 2) {
+    var swl = _fd(1, 10);
+    if (iwl == 1) { swl = _fd(5, 100); }
+    r = grin_rod_trace(psf, rw, Z, hp, f64_mul(pk, f64_sub(ONE, _fd(1, 1000000))), ONE, swl, 100000, &opl, &e);
+    assert_eq(e, PK_ERR_INVALID_PARAMETER, "wall 1e-6 inside the peak: vignetted, whichever step");
+    r = grin_rod_trace(psf, rw, Z, hp, f64_mul(pk, f64_add(ONE, _fd(1, 1000000))), ONE, swl, 100000, &opl, &e);
+    assert_eq(e, PK_ERR_NONE, "wall 1e-6 outside the peak: clear");
+    iwl = iwl + 1;
+}
+# The wall in the LANDING step: a homogeneous rod's exit radius 0.8988 (vector
+# Snell) crosses r = 0.86 only inside the last step.
+r = grin_rod_trace(pu, rv6, Z, F64_TWO, _fd(86, 100), N133, _fd(3, 10), 100000, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "exit radius 0.8988 > wall 0.86: vignetted");
+r = grin_rod_trace(pu, rv6, Z, F64_TWO, _fd(90, 100), N133, _fd(3, 10), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "... and clears a wall of 0.90");
+# A trace whose |T| collapsed stops at once instead of running the budget out: a
+# fish-eye chord at step 0.53 took 2 s at max_steps 1e6.
+var pfb = grin_maxwell_fisheye(F64_TWO, _fd(3, 2), Z, &e);
+var rfb = _ray(0x4014804388174707, 0x401605C4AFA3BD2D, 0x4022B31FD7F992F0, 0xBFDB53EC32A481D4, 0xBFDD77E094582C15,
+  0xBFE8E764141D3E34, ONE);
+var ts0[16];
+var ts1[16];
+syscall(228, 1, &ts0);
+r = grin_trace_to_sphere(pfb, rfb, Z, 0x402E2494AAA6D8B0, 0x3FE10519210CF714, 1000000, &opl, &e);
+syscall(228, 1, &ts1);
+var tns = (load64(&ts1) - load64(&ts0)) * 1000000000 + (load64(&ts1 + 8) - load64(&ts0 + 8));
+assert(tns < 250000000, "a collapsed trace returns promptly (< 0.25 s at max_steps 1e6)");
+# The landing check guards against over-relaxing: this coarse fish-eye trace is
+# refused, or lands within 1e-2 of the closed-form circle.
+var pfc = grin_maxwell_fisheye(F64_TWO, ONE, f64_from(40), &e);
+var rfc = _ray(0xC00AD93FCE86AB35, 0x400486F8A1FB13F7, 0x4042A9AA75A2BF5D, 0x3FD00D0C17C28728, 0xBFE4FB81233E99F6,
+  0x3FE6C9EE063A74A8, ONE);
+r = grin_trace_to_sphere(pfc, rfc, f64_from(40), 0x4015212F2FF41DD7, 0x3FD8AA41E5B6A923, 100000, &opl, &e);
+if (e == PK_ERR_NONE) {
+    _assert_near(_px(r), 0x40150567BB46DF7D, _fd(1, 100), "coarse fish-eye: success only near the exit (x)");
+    _assert_near(_pz(r), 0x4043C17881E506B1, _fd(1, 100), "coarse fish-eye: success only near the exit (z)");
+}
+# The drift tripwire, pinned: the fish-eye from far outside its core at steps 0.1
+# and 0.3 is refused, or accurate to 1e-3 (deleting the check returned 40% off).
+var ist2 = 0;
+while (ist2 < 2) {
+    var sq2 = _fd(1, 10);
+    if (ist2 == 1) { sq2 = _fd(3, 10); }
+    r = grin_trace_to_plane(pfq, _ray(Z, Z, f64_from(0 - 3), Z, Z, ONE, ONE), F64_HALF, sq2, 2000000, &opl, &e);
+    assert((e == PK_ERR_INVALID_PARAMETER) | ((e == PK_ERR_NONE) & _near(opl, 0x3FF4C2288058ADFC, _fd(1, 1000))),
+      "coarse fish-eye plane trace: refused, or accurate to 1e-3");
+    ist2 = ist2 + 1;
+}
+# A closed fish-eye orbit that never meets the plane: the circle about (0, 0, 0.75)
+# of radius 1.25 bottoms out at z = -0.5, so z = -0.6 is never reached — TIR at any
+# budget (the integrator's precession used to "arrive" once max_steps allowed).
+var pf1 = grin_maxwell_fisheye(ONE, ONE, Z, &e);
+var rorb2 = _ray(Z, Z, F64_TWO, ONE, Z, Z, ONE);
+r = grin_trace_to_plane(pf1, rorb2, _fd(0 - 6, 10), _fd(1, 12), 10000, &opl, &e);
+assert_eq(e, PK_ERR_TIR, "never-reached plane: TIR at 1e4 steps");
+r = grin_trace_to_plane(pf1, rorb2, _fd(0 - 6, 10), _fd(1, 12), 100000, &opl, &e);
+assert_eq(e, PK_ERR_TIR, "... and at 1e5");
+r = grin_trace_to_plane(pf1, rorb2, _fd(0 - 6, 10), _fd(1, 6), 100000, &opl, &e);
+assert_eq(e, PK_ERR_TIR, "... and at step 1/6");
+r = grin_trace_to_plane(pf1, rorb2, _fd(0 - 4, 10), _fd(1, 12), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "the reachable plane z = -0.4 is reached");
+assert(f64_lt(opl, F64_PI), "... within one loop of the circle");
+# A ray TANGENT to a ball is a miss: the rim of a Luneburg is itself a ray, so a
+# traced tangent ray came back with a different exit at every step.
+var its = 0;
+while (its < 3) {
+    var stt = _fd(1, 10);
+    if (its == 1) { stt = _fd(5, 1000); }
+    if (its == 2) { stt = _fd(1, 1000); }
+    r = grin_ball_trace(plu, _ray(Z, ONE, f64_from(0 - 2), Z, Z, ONE, ONE), Z, ONE, ONE, stt, 100000, &opl, &e);
+    assert_eq(e, PK_ERR_INVALID_PARAMETER, "a ray tangent to the ball (h = R): a miss");
+    its = its + 1;
+}
+var rv101 = _ray(Z, ONE, _fd(0 - 1, 1000000000), Z, Z, ONE, ONE);
+r = grin_ball_trace(plu, rv101, Z, ONE, ONE, _fd(1, 100), 1000000, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "... also from 1e-9 before the sphere");
+# h = 1 - 2^-53 still enters. That ray stays within 7.5e-9 of the rim all the way
+# (|X|^2 - 1 = -sqrt(1 - h^2) sin 2t) and leaves tangentially, so its exit point
+# is ill-conditioned (a 1e-10 trajectory error moves it by ~3e-3): pinned loosely.
+# The conditioning is 1/sqrt(2 (1 - h)) times the method's ~5e-11 (measured 3.7e-8
+# at 1 - 1e-6, 3.6e-9 at 1 - 1e-4): pinned at 1 - 1e-6 to 1e-7.
+var rv102 = _ray(Z, 0x3FEFFFFFFFFFFFFF, f64_from(0 - 2), Z, Z, ONE, ONE);
+r = grin_ball_trace(plu, rv102, Z, ONE, ONE, _fd(1, 100), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "h = 1 - 2^-53: still enters, and leaves near the far pole");
+if (r != 0) { _assert_near(_pz(r), ONE, _fd(1, 10000), "... z within the rim ray's conditioning"); }
+var rv103 = _ray(Z, f64_sub(ONE, _fd(1, 1000000)), f64_from(0 - 2), Z, Z, ONE, ONE);
+r = grin_ball_trace(plu, rv103, Z, ONE, ONE, _fd(1, 100), 100000, &opl, &e);
+if (r != 0) {
+    _assert_near(_py(r), Z, _fd(1, 10000000), "h = 1 - 1e-6: on the focus (y)");
+    _assert_near(_pz(r), ONE, T9, "h = 1 - 1e-6: on the focus (z)");
+}
+r = grin_trace_to_sphere(pfe, _ray(Z, ONE, Z, Z, Z, ONE, ONE), Z, ONE, _fd(1, 10), 100000, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "trace_to_sphere from the sphere, heading tangentially: refused");
+# A ray skimming just inside the rim costs its ~180 steps, not 1000x (the step's
+# own quadratic, not the straight chord, predicts the boundary).
+r = grin_ball_trace(plu, _ray(Z, f64_sub(ONE, _fd(1, 1000000000000)), f64_from(0 - 2), Z, Z, ONE, ONE), Z, ONE, ONE,
+  _fd(1, 100), 1000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "a Luneburg ray 1e-12 inside the rim: traced within 1000 steps");
+# Far starts: an entry snapped onto the sphere (half the rays from 1e7 R were
+# refused as starting outside it).
+var pl3 = grin_luneburg(ONE, F64_TWO, f64_from(3), &e);
+var ifr = 0;
+var ffar = 0;
+while (ifr < 54) {
+    var dfar = f64_from(20000000);
+    if (ifr >= 18) { dfar = f64_from(200000000); }
+    if (ifr >= 36) { dfar = f64_from(2000000000); }
+    var hfar = _fd(1 + ifr % 18, 10);
+    var rv104 = _ray(hfar, Z, f64_sub(f64_from(3), dfar), Z, Z, ONE, ONE);
+    r = grin_ball_trace(pl3, rv104, f64_from(3), F64_TWO, ONE, _fd(2, 100), 100000, &opl, &e);
+    if (e != PK_ERR_NONE) { ffar = ffar + 1; }
+    if (r != 0) {
+        if (_near(_px(r), Z, T9) == 0) { ffar = ffar + 1; }
+        if (_near(_pz(r), f64_from(5), T9) == 0) { ffar = ffar + 1; }
+    }
+    ifr = ifr + 1;
+}
+assert_eq(ffar, 0, "54 rays from 2e7..2e9 away all focus on (0, 0, 5)");
+# The on-sphere tolerance is the run's own: 4e-4 R inside a ball at cz = 1e6 is
+# inside, not on it.
+var plx = grin_luneburg(ONE, ONE, f64_from(1000000), &e);
+var zon = f64_sub(f64_from(1000000), f64_sqrt(_fd(91, 100)));
+r = grin_ball_trace(plx, _ray(Z, _fd(3, 10), f64_add(zon, _fd(4, 10000)), Z, Z, ONE, ONE), f64_from(1000000), ONE, ONE,
+  _fd(1, 100), 100000, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "a start 4e-4 R inside a far ball: refused");
+var rv105 = _ray(Z, _fd(3, 10), zon, Z, Z, ONE, ONE);
+r = grin_ball_trace(plx, rv105, f64_from(1000000), ONE, ONE, _fd(1, 100), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "... on it (to rounding): traced");
+# Step halving at a reasonable step: this Luneburg orbit's n^2 falls to 0.01 at its
+# apoapsis (r^2 = 1.99), so steps there are re-taken shorter; closed form x = -1/12,
+# optical path 3.2785780598 (harmonic in t).
+var rorb = _ray(Z, _fd(1, 10), Z, _fd(5, 10), Z, _fd(0 - 3, 10), ONE);
+r = grin_trace_to_plane(plu, rorb, _fd(5, 100), _fd(1, 10), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "Luneburg orbit at step 0.1: re-taken shorter where n^2 falls, arrives");
+_assert_near(opl, 0x400A3A8722423158, _fd(1, 100000), "... optical path, closed form");
+r = grin_trace_to_plane(plu, rorb, _fd(5, 100), _fd(1, 100), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "Luneburg orbit heading away comes round to z = 0.05");
+if (r != 0) { _assert_near(_px(r), 0xBFB5555555555555, T9, "x = -1/12 closed form"); }
+_assert_near(opl, 0x400A3A8722423158, T9, "optical path closed form");
+r = grin_trace_to_plane(plu, rorb, _fd(5, 100), _fd(7, 10), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "... at step 0.7: re-taken shorter, arrives");
+_assert_near(opl, 0x400A3A8722423158, _fd(2, 1000), "... optical path");
+var rv106 = _ray(Z, _fd(48, 100), f64_from(0 - 1), Z, Z, ONE, ONE);
+r = grin_ball_trace(plu, rv106, Z, ONE, ONE, f64_from(4), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "Luneburg at step 4: re-taken until each step turns < 0.5 rad");
+if (r != 0) { _assert_near(_py(r), Z, _fd(1, 100), "... focus y"); }
+# Rays heading AWAY that turn back and arrive (profiles with an axial gradient).
+var kpup = grin_polynomial(N15, 0, 0, 0, _fd(1, 10), 0, 0, &e);
+var rv107 = _ray(Z, Z, Z, Z, _fd(99, 100), _fd(0 - 14, 100), ONE);
+r = grin_trace_to_plane(kpup, rv107, ONE, _fd(1, 100), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "n = 1.5 + 0.1 z: heading away, turns back, arrives");
+if (r != 0) { _assert_near(_py(r), 0x401F94E7B4C35FA5, _fd(1, 100000000), "y = (b/a)[acosh(n0/b) + acosh(n1/b)]"); }
+_assert_near(opl, 0x402865EA804459CD, _fd(1, 100000000), "optical path closed form");
+var kpcub = grin_polynomial(N15, 0, 0, 0, 0, 0, _fd(2, 100), &e);
+var rv108 = _ray(Z, Z, ONE, Z, _fd(99, 100), _fd(0 - 14, 100), ONE);
+r = grin_trace_to_plane(kpcub, rv108, F64_TWO, _fd(1, 100), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "cubic-only axial profile: turns back and arrives");
+_assert_near(opl, 0x40390092FF9EBBDD, _fd(1, 100000000), "optical path vs mpmath quadrature");
+# Refusals that must be IMMEDIATE (each would spin 2^40 steps otherwise).
+r = grin_trace_to_plane(psf, _ray(Z, _fd(1, 10), Z, Z, Z, f64_neg(ONE), ONE), ONE, _fd(1, 10), 1099511627776, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "SELFOC heading away, 2^40 budget: refused at once");
+r = grin_trace_to_plane(psc, _ray(Z, _fd(1, 10), Z, Z, Z, f64_neg(ONE), ONE), ONE, _fd(1, 10), 1099511627776, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "sech heading away, 2^40 budget: refused at once");
+var rv109 = _ray(Z, Z, 0x4376345785D8A000, Z, Z, ONE, ONE);
+r = grin_trace_to_plane(psf, rv109, 0x4376345785D8A271, _fd(1, 10), 1099511627776, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "a step below the resolution of z = 1e17: refused at once");
+# Spheres and balls centred BELOW the origin (the scales use |cz|).
+var kfn = grin_maxwell_fisheye(_fd(18, 10), F64_TWO, f64_from(0 - 5), &e);
+var rv110 = _ray(F64_TWO, Z, f64_from(0 - 5), _fd(0 - 6, 10), _fd(3, 10), _fd(2, 10), ONE);
+r = grin_trace_to_sphere(kfn, rv110, f64_from(0 - 5), F64_TWO, _fd(1, 100), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "fish-eye about z = -5: traced");
+if (r != 0) { _assert_near(_px(r), f64_neg(F64_TWO), T9, "antipode x"); }
+_assert_near(opl, 0x40169E9565708EFC, T9, "optical path n0 pi R/2 = 1.8 pi");
+var kln = grin_luneburg(ONE, _fd(13, 10), f64_from(0 - 10), &e);
+r = grin_ball_trace(kln, _ray(_fd(5, 10), _fd(12, 10), f64_from(0 - 10), _fd(0 - 5, 10), _fd(0 - 12, 10), Z, ONE),
+  f64_from(0 - 10), _fd(13, 10), ONE, _fd(1, 100), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "ball about z = -10 starting on the sphere: accepted");
+if (r != 0) { _assert_near(_px(r), _fd(0 - 5, 10), T12, "antipode x"); }
+# Entry guards that stop fabricated successes.
+r = grin_ball_trace(plu, _ray(Z, Z, f64_neg(F64_HALF), Z, Z, ONE, ONE), Z, ONE, ONE, _fd(1, 100), 100000, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "ball: a start inside heading in is refused");
+var rv111 = _ray(Z, Z, f64_neg(f64_sub(ONE, _fd(1, 1000000))), Z, Z, ONE, ONE);
+r = grin_ball_trace(plu, rv111, Z, ONE, ONE, _fd(1, 100), 100000, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "ball: a start 1e-6 R inside is refused");
+var rv112 = _ray(Z, _fd(1, 10), f64_neg(ONE), Z, Z, f64_neg(ONE), ONE);
+r = grin_rod_trace(psf, rv112, Z, ONE, INF, ONE, _fd(1, 10), 100, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "rod: a ray heading -z (away from the rod)");
+assert_eq(r, 0, "... no ray");
+r = grin_rod_trace(psf, _ray(Z, _fd(1, 10), f64_neg(ONE), Z, Z, ONE, ONE), Z, ONE, NAN, ONE, _fd(1, 10), 100, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "rod radius NaN");
+var rv113 = _ray(Z, _fd(1, 10), f64_neg(ONE), Z, Z, ONE, ONE);
+r = grin_rod_trace(psf, rv113, Z, ONE, f64_neg(ONE), ONE, _fd(1, 10), 100, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "rod radius -1");
+var rv114 = _ray(Z, Z, f64_neg(ONE), Z, Z, ONE, ONE);
+r = grin_rod_trace(psf, rv114, Z, ONE, 0x16687E92154EF7AC, ONE, _fd(1, 10), 100, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "rod radius 1e-200 (its square underflows)");
+# TIR is a ray that approached and turned away; everything else that never arrives
+# is INVALID_PARAMETER.
+var rv115 = _ray(Z, Z, Z, Z, _fd(99, 100), _fd(0 - 14, 100), ONE);
+r = grin_trace_to_plane(pmi, rv115, f64_from(10), _fd(1, 100), 3000, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "heading away into rising index never turns: not TIR");
+var rv116 = _ray(Z, _fd(1, 10), Z, ONE, Z, _fd(0 - 1, 100), ONE);
+r = grin_trace_to_plane(plu, rv116, _fd(9, 10), _fd(1, 20), 300, &opl, &e);
+assert_eq(e, PK_ERR_TIR, "orbit heads away, comes round, turns away short of the plane: TIR");
+r = grin_trace_to_plane(psf, _ray(Z, ONE, Z, ONE, Z, Z, ONE), ONE, _fd(1, 10), 100, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "skew orbit with T_z = 0: not TIR");
+var rv117 = _ray(Z, Z, Z, Z, _fd(99, 100), _fd(14, 100), ONE);
+r = grin_trace_to_plane(pmi, rv117, _fd(9, 100), f64_from(4), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "plane below the turning point 0.1478: reached at step 4");
+if (r != 0) { _assert_near(_py(r), 0x3FE914F1BD20C445, _fd(1, 10000), "y closed form"); }
+var rv118 = _ray(Z, Z, Z, Z, _fd(99, 100), _fd(0 - 14, 100), ONE);
+r = grin_trace_to_plane(pmb, rv118, _fd(0 - 9, 100), f64_from(4), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "mirrored toward -z");
+# A step past the sphere is clamped to just past it: one step suffices.
+r = grin_trace_to_sphere(plu, _ray(Z, Z, Z, ONE, Z, Z, ONE), Z, _fd(7, 10), f64_from(10), 1, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "one clamped step to radius 0.7");
+if (r != 0) { _assert_near(_px(r), _fd(7, 10), T12, "exits at radius 0.7"); }
+_assert_near(opl, 0x3FEE5523A2985F53, _fd(1, 10000), "optical path, integral of sqrt(2 - r^2)");
+# Landing robustness: a grazing exit 1e-9 inside the apoapsis (step 0.01: the
+# method's amplitude error is ~1e-10 there), exact landings, a tiny far ball, and a
+# start 1e-7 R outside.
+r = grin_trace_to_sphere(plu, _ray(Z, _fd(1, 10), Z, ONE, Z, _fd(3, 10), ONE), Z, f64_sub(f64_sqrt(_fd(199, 100)),
+    0x3E112E0BE826D695), _fd(1, 100), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "grazing exit 1e-9 inside the apoapsis lands");
+if (r != 0) {
+    _assert_near(_px(r), 0x3FF59E6F2ED34BA9, _fd(1, 10000000), "x closed form");
+    _assert_near(_pz(r), 0x3FD9F1523830C131, _fd(1, 10000000), "z closed form");
+}
+_assert_near(opl, 0x3FF921FAEEEFD7B9, _fd(1, 10000000), "optical path closed form");
+var ks = 1;
+while (ks <= 8) {
+    r = grin_trace_to_plane(phom, _ray(Z, Z, Z, Z, Z, ONE, ONE), f64_mul(F64_TWO, _fd(ks, 8)), _fd(ks, 8), 2, &opl, &e);
+    assert_eq(e, PK_ERR_NONE, "two steps of arc s reach z = 2 s exactly");
+    ks = ks + 1;
+}
+var kplf = grin_luneburg(ONE, _fd(1, 1000), f64_from(100000), &e);
+r = grin_ball_trace(kplf, _ray(Z, _fd(4, 10000), f64_from(99999), Z, Z, ONE, ONE), f64_from(100000), _fd(1, 1000), ONE,
+  _fd(1, 100000), 100000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "1 mm Luneburg 1e8 radii out: traced");
+_assert_near(opl, f64_add(ONE, f64_mul(_fd(1, 1000), f64_mul(F64_HALF, F64_PI))), T9, "1 + R pi/2");
+var rv119 = _ray(Z, Z, f64_add(ONE, _fd(1, 10000000)), Z, Z, f64_neg(ONE), ONE);
+r = grin_trace_to_sphere(pfe, rv119, Z, ONE, _fd(1, 100), 100000, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "trace_to_sphere from 1e-7 R outside: refused");
+# Error codes on each path.
+r = grin_trace_to_sphere(psf, _ray(f64_from(3), Z, Z, Z, Z, ONE, ONE), Z, f64_from(10), _fd(1, 10), 100, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_INDEX, "inside the sphere where SELFOC has no index");
+var rv120 = _ray(f64_from(3), Z, f64_from(100), Z, Z, ONE, ONE);
+r = grin_trace_to_sphere(psf, rv120, f64_from(100), f64_from(10), _fd(1, 10), 100, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_INDEX, "... about z = 100");
+var rv121 = _ray(_fd(5, 10), _fd(12, 10), Z, Z, Z, ONE, ONE);
+r = grin_ball_trace(plb, rv121, Z, _fd(13, 10), ONE, _fd(1, 100), 100000, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "tangent start on the sphere (b = 0): a miss");
+r = grin_trace_to_sphere(pfe, _ray(Z, _fd(1, 10), Z, Z, Z, Z, ONE), Z, ONE, _fd(1, 10), 100, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "sphere trace, zero direction");
+r = grin_trace_to_sphere(pfe, _ray(Z, _fd(1, 10), Z, Z, NAN, ONE, ONE), Z, ONE, _fd(1, 10), 100, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "sphere trace, NaN direction component");
+r = grin_trace_to_plane(psf, _ray(Z, _fd(1, 10), Z, Z, Z, ONE, ONE), Z, _fd(1, 10), 0, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "max_steps 0, even on the plane");
+var rv122 = _ray(Z, Z, Z, 0x7FE55C576D815726, Z, 0x7FE55C576D815726, ONE);
+r = grin_trace_to_plane(phom, rv122, ONE, _fd(1, 10), 1000, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "direction (1.2e308, 0, 1.2e308): finite, traced");
+# The snap, pinned where it matters: at step 0.01 this landing is 1 ulp off z = 2
+# without it; and sphere exits lie exactly on the unit sphere (bit-exact pin of
+# the rescale).
+var rv123 = _ray(Z, Z, _fd(0 - 1, 2), Z, f64_sin(ONE), f64_cos(ONE), ONE);
+r = grin_trace_to_plane(pfe, rv123, F64_TWO, _fd(1, 100), 100000, &opl, &e);
+if (r != 0) { assert_eq(_pz(r), F64_TWO, "ends exactly on z = 2 at step 0.01"); }
+var kb = 0;
+while (kb < 10) {
+    var rkb = _ray(Z, ONE, Z, _fd(1, 10), f64_neg(f64_cos(_fd(kb, 10))), f64_sin(_fd(kb, 10)), ONE);
+    r = grin_trace_to_sphere(pfe, rkb, Z, ONE, _fd(1, 100), 100000, &opl, &e);
+    if (r != 0) {
+        var pp2 = f64_add(f64_add(f64_mul(_px(r), _px(r)), f64_mul(_py(r), _py(r))), f64_mul(_pz(r), _pz(r)));
+        _assert_near(pp2, ONE, 0x3CB0000000000000, "exit on the unit sphere to an ulp");
+    }
+    kb = kb + 1;
+}
+# Scales whose squares or products leave the normal range are refused.
+assert_eq(grin_selfoc(0x6070000000000000, G5, 0, 0, &e), 0, "selfoc n0 = 2^520");
+assert_eq(grin_selfoc(0x1F70000000000000, G5, 0, 0, &e), 0, "selfoc n0 = 2^-520");
+assert_eq(grin_selfoc(N16, 0x6070000000000000, 0, 0, &e), 0, "selfoc g = 2^520");
+assert_eq(grin_selfoc(_fd(3, 2), 0x5FE7DDDF6B095FF1, 0, 0, &e), 0, "selfoc n0 g past 1.3e154 (g = 1e154)");
+assert_eq(grin_sech(_fd(3, 2), 0x5FE7DDDF6B095FF1, &e), 0, "sech n0 g past 1.3e154");
+assert_eq(grin_sech(N16, 0x1F70000000000000, &e), 0, "sech g = 2^-520");
+assert_eq(grin_luneburg(ONE, 0x6070000000000000, Z, &e), 0, "luneburg R = 2^520");
+assert_eq(grin_maxwell_fisheye(ONE, 0x1F70000000000000, Z, &e), 0, "fisheye R = 2^-520");
+assert_eq(grin_maxwell_fisheye(_fd(3, 2), 0x2000000000000000, Z, &e), 0, "fisheye 2 (n0/R)^2 overflows (R = 2^-511)");
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "... invalid parameter");
+r = grin_trace_to_sphere(plu, _ray(Z, Z, Z, Z, Z, ONE, ONE), Z, 0x1F70000000000000, _fd(1, 10), 100, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "trace_to_sphere R = 2^-520");
+var rv124 = _ray(Z, Z, 0xE070000000000000, Z, Z, ONE, ONE);
+r = grin_ball_trace(phom, rv124, Z, 0x6070000000000000, ONE, _fd(1, 10), 100, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "ball R = 2^520");
+var rv125 = _ray(Z, _fd(1, 10), f64_neg(ONE), Z, Z, ONE, 0x1F70000000000000);
+r = grin_rod_trace(psf, rv125, Z, ONE, INF, ONE, _fd(1, 10), 100, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "rod ray index 2^-520");
+var rv126 = _ray(Z, _fd(1, 10), f64_neg(ONE), Z, Z, ONE, ONE);
+r = grin_rod_trace(psf, rv126, Z, ONE, INF, 0x6070000000000000, _fd(1, 10), 100, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "rod n_after 2^520");
+var rv127 = _ray(Z, _fd(1, 10), f64_from(0 - 2), Z, Z, ONE, 0x6070000000000000);
+r = grin_ball_trace(plu, rv127, Z, ONE, ONE, _fd(1, 10), 100, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "ball ray index 2^520");
+var rv128 = _ray(Z, _fd(1, 10), f64_from(0 - 2), Z, Z, ONE, ONE);
+r = grin_ball_trace(plu, rv128, Z, ONE, 0x6070000000000000, _fd(1, 10), 100, &opl, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "ball n_after 2^520");
+# grin_selfoc_abcd: no phase past 2^53, and its other refusals.
+assert_eq(grin_selfoc_abcd(_fd(3, 2), ONE, 0x43D0000000000000, ONE, abcd), PK_ERR_INVALID_PARAMETER, "abcd g L = 2^62");
+assert_eq(grin_selfoc_abcd(_fd(3, 2), ONE, 0x4340000000000000, ONE, abcd), PK_ERR_INVALID_PARAMETER, "abcd g L = 2^53");
+assert_eq(grin_selfoc_abcd(_fd(3, 2), ONE, 0x430C6BF526340000, ONE, abcd), PK_ERR_NONE, "abcd g L = 1e15: a phase");
+_s = grin_selfoc_abcd(0x6070000000000000, 0x6070000000000000, 0x1F70000000000000, ONE, abcd);
+assert_eq(_s, PK_ERR_INVALID_PARAMETER, "abcd n0 g overflows");
+assert_eq(grin_selfoc_abcd(N16, f64_neg(G5), ONE, ONE, abcd), PK_ERR_INVALID_PARAMETER, "abcd g < 0");
+assert_eq(grin_selfoc_abcd(0x1EB67E9C127B6E74, 0x1EB67E9C127B6E74, ONE, ONE, abcd), PK_ERR_INVALID_PARAMETER,
+  "abcd n0 g subnormal (1e-160 squared)");
+
+# ── Errors ────────
+test_group("grin_errors");
+
+e = PK_ERR_NONE;
+assert_eq(grin_selfoc(0, G5, 0, 0, &e), 0, "selfoc n0 = 0");
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "selfoc n0 = 0: invalid parameter");
+assert_eq(grin_selfoc(N16, NAN, 0, 0, &e), 0, "selfoc g NaN");
+assert_eq(grin_selfoc(N16, INF, 0, 0, &e), 0, "selfoc g inf");
+assert_eq(grin_selfoc(N16, G5, INF, 0, &e), 0, "selfoc h4 inf");
+assert_eq(grin_selfoc(N16, G5, 0, NAN, &e), 0, "selfoc h6 NaN");
+assert_eq(grin_sech(N16, f64_neg(G5), &e), 0, "sech g < 0");
+assert_eq(grin_polynomial(N16, 0, 0, 0, 0, 0, INF, &e), 0, "polynomial nz3 inf");
+assert_eq(grin_polynomial(NAN, 0, 0, 0, 0, 0, 0, &e), 0, "polynomial n0 NaN");
+assert_eq(grin_luneburg(ONE, 0, Z, &e), 0, "luneburg R = 0");
+assert_eq(grin_luneburg(ONE, ONE, NAN, &e), 0, "luneburg cz NaN");
+assert_eq(grin_maxwell_fisheye(ONE, f64_neg(ONE), Z, &e), 0, "fisheye R < 0");
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "... invalid parameter");
+var rz = _ray(Z, _fd(1, 10), Z, Z, Z, ONE, ONE);
+opl = ONE;
+assert_eq(grin_trace_to_plane(0, rz, ONE, _fd(1, 10), 100, &opl, &e), 0, "trace: null profile");
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "trace: null profile: invalid parameter");
+assert_eq(opl, 0, "a refusal writes optical path 0");
+assert_eq(grin_trace_to_plane(psf, 0, ONE, _fd(1, 10), 100, &opl, &e), 0, "trace: null ray");
+assert_eq(grin_trace_to_plane(psf, rz, NAN, _fd(1, 10), 100, &opl, &e), 0, "trace: z_end NaN");
+assert_eq(grin_trace_to_plane(psf, rz, ONE, 0, 100, &opl, &e), 0, "trace: step 0");
+assert_eq(grin_trace_to_plane(psf, rz, ONE, INF, 100, &opl, &e), 0, "trace: step inf");
+assert_eq(grin_trace_to_plane(psf, rz, ONE, _fd(1, 10), 0, &opl, &e), 0, "trace: max_steps 0");
+assert_eq(grin_trace_to_plane(psf, _ray(Z, Z, Z, Z, Z, Z, ONE), ONE, _fd(1, 10), 100, &opl, &e), 0, "trace: zero dir");
+var rnan = _ray(NAN, Z, Z, Z, Z, ONE, ONE);
+assert_eq(grin_trace_to_plane(psf, rnan, ONE, _fd(1, 10), 100, &opl, &e), 0, "trace: NaN pos");
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "... invalid parameter");
+assert_eq(grin_trace_to_plane(psf, _ray(f64_from(3), Z, Z, Z, Z, ONE, ONE), ONE, _fd(1, 10), 100, &opl, &e), 0,
+  "trace: start outside the index's domain");
+assert_eq(e, PK_ERR_INVALID_INDEX, "... invalid index");
+assert_eq(grin_trace_to_plane(psf, rz, f64_from(100), _fd(1, 10), 10, &opl, &e), 0, "trace: budget too small");
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "budget exhausted heading to the plane: invalid parameter");
+r = grin_trace_to_plane(psf, rz, Z, _fd(1, 10), 10, &opl, &e);
+assert_eq(e, PK_ERR_NONE, "trace to its own plane: ok");
+assert_eq(opl, 0, "... zero path");
+assert_eq(_py(r), _fd(1, 10), "... where it started");
+# Backwards: a ray heading -z to a plane behind it.
+r = grin_trace_to_plane(psf, _ray(Z, _fd(1, 10), Z, Z, Z, f64_neg(ONE), ONE), f64_from(0 - 7), _fd(1, 80), 100000, &opl,
+  &e);
+_sf_exact(N16, G5, Z, _fd(1, 10), Z, Z, ONE, f64_from(7), &ex);
+_assert_near(_py(r), load64(&ex + 8), T11, "tracing toward -z mirrors tracing toward +z");
+assert_eq(grin_trace_to_sphere(plu, _ray(Z, Z, f64_from(0 - 2), Z, Z, ONE, ONE), Z, ONE, _fd(1, 10), 100, &opl, &e), 0,
+  "trace_to_sphere from outside");
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "... invalid parameter");
+assert_eq(grin_trace_to_sphere(plu, rz, Z, 0, _fd(1, 10), 100, &opl, &e), 0, "trace_to_sphere radius 0");
+assert_eq(grin_trace_to_sphere(pfe, _ray(Z, Z, F64_TWO, Z, Z, f64_neg(ONE), ONE), Z, ONE, _fd(1, 10), 100, &opl, &e), 0,
+  "trace_to_sphere from outside, where the law has an index");
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "... invalid parameter");
+var rmiss = _ray(Z, F64_TWO, f64_from(0 - 2), Z, Z, ONE, ONE);
+assert_eq(grin_ball_trace(plu, rmiss, Z, ONE, ONE, _fd(1, 10), 100, &opl, &e), 0, "ball: a ray that misses");
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "... invalid parameter");
+assert_eq(grin_ball_trace(plu, _ray(Z, Z, f64_from(0 - 2), Z, Z, f64_neg(ONE), ONE), Z, ONE, ONE, _fd(1, 10), 100, &opl,
+    &e), 0, "ball: a ray heading away");
+assert_eq(grin_ball_trace(plu, _ray(Z, Z, Z, Z, Z, ONE, ONE), Z, ONE, ONE, _fd(1, 10), 100, &opl, &e), 0,
+  "ball: a ray starting inside");
+assert_eq(grin_ball_trace(plu, rz, Z, ONE, 0, _fd(1, 10), 100, &opl, &e), 0, "ball: n_after 0");
+assert_eq(grin_rod_trace(psf, _ray(Z, Z, ONE, Z, Z, ONE, ONE), Z, ONE, INF, ONE, _fd(1, 10), 100, &opl, &e), 0,
+  "rod: a ray starting past the front face");
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "... invalid parameter");
+assert_eq(grin_rod_trace(psf, _ray(Z, Z, f64_neg(ONE), Z, ONE, Z, ONE), Z, ONE, INF, ONE, _fd(1, 10), 100, &opl, &e), 0,
+  "rod: a ray not heading +z");
+assert_eq(grin_rod_trace(psf, rz, Z, 0, INF, ONE, _fd(1, 10), 100, &opl, &e), 0, "rod: length 0");
+assert_eq(grin_rod_trace(psf, rz, Z, ONE, INF, NAN, _fd(1, 10), 100, &opl, &e), 0, "rod: n_after NaN");
+assert_eq(grin_rod_trace(psf, _ray(Z, Z, f64_neg(ONE), Z, Z, ONE, 0), Z, ONE, INF, ONE, _fd(1, 10), 100, &opl, &e), 0,
+  "rod: ray index 0");
+r = grin_trace_to_plane(psf, rz, ONE, _fd(1, 10), 100, 0, &e);
+assert_eq(e, PK_ERR_NONE, "opl_out may be 0");
+assert_eq(grin_selfoc_pitch(0), NAN, "pitch g = 0: NaN");
+assert_eq(grin_selfoc_pitch(INF), NAN, "pitch g inf: NaN");
+assert_eq(grin_selfoc_abcd(N16, G5, ONE, ONE, 0), PK_ERR_INVALID_PARAMETER, "abcd null out");
+assert_eq(grin_selfoc_abcd(N16, G5, NAN, ONE, abcd), PK_ERR_INVALID_PARAMETER, "abcd length NaN");
+assert_eq(grin_selfoc_abcd(N16, 0, ONE, ONE, abcd), PK_ERR_INVALID_PARAMETER, "abcd g 0");
+assert_eq(grin_selfoc_abcd(N16, G5, ONE, 0, abcd), PK_ERR_INVALID_PARAMETER, "abcd n_ext 0");
+
+var rr = assert_summary();
