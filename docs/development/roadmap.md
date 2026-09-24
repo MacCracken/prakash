@@ -30,13 +30,13 @@ Rust→Cyrius port and the 2.2–2.5 correctness audits pushed back, plus the ga
 films, fiber dispersion) and the 3×3 polarization ray tracing that document marked
 implemented but that was never built. 2.6.0 shipped the first of them — Gaussian
 beams, HG/LG modes, M² and OAM — 2.6.1 made it fast and 2.6.2 closed its edge cases;
-2.7.0 shipped wavefront coefficients and the aberrated OTF, 2.8.0 GRIN ray tracing, and
-2.9.0 diffractive optics; see `CHANGELOG.md`.
+2.7.0 shipped wavefront coefficients and the aberrated OTF, 2.8.0 GRIN ray tracing,
+2.9.0 diffractive optics, and 2.10.0 absorbing thin films and fiber dispersion; see
+`CHANGELOG.md`.
 
 | Version | Release | Roadmap items it closes |
 |---|---|---|
-| **2.10.0** | Absorbing films + fiber dispersion | audit gaps: complex-index TMM, fiber dispersion |
-| 2.11.0 | 3×3 polarization ray tracing | audit gap: the PRT matrix never built |
+| **2.11.0** | 3×3 polarization ray tracing | audit gap: the PRT matrix never built |
 | 2.12.0 | Vectorial focusing | Richards-Wolf |
 | 2.13.0 | Fifth-order aberrations | Buchdahl |
 | 2.14.0 | Fluorescence | Stokes shift, excitation/emission |
@@ -52,14 +52,6 @@ Fixes found along the way ship as patches (2.6.1, …) of whichever minor is cur
 ⚠ **Keep rows SHORT.** A row says what the release delivers and what it will be
 pinned against. Measurements belong in `CHANGELOG.md`; a row that grows past ~8
 lines has started duplicating the release history and should be cut back.
-
-### 2.10.0 — Absorbing thin films and fiber dispersion
-
-A complex-index transfer-matrix entry point taking (n, k, d) per layer — the
-current buffer is (n, d) at a 16-byte stride, so this is a new function, not a
-layout change. Fiber chromatic dispersion: material D = −(λ/c)·d²n/dλ² from the
-Sellmeier presets plus step-index waveguide dispersion; fused silica's zero near
-1.27 µm is the pin.
 
 ### 2.11.0 — 3×3 polarization ray tracing
 

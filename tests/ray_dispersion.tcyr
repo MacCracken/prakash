@@ -280,4 +280,78 @@ assert(_between(lateral_chromatic_aberration(f64_from(10), v), Z, F64_ONE), "TCA
 _assert_near(secondary_spectrum(f64_from(100), Z, f64_from(64)), Z, TOL6, "zero dP -> zero secondary spectrum");
 assert(f64_gt(secondary_spectrum(f64_from(100), _fd(1, 100), f64_from(64)), Z), "positive dP -> positive secondary");
 
+# ── Sellmeier derivatives and group index (2.10.0) ────────
+test_group("sellmeier_derivatives");
+
+# Pinned against mpmath at 50 digits (numerical differentiation of the SAME
+# Sellmeier formula, with the coefficients and wavelengths as the doubles the
+# library holds) — an independent evaluation of the derivatives, not the analytic
+# expression they are computed from.
+fn _rel(a, b) { return f64_div(f64_abs(f64_sub(a, b)), f64_abs(b)); }
+fn _assert_rel(a, b, rtol, msg) { assert(f64_le(_rel(a, b), rtol), msg); }
+fn _isnan(x) { return f64_eq(x, x) == 0; }
+var R13 = _fd(1, 10000000000000);   # 1e-13
+var fsd = sellmeier_fused_silica();
+var bkd = sellmeier_bk7();
+var dia = sellmeier_diamond();
+_assert_rel(sellmeier_dn_dlambda(fsd, _fd(5, 10)), 0xBFAC57AB86E57A01, R13, "silica dn/dl at 0.5 um");
+_assert_rel(sellmeier_d2n_dlambda2(fsd, _fd(5, 10)), 0x3FD4AC33B3B86D4F, R13, "silica d2n/dl2 at 0.5 um");
+_assert_rel(sellmeier_group_index(fsd, _fd(5, 10)), 0x3FF7D70F235BAA19, R13, "silica N_g at 0.5 um");
+_assert_rel(sellmeier_dn_dlambda(fsd, F64_ONE), 0xBF89D954B4220D21, R13, "silica dn/dl at 1 um");
+_assert_rel(sellmeier_d2n_dlambda2(fsd, F64_ONE), 0x3F88783D9BD2BDDD, R13, "silica d2n/dl2 at 1 um");
+_assert_rel(sellmeier_dn_dlambda(fsd, _fd(155, 100)), 0xBF888A46D0BC8D5F, R13, "silica dn/dl at 1.55 um");
+_assert_rel(sellmeier_d2n_dlambda2(fsd, _fd(155, 100)), 0xBF715BED7B11B3C3, R13,
+  "silica d2n/dl2 at 1.55 um (negative: past the zero)");
+_assert_rel(sellmeier_group_index(fsd, _fd(155, 100)), 0x3FF766CB92173C16, R13, "silica N_g at 1.55 um = 1.46243");
+_assert_rel(sellmeier_d2n_dlambda2(fsd, _fd(131, 100)), 0xBF4ADC1C1237983F, _fd(1, 100000000000),
+  "silica d2n/dl2 at 1.31 um (small)");
+_assert_rel(sellmeier_dn_dlambda(bkd, _fd(58756, 100000)), 0xBFA566C8395E21A2, R13, "BK7 dn/dl at the d line");
+_assert_rel(sellmeier_d2n_dlambda2(bkd, _fd(58756, 100000)), 0x3FC9144FE7C31B13, R13, "BK7 d2n/dl2 at the d line");
+_assert_rel(sellmeier_group_index(bkd, _fd(58756, 100000)), 0x3FF8A96919013E94, R13, "BK7 N_g at the d line");
+_assert_rel(sellmeier_group_index(bkd, _fd(155, 100)), 0x3FF85236ADBB61D2, R13, "BK7 N_g at 1.55 um");
+_assert_rel(sellmeier_dn_dlambda(dia, _fd(58756, 100000)), 0xBFC0C4B322B28CCC, R13, "diamond dn/dl at the d line");
+_assert_rel(sellmeier_d2n_dlambda2(dia, _fd(58756, 100000)), 0x3FE67B71450B4FC4, R13, "diamond d2n/dl2 at the d line");
+# Diamond's third term is a placeholder (b3 = 0, c3 = 1): it contributes nothing
+# and must not turn 1 um into a pole.
+_assert_rel(sellmeier_dn_dlambda(dia, F64_ONE), 0xBF99EF1B0672B151, R13,
+  "diamond dn/dl at 1 um: the (0, 1) term is not a pole");
+_assert_rel(sellmeier_group_index(dia, F64_ONE), 0x40035880A9A0CFEA, R13, "diamond N_g at 1 um");
+
+# The analytic derivative against the library's own index: central differences
+# of sellmeier_n_at at h = 1e-4 um (truncation ~1e-9 relative, rounding ~1e-12).
+var hl = _fd(1, 10000);
+var l0 = _fd(8, 10);
+var np8 = sellmeier_n_at(fsd, f64_add(l0, hl));
+var nm8 = sellmeier_n_at(fsd, f64_sub(l0, hl));
+var fdiff = f64_div(f64_sub(np8, nm8), f64_add(hl, hl));
+_assert_rel(sellmeier_dn_dlambda(fsd, l0), fdiff, _fd(1, 10000000), "dn/dl agrees with a difference of sellmeier_n_at");
+var fdiff2 = f64_div(f64_add(f64_sub(np8, f64_mul(F64_TWO, sellmeier_n_at(fsd, l0))), nm8), f64_mul(hl, hl));
+_assert_rel(sellmeier_d2n_dlambda2(fsd, l0), fdiff2, _fd(1, 100000), "d2n/dl2 agrees with a second difference");
+# N_g > n in normal dispersion.
+assert(f64_gt(sellmeier_group_index(fsd, l0), sellmeier_n_at(fsd, l0)),
+  "group index exceeds phase index (normal dispersion)");
+
+# Refusals: NaN, never a number, on inputs with no derivative.
+assert(_isnan(sellmeier_dn_dlambda(0, F64_ONE)), "null set -> NaN");
+assert(_isnan(sellmeier_d2n_dlambda2(fsd, Z)), "zero wavelength -> NaN");
+assert(_isnan(sellmeier_group_index(fsd, f64_neg(F64_ONE))), "negative wavelength -> NaN");
+assert(_isnan(sellmeier_dn_dlambda(fsd, 0x7FF0000000000000)), "infinite wavelength -> NaN");
+assert(_isnan(sellmeier_dn_dlambda(fsd, 0x7FF8000000000000)), "NaN wavelength -> NaN");
+# Water's IR resonance puts n^2 < 1 near 3.1 um, where sellmeier_n_at clamps to 1.
+var wat = sellmeier_water();
+assert_eq(sellmeier_n_at(wat, _fd(31, 10)), F64_ONE, "water at 3.1 um is in the clamped region");
+assert(_isnan(sellmeier_dn_dlambda(wat, _fd(31, 10))), "no derivative of a clamped index");
+assert(_isnan(sellmeier_d2n_dlambda2(wat, _fd(31, 10))), "no second derivative of a clamped index");
+# A real pole: lambda^2 = c exactly, for a term whose b is nonzero.
+var pole = _sellmeier_mk(F64_ONE, _fd(1, 4), Z, F64_ONE, Z, F64_ONE);
+assert(_isnan(sellmeier_dn_dlambda(pole, F64_HALF)), "on a resonance -> NaN");
+
+# Round 1: the pole guard is a BAND (|l^2 - C| <= 1e-15), not a point — one ulp
+# above l^2 = C an unguarded term returns 2e23. And the n^2 < 1 test is on chi = n^2 - 1
+# itself: at 5e-10 um silica's first term is below half an ulp of 1.
+assert(_isnan(sellmeier_dn_dlambda(pole, 0x3FE0000000000001)), "one ulp above a resonance -> NaN");
+assert(_isnan(sellmeier_d2n_dlambda2(pole, 0x3FE0000000000001)), "one ulp above a resonance -> NaN (d2n)");
+assert(_isnan(sellmeier_group_index(fsd, 0x3E012E0BE826D695)), "silica at 5e-10 um (n^2 < 1 by an ulp) -> NaN");
+assert(_isnan(sellmeier_d2n_dlambda2(fsd, 0x3E012E0BE826D695)), "silica at 5e-10 um -> NaN (d2n)");
+
 var r = assert_summary();

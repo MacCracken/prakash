@@ -2,6 +2,80 @@
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-09-23 — absorbing thin films and fiber dispersion
+
+Closes the 2.10.0 roadmap row and the last two gaps that
+`docs/research/physics-completeness-audit.md` recorded as open:
+- a complex-index transfer matrix for absorbing layers and substrates;
+- fiber chromatic dispersion: material, waveguide and total. The pin is fused
+  silica's zero at 1.2727539 µm.
+
+Suite **9161 → @TOTAL@ assertions across 35 suites**, 0 failed; `cyrius audit`
+exits 0; `#must_use` 491 → **@MU@**, 0 lost. Benchmarks 159 → **166**.
+
+### Added — absorbing multilayers (`wave_diffraction`)
+- **`multilayer_rta`** returns R, T and A for s and p, and their means, into an
+  `AbsorbingFilmResult` the caller owns. It is safe to reuse one buffer across a
+  spectral sweep; the allocator never frees.
+- **Layers** are (n, k, d) triples at a 24-byte stride, with ñ = n + ik. This is a
+  new entry point: `multilayer_rt`'s (n, d) buffer could not admit k.
+- **Substrate:** it may absorb, and T is then the flux crossing into it, following
+  Macleod's and Byrnes' convention. A is what the layers absorb.
+- **Method:** Abelès characteristic matrices on the admittance vector. Because
+  cos δ and sin δ/q are even in q, layers need no propagating/evanescent branch and
+  have no grazing singularity. Each layer is scaled by e^{−|Im δ|} and the vector
+  rescaled by exact powers of 2²⁵⁶, so opaque layers underflow T to 0 instead of
+  overflowing. 10 µm of gold transmits 1.87e−249, 1 mm transmits 0, and an
+  800-layer mirror transmits 8.7e−178.
+- **Refusals:** a coherent layer phase past 2⁴² rad, an absorbing incident medium,
+  gain (k < 0), and |θ| ≥ π/2.
+
+### Added — dispersion and fibers (`ray_dispersion`, `ray_fiber`)
+- **`sellmeier_dn_dlambda`, `sellmeier_d2n_dlambda2`, `sellmeier_group_index`:**
+  analytic, and NaN at a resonance or in the n² < 1 region that `sellmeier_n_at`
+  clamps.
+- **`fiber_material_dispersion`:** D = −(λ/c) n″ in ps/(nm·km). Fused silica is
+  +21.912 at 1.55 µm.
+- **`fiber_lp01_b`:** b(V) of the LP01 mode, from the exact weak-guidance
+  eigenvalue equation rather than the Rudolph–Neumann fit.
+- **`fiber_waveguide_factor`:** V d²(Vb)/dV², by implicit differentiation of that
+  equation. It gives 1.34557, 0.462258 and 0.195086 at V = 1, 2 and 2.4, and crosses
+  zero just above V = 3.
+- **`fiber_waveguide_dispersion`:** Gloge's D_w.
+- **`fiber_dispersion`:** total D of a step-index fibre, a Sellmeier cladding plus a
+  constant Δ, through n_eff″. It keeps the cross terms D_m + D_w drops.
+- **`fiber_zero_dispersion_wavelength`:** Illinois false position.
+  - Δ = 0 gives the material zero.
+  - An SMF-like fibre (Δ = 0.36%, a = 4.1 µm) puts it at 1.29680 µm.
+
+@FIXES@
+### Tests
+- **tests/wave_diffraction.tcyr** (@TMMT@ new):
+  - Pinned against an independent 50-digit implementation of the other TMM
+    formalism, Byrnes' interface/propagation matrices. That implementation agrees
+    with Byrnes' published `tmm` package to 8e−16.
+  - Cases: bare and 20 nm gold, a-Si-like film, a 5-layer mixed stack, an oxide
+    on silicon, a thick weak absorber, k = 1e−9, Kretschmann SPR (the R_p dip at
+    42.806°), opaque gold and a 400-pair mirror.
+  - Cross-checks: pinned against `multilayer_rt` for lossless stacks, including
+    frustrated TIR, and against `fresnel_*_complex` for bare substrates.
+  - Invariants: zero thickness and ±θ bit for bit, unit scaling, a layer and a
+    substrate at exactly critical, every refusal, and the 2⁴² guard from both
+    sides.
+- **tests/ray_fiber.tcyr** (@FIBT@ new):
+  - Material D, the silica and BK7 zeros, b(V) and V(Vb)″ at nine V, Gloge D_w and
+    the total D, all against 45–60-digit mpmath. The references are computed by
+    bisection plus Illinois on mpmath's own J and K, and by numerical
+    differentiation of that root, not by the library's implicit formulas.
+  - The literature fits within their quoted accuracy, the D_m + D_w split, and the
+    refusals.
+- **tests/ray_dispersion.tcyr** (@DISPT@ new): the Sellmeier derivatives and
+  group index for silica, BK7 and diamond, against mpmath differentiation and
+  against differences of `sellmeier_n_at`, plus the NaN refusals.
+
+### Performance (new benchmarks)
+@PERF@
+
 ## [2.9.0] - 2026-09-23 — diffractive optics
 
 Closes the 2.9.0 roadmap row: blazed-grating and multilevel-kinoform scalar

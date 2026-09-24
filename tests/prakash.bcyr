@@ -594,6 +594,32 @@ fn b_doe_kogelnik() { var r = hologram_efficiency(_doe_g, _bf(3, 100), _bf(532, 
 var _doe_gr = 0;
 # Kogelnik: an unslanted reflection hologram detuned inside its band, TM (the sinh branch).
 fn b_doe_kogelnik_refl() { var r = hologram_efficiency(_doe_gr, 0, _bf(601, 1000), 1, _err); return 0; }
+# ── Absorbing films + fiber dispersion (2.10.0) ────────
+var _rta_l3 = 0;
+var _rta_au = 0;
+var _rta_out = 0;
+var _fs = 0;
+# The complex-index TMM on multilayer_rt's own 3-layer stack (k = 0): the price of
+# the complex path, like for like.
+fn b_multilayer_rta_3() { var r = multilayer_rta(_wl_nm, _ang, _n1, _ns, 0, _rta_l3, 3, _rta_out); return 0; }
+# 20 nm of gold on glass at 45 deg.
+fn b_multilayer_rta_gold() {
+    var r = multilayer_rta(_wl_nm, _bf(7853981633974483, 10000000000000000), _n1, _ns, 0, _rta_au, 1, _rta_out);
+    return 0;
+}
+# Analytic group index of fused silica at 1.55 um.
+fn b_sellmeier_group_index() { var r = sellmeier_group_index(_fs, _bf(155, 100)); return 0; }
+# Material dispersion D of fused silica at 1.55 um.
+fn b_fiber_material_dispersion() { var r = fiber_material_dispersion(_fs, _bf(155, 100)); return 0; }
+# The LP01 eigenvalue b at V = 2 (s-branch solve).
+fn b_fiber_lp01_b() { var r = fiber_lp01_b(F64_TWO, _err); return 0; }
+# Total dispersion of an SMF-like step-index fibre at 1.55 um (mode solve + chain rule).
+fn b_fiber_dispersion() { var r = fiber_dispersion(_fs, _bf(36, 10000), _bf(41, 10), _bf(155, 100), _err); return 0; }
+# Fused silica's material zero-dispersion wavelength (Illinois over [1, 2] um).
+fn b_fiber_zero_material() {
+    var r = fiber_zero_dispersion_wavelength(_fs, 0, F64_ONE, F64_ONE, F64_TWO, _err);
+    return 0;
+}
 # ISO 11146 second-moment radius of a 256-sample profile (two passes).
 fn b_second_moment_256() { var r = beam_second_moment_radius(_gb_prof, 256, 0, _bf(1, 100), _err); return 0; }
 
@@ -777,6 +803,18 @@ fn main() {
     store64(_doe_dm + 16, 0x3FDEAD29F2BF25D9);
     _doe_g = volume_grating_new(_bf(152, 100), _bf(12, 1000), f64_from(30), _bf(8, 10), _bf(12, 10), _err);
     _doe_gr = volume_grating_new(_bf(3, 2), _bf(1, 100), f64_from(20), _bf(2, 10), 0, _err);
+    _rta_l3 = alloc(3 * 24);
+    for (var li = 0; li < 3; li = li + 1) {
+        store64(_rta_l3 + li * 24, load64(_layers + li * 16));
+        store64(_rta_l3 + li * 24 + 8, 0);
+        store64(_rta_l3 + li * 24 + 16, load64(_layers + li * 16 + 8));
+    }
+    _rta_au = alloc(24);
+    store64(_rta_au, _bf(43, 100));
+    store64(_rta_au + 8, _bf(246, 100));
+    store64(_rta_au + 16, f64_from(20));
+    _rta_out = alloc(sizeof(AbsorbingFilmResult));
+    _fs = sellmeier_fused_silica();
     _gb_prof = alloc(256 * 8);
     for (var gi = 0; gi < 256; gi = gi + 1) {
         var gx = f64_mul(_bf(1, 100), f64_from(gi - 128));
@@ -960,6 +998,13 @@ fn main() {
     bench("doe/dammann_order", &b_doe_dammann, 1000000);
     bench("doe/kogelnik_efficiency", &b_doe_kogelnik, 1000000);
     bench("doe/kogelnik_reflection", &b_doe_kogelnik_refl, 1000000);
+    bench("film/multilayer_rta_3", &b_multilayer_rta_3, 100000);
+    bench("film/multilayer_rta_gold", &b_multilayer_rta_gold, 200000);
+    bench("fiber/sellmeier_group_index", &b_sellmeier_group_index, 1000000);
+    bench("fiber/material_dispersion", &b_fiber_material_dispersion, 1000000);
+    bench("fiber/lp01_b", &b_fiber_lp01_b, 100000);
+    bench("fiber/dispersion_smf", &b_fiber_dispersion, 100000);
+    bench("fiber/zero_dispersion_material", &b_fiber_zero_material, 20000);
     return 0;
 }
 

@@ -2,6 +2,8 @@
 # from rust-old/src/wave/diffraction.rs (inline #[cfg(test)] mod).
 
 include "src/error.cyr"
+include "src/ray_core.cyr"
+include "src/ray_fresnel.cyr"
 include "src/wave_core.cyr"
 include "src/wave_diffraction.cyr"
 
@@ -389,5 +391,429 @@ assert(f64_le(ThinFilmResult_t_avg(_g100), F64_ONE), "t_avg <= 1");
 # And the thickness dependence the old p-polarisation path lost entirely.
 assert(f64_gt(f64_abs(f64_sub(ThinFilmResult_r_p(_g100), ThinFilmResult_r_p(_g300))), _fd(1, 100)),
   "r_p depends on gap thickness (it was bit-identical across thicknesses)");
+
+# ── Absorbing multilayers: complex-index TMM (2.10.0) ────────
+# Every value pin below is from an INDEPENDENT 50-digit implementation of the
+# other TMM formalism — Byrnes' interface/propagation matrices (arXiv:1603.02720)
+# in mpmath, not the characteristic-matrix/admittance form multilayer_rta uses —
+# which in turn agrees with Byrnes' published `tmm` 0.2.0 package to 8e-16.
+test_group("multilayer_rta");
+
+fn _rel(a, b) { return f64_div(f64_abs(f64_sub(a, b)), f64_abs(b)); }
+fn _assert_rel(a, b, rtol, msg) { assert(f64_le(_rel(a, b), rtol), msg); }
+fn _deg(d) { return f64_div(f64_mul(F64_PI, d), f64_from(180)); }
+var R13 = _fd(1, 10000000000000);   # 1e-13
+var AF = alloc(sizeof(AbsorbingFilmResult));
+fn _rta(lam, th, n0, ns, ks, lay, nl) {
+    return multilayer_rta(lam, th, n0, ns, ks, lay, nl, AF);
+}
+fn _lay1(n, k, d) {
+    var l = alloc(24);
+    store64(l, n);
+    store64(l + 8, k);
+    store64(l + 16, d);
+    return l;
+}
+fn _pin6(tag, rs, ts, as, rp, tp, ap) {
+    _assert_rel(AbsorbingFilmResult_r_s(AF), rs, R13, tag);
+    _assert_rel(AbsorbingFilmResult_t_s(AF), ts, R13, tag);
+    _assert_rel(AbsorbingFilmResult_a_s(AF), as, R13, tag);
+    _assert_rel(AbsorbingFilmResult_r_p(AF), rp, R13, tag);
+    _assert_rel(AbsorbingFilmResult_t_p(AF), tp, R13, tag);
+    _assert_rel(AbsorbingFilmResult_a_p(AF), ap, R13, tag);
+    return 0;
+}
+# R + T + A = 1 for both polarizations, and the averages are the averages.
+fn _energy(tag) {
+    var one_s = f64_add(f64_add(AbsorbingFilmResult_r_s(AF), AbsorbingFilmResult_t_s(AF)), AbsorbingFilmResult_a_s(AF));
+    var one_p = f64_add(f64_add(AbsorbingFilmResult_r_p(AF), AbsorbingFilmResult_t_p(AF)), AbsorbingFilmResult_a_p(AF));
+    _assert_near(one_s, F64_ONE, _fd(1, 100000000000000), tag);
+    _assert_near(one_p, F64_ONE, _fd(1, 100000000000000), tag);
+    var ravg = f64_mul(F64_HALF, f64_add(AbsorbingFilmResult_r_s(AF), AbsorbingFilmResult_r_p(AF)));
+    assert_eq(AbsorbingFilmResult_r_avg(AF), ravg, tag);
+    var aavg = f64_mul(F64_HALF, f64_add(AbsorbingFilmResult_a_s(AF), AbsorbingFilmResult_a_p(AF)));
+    assert_eq(AbsorbingFilmResult_a_avg(AF), aavg, tag);
+    var tavg = f64_mul(F64_HALF, f64_add(AbsorbingFilmResult_t_s(AF), AbsorbingFilmResult_t_p(AF)));
+    assert_eq(AbsorbingFilmResult_t_avg(AF), tavg, tag);
+    return 0;
+}
+var AUN = _fd(43, 100);   # gold at 550 nm, the ComplexMedium preset
+var AUK = _fd(246, 100);
+var W550 = f64_from(550);
+
+# Bare gold (no layers): T is the flux INTO the absorbing substrate.
+assert_eq(_rta(W550, Z, F64_ONE, AUN, AUK, 0, 0), PK_ERR_NONE, "bare gold ok");
+_assert_rel(AbsorbingFilmResult_r_s(AF), 0x3FE933B6542318BE, R13, "bare gold R at 0 deg = 0.78756");
+_assert_rel(AbsorbingFilmResult_t_s(AF), 0x3FCB3126AF739D09, R13, "bare gold T at 0 deg = 0.21244");
+_assert_rel(AbsorbingFilmResult_r_p(AF), 0x3FE933B6542318BE, R13, "s = p at normal incidence");
+_energy("bare gold 0 deg");
+assert_eq(_rta(W550, _deg(f64_from(60)), F64_ONE, AUN, AUK, 0, 0), PK_ERR_NONE, "bare gold 60 ok");
+_assert_rel(AbsorbingFilmResult_r_s(AF), 0x3FEC94A953B5ED92, R13, "bare gold R_s at 60 deg");
+_assert_rel(AbsorbingFilmResult_t_s(AF), 0x3FBB5AB56250936D, R13, "bare gold T_s at 60 deg");
+_assert_rel(AbsorbingFilmResult_r_p(AF), 0x3FE5E490DD892132, R13, "bare gold R_p at 60 deg");
+_assert_rel(AbsorbingFilmResult_t_p(AF), 0x3FD436DE44EDBD9C, R13, "bare gold T_p at 60 deg");
+
+# 20 nm gold on glass, the semitransparent-mirror case.
+var lau = _lay1(AUN, AUK, f64_from(20));
+assert_eq(_rta(W550, Z, F64_ONE, N152, Z, lau, 1), PK_ERR_NONE, "gold film ok");
+_pin6("20nm gold on glass, 0 deg", 0x3FD5DC7752E2EE6A, 0x3FDECB870E7ACF31, 0x3FC6B0033D4484CA,
+  0x3FD5DC7752E2EE6A, 0x3FDECB870E7ACF31, 0x3FC6B0033D4484CA);
+_energy("gold film 0 deg");
+assert_eq(_rta(W550, _deg(f64_from(45)), F64_ONE, N152, Z, lau, 1), PK_ERR_NONE, "gold film 45 ok");
+_pin6("20nm gold on glass, 45 deg", 0x3FDD8A1F3681AF5A, 0x3FD8557A081BF842, 0x3FC440CD82C4B0C8,
+  0x3FD141760AB32E87, 0x3FE13BCEC2CF39F3, 0x3FC88DD8DF5CBB23);
+_energy("gold film 45 deg");
+
+# Weakly absorbing high-index film (a-Si-like), 30 deg.
+assert_eq(_rta(f64_from(600), _deg(f64_from(30)), F64_ONE, N152, Z, _lay1(f64_from(4), _fd(1, 10), f64_from(100)), 1),
+  PK_ERR_NONE, "a-Si ok");
+_pin6("100nm n=4+0.1i on glass, 30 deg", 0x3FE3432D00AA253B, 0x3FD271A9BD410D7C, 0x3FBC1FF105AAA039,
+  0x3FDF925028F65316, 0x3FD7F5997C77A5DF, 0x3FC0F02CB5240E16);
+
+# Five layers mixing lossless, weakly and strongly absorbing films, 50 deg.
+var l5 = alloc(120);
+store64(l5, N138);
+store64(l5 + 8, Z);
+store64(l5 + 16, _fd(996, 10));
+store64(l5 + 24, _fd(23, 10));
+store64(l5 + 32, _fd(2, 1000));
+store64(l5 + 40, f64_from(60));
+store64(l5 + 48, AUN);
+store64(l5 + 56, AUK);
+store64(l5 + 64, f64_from(8));
+store64(l5 + 72, _fd(23, 10));
+store64(l5 + 80, Z);
+store64(l5 + 88, _fd(598, 10));
+store64(l5 + 96, _fd(146, 100));
+store64(l5 + 104, Z);
+store64(l5 + 112, _fd(942, 10));
+assert_eq(_rta(W550, _deg(f64_from(50)), F64_ONE, N152, Z, l5, 5), PK_ERR_NONE, "5-layer ok");
+_pin6("5-layer mixed stack, 50 deg", 0x3FC10774E82FA75D, 0x3FEA4B089053873B, 0x3FA731A35A08EED4,
+  0x3FA2F51B2ACE4E4E, 0x3FECB9C902982841, 0x3FB0B72A55D796D1);
+_energy("5-layer");
+
+# Absorbing SUBSTRATE (silicon) under a lossless oxide, 60 deg: the layers absorb
+# nothing, so A = 0 and all of 1 - R crosses into the silicon.
+var lox = _lay1(_fd(146, 100), Z, f64_from(100));
+assert_eq(_rta(W550, _deg(f64_from(60)), F64_ONE, _fd(408, 100), _fd(4, 100), lox, 1),
+  PK_ERR_NONE, "Si substrate ok");
+_assert_rel(AbsorbingFilmResult_r_s(AF), 0x3FB8F59E317ED378, R13, "oxide on Si: R_s");
+_assert_rel(AbsorbingFilmResult_t_s(AF), 0x3FECE14C39D02591, R13, "oxide on Si: T_s into the silicon");
+_assert_rel(AbsorbingFilmResult_r_p(AF), 0x3FC7D55E57D033F3, R13, "oxide on Si: R_p");
+_assert_rel(AbsorbingFilmResult_t_p(AF), 0x3FEA0AA86A0BF303, R13, "oxide on Si: T_p (Re(n~ conj cos) flux)");
+assert(f64_lt(f64_abs(AbsorbingFilmResult_a_s(AF)), _fd(1, 1000000000000000)), "lossless layer: A_s = 0");
+assert(f64_lt(f64_abs(AbsorbingFilmResult_a_p(AF)), _fd(1, 1000000000000000)), "lossless layer: A_p = 0");
+
+# Thick weak absorber: 10 um at 1550 nm, phase ~60 rad.
+assert_eq(_rta(f64_from(1550), _deg(f64_from(10)), F64_ONE, _fd(145, 100), Z,
+    _lay1(_fd(15, 10), _fd(1, 10000), f64_from(10000)), 1), PK_ERR_NONE, "thick weak ok");
+_pin6("10um n=1.5+1e-4i, 10 deg", 0x3FA4F187B0B6594B, 0x3FEE70FB0C6A2B34, 0x3F7FF63C45379BA1,
+  0x3FA34938252E5BC8, 0x3FEE8B498DB9CDAA, 0x3F8008BBFCD3266C);
+
+# A VERY weak absorber, k = 1e-9: A = 1.1e-8. A is a difference of two O(1)
+# fluxes (what enters the stack minus what reaches the substrate), so it is
+# resolved to ~1e-16 of the INCIDENT power, like R and T — here 2.5e-16, i.e.
+# 2e-8 relative. The pin is absolute for that reason, at 1e-15.
+assert_eq(_rta(W550, Z, F64_ONE, N152, Z, _lay1(_fd(15, 10), _fd(1, 1000000000), f64_from(500)), 1),
+  PK_ERR_NONE, "k=1e-9 ok");
+_assert_near(AbsorbingFilmResult_a_s(AF), 0x3E479452755FEDC8, _fd(1, 1000000000000000), "k = 1e-9: A = 1.09800059e-8");
+assert(f64_gt(AbsorbingFilmResult_a_s(AF), Z), "k = 1e-9: A > 0");
+_assert_rel(AbsorbingFilmResult_r_s(AF), 0x3FA4512ABE05FDA8, R13, "k = 1e-9: R");
+_assert_rel(AbsorbingFilmResult_t_s(AF), 0x3FEEBAED4E3A8B88, R13, "k = 1e-9: T");
+
+# Kretschmann surface-plasmon geometry: glass prism (1.515) / 50 nm silver /
+# air at 633 nm. The substrate (air) is past its critical angle, so T = 0
+# EXACTLY and 1 - R is what the silver absorbs; p-polarization couples to the
+# plasmon and its reflectance collapses at 42.806 deg, s does not.
+var lag = _lay1(_fd(562, 10000), _fd(4276, 1000), f64_from(50));
+var W633 = f64_from(633);
+assert_eq(_rta(W633, _deg(f64_from(44)), _fd(1515, 1000), F64_ONE, Z, lag, 1), PK_ERR_NONE, "SPR 44 ok");
+_assert_rel(AbsorbingFilmResult_r_s(AF), 0x3FEF9749ECD9441D, R13, "SPR 44 deg R_s");
+_assert_rel(AbsorbingFilmResult_r_p(AF), 0x3FEE579B313B9B39, R13, "SPR 44 deg R_p");
+_assert_rel(AbsorbingFilmResult_a_p(AF), 0x3FAA864CEC464C74, R13, "SPR 44 deg A_p");
+assert_eq(AbsorbingFilmResult_t_s(AF), Z, "evanescent substrate: T_s = 0 exactly");
+assert_eq(AbsorbingFilmResult_t_p(AF), Z, "evanescent substrate: T_p = 0 exactly");
+var th_spr = 0x3FE7E84EA746A839;   # 42.806125 deg, the R_p minimum (golden section at 40 digits)
+assert_eq(_rta(W633, th_spr, _fd(1515, 1000), F64_ONE, Z, lag, 1), PK_ERR_NONE, "SPR dip ok");
+var rp_dip = AbsorbingFilmResult_r_p(AF);
+_assert_rel(rp_dip, 0x3F9B4980A490F3A7, _fd(1, 1000000000000), "SPR dip R_p = 0.02665");
+_assert_rel(AbsorbingFilmResult_r_s(AF), 0x3FEF948A7255B60F, R13, "s sees no plasmon at the dip: R_s = 0.987");
+var _s1 = _rta(W633, f64_sub(th_spr, _deg(_fd(1, 10))), _fd(1515, 1000), F64_ONE, Z, lag, 1);
+var rp_lo = AbsorbingFilmResult_r_p(AF);
+var _s2 = _rta(W633, f64_add(th_spr, _deg(_fd(1, 10))), _fd(1515, 1000), F64_ONE, Z, lag, 1);
+assert(f64_gt(rp_lo, rp_dip), "R_p rises below the dip");
+assert(f64_gt(AbsorbingFilmResult_r_p(AF), rp_dip), "R_p rises above the dip");
+
+# OPAQUE: a 10 um gold layer transmits 1.87e-249 — the exp(-Im delta) scaling
+# carries it where the unscaled matrix would overflow at e^1124. 1 mm transmits 0
+# exactly, and then R is the bare-gold reflectance.
+assert_eq(_rta(W550, _deg(f64_from(30)), F64_ONE, N152, Z, _lay1(AUN, AUK, f64_from(10000)), 1), PK_ERR_NONE,
+  "10um gold ok");
+_assert_rel(AbsorbingFilmResult_r_s(AF), 0x3FEA1F785CACA5B4, R13, "10 um gold R_s");
+_assert_rel(AbsorbingFilmResult_t_s(AF), 0x0C4ABC771EAF19CD, _fd(1, 1000000000000), "10 um gold T_s = 1.87e-249");
+_assert_rel(AbsorbingFilmResult_t_p(AF), 0x0C5131DE11575A16, _fd(1, 1000000000000), "10 um gold T_p = 2.40e-249");
+_assert_rel(AbsorbingFilmResult_a_p(AF), 0x3FCEFD91F4B509EB, R13, "10 um gold A_p");
+assert_eq(_rta(W550, _deg(f64_from(30)), F64_ONE, N152, Z, _lay1(AUN, AUK, f64_from(1000000)), 1), PK_ERR_NONE,
+  "1mm gold ok");
+assert_eq(AbsorbingFilmResult_t_s(AF), Z, "1 mm of gold: T_s = 0");
+assert_eq(AbsorbingFilmResult_t_p(AF), Z, "1 mm of gold: T_p = 0");
+var rs_thick = AbsorbingFilmResult_r_s(AF);
+var rp_thick = AbsorbingFilmResult_r_p(AF);
+var _g0 = _rta(W550, _deg(f64_from(30)), F64_ONE, AUN, AUK, 0, 0);
+_assert_near(rs_thick, AbsorbingFilmResult_r_s(AF), _fd(1, 1000000000000000),
+  "opaque layer R_s = semi-infinite gold R_s");
+_assert_near(rp_thick, AbsorbingFilmResult_r_p(AF), _fd(1, 1000000000000000),
+  "opaque layer R_p = semi-infinite gold R_p");
+
+# 800 lossless layers: a 400-pair quarter-wave mirror, T = 8.7e-178. The vector
+# grows by ~(2.3/1.38)^400 (its admittance ratio by the 800th power) and passes
+# through the exact 2^256 rescaling.
+var lqw = alloc(800 * 24);
+var iq = 0;
+while (iq < 400) {
+    var bq = lqw + iq * 48;
+    store64(bq, _fd(23, 10));
+    store64(bq + 8, Z);
+    store64(bq + 16, f64_div(W550, f64_mul(f64_from(4), _fd(23, 10))));
+    store64(bq + 24, N138);
+    store64(bq + 32, Z);
+    store64(bq + 40, f64_div(W550, f64_mul(f64_from(4), N138)));
+    iq = iq + 1;
+}
+assert_eq(_rta(W550, Z, F64_ONE, N152, Z, lqw, 800), PK_ERR_NONE, "800 layers ok");
+_assert_rel(AbsorbingFilmResult_t_s(AF), 0x1B2C506EBE385285, _fd(1, 10000000000), "400-pair QW mirror T = 8.73e-178");
+assert_eq(AbsorbingFilmResult_r_s(AF), F64_ONE, "400-pair QW mirror R = 1 to double precision");
+
+# ── Cross-pins against the library's other implementations ────────
+# Lossless layers: multilayer_rta must agree with multilayer_rt (real-index TMM,
+# its own propagating/evanescent branches), including frustrated TIR.
+fn _vs_rt(lam, th, n0, ns, lay16, lay24, nl, tag) {
+    var rt = multilayer_rt(lam, th, n0, ns, lay16, nl);
+    var e = _rta(lam, th, n0, ns, Z, lay24, nl);
+    assert_eq(e, PK_ERR_NONE, tag);
+    _assert_near(AbsorbingFilmResult_r_s(AF), ThinFilmResult_r_s(rt), _fd(1, 10000000000000), tag);
+    _assert_near(AbsorbingFilmResult_r_p(AF), ThinFilmResult_r_p(rt), _fd(1, 10000000000000), tag);
+    _assert_near(AbsorbingFilmResult_t_s(AF), ThinFilmResult_t_s(rt), _fd(1, 10000000000000), tag);
+    _assert_near(AbsorbingFilmResult_t_p(AF), ThinFilmResult_t_p(rt), _fd(1, 10000000000000), tag);
+    return 0;
+}
+var l16 = alloc(48);
+var l24 = alloc(72);
+store64(l16, N138);
+store64(l16 + 8, _fd(996, 10));
+store64(l16 + 16, _fd(23, 10));
+store64(l16 + 24, _fd(598, 10));
+store64(l16 + 32, _fd(146, 100));
+store64(l16 + 40, _fd(942, 10));
+var il = 0;
+while (il < 3) {
+    store64(l24 + il * 24, load64(l16 + il * 16));
+    store64(l24 + il * 24 + 8, Z);
+    store64(l24 + il * 24 + 16, load64(l16 + il * 16 + 8));
+    il = il + 1;
+}
+_vs_rt(f64_from(450), Z, F64_ONE, N152, l16, l24, 3, "vs multilayer_rt: 3 layers, 450 nm, 0 deg");
+_vs_rt(f64_from(450), _deg(f64_from(30)), F64_ONE, N152, l16, l24, 3, "vs multilayer_rt: 30 deg");
+_vs_rt(f64_from(650), _deg(f64_from(70)), F64_ONE, N152, l16, l24, 3, "vs multilayer_rt: 70 deg");
+var g16 = alloc(16);
+store64(g16, F64_ONE);
+store64(g16 + 8, f64_from(100));
+var g24 = _lay1(F64_ONE, Z, f64_from(100));
+_vs_rt(W550, _deg(f64_from(50)), _fd(15, 10), _fd(15, 10), g16, g24, 1, "vs multilayer_rt: frustrated TIR, 100 nm gap");
+# ... and against the independent reference for the same gap class.
+assert_eq(_rta(W550, _deg(f64_from(60)), _fd(15, 10), _fd(15, 10), Z, _lay1(F64_ONE, Z, f64_from(200)), 1), PK_ERR_NONE,
+  "ftir ok");
+_assert_rel(AbsorbingFilmResult_r_s(AF), 0x3FED41AF3018D950, R13, "FTIR 200 nm gap, 60 deg: R_s");
+_assert_rel(AbsorbingFilmResult_t_s(AF), 0x3FB5F2867F393580, R13, "FTIR: T_s");
+_assert_rel(AbsorbingFilmResult_r_p(AF), 0x3FEE9C64CC9AECEE, R13, "FTIR: R_p");
+_assert_rel(AbsorbingFilmResult_t_p(AF), 0x3FA639B33651311D, R13, "FTIR: T_p");
+assert(f64_lt(f64_abs(AbsorbingFilmResult_a_s(AF)), _fd(1, 1000000000000000)), "evanescent but lossless: A_s = 0");
+
+# No layers on an absorbing substrate: ray_fresnel's complex Fresnel equations.
+# (Those carry up to ~1.2e-14 relative error here; multilayer_rta is within an
+# ulp of the 40-digit reference at the same angles, so the tolerance is theirs.)
+var gold = complex_gold_550nm();
+var ia = 0;
+while (ia <= 85) {
+    var tha = _deg(f64_from(ia));
+    var _e = _rta(W550, tha, F64_ONE, AUN, AUK, 0, 0);
+    _assert_near(AbsorbingFilmResult_r_s(AF), fresnel_s_complex(F64_ONE, gold, tha), _fd(5, 100000000000000),
+      "bare gold R_s = fresnel_s_complex");
+    _assert_near(AbsorbingFilmResult_r_p(AF), fresnel_p_complex(F64_ONE, gold, tha), _fd(5, 100000000000000),
+      "bare gold R_p = fresnel_p_complex");
+    ia = ia + 17;
+}
+
+# ── Invariants ────────
+test_group("multilayer_rta invariants");
+# A zero-thickness layer is no layer, bit for bit (delta = 0: the series sinc
+# gives S = 0 and cos(delta) = 1 exactly).
+var _i1 = _rta(W550, _deg(f64_from(40)), F64_ONE, N152, Z, lau, 1);
+var ref_s = AbsorbingFilmResult_r_s(AF);
+var ref_tp = AbsorbingFilmResult_t_p(AF);
+var l2z = alloc(48);
+store64(l2z, AUN);
+store64(l2z + 8, AUK);
+store64(l2z + 16, f64_from(20));
+store64(l2z + 24, f64_from(3));
+store64(l2z + 32, _fd(1, 2));
+store64(l2z + 40, Z);
+var _i2 = _rta(W550, _deg(f64_from(40)), F64_ONE, N152, Z, l2z, 2);
+assert_eq(AbsorbingFilmResult_r_s(AF), ref_s, "zero-thickness layer changes nothing (R_s)");
+assert_eq(AbsorbingFilmResult_t_p(AF), ref_tp, "zero-thickness layer changes nothing (T_p)");
+# The sign of the angle is irrelevant, bit for bit (only beta^2 and cos enter).
+var _i3 = _rta(W550, f64_neg(_deg(f64_from(40))), F64_ONE, N152, Z, lau, 1);
+assert_eq(AbsorbingFilmResult_r_s(AF), ref_s, "angle -> -angle: same R_s");
+assert_eq(AbsorbingFilmResult_t_p(AF), ref_tp, "angle -> -angle: same T_p");
+# Scale invariance: wavelength and thicknesses in um instead of nm.
+var _i4 = _rta(_fd(55, 100), _deg(f64_from(40)), F64_ONE, N152, Z, _lay1(AUN, AUK, _fd(2, 100)), 1);
+_assert_rel(AbsorbingFilmResult_r_s(AF), ref_s, R13, "unit-free: nm and um agree");
+# A layer at EXACTLY its critical angle (q = 0: n = beta) — no branch, no
+# singularity: continuous with its neighbours on both sides.
+var thq = _deg(f64_from(40));
+var bq = f64_mul(_fd(15, 10), _prk_sin(thq));
+var _q0 = _rta(W550, thq, _fd(15, 10), _fd(15, 10), Z, _lay1(bq, Z, f64_from(300)), 1);
+var rq0 = AbsorbingFilmResult_r_p(AF);
+var rq0s = AbsorbingFilmResult_r_s(AF);
+var lq1 = _lay1(f64_mul(bq, _fd(1000000000001, 1000000000000)), Z, f64_from(300));
+var _q1 = _rta(W550, thq, _fd(15, 10), _fd(15, 10), Z, lq1, 1);
+_assert_near(AbsorbingFilmResult_r_p(AF), rq0, _fd(1, 1000000), "q = 0 layer continuous from above (R_p)");
+_assert_near(AbsorbingFilmResult_r_s(AF), rq0s, _fd(1, 1000000), "q = 0 layer continuous from above (R_s)");
+var lq2 = _lay1(f64_mul(bq, _fd(999999999999, 1000000000000)), Z, f64_from(300));
+var _q2 = _rta(W550, thq, _fd(15, 10), _fd(15, 10), Z, lq2, 1);
+_assert_near(AbsorbingFilmResult_r_p(AF), rq0, _fd(1, 1000000), "q = 0 layer continuous from below (R_p)");
+_energy("q = 0 layer");
+# A SUBSTRATE at exactly its critical angle: p's admittance is infinite there,
+# which is why p starts from [1/eta; 1]. Total reflection, no NaN.
+var _c0 = _rta(W550, thq, _fd(15, 10), bq, Z, 0, 0);
+assert_eq(AbsorbingFilmResult_r_s(AF), F64_ONE, "critical substrate: R_s = 1");
+assert_eq(AbsorbingFilmResult_r_p(AF), F64_ONE, "critical substrate: R_p = 1");
+assert_eq(AbsorbingFilmResult_t_p(AF), Z, "critical substrate: T_p = 0");
+# Grazing incidence: R -> 1, finite.
+var _gz = _rta(W550, _fd(15707963, 10000000), F64_ONE, N152, Z, lau, 1);
+assert(f64_gt(AbsorbingFilmResult_r_p(AF), _fd(999, 1000)), "near-grazing R_p -> 1");
+_energy("near grazing");
+
+# ── Refusals: out untouched, a code returned ────────
+test_group("multilayer_rta errors");
+store64(AF, 0x4045000000000000);   # sentinel 42.0 in r_s
+assert_eq(multilayer_rta(W550, Z, F64_ONE, N152, Z, lau, 1, 0), PK_ERR_INVALID_PARAMETER, "null out");
+assert_eq(_rta(W550, Z, F64_ONE, N152, Z, lau, 0 - 1), PK_ERR_INVALID_PARAMETER, "negative count");
+assert_eq(_rta(W550, Z, F64_ONE, N152, Z, 0, 2), PK_ERR_INVALID_PARAMETER, "null layers with a count");
+assert_eq(_rta(Z, Z, F64_ONE, N152, Z, lau, 1), PK_ERR_INVALID_PARAMETER, "zero wavelength");
+assert_eq(_rta(0x7FF0000000000000, Z, F64_ONE, N152, Z, lau, 1), PK_ERR_INVALID_PARAMETER, "infinite wavelength");
+assert_eq(_rta(W550, F64_PI_2, F64_ONE, N152, Z, lau, 1), PK_ERR_INVALID_ANGLE, "90 deg");
+assert_eq(_rta(W550, f64_from(4), F64_ONE, N152, Z, lau, 1), PK_ERR_INVALID_ANGLE, "4 rad");
+assert_eq(_rta(W550, 0x7FF8000000000000, F64_ONE, N152, Z, lau, 1), PK_ERR_INVALID_ANGLE, "NaN angle");
+assert_eq(_rta(W550, Z, Z, N152, Z, lau, 1), PK_ERR_INVALID_PARAMETER, "zero incident index");
+assert_eq(_rta(W550, Z, F64_ONE, Z, Z, lau, 1), PK_ERR_INVALID_PARAMETER, "substrate n = k = 0");
+assert_eq(_rta(W550, Z, F64_ONE, N152, f64_neg(_fd(1, 10)), lau, 1), PK_ERR_INVALID_PARAMETER,
+  "negative substrate k (gain)");
+assert_eq(_rta(W550, Z, F64_ONE, N152, Z, _lay1(AUN, f64_neg(AUK), f64_from(20)), 1), PK_ERR_INVALID_PARAMETER,
+  "negative layer k");
+assert_eq(_rta(W550, Z, F64_ONE, N152, Z, _lay1(f64_neg(AUN), AUK, f64_from(20)), 1), PK_ERR_INVALID_PARAMETER,
+  "negative layer n");
+assert_eq(_rta(W550, Z, F64_ONE, N152, Z, _lay1(Z, Z, f64_from(20)), 1), PK_ERR_INVALID_PARAMETER, "layer n = k = 0");
+assert_eq(_rta(W550, Z, F64_ONE, N152, Z, _lay1(AUN, AUK, f64_from(0 - 20)), 1), PK_ERR_INVALID_PARAMETER,
+  "negative thickness");
+assert_eq(_rta(W550, Z, F64_ONE, N152, Z, _lay1(AUN, AUK, 0x7FF0000000000000), 1), PK_ERR_INVALID_PARAMETER,
+  "infinite thickness");
+assert_eq(_rta(W550, Z, F64_ONE, N152, Z, _lay1(0x7FF8000000000000, AUK, f64_from(20)), 1), PK_ERR_INVALID_PARAMETER,
+  "NaN layer n");
+# The phase guard, exactly at its edge: with lambda = 2 pi, n = 1 at normal
+# incidence, delta = d. 2^42 radians is answered; one ulp more is refused.
+assert_eq(_rta(F64_TAU, Z, F64_ONE, N152, Z, _lay1(F64_ONE, Z, 0x4290000000000000), 1), PK_ERR_NONE,
+  "phase 2^42 answered");
+assert_eq(_rta(F64_TAU, Z, F64_ONE, N152, Z, _lay1(F64_ONE, Z, 0x4290000000000001), 1), PK_ERR_INVALID_PARAMETER,
+  "phase past 2^42 refused");
+store64(AF, 0x4045000000000000);
+var _ex = _rta(W550, Z, F64_ONE, N152, Z, _lay1(AUN, AUK, f64_from(0 - 20)), 1);
+assert_eq(load64(AF), 0x4045000000000000, "a refused call leaves out untouched");
+
+# ── Round-1 review regressions ────────
+test_group("multilayer_rta review");
+fn _stack(pairs, n1, k1, d1, n2, k2, d2) {
+    var l = alloc(pairs * 48);
+    var i = 0;
+    while (i < pairs) {
+        store64(l + i * 48, n1);
+        store64(l + i * 48 + 8, k1);
+        store64(l + i * 48 + 16, d1);
+        store64(l + i * 48 + 24, n2);
+        store64(l + i * 48 + 32, k2);
+        store64(l + i * 48 + 40, d2);
+        i = i + 1;
+    }
+    return l;
+}
+# 200 periods of dielectric (n 2) and lossless Drude metal (n 0, k 2): the stack
+# absorbs nothing, sum Im delta = 182. The first cut restored e^(-2 sum) from a
+# plain running sum: T 1.3e-12 relative off and A = +5.7e-13. The flux now rides
+# in the scaled frame. This stack also drives the vector BELOW 2^-256, the only
+# case in the suite that runs the upward rescaling.
+var ldr = _stack(200, F64_TWO, Z, f64_from(60), Z, F64_TWO, f64_from(40));
+assert_eq(_rta(W550, Z, F64_ONE, _fd(15, 10), Z, ldr, 400), PK_ERR_NONE, "Drude stack ok");
+_assert_rel(AbsorbingFilmResult_r_s(AF), 0x3FE23279E6E9F850, R13, "Drude stack R_s");
+_assert_rel(AbsorbingFilmResult_t_s(AF), 0x3FDB9B0C322C0F60, _fd(2, 10000000000000), "Drude stack T_s (2e-13)");
+_assert_rel(AbsorbingFilmResult_t_p(AF), 0x3FDB9B0C322C0F60, _fd(2, 10000000000000), "Drude stack T_p");
+assert(f64_lt(f64_abs(AbsorbingFilmResult_a_s(AF)), R13), "lossless Drude stack: |A_s| < 1e-13 (was 5.7e-13)");
+assert(f64_lt(f64_abs(AbsorbingFilmResult_a_p(AF)), R13), "lossless Drude stack: |A_p| < 1e-13");
+# 30 periods of 10 nm silver and 60 nm dielectric, 20 deg.
+var lag30 = _stack(30, _fd(562, 10000), _fd(4276, 1000), f64_from(10), _fd(23, 10), Z, f64_from(60));
+assert_eq(_rta(W633, _deg(f64_from(20)), F64_ONE, N152, Z, lag30, 60), PK_ERR_NONE, "Ag stack ok");
+_pin6("30 x (10 nm Ag, 60 nm n=2.3), 20 deg", 0x3FCB9FB795390997, 0x3FD4BF4397238AA3, 0x3FDD70E09E3FF091,
+  0x3FB94382A0D9ECD8, 0x3FD8938A0F3BD046, 0x3FE08DCAA446DA42);
+_energy("Ag stack");
+# 700 quarter-wave pairs (1400 layers): T = 6.79e-311, subnormal. The vector
+# passes 2^256 here, so without the downward rescaling the call is refused.
+var lqw7 = _stack(700, _fd(23, 10), Z, f64_div(W550, f64_mul(f64_from(4), _fd(23, 10))),
+  N138, Z, f64_div(W550, f64_mul(f64_from(4), N138)));
+assert_eq(_rta(W550, Z, F64_ONE, N152, Z, lqw7, 1400), PK_ERR_NONE, "1400 layers ok");
+_assert_rel(AbsorbingFilmResult_t_s(AF), 0x00000C8088A934CB, _fd(1, 1000000000000), "700-pair mirror T = 6.7915e-311");
+# The small-delta series (|delta|^2 < 2^-10): 1 nm of gold, and a film just under
+# the switch. The A pins are what see the series' higher terms.
+assert_eq(_rta(W550, _deg(f64_from(30)), F64_ONE, N152, Z, _lay1(AUN, AUK, F64_ONE), 1), PK_ERR_NONE, "1nm Au ok");
+_pin6("1 nm gold, 30 deg (series branch)", 0x3FB0FFF8F0FB4459, 0x3FED6151A0BF8528, 0x3F8FABD04844933B,
+  0x3F9F36AA77FECF64, 0x3FEE8EC44F107F17, 0x3F8DE1974BE29B85);
+assert_eq(_rta(W550, Z, F64_ONE, N152, Z, _lay1(_fd(15, 10), _fd(2, 10), 0x3FFCA21B16E7AF55), 1), PK_ERR_NONE, "dser ok");
+_assert_rel(AbsorbingFilmResult_r_s(AF), 0x3FA69DD2071C2610, R13, "|delta| = 0.99 * 2^-5: R");
+_assert_rel(AbsorbingFilmResult_t_s(AF), 0x3FEE5773A28B0883, R13, "|delta| = 0.99 * 2^-5: T");
+_assert_rel(AbsorbingFilmResult_a_s(AF), 0x3F7F579E819A8E21, R13, "|delta| = 0.99 * 2^-5: A");
+var _ls = _rta(W550, _deg(f64_from(30)), F64_ONE, N152, Z, _lay1(F64_TWO, Z, _fd(13, 10)), 1);
+assert(f64_lt(f64_abs(AbsorbingFilmResult_a_s(AF)), _fd(1, 1000000000000000)), "lossless 1.3 nm film (series): A_s = 0");
+assert(f64_lt(f64_abs(AbsorbingFilmResult_a_p(AF)), _fd(1, 1000000000000000)), "lossless 1.3 nm film (series): A_p = 0");
+# Grazing: cos theta_0 from sin(pi/2 - theta), not x87 fcos (2e-21 absolute near
+# pi/2 — R_p was 2.7e-6 off on a 1e15 substrate at pi/2 - 1 ulp).
+assert_eq(_rta(F64_ONE, 0x3FF921FB54442D17, F64_ONE, 0x430C6BF526340000, Z, 0, 0), PK_ERR_NONE, "graze ok");
+_assert_rel(AbsorbingFilmResult_r_p(AF), 0x3FD3F6B7C4EAC7BE, _fd(1, 1000000000000000), "pi/2 - 1 ulp, 1e15 substrate: R_p");
+_assert_rel(AbsorbingFilmResult_t_p(AF), 0x3FE604A41D8A9C21, _fd(1, 1000000000000000), "... and T_p");
+_assert_rel(AbsorbingFilmResult_t_s(AF), 0x39B6FB6E9531E255, _fd(1, 1000000000000), "... and T_s = 1.1e-30");
+# Magnitude bounds: every |n~| in [2^-100, 2^101]. Past them squares left the
+# double range and wrong answers came back as success (n0 = 1e-161 on 1.3e-161:
+# R_s 9.9% high).
+store64(AF, 0x4045000000000000);
+assert_eq(_rta(F64_ONE, Z, _fd(1, 1000000000), _fd(13, 10), Z, 0, 0), PK_ERR_NONE, "n = 1e-9 is in range");
+_assert_near(AbsorbingFilmResult_r_s(AF), fresnel_normal(_fd(1, 1000000000), _fd(13, 10)), _fd(1, 1000000000000000),
+  "tiny incident index still exact");
+store64(AF, 0x4045000000000000);
+assert_eq(_rta(F64_ONE, Z, 0x3970000000000000, 0x3970000000000000, Z, 0, 0), PK_ERR_INVALID_PARAMETER,
+  "n0 = 2^-104 refused");
+assert_eq(_rta(F64_ONE, Z, F64_ONE, 0x6974000000000000, Z, 0, 0), PK_ERR_INVALID_PARAMETER, "substrate n = 1e200 refused");
+assert_eq(_rta(F64_ONE, Z, 0x6974000000000000, N152, Z, 0, 0), PK_ERR_INVALID_PARAMETER, "n0 = 1e200 refused");
+assert_eq(load64(AF), 0x4045000000000000, "refused: out untouched");
+assert_eq(_rta(F64_ONE, Z, F64_ONE, 0x4630000000000000, Z, 0, 0), PK_ERR_NONE, "n = 2^100 accepted");
+assert_eq(_rta(F64_ONE, Z, F64_ONE, 0x4630000000000001, Z, 0, 0), PK_ERR_INVALID_PARAMETER, "n = 2^100 + 1 ulp refused");
+assert_eq(_rta(F64_ONE, Z, F64_ONE, N152, Z, _lay1(0x39A0000000000000, 0x39A0000000000000, f64_from(5)), 1),
+  PK_ERR_INVALID_PARAMETER, "layer with n, k both below 2^-100 refused");
+assert_eq(_rta(F64_ONE, Z, F64_ONE, N152, Z, _lay1(Z, 0x39B0000000000000, f64_from(5)), 1), PK_ERR_NONE,
+  "n = 0, k = 2^-100 accepted");
+# Negative real parts: refused by the medium check itself, not by a later guard
+# (the first cut's only test, n < 0 with k > 0, was also caught by Im q < 0).
+assert_eq(_rta(W550, _deg(f64_from(30)), F64_ONE, f64_neg(N152), Z, 0, 0), PK_ERR_INVALID_PARAMETER,
+  "substrate -1.52 + 0i refused");
+assert_eq(_rta(W550, _deg(f64_from(30)), F64_ONE, f64_neg(N152), _fd(1, 10), 0, 0), PK_ERR_INVALID_PARAMETER,
+  "substrate -1.52 + 0.1i refused");
+assert_eq(_rta(W550, _deg(f64_from(30)), F64_ONE, N152, Z, _lay1(f64_neg(_fd(15, 10)), Z, f64_from(100)), 1),
+  PK_ERR_INVALID_PARAMETER, "layer -1.5 + 0i refused");
 
 var r = assert_summary();

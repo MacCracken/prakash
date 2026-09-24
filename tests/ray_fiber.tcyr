@@ -2,6 +2,7 @@
 # Covers numerical aperture, V-number, mode count, MFD, and coupling efficiency.
 
 include "src/error.cyr"
+include "src/ray_dispersion.cyr"
 include "src/ray_fiber.cyr"
 
 fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
@@ -73,5 +74,272 @@ assert(f64_gt(eta_mm, HALF), "mismatch > 0.5");
 _assert_near(
   coupling_efficiency_gaussian(_fd(3, 1000000), _fd(5, 1000000)),
   coupling_efficiency_gaussian(_fd(5, 1000000), _fd(3, 1000000)), TOL6, "coupling symmetric");
+
+# ── Chromatic dispersion (2.10.0) ────────
+# Every value is pinned against mpmath at 45-60 digits, computed independently of
+# this code: material D by numerical differentiation of the Sellmeier index, the
+# LP01 b by bisection + Illinois on the Bessel eigenvalue equation (mpmath's own
+# J and K), and V(Vb)'', D_w and the total D by numerical differentiation of
+# that root — not by the implicit-derivative formulas the library uses.
+fn _rel(a, b) { return f64_div(f64_abs(f64_sub(a, b)), f64_abs(b)); }
+fn _assert_rel(a, b, rtol, msg) { assert(f64_le(_rel(a, b), rtol), msg); }
+fn _isnan(x) { return f64_eq(x, x) == 0; }
+var Z = f64_from(0);
+var R13 = _fd(1, 10000000000000);   # 1e-13
+var R12 = _fd(1, 1000000000000);    # 1e-12
+var fsf = sellmeier_fused_silica();
+
+test_group("fiber_material_dispersion");
+# 1e12/299792458, correctly rounded — the unit conversion to ps/(nm km).
+assert_eq(_fib_dconst(), 0x40AA0F482ADBADE0, "ps/(nm km) constant = 3335.640951981520");
+_assert_rel(fiber_material_dispersion(fsf, _fd(155, 100)), 0x4035E96BBFC4DA88, R13,
+  "silica D at 1.55 um = +21.912 ps/(nm km)");
+_assert_rel(fiber_material_dispersion(fsf, F64_ONE), 0xC043ED619ACCB05E, R13, "silica D at 1 um = -39.855");
+_assert_rel(fiber_material_dispersion(fsf, _fd(5, 10)), 0xC080D5C959665A53, R13, "silica D at 0.5 um = -538.72");
+_assert_rel(fiber_material_dispersion(fsf, _fd(131, 100)), 0x400CA790129B2F2A, R12, "silica D at 1.31 um = +3.582");
+_assert_rel(fiber_material_dispersion(sellmeier_bk7(), _fd(155, 100)), 0x40334FF2BAEDF48D, R13,
+  "BK7 D at 1.55 um = +19.31");
+# D = -(l/c) n'': the definition, against the library's own second derivative.
+assert_eq(fiber_material_dispersion(fsf, _fd(155, 100)),
+  f64_neg(f64_mul(f64_mul(_fd(155, 100), sellmeier_d2n_dlambda2(fsf, _fd(155, 100))), _fib_dconst())),
+  "material D is -l n'' K exactly");
+assert(_isnan(fiber_material_dispersion(0, F64_ONE)), "null set -> NaN");
+assert(_isnan(fiber_material_dispersion(fsf, Z)), "zero wavelength -> NaN");
+
+test_group("fiber_zero_dispersion");
+# THE ROADMAP PIN: fused silica's material zero, 1.2727539302 um (Malitson).
+var ez = 0;
+var zfs = fiber_zero_dispersion_wavelength(fsf, Z, F64_ONE, F64_ONE, F64_TWO, &ez);
+assert_eq(ez, PK_ERR_NONE, "silica zero found");
+_assert_rel(zfs, 0x3FF45D3339A10994, _fd(1, 1000000000000000),
+  "fused silica zero-dispersion wavelength = 1.2727539 um");
+var zbk = fiber_zero_dispersion_wavelength(sellmeier_bk7(), Z, F64_ONE, F64_ONE, F64_TWO, &ez);
+_assert_rel(zbk, 0x3FF526EA139B3A65, _fd(1, 1000000000000000), "BK7 zero-dispersion wavelength = 1.3220 um");
+assert(f64_lt(fiber_material_dispersion(fsf, f64_sub(zfs, _fd(1, 1000))), Z), "normal (D < 0) just below the zero");
+assert(f64_gt(fiber_material_dispersion(fsf, f64_add(zfs, _fd(1, 1000))), Z), "anomalous (D > 0) just above it");
+var e_nz = 0;
+var _zn = fiber_zero_dispersion_wavelength(fsf, Z, F64_ONE, _fd(14, 10), F64_TWO, &e_nz);
+assert_eq(e_nz, PK_ERR_INVALID_PARAMETER, "no sign change in the bracket -> error");
+var _zr = fiber_zero_dispersion_wavelength(fsf, Z, F64_ONE, F64_TWO, F64_ONE, &e_nz);
+assert_eq(e_nz, PK_ERR_INVALID_PARAMETER, "reversed bracket -> error");
+var _zb = fiber_zero_dispersion_wavelength(0, Z, F64_ONE, F64_ONE, F64_TWO, &e_nz);
+assert_eq(e_nz, PK_ERR_INVALID_PARAMETER, "null set -> error");
+
+test_group("fiber_lp01");
+var ev = 0;
+# b(V): exact LP01 eigenvalues. Small V is ill-conditioned (d ln b/d ln V ~ 8/V^2,
+# 32 at V = 0.5), so the tolerance there is wider; elsewhere a few ulps.
+_assert_rel(fiber_lp01_b(F64_HALF, &ev), 0x3EAF91498489AC58, _fd(1, 100000000000000), "b(0.5) = 9.4079e-7");
+_assert_rel(fiber_lp01_b(F64_ONE, &ev), 0x3FA4F77426CFB292, R13, "b(1) = 0.0409504");
+_assert_rel(fiber_lp01_b(_fd(15, 10), &ev), 0x3FCD57FDB28E76EB, R13, "b(1.5) = 0.2292478");
+_assert_rel(fiber_lp01_b(F64_TWO, &ev), 0x3FDAA26BC84FB67E, R13, "b(2) = 0.4161634");
+_assert_rel(fiber_lp01_b(_fd(24, 10), &ev), 0x3FE0F5F9EEED00FC, R13, "b(2.4) = 0.5300264");
+_assert_rel(fiber_lp01_b(f64_from(3), &ev), 0x3FE4D8D978CDD225, R13, "b(3) = 0.6514709");
+_assert_rel(fiber_lp01_b(f64_from(5), &ev), 0x3FEAE90D669A35F7, R13, "b(5) = 0.8409488");
+_assert_rel(fiber_lp01_b(f64_from(10), &ev), 0x3FEE791156B77117, R13, "b(10) = 0.9522788");
+assert_eq(ev, PK_ERR_NONE, "b ok");
+# b ~ e^(-4/V^2): below V ~ 0.073 it is under the smallest double.
+assert_eq(fiber_lp01_b(_fd(3, 100), &ev), Z, "b(0.03) underflows to 0");
+assert(f64_gt(fiber_lp01_b(_fd(1, 10), &ev), Z), "b(0.1) ~ 1e-172 is still resolved");
+# Monotone in V across both solve branches (the U/s switch is near V = 2.28).
+var bprev = Z;
+var mono = 1;
+var iv = 1;
+while (iv <= 60) {
+    var bv = fiber_lp01_b(_fd(iv, 10), &ev);
+    # Written so a NaN fails it (round 1: `bv <= bprev` let NaN through).
+    if ((f64_gt(bv, bprev) & f64_lt(bv, F64_ONE)) == 0) { mono = 0; }
+    bprev = bv;
+    iv = iv + 1;
+}
+assert_eq(mono, 1, "0 < b < 1 and increasing on V = 0.1..6.0");
+# Literature cross-check (a fit, so loose): Rudolph-Neumann b ~ (1.1428 - 0.9960/V)^2,
+# quoted accurate to 0.2% on 1.5 < V < 2.5.
+var rn = f64_sub(_fd(11428, 10000), f64_div(_fd(996, 1000), F64_TWO));
+_assert_rel(fiber_lp01_b(F64_TWO, &ev), f64_mul(rn, rn), _fd(2, 1000), "b(2) within 0.2% of Rudolph-Neumann");
+# b is continuous across the branch switch, which is at V = 2.2834387 (U = W
+# there): 2.2834 solves in s and 2.2835 in U, and b moves by db/dV * 1e-4 ~ 5.4e-5.
+var brl[32];
+var brh[32];
+_fib_lp01(_fd(22834, 10000), &brl);
+_fib_lp01(_fd(22835, 10000), &brh);
+assert_eq(load64(&brl + 24), 0, "V = 2.2834 is solved in s");
+assert_eq(load64(&brh + 24), 1, "V = 2.2835 is solved in U");
+# The step across the switch is the mean of its neighbours' to second order
+# (b'' ~ -0.9, so they differ by 9e-9): a jump would show as a kink.
+var bl = fiber_lp01_b(_fd(22834, 10000), &ev);
+var bh = fiber_lp01_b(_fd(22835, 10000), &ev);
+var dsw = f64_sub(bh, bl);
+var dlo = f64_sub(bl, fiber_lp01_b(_fd(22833, 10000), &ev));
+var dhi = f64_sub(fiber_lp01_b(_fd(22836, 10000), &ev), bh);
+assert(f64_gt(dsw, Z), "b rises across the branch switch");
+assert(f64_lt(f64_abs(f64_sub(dsw, f64_mul(F64_HALF, f64_add(dlo, dhi)))), _fd(1, 10000000000)),
+  "no kink at the branch switch (second difference < 1e-10)");
+_assert_rel(fiber_lp01_b(_fd(231, 100), &ev), 0x3FE039D0B8C9B4A0, R13, "b(2.31) = 0.50705, just past the switch");
+var _b0 = fiber_lp01_b(Z, &ev);
+assert_eq(ev, PK_ERR_INVALID_PARAMETER, "V = 0 -> error");
+var _bn = fiber_lp01_b(f64_neg(F64_ONE), &ev);
+assert_eq(ev, PK_ERR_INVALID_PARAMETER, "negative V -> error");
+var _bi = fiber_lp01_b(0x7FF0000000000000, &ev);
+assert_eq(ev, PK_ERR_INVALID_PARAMETER, "infinite V -> error");
+var _bq = fiber_lp01_b(0x7FF8000000000000, &ev);
+assert_eq(ev, PK_ERR_INVALID_PARAMETER, "NaN V -> error");
+
+test_group("fiber_waveguide_factor");
+# V d^2(Vb)/dV^2 against 60-digit finite differences of the root.
+_assert_rel(fiber_waveguide_factor(F64_HALF, &ev), 0x3F4AB7BE084F6563, _fd(1, 100000000000000),
+  "V(Vb)'' at 0.5 = 8.154e-4");
+_assert_rel(fiber_waveguide_factor(F64_ONE, &ev), 0x3FF587768AB67663, R13, "V(Vb)'' at 1 = 1.34557");
+_assert_rel(fiber_waveguide_factor(_fd(15, 10), &ev), 0x3FF10291D73A266F, R13, "V(Vb)'' at 1.5 = 1.06313");
+_assert_rel(fiber_waveguide_factor(F64_TWO, &ev), 0x3FDD95A46FD8B817, R13, "V(Vb)'' at 2 = 0.462258");
+_assert_rel(fiber_waveguide_factor(_fd(24, 10), &ev), 0x3FC8F8922369E840, R13, "V(Vb)'' at 2.4 = 0.195086");
+# Near its zero crossing (V ~ 3) the factor is 0.0015 from O(1) terms; absolute.
+_assert_near(fiber_waveguide_factor(f64_from(3), &ev), 0x3F5886418FECC18F, _fd(1, 1000000000000000),
+  "V(Vb)'' at 3 = 0.00149685");
+_assert_rel(fiber_waveguide_factor(f64_from(5), &ev), 0xBFBCD5FEBDD5B821, R13, "V(Vb)'' at 5 = -0.112640");
+_assert_rel(fiber_waveguide_factor(f64_from(10), &ev), 0xBFAFC0C1305120BA, R13, "V(Vb)'' at 10 = -0.0620175");
+assert_eq(ev, PK_ERR_NONE, "factor ok");
+# Marcuse's fit 0.080 + 0.549 (2.834 - V)^2, quoted for 1.5 < V < 2.5: within 7%.
+var mv = f64_sub(_fd(2834, 1000), F64_TWO);
+_assert_rel(fiber_waveguide_factor(F64_TWO, &ev), f64_add(_fd(80, 1000), f64_mul(_fd(549, 1000), f64_mul(mv, mv))),
+  _fd(7, 100), "V(Vb)'' at 2 within 7% of Marcuse's fit");
+assert_eq(fiber_waveguide_factor(_fd(3, 100), &ev), Z, "factor underflows to 0 with b");
+var _f0 = fiber_waveguide_factor(Z, &ev);
+assert_eq(ev, PK_ERR_INVALID_PARAMETER, "V = 0 -> error");
+
+test_group("fiber_waveguide_dispersion");
+# SMF-like: silica cladding, delta = 0.36%, a = 4.1 um.
+var dcore = _fd(36, 10000);
+var acore = _fd(41, 10);
+var ew = 0;
+var n155 = sellmeier_n_at(fsf, _fd(155, 100));
+_assert_rel(fiber_waveguide_dispersion(fsf, dcore, acore, _fd(155, 100), &ew), 0xC0130387B3691407, R13,
+  "Gloge D_w at 1.55 um = -4.7534 ps/(nm km)");
+_assert_rel(fiber_waveguide_dispersion(fsf, dcore, acore, _fd(131, 100), &ew),
+  0xC003870068819759, R13, "Gloge D_w at 1.31 um = -2.4409");
+_assert_rel(fiber_waveguide_dispersion(fsf, _fd(1, 100), F64_TWO, _fd(155, 100), &ew), 0xC03982B38F0639DD, R13,
+  "dispersion-shifting core (delta 1%, a 2 um): D_w = -25.51");
+assert_eq(ew, PK_ERR_NONE, "D_w ok");
+var _w1 = fiber_waveguide_dispersion(fsf, Z, acore, _fd(155, 100), &ew);
+assert_eq(ew, PK_ERR_INVALID_PARAMETER, "delta = 0 -> error (no guide)");
+var _w2 = fiber_waveguide_dispersion(fsf, F64_HALF, acore, _fd(155, 100), &ew);
+assert_eq(ew, PK_ERR_INVALID_PARAMETER, "delta = 1/2 -> error");
+var _w3 = fiber_waveguide_dispersion(fsf, dcore, Z, _fd(155, 100), &ew);
+assert_eq(ew, PK_ERR_INVALID_PARAMETER, "zero core radius -> error");
+var _w4 = fiber_waveguide_dispersion(0, dcore, acore, _fd(155, 100), &ew);
+assert_eq(ew, PK_ERR_INVALID_PARAMETER, "null set -> error");
+var _w5 = fiber_waveguide_dispersion(fsf, dcore, acore, 0x7FF8000000000000, &ew);
+assert_eq(ew, PK_ERR_INVALID_PARAMETER, "NaN wavelength -> error");
+
+test_group("fiber_dispersion");
+var ed = 0;
+_assert_rel(fiber_dispersion(fsf, dcore, acore, _fd(155, 100), &ed), 0x40311C3673EA729B, R13,
+  "SMF-like total D at 1.55 um = +17.110 ps/(nm km)");
+_assert_rel(fiber_dispersion(fsf, dcore, acore, F64_ONE, &ed), 0xC043BC6CB9FEFD52, R13, "total D at 1 um = -39.472");
+_assert_near(fiber_dispersion(fsf, dcore, acore, _fd(131, 100), &ed), 0x3FF1BEB97202A85A, _fd(1, 1000000000000),
+  "total D at 1.31 um = +1.1091");
+_assert_rel(fiber_dispersion(fsf, _fd(1, 100), F64_TWO, _fd(155, 100), &ed), 0xC011706AB6BD16A0, R13,
+  "dispersion-shifting core at 1.55 um: -4.360");
+assert_eq(ed, PK_ERR_NONE, "D ok");
+# delta = 0 is the bulk glass, bit for bit.
+assert_eq(fiber_dispersion(fsf, Z, F64_ONE, _fd(155, 100), &ed), fiber_material_dispersion(fsf, _fd(155, 100)),
+  "delta = 0 -> material dispersion exactly");
+# The textbook split D ~ D_m + D_w misses the full D by -0.048 of 17.1 ps/(nm km)
+# here: +0.085 material-waveguide cross term, -0.123 because D_w carries n2 where
+# the first-order waveguide term has N_g^2/n2, and -0.010 second order (round 1).
+var dsum = f64_add(fiber_material_dispersion(fsf, _fd(155, 100)),
+  fiber_waveguide_dispersion(fsf, dcore, acore, _fd(155, 100), &ew));
+var dtot = fiber_dispersion(fsf, dcore, acore, _fd(155, 100), &ed);
+assert(f64_lt(f64_abs(f64_sub(dsum, dtot)), _fd(1, 10)), "D_m + D_w within 0.1 of the full D");
+assert(f64_gt(f64_abs(f64_sub(dsum, dtot)), _fd(1, 100)), "... and the neglected terms are really there (> 0.01)");
+# Waveguide dispersion pushes the zero to the red of the material zero.
+var zsm = fiber_zero_dispersion_wavelength(fsf, dcore, acore, _fd(125, 100), _fd(14, 10), &ez);
+assert_eq(ez, PK_ERR_NONE, "SMF-like zero found");
+assert(f64_gt(zsm, zfs), "the waveguide shifts the zero to longer wavelength");
+_assert_rel(zsm, 0x3FF4BFB2A2E054DC, _fd(1, 1000000000000000), "SMF-like zero-dispersion wavelength = 1.29680 um");
+var _d1 = fiber_dispersion(fsf, f64_neg(dcore), acore, _fd(155, 100), &ed);
+assert_eq(ed, PK_ERR_INVALID_PARAMETER, "negative delta -> error");
+var _d2 = fiber_dispersion(fsf, dcore, Z, _fd(155, 100), &ed);
+assert_eq(ed, PK_ERR_INVALID_PARAMETER, "zero core radius with delta > 0 -> error");
+var _d3 = fiber_dispersion(0, dcore, acore, _fd(155, 100), &ed);
+assert_eq(ed, PK_ERR_INVALID_PARAMETER, "null set -> error");
+var _d4 = fiber_dispersion(fsf, dcore, acore, Z, &ed);
+assert_eq(ed, PK_ERR_INVALID_PARAMETER, "zero wavelength -> error");
+
+# ── Round-1 review regressions ────────
+test_group("fiber review");
+# Large V, where Gloge's start passes j01 and the root sits within ~j01/V of J0's
+# zero: 60-digit references (Illinois from U = j01 V/(V + 1), mp.diff).
+_assert_rel(fiber_lp01_b(f64_from(500), &ev), 0x3FEFFFCFAE3B412A, R13, "b(500) = 0.99997696");
+_assert_rel(fiber_waveguide_factor(f64_from(500), &ev), 0xBF07F793B5B6E9E7, R13, "V(Vb)'' at 500 = -4.5714e-5");
+_assert_rel(fiber_lp01_b(f64_from(10000), &ev), 0x3FEFFFFFE0F53D3A, R13, "b(1e4) = 0.9999999422");
+_assert_rel(fiber_waveguide_factor(f64_from(10000), &ev), 0xBE7F07952AD61871, R13, "V(Vb)'' at 1e4 = -1.15594e-7");
+# The domain ends at V = 2^48: the root is resolved there, and past ~1e16 it cannot
+# be placed at all (round 1: NaN came back as success from V = 3e16).
+var vmax = 0x42F0000000000000;
+_assert_rel(fiber_lp01_b(vmax, &ev), F64_ONE, _fd(3, 10000000000000000), "b(2^48) = 1 to an ulp");
+assert_eq(ev, PK_ERR_NONE, "V = 2^48 answered");
+var fmax = fiber_waveguide_factor(vmax, &ev);
+_assert_rel(fmax, f64_neg(f64_div(f64_mul(F64_TWO, f64_mul(0x40033D152E971B3F, 0x40033D152E971B3F)), f64_mul(vmax, vmax))),
+  _fd(1, 1000000000000), "V(Vb)'' at 2^48 = -2 j01^2/V^2");
+var _bv1 = fiber_lp01_b(0x42F0000000000001, &ev);
+assert_eq(ev, PK_ERR_INVALID_PARAMETER, "V past 2^48 refused (b)");
+var _bv2 = fiber_waveguide_factor(f64_from(100000000000000000), &ev);
+assert_eq(ev, PK_ERR_INVALID_PARAMETER, "V = 1e17 refused (factor)");
+var _bv3 = fiber_lp01_b(0x7FEFFFFFFFFFFFFF, &ev);
+assert_eq(ev, PK_ERR_INVALID_PARAMETER, "V = DBL_MAX refused");
+# Tiny V: b and the factor are 0, not 0/0 (V^2 underflows below 1.6e-162).
+assert_eq(fiber_lp01_b(0x16687E92154EF7AC, &ev), Z, "b(1e-200) = 0");
+assert_eq(ev, PK_ERR_NONE, "b(1e-200) answered");
+assert_eq(fiber_lp01_b(1, &ev), Z, "b(5e-324) = 0");
+assert_eq(fiber_waveguide_factor(0x2B2BFF2EE48E0530, &ev), Z, "V(Vb)'' at 1e-100 = 0");
+assert_eq(ev, PK_ERR_NONE, "factor(1e-100) answered");
+# ... and a vanishing core is the bulk glass.
+assert_eq(fiber_dispersion(fsf, dcore, 0x2B2BFF2EE48E0530, _fd(155, 100), &ed), fiber_material_dispersion(fsf, _fd(155, 100)),
+  "1e-100 um core: material dispersion");
+# delta = -0.0 is zero (the first cut refused it: `delta == 0` compares bits).
+var nz = f64_mul(Z, f64_neg(F64_ONE));
+assert_eq(nz, 0x8000000000000000, "-0.0 built");
+assert_eq(fiber_dispersion(fsf, nz, F64_ONE, _fd(155, 100), &ed), fiber_material_dispersion(fsf, _fd(155, 100)),
+  "delta = -0.0 is the bulk glass");
+assert_eq(ed, PK_ERR_NONE, "delta = -0.0 accepted");
+# Non-finite wavelengths and coefficients are refused on the delta = 0 path too.
+var _nf1 = fiber_dispersion(fsf, Z, F64_ONE, 0x7FF0000000000000, &ed);
+assert_eq(ed, PK_ERR_INVALID_PARAMETER, "delta = 0, infinite wavelength refused");
+var _nf2 = fiber_dispersion(fsf, Z, F64_ONE, 0x7FF8000000000000, &ed);
+assert_eq(ed, PK_ERR_INVALID_PARAMETER, "delta = 0, NaN wavelength refused");
+var binf = _sellmeier_mk(0x7FF0000000000000, _fd(1, 100), Z, F64_ONE, Z, F64_ONE);
+var _nf3 = fiber_dispersion(binf, Z, F64_ONE, F64_ONE, &ed);
+assert_eq(ed, PK_ERR_INVALID_PARAMETER, "infinite Sellmeier coefficient refused");
+var _nf4 = fiber_zero_dispersion_wavelength(fsf, Z, F64_ONE, F64_ONE, 0x7FF0000000000000, &ez);
+assert_eq(ez, PK_ERR_INVALID_PARAMETER, "zero finder: infinite end refused");
+# Huge wavelengths: D keeps its sign (the first cut formed d^3, which overflowed
+# past 2.4e51 um and flipped D positive) and underflows rather than crossing zero.
+var dhuge = fiber_dispersion(fsf, Z, F64_ONE, 0x4AB0A0B0AA5A7B31, &ed);
+assert_eq(ed, PK_ERR_NONE, "D at 2.5e51 um answered");
+assert(f64_lt(dhuge, Z), "D at 2.5e51 um is negative, as the true value is");
+# An exactly-zero end is refused, not returned: D(1e60) underflows to 0 while the
+# true value is -5e-160, and the first cut returned 1e60 as the zero.
+var _z60 = fiber_zero_dispersion_wavelength(fsf, Z, F64_ONE, F64_ONE, 0x4C63E9E4E4C2F344, &ez);
+assert_eq(ez, PK_ERR_INVALID_PARAMETER, "no zero between 1 um and 1e60 um");
+# An iterate the dispersion refuses aborts the search: on [5, 20] um silica's
+# false position lands at 9.16 um, past its IR resonance (n^2 < 1).
+var _z520 = fiber_zero_dispersion_wavelength(fsf, Z, F64_ONE, f64_from(5), f64_from(20), &ez);
+assert_eq(ez, PK_ERR_INVALID_PARAMETER, "a refused iterate is not a root");
+# Wide brackets converge to the same zeros (plain false position, or halving the
+# wrong end, stalled on these and returned a non-root after 200 steps).
+_assert_rel(fiber_zero_dispersion_wavelength(fsf, Z, F64_ONE, _fd(25, 100), _fd(35, 10), &ez), 0x3FF45D3339A10994,
+  _fd(1, 1000000000000000), "silica zero from [0.25, 3.5]");
+_assert_rel(fiber_zero_dispersion_wavelength(sellmeier_bk7(), Z, F64_ONE, _fd(3, 10), _fd(25, 10), &ez),
+  0x3FF526EA139B3A65, _fd(1, 1000000000000000), "BK7 zero from [0.3, 2.5]");
+_assert_rel(fiber_zero_dispersion_wavelength(fsf, dcore, acore, F64_HALF, _fd(17, 10), &ez), 0x3FF4BFB2A2E054DC,
+  _fd(1, 1000000000000000), "SMF-like zero from [0.5, 1.7]");
+assert_eq(ez, PK_ERR_NONE, "wide brackets ok");
+# Waveguide dispersion refuses a V it cannot answer rather than passing the
+# factor's sentinel on as success.
+var _wv = fiber_waveguide_dispersion(fsf, dcore, 0x7FE0000000000000, _fd(155, 100), &ew);
+assert_eq(ew, PK_ERR_INVALID_PARAMETER, "core radius 2^1023 -> V overflows -> refused");
+var _wv2 = fiber_dispersion(fsf, dcore, f64_from(100000000000000000), _fd(155, 100), &ed);
+assert_eq(ed, PK_ERR_INVALID_PARAMETER, "1e17 um core -> V past 2^48 -> refused");
 
 var r = assert_summary();

@@ -5,7 +5,8 @@
 # Ported from the Rust `wave/diffraction.rs`. Two sections: (1) diffraction
 # patterns (Fraunhofer, Fresnel integrals, Huygens-Fresnel); (2) anti-reflection
 # coatings and the multilayer transfer-matrix method (single- and multi-layer,
-# plus the full oblique-incidence s/p-split TMM `multilayer_rt`).
+# plus the full oblique-incidence s/p-split TMM `multilayer_rt`, and 2.10.0's
+# complex-index `multilayer_rta` for absorbing layers and substrates).
 #
 # Aperture slices `&[(pos, amplitude)]` and layer slices `&[(n, thickness)]` are
 # passed as interleaved buffers: element i has field-0 at offset i*16, field-1 at
@@ -559,4 +560,368 @@ fn multilayer_rt(wavelength, angle, n_incident, n_substrate, layers, num_layers)
     ThinFilmResult_set_r_avg(res, f64_mul(F64_HALF, f64_add(r_s, r_p)));
     ThinFilmResult_set_t_avg(res, f64_mul(F64_HALF, f64_add(t_s, t_p)));
     return res;
+}
+
+# ── Absorbing multilayers: complex-index TMM (2.10.0) ────────
+#
+# multilayer_rt above takes REAL indices at a 16-byte (n, d) stride; admitting an
+# extinction coefficient k is a new layout, so it is a new entry point rather than
+# a change to that one. Convention: n~ = n + ik with k >= 0 absorbing and fields
+# ~ exp(i(kz - wt)) — the sign ray_fresnel's ComplexMedium uses.
+#
+# Method: Abeles characteristic matrices (Macleod, Thin-Film Optical Filters ch. 2)
+# applied to the substrate's admittance vector from the back of the stack forward,
+#   [B; C] = M_1 M_2 ... M_q [1; eta_sub],   M_j = [[cos d, -i sin d/eta],
+#                                                    [-i eta sin d, cos d]],
+# delta_j = 2 pi q_j d_j/lambda, q_j = n~_j cos(theta_j) = sqrt(n~_j^2 - beta^2),
+# beta = n_0 sin(theta_0), and tilted admittances eta = q (s) or n~^2/q (p). Then
+#   R = |(eta_0 B - C)/(eta_0 B + C)|^2,   T = 4 eta_0 Re(eta_sub)/|eta_0 B + C|^2,
+#   A = 4 eta_0 Re(B C* - eta_sub)/|eta_0 B + C|^2,
+# which is R + T + A = 1 with A the power the LAYERS absorb and T the power that
+# crosses into the substrate (for an absorbing substrate, the flux just inside
+# it — Macleod's and Byrnes' convention). ⚠ A is a difference of two O(1)
+# fluxes, so like R and T it is accurate to ~1e-16 of the INCIDENT power, not
+# relative to itself: a 1e-8 absorptance carries ~2e-8 relative error (measured,
+# k = 1e-9). Resolving ppb absorption relatively needs the per-layer field
+# integral, which this does not compute. T through a strongly attenuating stack
+# is conditioned by its own exponent: rounding moves e^(-2 sum Im delta) by
+# ~2e-16 sum Im delta relative (measured 7.7e-14 through 200 metal layers,
+# sum Im delta = 182), and that is the accuracy T is computed to.
+#
+# Three things make it robust where the real-index TMM needed special branches:
+#   - cos(delta) and sin(delta)/q are EVEN in q, and q^2 is known without a root,
+#     so the layer matrix does not depend on which square root is taken — there
+#     is no propagating/evanescent branch and no grazing (q = 0) singularity.
+#     sin(delta)/q is formed as (2 pi d/lambda) sinc(delta) near delta = 0.
+#   - Each layer matrix is scaled by exp(-|Im delta|) and the exponent summed, and
+#     the vector is rescaled by exact powers of two when it leaves [2^-256, 2^256].
+#     An opaque layer's T underflows to 0 instead of the matrix overflowing to
+#     NaN, which is what the real-index code's cosh/sinh clamp at 350 is for.
+#   - Only the SUBSTRATE needs a branch: the principal root, Im q >= 0 (decaying
+#     or, lossless, outgoing), taken where q^2 = (n - beta)(n + beta) - k^2 + 2ink.
+# Validated against an independent 50-digit implementation of the interface /
+# propagation formalism (Byrnes, arXiv:1603.02720) and Byrnes' own `tmm` package.
+
+#derive(accessors)
+struct AbsorbingFilmResult { r_s; r_p; t_s; t_p; a_s; a_p; r_avg; t_avg; a_avg; }
+
+fn _diff_finite(x) {
+    if ((x & _PRK_ABS) >= _PRK_INF) { return 0; }
+    return 1;
+}
+
+# A complex index n + ik is admissible: both finite, >= 0 and <= 2^100, with
+# max(n, k) >= 2^-100 — so every |n~| lies in [2^-100, 2^101] and no square,
+# admittance or |eta_0 B + C|^2 leaves the double range. (Past those bounds the
+# squares overflowed or underflowed into results returned as success: n0 = 1e-161
+# on 1.3e-161 gave R_s 9.9% high.) 2^100 ~ 1.3e30, 2^-100 ~ 7.9e-31.
+fn _diff_medium_ok(n, k) {
+    if ((_diff_finite(n) & _diff_finite(k)) == 0) { return 0; }
+    if ((f64_ge(n, 0) & f64_ge(k, 0)) == 0) { return 0; }
+    if ((f64_le(n, 0x4630000000000000) & f64_le(k, 0x4630000000000000)) == 0) { return 0; }
+    if ((f64_ge(n, 0x39B0000000000000) | f64_ge(k, 0x39B0000000000000)) == 0) { return 0; }
+    return 1;
+}
+
+# exp(y) - 1 accurate for small y, given u = exp(y) already computed (Kahan: the
+# same rounded exp in both halves, so its error cancels).
+fn _diff_expm1(y, u) {
+    if (u == F64_ONE) { return y; }
+    var um1 = f64_sub(u, F64_ONE);
+    if (f64_gt(f64_abs(y), F64_HALF) == 1) { return um1; }
+    return f64_div(f64_mul(um1, y), f64_ln(u));
+}
+
+# Principal square root of x + iy into out[0], out[1]: Re >= 0, and Im carries
+# y's sign (a zero y counts as positive, so a lossless evanescent root is +i|q|).
+fn _diff_csqrt(x, y, out) {
+    var r = f64_hypot(x, y);
+    if (f64_ge(x, 0) == 1) {
+        var t = f64_sqrt(f64_mul(F64_HALF, f64_add(r, x)));
+        store64(out, t);
+        if (t == 0) {
+            store64(out + 8, 0);
+            return 0;
+        }
+        store64(out + 8, f64_div(y, f64_add(t, t)));
+        return 0;
+    }
+    var u = f64_sqrt(f64_mul(F64_HALF, f64_sub(r, x)));
+    store64(out, f64_div(f64_abs(y), f64_add(u, u)));
+    if (f64_lt(y, 0) == 1) { u = f64_neg(u); }
+    store64(out + 8, u);
+    return 0;
+}
+
+# (ar + i ai)/(br + i bi) into out[0], out[1] (Smith's algorithm: no squared
+# magnitude, so no overflow a quotient does not itself have).
+fn _diff_cdiv(ar, ai, br, bi, out) {
+    if (f64_ge(f64_abs(br), f64_abs(bi)) == 1) {
+        var r = f64_div(bi, br);
+        var d = f64_add(br, f64_mul(bi, r));
+        store64(out, f64_div(f64_add(ar, f64_mul(ai, r)), d));
+        store64(out + 8, f64_div(f64_sub(ai, f64_mul(ar, r)), d));
+        return 0;
+    }
+    var r2 = f64_div(br, bi);
+    var d2 = f64_add(bi, f64_mul(br, r2));
+    store64(out, f64_div(f64_add(f64_mul(ar, r2), ai), d2));
+    store64(out + 8, f64_div(f64_sub(f64_mul(ai, r2), ar), d2));
+    return 0;
+}
+
+# One layer applied to a polarization's state
+#   st = [B_re, B_im, C_re, C_im, fe, fm],
+# where fm 2^(512 fe) is the substrate flux Re(u w*) carried in the SAME frame as
+# the scaled vector: [B; C] <- [[cd, m12], [m21, cd]] [B; C] is the true layer
+# times e^-b, so the flux is multiplied by e2 = e^-2b — the same rounded
+# exponential the layer's cosh/sinh were built from, so the two frames agree to
+# rounding with no large exp at the end. The vector is then rescaled by 2^-+256
+# (the flux by 2^-+512, exactly) while its largest component is outside
+# [2^-256, 2^256], and fm is kept in [2^-512, 2^512] by moving whole 2^512 steps
+# into fe.
+# (Round 1 of the review: the first cut summed Im delta into one exponent and
+# applied e^(-2 sum) at the end; the sum's rounding landed on T and A, 1.3e-12
+# relative through 200 absorbing layers, and a lossless 1600-layer stack
+# reported A = -5.6e-12.)
+fn _diff_rta_apply(st, cdr, cdi, m12r, m12i, m21r, m21i, e2) {
+    var br = load64(st);
+    var bi = load64(st + 8);
+    var cr = load64(st + 16);
+    var ci = load64(st + 24);
+    var nbr = f64_add(f64_sub(f64_mul(cdr, br), f64_mul(cdi, bi)),
+      f64_sub(f64_mul(m12r, cr), f64_mul(m12i, ci)));
+    var nbi = f64_add(f64_add(f64_mul(cdr, bi), f64_mul(cdi, br)),
+      f64_add(f64_mul(m12r, ci), f64_mul(m12i, cr)));
+    var ncr = f64_add(f64_sub(f64_mul(m21r, br), f64_mul(m21i, bi)),
+      f64_sub(f64_mul(cdr, cr), f64_mul(cdi, ci)));
+    var nci = f64_add(f64_add(f64_mul(m21r, bi), f64_mul(m21i, br)),
+      f64_add(f64_mul(cdr, ci), f64_mul(cdi, cr)));
+    var m = f64_max(f64_max(f64_abs(nbr), f64_abs(nbi)), f64_max(f64_abs(ncr), f64_abs(nci)));
+    var fe = load64(st + 32);
+    var fm = f64_mul(load64(st + 40), e2);
+    # 2^256 = 0x4FF0000000000000, 2^-256 = 0x2FF0000000000000,
+    # 2^512 = 0x5FF0000000000000, 2^-512 = 0x1FF0000000000000: exact rescalings.
+    while ((f64_gt(m, 0x4FF0000000000000) & _diff_finite(m)) == 1) {
+        nbr = f64_mul(nbr, 0x2FF0000000000000);
+        nbi = f64_mul(nbi, 0x2FF0000000000000);
+        ncr = f64_mul(ncr, 0x2FF0000000000000);
+        nci = f64_mul(nci, 0x2FF0000000000000);
+        m = f64_mul(m, 0x2FF0000000000000);
+        fe = fe - 1;
+    }
+    while ((f64_lt(m, 0x2FF0000000000000) & f64_gt(m, 0)) == 1) {
+        nbr = f64_mul(nbr, 0x4FF0000000000000);
+        nbi = f64_mul(nbi, 0x4FF0000000000000);
+        ncr = f64_mul(ncr, 0x4FF0000000000000);
+        nci = f64_mul(nci, 0x4FF0000000000000);
+        m = f64_mul(m, 0x4FF0000000000000);
+        fe = fe + 1;
+    }
+    while ((f64_gt(fm, 0) & f64_lt(fm, 0x1FF0000000000000)) == 1) {
+        fm = f64_mul(fm, 0x5FF0000000000000);
+        fe = fe - 1;
+    }
+    while ((f64_gt(fm, 0x5FF0000000000000) & _diff_finite(fm)) == 1) {
+        fm = f64_mul(fm, 0x1FF0000000000000);
+        fe = fe + 1;
+    }
+    store64(st, nbr);
+    store64(st + 8, nbi);
+    store64(st + 16, ncr);
+    store64(st + 24, nci);
+    store64(st + 32, fe);
+    store64(st + 40, fm);
+    return 0;
+}
+
+# R, T, A of one polarization from its final state, with incident weights a0, b0
+# (s: n0 cos0 and 1; p: n0 and cos0 — eta_0 = a0/b0 without dividing by a
+# grazing cosine). T = w fm 2^(512 fe) with w = 4 a0 b0/|a0 B + b0 C|^2, the power
+# of two applied in exact steps after the product so nothing underflows early;
+# A = w Re(B C*) - T. Writes out[0..2].
+fn _diff_rta_finish(st, a0, b0, out) {
+    var br = load64(st);
+    var bi = load64(st + 8);
+    var cr = load64(st + 16);
+    var ci = load64(st + 24);
+    var fe = load64(st + 32);
+    var denr = f64_add(f64_mul(a0, br), f64_mul(b0, cr));
+    var deni = f64_add(f64_mul(a0, bi), f64_mul(b0, ci));
+    var numr = f64_sub(f64_mul(a0, br), f64_mul(b0, cr));
+    var numi = f64_sub(f64_mul(a0, bi), f64_mul(b0, ci));
+    var dd = f64_add(f64_mul(denr, denr), f64_mul(deni, deni));
+    var r = f64_div(f64_add(f64_mul(numr, numr), f64_mul(numi, numi)), dd);
+    var w = f64_div(f64_mul(f64_mul(f64_from(4), a0), b0), dd);
+    var t = f64_mul(w, load64(st + 40));
+    while ((fe > 0) & _diff_finite(t)) {
+        t = f64_mul(t, 0x5FF0000000000000);
+        fe = fe - 1;
+    }
+    while ((fe < 0) & ((t & _PRK_ABS) != 0)) {
+        t = f64_mul(t, 0x1FF0000000000000);
+        fe = fe + 1;
+    }
+    store64(out, r);
+    store64(out + 8, t);
+    store64(out + 16, f64_sub(f64_mul(w, f64_add(f64_mul(br, cr), f64_mul(bi, ci))), t));
+    return 0;
+}
+
+# Reflectance, transmittance and absorptance of an ABSORBING multilayer at
+# oblique incidence, for s and p. `layers` holds num_layers (n, k, thickness)
+# triples at a 24-byte stride, listed from the incident side; thickness and
+# wavelength share a unit. The incident medium is lossless (n_incident real —
+# R, T and the angle are not well defined in an absorbing one); the substrate is
+# n_substrate + i k_substrate. Every n, k finite, >= 0 and <= 2^100 (~1.3e30),
+# with max(n, k) >= 2^-100 (n_incident itself in [2^-100, 2^100]); every
+# thickness finite and >= 0; |angle| < pi/2.
+#
+# Writes the result into `out`, an AbsorbingFilmResult the caller owns — one
+# alloc(sizeof(AbsorbingFilmResult)) reused across a spectral sweep, rather than
+# a fresh block per wavelength from an allocator that never frees. Returns
+# PK_ERR_NONE, PK_ERR_INVALID_ANGLE for the angle, or PK_ERR_INVALID_PARAMETER
+# (out untouched) for anything else, including a layer whose phase exceeds 2^42
+# radians — past that an input's last bit moves the phase by more than 5e-4 rad,
+# so the coherent answer is rounding noise, not optics.
+fn multilayer_rta(wavelength, angle, n_incident, n_substrate, k_substrate, layers, num_layers, out) {
+    _prk_trace("multilayer_rta");
+    if (out == 0) { return PK_ERR_INVALID_PARAMETER; }
+    if (num_layers < 0) { return PK_ERR_INVALID_PARAMETER; }
+    if (num_layers > 0) { if (layers == 0) { return PK_ERR_INVALID_PARAMETER; } }
+    if ((f64_gt(wavelength, 0) & _diff_finite(wavelength)) == 0) { return PK_ERR_INVALID_PARAMETER; }
+    if ((f64_gt(n_incident, 0) & _diff_medium_ok(n_incident, 0)) == 0) { return PK_ERR_INVALID_PARAMETER; }
+    if (_diff_medium_ok(n_substrate, k_substrate) == 0) { return PK_ERR_INVALID_PARAMETER; }
+    if (f64_lt(f64_abs(angle), F64_PI_2) == 0) { return PK_ERR_INVALID_ANGLE; }
+    var beta = f64_mul(n_incident, _prk_sin(angle));
+    # cos theta_0 near grazing as sin(pi/2 - |theta|), pi/2 split into its double
+    # and the 6.1e-17 remainder: the subtraction is exact (Sterbenz) past pi/4, and
+    # x87 fcos's ~2e-21 absolute error near pi/2 would otherwise be the whole of a
+    # grazing cosine's last digits — 7e-6 relative at pi/2 - 1 ulp, carried into
+    # eta_0 (R_p 2.7e-6 off on a 1e15 substrate; round 1 of the review).
+    var c0 = _prk_cos(angle);
+    if (f64_gt(f64_abs(angle), F64_PI_4) == 1) {
+        c0 = _prk_sin(f64_add(f64_sub(F64_PI_2, f64_abs(angle)), 0x3C91A62633145C07));
+    }
+    var tmp[16];
+    # Substrate: q_s = principal sqrt(n~^2 - beta^2), eps_s = n~^2.
+    var esr = f64_mul(f64_sub(n_substrate, k_substrate), f64_add(n_substrate, k_substrate));
+    var esi = f64_mul(f64_add(n_substrate, n_substrate), k_substrate);
+    var qs2r = f64_sub(f64_mul(f64_sub(n_substrate, beta), f64_add(n_substrate, beta)),
+      f64_mul(k_substrate, k_substrate));
+    _diff_csqrt(qs2r, esi, &tmp);
+    var qsr = load64(&tmp);
+    var qsi = load64(&tmp + 8);
+    # s starts at [1; eta_s] = [1; q_s]; p at [1/eta_s; 1] = [q_s/eps_s; 1], the p
+    # vector divided through by eta_s so a substrate at exactly its critical angle
+    # (q_s = 0, eta_p infinite) needs no special case. The flux Re(u w*) is
+    # Re(eta_s) and Re(1/eta_s) respectively.
+    var sts[48];
+    var stp[48];
+    store64(&sts, F64_ONE);
+    store64(&sts + 8, 0);
+    store64(&sts + 16, qsr);
+    store64(&sts + 24, qsi);
+    store64(&sts + 32, 0);
+    store64(&sts + 40, qsr);
+    _diff_cdiv(qsr, qsi, esr, esi, &tmp);
+    store64(&stp, load64(&tmp));
+    store64(&stp + 8, load64(&tmp + 8));
+    store64(&stp + 16, F64_ONE);
+    store64(&stp + 24, 0);
+    store64(&stp + 32, 0);
+    store64(&stp + 40, load64(&tmp));
+    var kap0 = f64_div(F64_TAU, wavelength);
+    var j = num_layers - 1;
+    while (j >= 0) {
+        var base = layers + j * 24;
+        var n = load64(base);
+        var k = load64(base + 8);
+        var d = load64(base + 16);
+        if (_diff_medium_ok(n, k) == 0) { return PK_ERR_INVALID_PARAMETER; }
+        if ((f64_ge(d, 0) & _diff_finite(d)) == 0) { return PK_ERR_INVALID_PARAMETER; }
+        var epr = f64_mul(f64_sub(n, k), f64_add(n, k));
+        var epi = f64_mul(f64_add(n, n), k);
+        var q2r = f64_sub(f64_mul(f64_sub(n, beta), f64_add(n, beta)), f64_mul(k, k));
+        _diff_csqrt(q2r, epi, &tmp);
+        var qr = load64(&tmp);
+        var qi = load64(&tmp + 8);
+        var kap = f64_mul(kap0, d);
+        var a = f64_mul(kap, qr);
+        var b = f64_mul(kap, qi);
+        # 2^42 = 0x4290000000000000; the comparison is false for NaN too.
+        if (f64_le(f64_abs(a), 0x4290000000000000) == 0) { return PK_ERR_INVALID_PARAMETER; }
+        if (f64_ge(b, 0) == 0) { return PK_ERR_INVALID_PARAMETER; }
+        # cos(delta), sin(delta) scaled by e^-b: cosh b -> (1 + e^-2b)/2,
+        # sinh b -> (1 - e^-2b)/2, the latter through expm1 so the imaginary
+        # parts keep their relative precision when b is small.
+        var mb2 = f64_mul(f64_from(-2), b);
+        var e2 = _prk_exp(mb2);
+        var em = _diff_expm1(mb2, e2);
+        var ch = f64_add(F64_ONE, f64_mul(F64_HALF, em));
+        var sh = f64_neg(f64_mul(F64_HALF, em));
+        var ca = _prk_cos(a);
+        var sa = _prk_sin(a);
+        var cdr = f64_mul(ca, ch);
+        var cdi = f64_neg(f64_mul(sa, sh));
+        # S = sin(delta)/q, scaled. Near delta = 0 it is kap * sinc(delta), by the
+        # series through delta^8 (truncation below 2^-60 relative at |delta| < 2^-5).
+        var sr = 0;
+        var si = 0;
+        if (f64_lt(f64_add(f64_mul(a, a), f64_mul(b, b)), 0x3F50000000000000) == 1) {
+            var zr = f64_mul(f64_sub(a, b), f64_add(a, b));
+            var zi = f64_mul(f64_add(a, a), b);
+            # Horner in z: 1 + z(-1/6 + z(1/120 + z(-1/5040 + z/362880))).
+            var pr = f64_div(F64_ONE, f64_from(362880));
+            var pim = 0;
+            var cf = f64_neg(f64_div(F64_ONE, f64_from(5040)));
+            var tr = f64_add(f64_sub(f64_mul(pr, zr), f64_mul(pim, zi)), cf);
+            var ti = f64_add(f64_mul(pr, zi), f64_mul(pim, zr));
+            cf = f64_div(F64_ONE, f64_from(120));
+            pr = f64_add(f64_sub(f64_mul(tr, zr), f64_mul(ti, zi)), cf);
+            pim = f64_add(f64_mul(tr, zi), f64_mul(ti, zr));
+            cf = f64_neg(f64_div(F64_ONE, f64_from(6)));
+            tr = f64_add(f64_sub(f64_mul(pr, zr), f64_mul(pim, zi)), cf);
+            ti = f64_add(f64_mul(pr, zi), f64_mul(pim, zr));
+            pr = f64_add(f64_sub(f64_mul(tr, zr), f64_mul(ti, zi)), F64_ONE);
+            pim = f64_add(f64_mul(tr, zi), f64_mul(ti, zr));
+            var sc = f64_mul(kap, f64_sqrt(e2));
+            sr = f64_mul(pr, sc);
+            si = f64_mul(pim, sc);
+        } else {
+            _diff_cdiv(f64_mul(sa, ch), f64_mul(ca, sh), qr, qi, &tmp);
+            sr = load64(&tmp);
+            si = load64(&tmp + 8);
+        }
+        # P = q^2 S. s: m12 = -iS, m21 = -iP. p: m12 = -iP/eps, m21 = -i eps S.
+        var pvr = f64_sub(f64_mul(q2r, sr), f64_mul(epi, si));
+        var pvi = f64_add(f64_mul(q2r, si), f64_mul(epi, sr));
+        _diff_rta_apply(&sts, cdr, cdi, si, f64_neg(sr), pvi, f64_neg(pvr), e2);
+        _diff_cdiv(pvr, pvi, epr, epi, &tmp);
+        var esr2 = f64_sub(f64_mul(epr, sr), f64_mul(epi, si));
+        var esi2 = f64_add(f64_mul(epr, si), f64_mul(epi, sr));
+        _diff_rta_apply(&stp, cdr, cdi, load64(&tmp + 8), f64_neg(load64(&tmp)), esi2, f64_neg(esr2), e2);
+        j = j - 1;
+    }
+    var rs[24];
+    var rp[24];
+    _diff_rta_finish(&sts, f64_mul(n_incident, c0), F64_ONE, &rs);
+    _diff_rta_finish(&stp, n_incident, c0, &rp);
+    var i = 0;
+    while (i < 3) {
+        if ((_diff_finite(load64(&rs + i * 8)) & _diff_finite(load64(&rp + i * 8))) == 0) {
+            return PK_ERR_INVALID_PARAMETER;
+        }
+        i = i + 1;
+    }
+    AbsorbingFilmResult_set_r_s(out, load64(&rs));
+    AbsorbingFilmResult_set_t_s(out, load64(&rs + 8));
+    AbsorbingFilmResult_set_a_s(out, load64(&rs + 16));
+    AbsorbingFilmResult_set_r_p(out, load64(&rp));
+    AbsorbingFilmResult_set_t_p(out, load64(&rp + 8));
+    AbsorbingFilmResult_set_a_p(out, load64(&rp + 16));
+    AbsorbingFilmResult_set_r_avg(out, f64_mul(F64_HALF, f64_add(load64(&rs), load64(&rp))));
+    AbsorbingFilmResult_set_t_avg(out, f64_mul(F64_HALF, f64_add(load64(&rs + 8), load64(&rp + 8))));
+    AbsorbingFilmResult_set_a_avg(out, f64_mul(F64_HALF, f64_add(load64(&rs + 16), load64(&rp + 16))));
+    return PK_ERR_NONE;
 }

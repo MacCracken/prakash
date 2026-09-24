@@ -39,13 +39,17 @@
 >   no phase, so it cannot show the contrast reversals a true polychromatic MTF
 >   does.
 >
-> **Still genuinely open**, and these are the only entries worth mining for work:
-> complex refractive indices in the TMM (the layer buffer is `(n, d)` at a
-> 16-byte stride, so admitting `k` is a layout change), fiber dispersion, and
-> Gaussian-beam support from scratch — **the last shipped in 2.6.0** (`wave_beam`:
-> TEM00, q/ABCD, HG/LG modes, M², OAM), so §6 is now implemented. Everything else is either shipped or
-> superseded. The forward-looking list is `docs/development/roadmap.md`, not this
-> file.
+> **Formerly open, now all shipped:**
+> - complex refractive indices in the TMM — **2.10.0**, `multilayer_rta`: a new
+>   (n, k, d) entry point at a 24-byte stride, since the `(n, d)` buffer could not
+>   admit `k`;
+> - fiber dispersion — **2.10.0**: material, Gloge waveguide and total step-index
+>   D, with the zero-dispersion wavelength;
+> - Gaussian-beam support from scratch — **2.6.0**, `wave_beam`: TEM00, q/ABCD,
+>   HG/LG modes, M² and OAM, so §6 is implemented.
+>
+> Everything else is either shipped or superseded. The forward-looking list is
+> `docs/development/roadmap.md`, not this file.
 
 ---
 

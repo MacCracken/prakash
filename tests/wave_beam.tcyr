@@ -14,6 +14,7 @@
 #     against that integral, so the two functions cannot drift apart.
 
 include "src/error.cyr"
+include "src/ray_dispersion.cyr"
 include "src/ray_fiber.cyr"
 include "src/lens.cyr"
 include "src/wave_beam.cyr"

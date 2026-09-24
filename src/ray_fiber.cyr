@@ -1,5 +1,5 @@
 # ray_fiber.cyr -- fiber optics: numerical aperture, V-number, modes, coupling
-# Usage: include "lib/ray_fiber.cyr"  (requires error.cyr)
+# Usage: include "lib/ray_fiber.cyr"  (requires error.cyr, ray_dispersion.cyr)
 #
 # Ported from the Rust `ray/fiber.rs`. Non-integer literals are exact ratios.
 # `v.powf(-1.5)` uses ganita_f64_pow (transcendental, like Rust powf); `v.powi(-6)`
@@ -71,4 +71,509 @@ fn coupling_efficiency_gaussian(w_beam, w_fiber) {
     var den = f64_add(f64_mul(w_beam, w_beam), f64_mul(w_fiber, w_fiber));
     var ratio = f64_div(num, den);
     return f64_mul(ratio, ratio);
+}
+
+# ── Chromatic dispersion (2.10.0) ────────
+#
+# D = d(tau/L)/d(lambda) in ps/(nm km), the unit fibre data sheets use. With the
+# wavelength in um and n'' in um^-2, D = -(lambda/c) n'' is ps per um of
+# wavelength per um of length; 1 um of length is 1e-9 km and 1 um of wavelength
+# 1000 nm, and c = 299.792458 um/ps, so D[ps/(nm km)] = -lambda n'' * 1e12/299792458.
+# Wavelengths and core radii are in MICROMETRES here, the Sellmeier convention —
+# unlike this module's older functions, which take any consistent unit.
+
+fn _fib_finite(x) {
+    if ((x & 0x7FFFFFFFFFFFFFFF) >= 0x7FF0000000000000) { return 0; }
+    return 1;
+}
+fn _fib_pos(x) { return f64_gt(x, 0) & _fib_finite(x); }
+
+# 1e12/299792458 = 3335.6409519815205 (correctly rounded; pinned in the suite).
+fn _fib_dconst() { return f64_div(f64_from(1000000000000), f64_from(299792458)); }
+
+# The largest double BELOW j01 = 2.40482555769577277, J0's first zero — the LP01
+# root's upper bound. (Round 1 of the review: the nearest double,
+# 0x40033D152E971B40, is 1.2e-16 ABOVE the zero; a solve that converged onto it
+# evaluated g past the pole and returned NaN as success for V past 3e16.)
+var _FIB_J01 = 0x40033D152E971B3F;
+
+# The largest V the LP01 functions answer: 2^48 ~ 2.8e14. The root lies within
+# ~j01/V of J0's zero, so past ~1e16 a double cannot place it at all; below
+# 2^48 it is resolved to ~1e-15. Every real fibre has V < 1e3.
+fn _fib_v_ok(v) { return _fib_pos(v) & f64_le(v, 0x42F0000000000000); }
+
+# Material dispersion D = -(lambda/c) d^2n/dlambda^2 of a Sellmeier material, in
+# ps/(nm km), at wavelength_um. Positive is "anomalous": the group delay grows
+# with wavelength, so short wavelengths travel faster (blue leads red). Fused
+# silica (Malitson) crosses zero at 1.2727 um; NaN where sellmeier_d2n_dlambda2
+# refuses.
+#must_use
+fn fiber_material_dispersion(coef, wavelength_um) {
+    var d2 = sellmeier_d2n_dlambda2(coef, wavelength_um);
+    return f64_neg(f64_mul(f64_mul(wavelength_um, d2), _fib_dconst()));
+}
+
+# g(U) = U J1(U)/J0(U) by the backward continued fraction
+# t <- U^2/(2k - t), k = 20..1 — U J_k/J_{k-1} from the Bessel recurrence, with no
+# J evaluated and no division by U. Twenty levels leave a tail below 1e-27 for
+# U <= 3.4, the most the LP01 solve reaches. The pole at U = j01 is J0's zero.
+fn _fib_g(u) {
+    var u2 = f64_mul(u, u);
+    var t = 0;
+    var k = 20;
+    while (k >= 1) {
+        t = f64_div(u2, f64_sub(f64_from(2 * k), t));
+        k = k - 1;
+    }
+    return t;
+}
+
+# Steed's continued fraction z for W >= 1, with W K1(W)/K0(W) = W + 1/2 - z/4
+# (Thompson & Barnett 1987; Numerical Recipes' CF2 at order 0): partial
+# numerators -(i - 1/2)^2, denominators 2(i + W). Needs 61 levels at W = 1 and
+# fewer above. The U-branch derivatives use z itself: 4(h - W) - 2 = -z, which
+# is O(1/W) and would otherwise be recovered by cancelling O(1) terms.
+fn _fib_kcf(w) {
+    var b = f64_mul(F64_TWO, f64_add(F64_ONE, w));
+    var d = f64_div(F64_ONE, b);
+    var h = d;
+    var delh = d;
+    var a = f64_neg(0x3FD0000000000000);
+    var i = 2;
+    while (i < 400) {
+        a = f64_sub(a, f64_from(2 * (i - 1)));
+        b = f64_add(b, F64_TWO);
+        d = f64_div(F64_ONE, f64_add(b, f64_mul(a, d)));
+        delh = f64_mul(f64_sub(f64_mul(b, d), F64_ONE), delh);
+        h = f64_add(h, delh);
+        # 2^-56 relative.
+        if (f64_lt(f64_abs(delh), f64_mul(f64_abs(h), 0x3C70000000000000)) == 1) { i = 400; }
+        i = i + 1;
+    }
+    return h;
+}
+
+# h(W) = W K1(W)/K0(W); s = ln W, passed so the small-W branch needs no log and
+# works past the point where W itself underflows. W < 1: the ascending series
+#   K0 = sum (H_k - L) q^k/(k!)^2,
+#   W K1 = 1 + q sum (2L - H_k - H_{k+1}) q^k/(k!(k+1)!),
+# q = W^2/4, L = ln(W/2) + gamma, H_k harmonic (A&S 9.6.13, 9.6.11); W >= 1,
+# _fib_kcf. Both measured at <= 6e-16 relative against mpmath across 1e-3..1e3.
+fn _fib_h(w, s) {
+    if (f64_lt(w, F64_ONE) == 1) {
+        var q = f64_mul(F64_HALF, f64_mul(F64_HALF, f64_mul(w, w)));
+        var lg = f64_add(f64_sub(s, 0x3FE62E42FEFA39EF), 0x3FE2788CFC6FB619);
+        var k0 = 0;
+        var wk1 = 0;
+        var t0 = F64_ONE;
+        var t1 = F64_ONE;
+        var hk = 0;
+        var k = 0;
+        while (k < 14) {
+            var hn = f64_add(hk, f64_div(F64_ONE, f64_from(k + 1)));
+            k0 = f64_add(k0, f64_mul(f64_sub(hk, lg), t0));
+            wk1 = f64_add(wk1, f64_mul(f64_sub(f64_sub(f64_add(lg, lg), hk), hn), t1));
+            t0 = f64_div(f64_mul(t0, q), f64_from((k + 1) * (k + 1)));
+            t1 = f64_div(f64_mul(t1, q), f64_from((k + 1) * (k + 2)));
+            hk = hn;
+            k = k + 1;
+        }
+        return f64_div(f64_add(F64_ONE, f64_mul(q, wk1)), k0);
+    }
+    return f64_sub(f64_add(w, F64_HALF), f64_mul(0x3FD0000000000000, _fib_kcf(w)));
+}
+
+# The scalar LP01 mode of a step-index fibre (weak guidance): the root of
+#   U J1(U)/J0(U) = W K1(W)/K0(W),   U^2 + W^2 = V^2,
+# written to out[0..3] as U, W^2, X = the common value of both sides, and 1 if
+# it was solved in U (then W >= V/sqrt 2 >= 1.6) or 0 if in s.
+# F rises monotonically through the root, so a bracketed Newton with bisection
+# fallback cannot miss it. It is solved in U when the root has U < W and in
+# s = ln W otherwise, so neither of U, W is recovered from V^2 minus a nearly
+# equal square: small V has W ~ 2 e^(1/4 - gamma) e^(-2/V^2) = 1.44 e^(-2/V^2),
+# resolved in s down to W = e^-800 (V ~ 0.05; below it W^2 is 0 in double).
+# Callers keep V <= 2^48 (_fib_v_ok).
+fn _fib_lp01(v, out) {
+    var um = f64_mul(v, 0x3FE6A09E667F3BCD);   # V/sqrt 2: U = W there
+    var ubranch = f64_ge(um, _FIB_J01);
+    if (ubranch == 0) {
+        var fm = f64_sub(_fib_g(um), _fib_h(um, f64_ln(um)));
+        ubranch = f64_gt(fm, 0);
+    }
+    if (ubranch == 1) {
+        var lo = 0;
+        var hi = f64_min(um, _FIB_J01);
+        # Gloge's closed form U ~ (1 + sqrt 2) V/(1 + (4 + V^4)^(1/4)) to start.
+        var v2 = f64_mul(v, v);
+        var u = f64_div(f64_mul(0x4003504F333F9DE6, v),
+          f64_add(F64_ONE, f64_sqrt(f64_sqrt(f64_add(f64_from(4), f64_mul(v2, v2))))));
+        if ((f64_gt(u, lo) & f64_lt(u, hi)) == 0) { u = f64_mul(F64_HALF, f64_add(lo, hi)); }
+        var it = 0;
+        while (it < 200) {
+            var w2 = f64_mul(f64_sub(v, u), f64_add(v, u));
+            var w = f64_sqrt(w2);
+            var g = _fib_g(u);
+            var hh = _fib_h(w, f64_ln(w));
+            var f = f64_sub(g, hh);
+            if (f64_gt(f, 0) == 1) { hi = u; }
+            if (f64_lt(f, 0) == 1) { lo = u; }
+            if (f == 0) { it = 200; }
+            var gp = f64_add(u, f64_div(f64_mul(g, g), u));
+            var fp = f64_add(gp, f64_div(f64_mul(f64_sub(f64_mul(hh, hh), w2), u), w2));
+            var un = f64_sub(u, f64_div(f, fp));
+            # A Newton step below 2^-52 relative has converged — tested BEFORE the
+            # bracket, whose edge the converged iterate itself usually is (a
+            # sub-ulp step lands on it and would be thrown to a bisection).
+            if (f64_le(f64_abs(f64_sub(un, u)), f64_mul(u, 0x3CB0000000000000)) == 1) { it = 200; }
+            if (it < 200) {
+                if ((f64_gt(un, lo) & f64_lt(un, hi)) == 0) { un = f64_add(lo, f64_mul(F64_HALF, f64_sub(hi, lo))); }
+                if (f64_le(f64_sub(hi, lo), f64_mul(hi, 0x3CB0000000000000)) == 1) { it = 200; }
+                u = un;
+            }
+            it = it + 1;
+        }
+        store64(out, u);
+        store64(out + 8, f64_mul(f64_sub(v, u), f64_add(v, u)));
+        store64(out + 16, _fib_g(u));
+        store64(out + 24, 1);
+        return 0;
+    }
+    # s-branch: F(s) = g(U(s)) - h(e^s) FALLS through the root.
+    var shi = f64_ln(um);
+    # Past j01 the lower end is where U reaches the pole (F = +inf there).
+    var slo = f64_from(-800);
+    if (f64_gt(v, _FIB_J01) == 1) {
+        slo = f64_mul(F64_HALF, f64_ln(f64_mul(f64_sub(v, _FIB_J01), f64_add(v, _FIB_J01))));
+    }
+    var gv = _fib_g(v);
+    var deep = f64_le(v, _FIB_J01) & f64_le(f64_sub(gv, _fib_h(0, slo)), 0);
+    if (deep == 1) {
+        # The root is below W = e^-800: W^2 is 0 in double and so is b.
+        store64(out, v);
+        store64(out + 8, 0);
+        store64(out + 16, gv);
+        store64(out + 24, 0);
+        return 0;
+    }
+    # Small-W asymptote h ~ -1/(ln(W/2) + gamma) = g to start.
+    var s = f64_sub(f64_sub(0x3FE62E42FEFA39EF, 0x3FE2788CFC6FB619), f64_div(F64_ONE, gv));
+    if ((f64_gt(s, slo) & f64_lt(s, shi)) == 0) { s = f64_mul(F64_HALF, f64_add(slo, shi)); }
+    var us = v;
+    var ws2 = 0;
+    var xs = gv;
+    var jt = 0;
+    while (jt < 200) {
+        var ws = _prk_exp(s);
+        ws2 = f64_mul(ws, ws);
+        us = f64_sqrt(f64_mul(f64_sub(v, ws), f64_add(v, ws)));
+        xs = _fib_g(us);
+        var hs = _fib_h(ws, s);
+        var fs = f64_sub(xs, hs);
+        if (f64_gt(fs, 0) == 1) { slo = s; }
+        if (f64_lt(fs, 0) == 1) { shi = s; }
+        if (fs == 0) { jt = 200; }
+        var gps = f64_add(us, f64_div(f64_mul(xs, xs), us));
+        var fps = f64_neg(f64_add(f64_div(f64_mul(gps, ws2), us), f64_sub(f64_mul(hs, hs), ws2)));
+        var sn = f64_sub(s, f64_div(fs, fps));
+        var tol = f64_mul(f64_max(F64_ONE, f64_abs(s)), 0x3CB0000000000000);
+        if (f64_le(f64_abs(f64_sub(sn, s)), tol) == 1) { jt = 200; }
+        if (jt < 200) {
+            if ((f64_gt(sn, slo) & f64_lt(sn, shi)) == 0) { sn = f64_add(slo, f64_mul(F64_HALF, f64_sub(shi, slo))); }
+            if (f64_le(f64_sub(shi, slo), tol) == 1) { jt = 200; }
+            s = sn;
+        }
+        jt = jt + 1;
+    }
+    var wf = _prk_exp(s);
+    store64(out, f64_sqrt(f64_mul(f64_sub(v, wf), f64_add(v, wf))));
+    store64(out + 8, f64_mul(wf, wf));
+    store64(out + 16, _fib_g(load64(out)));
+    store64(out + 24, 0);
+    return 0;
+}
+
+# V-derivatives of the LP01 root by implicit differentiation, into out[0..3]:
+# b, b' = db/dV, b'' and the waveguide factor F = V (Vb)''. With X the common
+# value, g' = U + X^2/U and g'' = 1 + 2Xg'/U - X^2/U^2 (from (x J1)' = x J0,
+# J0' = -J1), and h' = (X^2 - W^2)/W, h'' = 2Xh'/W - X^2/W^2 - 1 (from
+# (x K1)' = -x K0, K0' = -K1). Two forms, one per solve branch, each free of the
+# cancellation the other suffers; both checked against 60-digit finite
+# differences of the root to 17 digits.
+#
+# s-branch (small V, W -> 0), in s = ln W, H(s) = h(e^s), H_s = X^2 - W^2,
+# H_ss = 2X H_s - 2W^2:
+#   s'  = g' V/(U H_s + g' W^2),   U' = (V - W^2 s')/U,
+#   s'' = [g'' U'^2 + g'(1 - U'^2 - 2W^2 s'^2)/U - H_ss s'^2] U/(U H_s + g' W^2),
+#   1 - U'^2 = W^2 (2V s' - 1 - W^2 s'^2)/U^2,
+#   F = W^2 [4s'^2 + 2s'' - 4s'/V + 2/V^2],
+# every term carrying its factor of W^2 explicitly, so none cancels as W
+# vanishes. Past V ~ 3 those terms cancel to a result O(1/V^2) smaller — 1400
+# ulps at V = 10 — so the
+# U-branch (W >= 1.6) works in U, with h's excess m = h - W = 1/2 - z/4 and
+# 4m - 2 = -z taken from the continued fraction rather than by subtraction:
+#   h' = m(2W + m)/W,   h'' = -z + (6m^2 - 2m)/W + (2m^3 - m^2)/W^2,
+#   U' = h' V/(W g' + h' U),   W' = (V - U U')/W,
+#   1 - U'^2 - W'^2 = -(U - V U')^2/W^2,
+#   U'' = [h'' W'^2 + h'(1 - U'^2 - W'^2)/W - g'' U'^2] W/(W g' + h' U),
+#   F = -2(U'^2 + U U'') + 4U U'/V - 2U^2/V^2.
+fn _fib_lp01_derivs(v, out) {
+    var r[32];
+    _fib_lp01(v, &r);
+    var u = load64(&r);
+    var w2 = load64(&r + 8);
+    var x = load64(&r + 16);
+    var x2 = f64_mul(x, x);
+    var gp = f64_add(u, f64_div(x2, u));
+    var gpp = f64_sub(f64_add(F64_ONE, f64_div(f64_mul(f64_mul(F64_TWO, x), gp), u)), f64_div(x2, f64_mul(u, u)));
+    var iv = f64_div(F64_ONE, v);
+    var v2 = f64_mul(v, v);
+    if (load64(&r + 24) == 1) {
+        var w = f64_sqrt(w2);
+        var z = _fib_kcf(w);
+        var m = f64_sub(F64_HALF, f64_mul(0x3FD0000000000000, z));
+        var hp = f64_div(f64_mul(m, f64_add(f64_add(w, w), m)), w);
+        var m2 = f64_mul(m, m);
+        var hpp = f64_add(f64_add(f64_neg(z), f64_div(f64_sub(f64_mul(f64_from(6), m2), f64_add(m, m)), w)),
+          f64_div(f64_sub(f64_mul(F64_TWO, f64_mul(m2, m)), m2), w2));
+        var den = f64_add(f64_mul(w, gp), f64_mul(hp, u));
+        var up = f64_div(f64_mul(hp, v), den);
+        var wp = f64_div(f64_sub(v, f64_mul(u, up)), w);
+        var e = f64_sub(u, f64_mul(v, up));
+        var one = f64_neg(f64_div(f64_mul(e, e), w2));
+        var num = f64_sub(f64_add(f64_mul(hpp, f64_mul(wp, wp)), f64_div(f64_mul(hp, one), w)),
+          f64_mul(gpp, f64_mul(up, up)));
+        var upp = f64_div(f64_mul(num, w), den);
+        var q = f64_add(f64_mul(up, up), f64_mul(u, upp));
+        var uu = f64_mul(u, u);
+        var uup = f64_mul(u, up);
+        store64(out, f64_div(w2, v2));
+        store64(out + 8, f64_mul(f64_div(f64_add(u, u), v2), f64_sub(f64_mul(u, iv), up)));
+        var bvv = f64_add(f64_neg(f64_div(f64_add(q, q), v2)), f64_div(f64_mul(f64_from(8), uup), f64_mul(v2, v)));
+        store64(out + 16, f64_sub(bvv, f64_div(f64_mul(f64_from(6), uu), f64_mul(v2, v2))));
+        store64(out + 24, f64_sub(f64_add(f64_neg(f64_add(q, q)), f64_mul(f64_mul(f64_from(4), uup), iv)),
+            f64_div(f64_add(uu, uu), v2)));
+        return 0;
+    }
+    if (w2 == 0) {
+        # b and all its derivatives are below the double range.
+        var i = 0;
+        while (i < 4) {
+            store64(out + i * 8, 0);
+            i = i + 1;
+        }
+        return 0;
+    }
+    var hsd = f64_sub(x2, w2);
+    var dn = f64_add(f64_mul(u, hsd), f64_mul(gp, w2));
+    var sp = f64_div(f64_mul(gp, v), dn);
+    var usp = f64_div(f64_sub(v, f64_mul(w2, sp)), u);
+    var sp2 = f64_mul(sp, sp);
+    var om = f64_div(f64_mul(w2, f64_sub(f64_sub(f64_mul(f64_mul(F64_TWO, v), sp), F64_ONE),
+          f64_mul(w2, sp2))), f64_mul(u, u));
+    var hss = f64_sub(f64_mul(f64_mul(F64_TWO, x), hsd), f64_mul(F64_TWO, w2));
+    var sn = f64_sub(f64_add(f64_mul(gpp, f64_mul(usp, usp)),
+        f64_div(f64_mul(gp, f64_sub(om, f64_mul(f64_mul(F64_TWO, w2), sp2))), u)), f64_mul(hss, sp2));
+    var spp = f64_div(f64_mul(sn, u), dn);
+    var c2 = f64_div(f64_mul(F64_TWO, w2), v2);
+    var e1 = f64_sub(sp, iv);
+    store64(out, f64_div(w2, v2));
+    store64(out + 8, f64_mul(c2, e1));
+    store64(out + 16, f64_mul(c2, f64_add(f64_add(f64_mul(F64_TWO, f64_mul(e1, e1)), spp), f64_mul(iv, iv))));
+    var br = f64_add(f64_sub(f64_add(f64_mul(f64_from(4), sp2), f64_mul(F64_TWO, spp)),
+        f64_mul(f64_mul(f64_from(4), sp), iv)), f64_mul(F64_TWO, f64_mul(iv, iv)));
+    store64(out + 24, f64_mul(w2, br));
+    return 0;
+}
+
+# Normalized propagation constant b = W^2/V^2 = (n_eff^2 - n_clad^2)/(n_core^2 -
+# n_clad^2) of the fundamental LP01 mode at normalized frequency V, from the exact
+# weak-guidance eigenvalue equation (not the Rudolph-Neumann fit):
+# b(1) = 0.0409504, b(2) = 0.4161634, b(2.405) = 0.5312608. 0 < b < 1 in exact
+# arithmetic; in double b underflows to 0 below V ~ 0.073 (it is ~e^(-4/V^2))
+# and rounds to 1 above V ~ 1e8. Writes PK_ERR_INVALID_PARAMETER (returns 0)
+# unless 0 < V <= 2^48 (_fib_v_ok).
+#must_use
+fn fiber_lp01_b(v, err_out) {
+    store64(err_out, PK_ERR_INVALID_PARAMETER);
+    if (_fib_v_ok(v) == 0) { return 0; }
+    var r[32];
+    _fib_lp01(v, &r);
+    store64(err_out, PK_ERR_NONE);
+    # W^2 = 0 is the deep branch; V^2 itself may underflow there (V < 1.6e-162).
+    if (load64(&r + 8) == 0) { return 0; }
+    return f64_div(load64(&r + 8), f64_mul(v, v));
+}
+
+# The waveguide-dispersion factor V d^2(Vb)/dV^2 of the LP01 mode — the curve
+# Gloge (1971) tabulates: 1.3456 at V = 1, 0.4623 at V = 2, 0.1951 at V = 2.4,
+# crossing zero just above V = 3. Exact within weak guidance (implicit
+# derivatives of the eigenvalue equation, not Marcuse's 0.080 + 0.549(2.834 -
+# V)^2 fit). PK_ERR_INVALID_PARAMETER (returns 0) unless 0 < V <= 2^48.
+#must_use
+fn fiber_waveguide_factor(v, err_out) {
+    store64(err_out, PK_ERR_INVALID_PARAMETER);
+    if (_fib_v_ok(v) == 0) { return 0; }
+    var dv[32];
+    _fib_lp01_derivs(v, &dv);
+    store64(err_out, PK_ERR_NONE);
+    return load64(&dv + 24);
+}
+
+# V = 2 pi a sqrt(n1^2 - n2^2)/lambda for cladding index n2 and relative index
+# step delta = (n1^2 - n2^2)/(2 n1^2): sqrt(n1^2 - n2^2) = n2 sqrt(rho),
+# rho = 2 delta/(1 - 2 delta).
+fn _fib_rho(delta) { return f64_div(f64_add(delta, delta), f64_sub(F64_ONE, f64_add(delta, delta))); }
+
+# Waveguide dispersion of a step-index fibre in the textbook split (Gloge 1971;
+# Keiser, Optical Fiber Communications):
+#   D_w = -(n2 delta/(c lambda)) V d^2(Vb)/dV^2      [ps/(nm km)]
+# with the exact weak-guidance factor above. `clad` is the cladding's Sellmeier
+# set — like fiber_material_dispersion and fiber_dispersion, not an index value
+# (round 1: an index here took a set pointer as a subnormal "index" and answered
+# 0 as success) — delta = (n1^2 - n2^2)/(2 n1^2), core_radius_um the radius.
+# ⚠ It is an approximation of the dispersion fiber_dispersion computes, and not
+# only by the cross term: expanding n_eff to first order in delta gives the
+# waveguide term with n2 replaced by N_g^2/n2 (Agrawal's form), 2.6% larger for
+# silica at 1.55 um. D_m + D_w misses fiber_dispersion by -0.048 ps/(nm km) at
+# delta = 0.36%, a = 4.1 um, 1.55 um (+0.085 cross term, -0.123 prefactor,
+# -0.010 second order). Both are the scalar LP01 model — see fiber_dispersion.
+# Writes PK_ERR_INVALID_PARAMETER (returns 0) for a null set or a wavelength
+# sellmeier_d2n_dlambda2 refuses, a core radius that is not finite and positive,
+# delta outside (0, 1/2), or V past 2^48.
+#must_use
+fn fiber_waveguide_dispersion(clad, delta, core_radius_um, wavelength_um, err_out) {
+    store64(err_out, PK_ERR_INVALID_PARAMETER);
+    if (_fib_pos(core_radius_um) == 0) { return 0; }
+    if ((_fib_pos(delta) & f64_lt(delta, F64_HALF)) == 0) { return 0; }
+    var f[24];
+    if (_sellmeier_f012(clad, wavelength_um, &f) == 0) { return 0; }
+    var n2 = f64_sqrt(load64(&f));
+    var v = f64_div(f64_mul(f64_mul(f64_mul(F64_TAU, core_radius_um), n2),
+        f64_sqrt(_fib_rho(delta))), wavelength_um);
+    var e = 0;
+    var fw = fiber_waveguide_factor(v, &e);
+    if (e != PK_ERR_NONE) { return 0; }
+    var dw = f64_neg(f64_div(f64_mul(f64_mul(f64_mul(n2, delta), fw), _fib_dconst()), wavelength_um));
+    if (_fib_finite(dw) == 0) { return 0; }
+    store64(err_out, PK_ERR_NONE);
+    return dw;
+}
+
+# Total chromatic dispersion of a step-index fibre, ps/(nm km): D = -(lambda/c)
+# d^2 n_eff/dlambda^2 with n_eff^2 = n2^2 + b(V)(n1^2 - n2^2) for the LP01 mode —
+# material, waveguide and their cross term together, not summed from the two
+# approximations. The cladding is the Sellmeier material `clad` and the core is
+# the same glass raised by a constant relative step delta (n1 = n2/sqrt(1 -
+# 2 delta)); a constant delta has no dispersion of its own. delta = 0 (either
+# sign of zero) is the bulk material, returned as fiber_material_dispersion
+# exactly.
+# ⚠ WEAK GUIDANCE. b(V) is the scalar LP01 mode, exact only as delta -> 0. Against
+# an exact vector (HE11) solution of the same constant-delta silica model the
+# error grows ~delta^2: -0.035 ps/(nm km) (0.2% of D) at delta = 0.36%,
+# a = 4.1 um, 1.55 um, but -0.49 (11%) at delta = 1%, a = 2 um, and 13% at delta
+# near its limit. Use it for standard fibres, not high-contrast waveguides.
+# Writes PK_ERR_INVALID_PARAMETER (returns 0) for a null set, a wavelength
+# sellmeier_d2n_dlambda2 refuses, delta outside [0, 1/2), (delta > 0) a core
+# radius that is not finite and positive or V past 2^48, or a result that is not
+# finite.
+#must_use
+fn fiber_dispersion(clad, delta, core_radius_um, wavelength_um, err_out) {
+    store64(err_out, PK_ERR_INVALID_PARAMETER);
+    if ((f64_ge(delta, 0) & f64_lt(delta, F64_HALF)) == 0) { return 0; }
+    var f[24];
+    if (_sellmeier_f012(clad, wavelength_um, &f) == 0) { return 0; }
+    var lam = wavelength_um;
+    var n2 = f64_sqrt(load64(&f));
+    var n2p = f64_div(load64(&f + 8), f64_mul(F64_TWO, n2));
+    var n2pp = f64_div(f64_sub(load64(&f + 16), f64_mul(F64_TWO, f64_mul(n2p, n2p))), f64_mul(F64_TWO, n2));
+    var kd = _fib_dconst();
+    if ((delta & 0x7FFFFFFFFFFFFFFF) == 0) {
+        var dm = f64_neg(f64_mul(f64_mul(lam, n2pp), kd));
+        if (_fib_finite(dm) == 0) { return 0; }
+        store64(err_out, PK_ERR_NONE);
+        return dm;
+    }
+    if (_fib_pos(core_radius_um) == 0) { return 0; }
+    var rho = _fib_rho(delta);
+    var ka = f64_mul(f64_mul(F64_TAU, core_radius_um), f64_sqrt(rho));
+    var v = f64_div(f64_mul(ka, n2), lam);
+    if (_fib_v_ok(v) == 0) { return 0; }
+    var dv[32];
+    _fib_lp01_derivs(v, &dv);
+    var b = load64(&dv);
+    var bv = load64(&dv + 8);
+    var bvv = load64(&dv + 16);
+    # V(lambda) = ka n2/lambda:  V' = ka (n2' lambda - n2)/lambda^2,
+    # V'' = ka [n2''/lambda - 2 (n2' lambda - n2)/lambda^3].
+    var l2 = f64_mul(lam, lam);
+    var m = f64_sub(f64_mul(n2p, lam), n2);
+    var vl = f64_div(f64_mul(ka, m), l2);
+    var vll = f64_mul(ka, f64_sub(f64_div(n2pp, lam), f64_div(f64_mul(F64_TWO, m), f64_mul(l2, lam))));
+    # n_eff = n2 Q, Q = sqrt(1 + rho b): Q' = rho b'/(2Q), Q'' = (rho b'' - 2Q'^2)/(2Q).
+    var q = f64_sqrt(f64_add(F64_ONE, f64_mul(rho, b)));
+    var bl = f64_mul(bv, vl);
+    var bll = f64_add(f64_mul(bvv, f64_mul(vl, vl)), f64_mul(bv, vll));
+    var ql = f64_div(f64_mul(rho, bl), f64_mul(F64_TWO, q));
+    var qll = f64_div(f64_sub(f64_mul(rho, bll), f64_mul(F64_TWO, f64_mul(ql, ql))), f64_mul(F64_TWO, q));
+    var npp = f64_add(f64_add(f64_mul(n2pp, q), f64_mul(f64_mul(F64_TWO, n2p), ql)), f64_mul(n2, qll));
+    var d = f64_neg(f64_mul(f64_mul(lam, npp), kd));
+    if (_fib_finite(d) == 0) { return 0; }
+    store64(err_out, PK_ERR_NONE);
+    return d;
+}
+
+# The zero-dispersion wavelength (um) of fiber_dispersion(clad, delta,
+# core_radius_um, .) between lo_um and hi_um, by Illinois false position — both
+# ends move, so the bracket shrinks to 2^-51 relative. delta = 0 finds the
+# MATERIAL zero: 1.2727539 um for fused silica, the roadmap's pin. Writes
+# PK_ERR_INVALID_PARAMETER (returns 0) if lo_um >= hi_um, if fiber_dispersion
+# refuses either end or any iterate, unless D is nonzero with OPPOSITE signs at
+# the two ends, or if the bracket has not converged in 200 steps. An end where D
+# is exactly 0 is refused, not returned: at 1e60 um D underflows to 0 while the
+# true value is -5e-160, and round 1 of the review had that end come back as a
+# "zero".
+#must_use
+fn fiber_zero_dispersion_wavelength(clad, delta, core_radius_um, lo_um, hi_um, err_out) {
+    store64(err_out, PK_ERR_INVALID_PARAMETER);
+    if (f64_lt(lo_um, hi_um) == 0) { return 0; }
+    var e = 0;
+    var a = lo_um;
+    var b = hi_um;
+    var fa = fiber_dispersion(clad, delta, core_radius_um, a, &e);
+    if (e != PK_ERR_NONE) { return 0; }
+    var fb = fiber_dispersion(clad, delta, core_radius_um, b, &e);
+    if (e != PK_ERR_NONE) { return 0; }
+    if ((f64_lt(fa, 0) & f64_gt(fb, 0)) == 0) {
+        if ((f64_gt(fa, 0) & f64_lt(fb, 0)) == 0) { return 0; }
+    }
+    var side = 0;
+    var c = a;
+    var done = 0;
+    var it = 0;
+    while ((it < 200) & (done == 0)) {
+        c = f64_div(f64_sub(f64_mul(a, fb), f64_mul(b, fa)), f64_sub(fb, fa));
+        if ((f64_gt(c, a) & f64_lt(c, b)) == 0) { c = f64_add(a, f64_mul(F64_HALF, f64_sub(b, a))); }
+        var fc = fiber_dispersion(clad, delta, core_radius_um, c, &e);
+        if (e != PK_ERR_NONE) { return 0; }
+        if ((fc & 0x7FFFFFFFFFFFFFFF) == 0) { done = 1; }
+        if (done == 0) {
+            if (f64_lt(fc, 0) == f64_lt(fb, 0)) {
+                b = c;
+                fb = fc;
+                if (side == 0 - 1) { fa = f64_mul(F64_HALF, fa); }
+                side = 0 - 1;
+            } else {
+                a = c;
+                fa = fc;
+                if (side == 1) { fb = f64_mul(F64_HALF, fb); }
+                side = 1;
+            }
+            # 2^-51 relative bracket.
+            if (f64_le(f64_sub(b, a), f64_mul(b, 0x3CC0000000000000)) == 1) { done = 1; }
+        }
+        it = it + 1;
+    }
+    if (done == 0) { return 0; }
+    store64(err_out, PK_ERR_NONE);
+    return c;
 }

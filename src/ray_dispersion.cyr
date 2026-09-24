@@ -196,6 +196,92 @@ fn sellmeier_n_at(coef, wavelength_um) {
     return f64_sqrt(n2);
 }
 
+# One term's contribution to chi = n^2 - 1, f' and f'' (accumulated into
+# acc[0..2]); 0 inside the pole guard. A b = 0 term contributes nothing and has
+# no pole — diamond's unused third term is (0, 1), which would otherwise refuse
+# lambda = 1 um. The derivatives are formed as (2BC/d)(l/d) and
+# (2BC/d)((3l^2 + C)/d)/d, never through d^3 — which overflowed past l = 2.4e51 um
+# and turned f'' into 0 and D's sign around (round 1 of the review).
+fn _sellmeier_f012_term(b, c, wl, acc) {
+    if ((b & 0x7FFFFFFFFFFFFFFF) == 0) { return 1; }
+    var l2 = f64_mul(wl, wl);
+    var d = f64_sub(l2, c);
+    if (f64_gt(f64_abs(d), _disp_eps15()) == 0) { return 0; }
+    var g = f64_div(f64_mul(F64_TWO, f64_mul(b, c)), d);
+    store64(acc, f64_add(load64(acc), f64_div(f64_mul(b, l2), d)));
+    store64(acc + 8, f64_sub(load64(acc + 8), f64_mul(g, f64_div(wl, d))));
+    store64(acc + 16, f64_add(load64(acc + 16),
+        f64_div(f64_mul(g, f64_div(f64_add(f64_mul(f64_from(3), l2), c), d)), d)));
+    return 1;
+}
+
+# n^2 and its first two wavelength derivatives, f = n^2, f', f'' (um^-1, um^-2),
+# into out[0..2]:  f  = 1 + chi, chi = sum B l^2/(l^2 - C),
+#                  f' = sum -2 B C l/(l^2 - C)^2,
+#                  f''= sum 2 B C (3 l^2 + C)/(l^2 - C)^3.
+# Returns 1, or 0 for a null set, a wavelength that is not finite and positive,
+# a term within sellmeier_n_at's pole guard, chi < 0 — the n^2 < 1 region
+# sellmeier_n_at clamps to 1, where its derivatives would describe a curve it
+# does not return — or any of f, f', f'' not finite. chi is summed on its own and
+# tested before 1 is added: below l = 6e-10 um silica's first term is under half
+# an ulp of 1, and a test on 1 + chi let that (all-negative) region through.
+fn _sellmeier_f012(coef, wavelength_um, out) {
+    if (coef == 0) { return 0; }
+    if (f64_gt(wavelength_um, 0) == 0) { return 0; }
+    if ((wavelength_um & 0x7FFFFFFFFFFFFFFF) >= 0x7FF0000000000000) { return 0; }
+    store64(out, 0);
+    store64(out + 8, 0);
+    store64(out + 16, 0);
+    var ok = _sellmeier_f012_term(SellmeierCoefficients_b1(coef), SellmeierCoefficients_c1(coef),
+      wavelength_um, out);
+    ok = ok & _sellmeier_f012_term(SellmeierCoefficients_b2(coef), SellmeierCoefficients_c2(coef),
+      wavelength_um, out);
+    ok = ok & _sellmeier_f012_term(SellmeierCoefficients_b3(coef), SellmeierCoefficients_c3(coef),
+      wavelength_um, out);
+    if (ok == 0) { return 0; }
+    if (f64_ge(load64(out), 0) == 0) { return 0; }
+    store64(out, f64_add(F64_ONE, load64(out)));
+    var i = 0;
+    while (i < 3) {
+        if ((load64(out + i * 8) & 0x7FFFFFFFFFFFFFFF) >= 0x7FF0000000000000) { return 0; }
+        i = i + 1;
+    }
+    return 1;
+}
+
+# dn/dlambda (um^-1) of a Sellmeier material at wavelength_um: f'/(2n) with
+# f = n^2. Analytic, not a finite difference. NaN where _sellmeier_f012 refuses
+# (null set, bad wavelength, a pole, the n^2 < 1 region sellmeier_n_at clamps, or
+# an overflow).
+#must_use
+fn sellmeier_dn_dlambda(coef, wavelength_um) {
+    var f[24];
+    if (_sellmeier_f012(coef, wavelength_um, &f) == 0) { return 0x7FF8000000000000; }
+    return f64_div(load64(&f + 8), f64_mul(F64_TWO, f64_sqrt(load64(&f))));
+}
+
+# d^2n/dlambda^2 (um^-2) at wavelength_um: (f'' - 2 n'^2)/(2n), from f = n^2.
+# NaN on the same inputs as sellmeier_dn_dlambda.
+#must_use
+fn sellmeier_d2n_dlambda2(coef, wavelength_um) {
+    var f[24];
+    if (_sellmeier_f012(coef, wavelength_um, &f) == 0) { return 0x7FF8000000000000; }
+    var n = f64_sqrt(load64(&f));
+    var n1 = f64_div(load64(&f + 8), f64_mul(F64_TWO, n));
+    return f64_div(f64_sub(load64(&f + 16), f64_mul(F64_TWO, f64_mul(n1, n1))), f64_mul(F64_TWO, n));
+}
+
+# Group index N_g = n - lambda dn/dlambda at wavelength_um: c over the group
+# velocity of a pulse in the bulk material. NaN on the same inputs as above.
+#must_use
+fn sellmeier_group_index(coef, wavelength_um) {
+    var f[24];
+    if (_sellmeier_f012(coef, wavelength_um, &f) == 0) { return 0x7FF8000000000000; }
+    var n = f64_sqrt(load64(&f));
+    var n1 = f64_div(load64(&f + 8), f64_mul(F64_TWO, n));
+    return f64_sub(n, f64_mul(wavelength_um, n1));
+}
+
 # Abbe number V = (n_d - 1) / (n_F - n_C).
 #must_use
 fn abbe_number(sellmeier) {

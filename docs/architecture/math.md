@@ -46,6 +46,70 @@ V = (n_d - 1) / (n_F - n_C)
 ### Prism Deviation
 δ = 2 arcsin(n sin(α/2)) - α
 
+### Sellmeier Derivatives and Group Index (2.10.0)
+With f = n² = 1 + Σ Bλ²/(λ² − C):
+f′ = Σ −2BCλ/(λ² − C)², f″ = Σ 2BC(3λ² + C)/(λ² − C)³,
+n′ = f′/(2n), n″ = (f″ − 2n′²)/(2n), N_g = n − λn′.
+Analytic, not differenced. NaN at a pole (a term with B ≠ 0 inside the 1e-15 guard)
+and in the n² < 1 region `sellmeier_n_at` clamps to 1. A B = 0 term is skipped, so
+diamond's placeholder (0, 1) is not a pole at 1 µm.
+
+## Fiber Chromatic Dispersion (`ray_fiber`, 2.10.0)
+
+Units: wavelength and core radius in µm (the Sellmeier convention);
+D in ps/(nm·km) = −λ n″ × 10¹²/299792458 with n″ in µm⁻².
+
+### Material dispersion
+D_m = −(λ/c) d²n/dλ². D > 0 is anomalous: the group delay grows with λ, so
+short wavelengths travel faster. Fused silica (Malitson) crosses zero at
+**1.2727539 µm**, BK7 at 1.3220 µm.
+
+### LP01 mode (weak guidance)
+U J₁(U)/J₀(U) = W K₁(W)/K₀(W), U² + W² = V², b = W²/V².
+- g(U) = U J₁/J₀ is formed by the backward continued fraction t ← U²/(2k − t),
+  k = 20…1.
+- h(W) = W K₁/K₀ uses the ascending series for W < 1 and Steed's continued fraction z
+  for W ≥ 1, where h = W + ½ − z/4.
+- The root is solved by bracketed Newton: in U when U < W, and in s = ln W
+  otherwise. Small V, where W ~ 2e^(¼−γ) e^(−2/V²) ≈ 1.44 e^(−2/V²), is therefore
+  resolved down to W = e⁻⁸⁰⁰ (V ≈ 0.05).
+- The upper bracket is the largest double BELOW j01. The domain is V ≤ 2⁴⁸; past
+  ~1e16 a double cannot place the root beside J0's zero.
+- Pinned values: b(1) = 0.0409504, b(2) = 0.4161634, b(2.4) = 0.5300264,
+  b(2.405) = 0.5312608.
+
+### Waveguide factor V d²(Vb)/dV²
+Found by implicit differentiation of the eigenvalue equation, using
+g′ = U + X²/U, g″ = 1 + 2Xg′/U − X²/U², h′ = (X² − W²)/W and
+h″ = 2Xh′/W − X²/W² − 1, where X is the common value.
+
+Each solve branch has its own cancellation-free form:
+- **s-branch:** in s = ln W. Every term carries W² explicitly.
+- **U-branch:** in U, with h − W = ½ − z/4 and 4(h − W) − 2 = −z read from the
+  continued fraction.
+
+Pinned values: 1.34557 at V = 1, 0.462258 at V = 2 and 0.195086 at V = 2.4. The factor
+crosses zero just above V = 3.
+
+### Waveguide and total dispersion
+- **Gloge / Keiser:** D_w = −(n₂Δ/(cλ)) · V d²(Vb)/dV², with
+  Δ = (n₁² − n₂²)/(2n₁²).
+  - This is the textbook split's form. To first order in Δ, the model's own
+    waveguide term carries N_g²/n₂ in place of n₂, which is Agrawal's form and
+    2.6% larger for silica at 1.55 µm.
+- **Total (`fiber_dispersion`):** the cladding is a Sellmeier material and the core
+  is n₁ = n₂/√(1 − 2Δ) at constant Δ.
+  - n_eff = n₂ √(1 + ρb) with ρ = 2Δ/(1 − 2Δ), and V = 2πa n₂ √ρ/λ.
+  - D = −(λ/c) n_eff″, taken by the chain rule through b′ and b″.
+  - D_m + D_w misses it by −0.048 ps/(nm·km) of 17.11 at SMF-like Δ = 0.36%,
+    a = 4.1 µm, 1.55 µm. That splits into +0.085 from the cross term, −0.123 from
+    the prefactor and −0.010 at second order.
+  - ⚠ **Weak guidance.** b is the scalar LP01 mode. Against an exact vector (HE11)
+    solution of the same model, the error grows as ~Δ²: −0.035 (0.2%) at
+    Δ = 0.36%, and −0.49 (11%) at Δ = 1% with a = 2 µm.
+  - Zero dispersion is found by Illinois false position. At SMF-like parameters it is
+    at 1.29680 µm.
+
 ## GRIN Ray Tracing (`ray_grin`, 2.8.0)
 
 ### The ray equation (Sharma, Kumar & Ghatak 1982)
@@ -185,6 +249,45 @@ n_coat = √(n₁ n₂)
 
 ### Quarter-Wave Thickness
 t = λ / (4n)
+
+### Absorbing Multilayers — complex-index TMM (`multilayer_rta`, 2.10.0)
+The convention is ñ = n + ik with k ≥ 0 absorbing, and fields ∝ e^{i(kz−ωt)}.
+β = n₀ sin θ₀ and q_j = ñ_j cos θ_j = √(ñ_j² − β²).
+
+**Admittances:** η = q (s) or ñ²/q (p).
+
+**Characteristic matrix** of layer j:
+M_j = [[cos δ, −i sin δ/η], [−iη sin δ, cos δ]], with δ = 2πq_j d_j/λ.
+
+**The stack vector** is built from the substrate forward,
+[B; C] = M₁⋯M_q [1; η_sub].
+
+**Results:**
+- R = |(η₀B − C)/(η₀B + C)|²;
+- T = 4η₀ Re η_sub/|η₀B + C|², the flux into the substrate;
+- A = 4η₀ Re(BC* − η_sub)/|η₀B + C|², the power the layers absorb;
+- R + T + A = 1.
+
+**Implementation:**
+- cos δ and sin δ/q are even in q, and q² needs no root, so layers have no
+  branch cut and no q = 0 singularity. sin δ/q = (2πd/λ) sinc δ near δ = 0.
+- Only the substrate takes a branch: the principal root, Im q ≥ 0.
+- p starts from [1/η; 1], so a substrate at exactly its critical angle is finite.
+- Each layer is scaled by e^{−|Im δ|} and the vector by exact powers of 2⁻²⁵⁶.
+  Opaque layers therefore underflow T to 0 instead of overflowing the matrix; the
+  test cases include 10 µm of gold (T = 1.87e−249) and 800 layers.
+
+**Limits and refusals:**
+- A is accurate to ~1e−16 of the incident power, not relative to itself: it is a
+  difference of fluxes.
+- T through a strongly attenuating stack carries ~2e−16 · Σ Im δ relative error.
+  That is the conditioning of e^(−2Σ Im δ); the substrate flux is carried in the
+  scaled frame, not restored by one large exp.
+- Every |ñ| must lie in [2⁻¹⁰⁰, 2¹⁰¹]. Beyond that, squares leave the double range.
+- cos θ₀ near grazing is computed as sin(π/2 − |θ|), with π/2 split into its
+  double part and remainder.
+- A layer phase past 2⁴² rad is refused, because an input's last bit would move it
+  by 5e−4 rad.
 
 ### Mueller/Stokes Formalism
 S' = M · S (4x4 matrix times 4-vector)
