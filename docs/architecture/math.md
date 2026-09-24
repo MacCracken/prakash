@@ -189,6 +189,64 @@ t = λ / (4n)
 ### Mueller/Stokes Formalism
 S' = M · S (4x4 matrix times 4-vector)
 
+## Diffractive Optics (`wave_doe`, 2.9.0)
+
+### Grating equation
+n_out sin θ_m = n_in sin θ_in + mλ/Λ. An order with |sin θ_m| > 1 is evanescent,
+reported as `PK_ERR_TIR`: for order 0 that is total internal reflection, which is how
+`ray_snell` reports it. A grazing order (|sin| = 1) counts as propagating.
+
+### Scalar efficiencies (thin elements, the Fourier coefficients of the profile)
+| Element | η_m |
+|---|---|
+| Blazed (sawtooth, phase depth α waves) | sinc²(α − m) |
+| N-level staircase (levels at 2πα j/N) | sinc²(m/N) · [sin π(α − m) / (N sin(π(α − m)/N))]² |
+| Binary phase (depth δ waves over duty D) | η₀ = 1 − 4D(1 − D) sin²πδ where 4D(1 − D) ≤ ½, else cos²πδ + (1 − 2D)² sin²πδ;  η_m = [2 sin πδ · sin πmD / (πm)]² |
+| Binary amplitude (open fraction D) | η₀ = D²,  η_m = [sin πmD / (πm)]² |
+| Dammann (0/π, even, transitions x_k ∈ (0, ½)) | c₀ = (−1)^J + 4Σ(−1)^{k+1}x_k,  c_m = (2/πm) Σ(−1)^{k+1} sin 2πm x_k,  η = c² |
+
+sinc x = sin πx/(πx). The off-design depth of a surface-relief blaze in air is
+α = M(λ₀/λ)(n(λ) − 1)/(n(λ₀) − 1). At design, a staircase puts sinc²(1/N) in order 1:
+40.5%, 81.1%, 95.0% and 98.7% for N = 2, 4, 8 and 16. The published Dammann designs
+reach 66.4% (1×3) and 77.4% (1×5). sin πx is evaluated with x reduced exactly, so
+integer x gives exactly 0. The numerator sin π(α − m) is formed as ±sin πα, and the
+Dirichlet denominator carries α − m with its exact rounding error (TwoSum). That way a
+weak grating (α ≈ 10⁻⁶) and a staircase near α = kN keep their relative accuracy.
+m is reduced modulo N in integers first. α and m past 2⁵² are refused.
+
+### Diffractive lens
+φ(r) = −sign(f)(2π/λ₀)(√(f² + r²) − |f|) exactly (paraxially −πr²/(λ₀f)), formed
+without cancellation. Zone j ends at r_j = √(2jλ₀|f| + (jλ₀)²).
+f(λ) = f₀λ₀/(mλ). Abbe number V = λ_d/(λ_F − λ_C) = −3.4534 for the d, F and C lines.
+Hybrid achromat: φ_r = P V_r/(V_r − V_d), φ_d = −P V_d/(V_r − V_d), about 5% diffractive
+with a crown.
+
+### Volume holograms (Kogelnik 1969)
+β = 2πn/λ, K = 2π/Λ, c_R = cos θ, c_S = cos θ − (K/β) cos φ,
+ϑ = K cos(φ − θ) − K²/(2β), κ = πn₁/λ. TM multiplies κ by |r̂·ŝ|, which is
+|β − K cos(φ − θ)| / √(β² − 2βK cos(φ − θ) + K²) with σ = ρ − K. That is Kogelnik's
+eqs. (78)–(90), equal to cos 2(θ_B − φ) at Bragg. Taking cos 2(θ − φ) at the incidence
+angle instead is 0.4% of η off at 4 mrad of detuning.
+
+K and −K are the same fringes. The order nearer Bragg is taken: the sign of K that
+makes K cos(φ − θ) ≥ 0. So slant φ + π and the mirror incidence −θ_B behave as the
+physics says.
+- Transmission (c_S > 0): ν = κd/√(c_R c_S), ξ = ϑd/(2c_S), η = [(ν/w) sin w]² with
+  w = √(ν² + ξ²). Since ν/w ≤ 1 in rounding too, η ≤ 1.
+- Reflection (c_S < 0): ν = κd/√(c_R|c_S|), ξ = ϑd/(2|c_S|), η = ν²/(ν² + F), with
+  F = (s/sinh s)² for s² = ν² − ξ² > 0, and (q/sin q)² for q² = ξ² − ν².
+
+Bragg: |cos(φ − θ_B)| = λ/(2nΛ). The entering root nearest the normal is returned;
+a tie goes to the side of sin φ, so θ_B(−φ) = −θ_B(φ).
+
+Refused:
+- grazing geometry (c_R ≤ 2⁻⁵⁰, c_S = 0, σ = 0);
+- a sine argument the doubles do not resolve to 2⁻¹¹ rad against max(w, 1), where the
+  uncertainty of w² is ν²ε_ν + (|ξ| + δξ)δξ;
+- inside a reflection band, an η whose propagated relative error passes 2⁻¹¹, or a band
+  edge within the uncertainty of s². Validity: Klein Q = 2πλd/(nΛ²) ≫ 1, n₁ ≪ n, lossless,
+two waves.
+
 ## Gaussian Beams (`wave_beam`, 2.6.0)
 
 ⚠ **Conventions**, stated because sources disagree on every one of them:

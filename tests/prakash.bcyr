@@ -22,6 +22,8 @@ include "src/wave_polarization.cyr"
 include "src/wave_coherence.cyr"
 include "src/wave_airy.cyr"
 include "src/wave_diffraction.cyr"
+# 2.9.0: diffractive optics.
+include "src/wave_doe.cyr"
 include "src/wave_zernike.cyr"
 include "src/wave_pattern.cyr"
 # 2.6.0: Gaussian beam optics.
@@ -580,6 +582,18 @@ fn b_grin_luneburg() {
     var r = grin_ball_trace(_grin_lu, _grin_lray, 0, F64_ONE, F64_ONE, _bf(2, 100), 1000, &_grin_opl, _err);
     return 0;
 }
+# ── Diffractive optics (2.9.0) ────────
+var _doe_dm = 0;
+var _doe_g = 0;
+# An 8-level kinoform's first order off design (sinc^2 times the Dirichlet kernel).
+fn b_doe_multilevel() { var r = doe_multilevel_efficiency(1, 8, _bf(9, 10)); return 0; }
+# A 1x7 Dammann grating's order 2 (three transitions).
+fn b_doe_dammann() { var r = doe_dammann_efficiency(_doe_dm, 3, 2, _err); return 0; }
+# Kogelnik: a slanted transmission hologram off Bragg, TE.
+fn b_doe_kogelnik() { var r = hologram_efficiency(_doe_g, _bf(3, 100), _bf(532, 1000), 0, _err); return 0; }
+var _doe_gr = 0;
+# Kogelnik: an unslanted reflection hologram detuned inside its band, TM (the sinh branch).
+fn b_doe_kogelnik_refl() { var r = hologram_efficiency(_doe_gr, 0, _bf(601, 1000), 1, _err); return 0; }
 # ISO 11146 second-moment radius of a 256-sample profile (two passes).
 fn b_second_moment_256() { var r = beam_second_moment_radius(_gb_prof, 256, 0, _bf(1, 100), _err); return 0; }
 
@@ -757,6 +771,12 @@ fn main() {
     _grin_lu = grin_luneburg(F64_ONE, F64_ONE, 0, _err);
     _grin_ray = trace_ray_new(ray_vec3(_bf(3, 10), _bf(1, 10), 0), ray_vec3(_bf(1, 10), _bf(2, 10), F64_ONE), F64_ONE);
     _grin_lray = trace_ray_new(ray_vec3(0, F64_HALF, f64_from(0 - 1)), ray_vec3(0, 0, F64_ONE), F64_ONE);
+    _doe_dm = alloc(24);
+    store64(_doe_dm, 0x3FCDD02E524BCFEE);
+    store64(_doe_dm + 8, 0x3FD8C5AF90AB6EBF);
+    store64(_doe_dm + 16, 0x3FDEAD29F2BF25D9);
+    _doe_g = volume_grating_new(_bf(152, 100), _bf(12, 1000), f64_from(30), _bf(8, 10), _bf(12, 10), _err);
+    _doe_gr = volume_grating_new(_bf(3, 2), _bf(1, 100), f64_from(20), _bf(2, 10), 0, _err);
     _gb_prof = alloc(256 * 8);
     for (var gi = 0; gi < 256; gi = gi + 1) {
         var gx = f64_mul(_bf(1, 100), f64_from(gi - 128));
@@ -936,6 +956,10 @@ fn main() {
     bench("grin/index", &b_grin_index, 1000000);
     bench("grin/selfoc_100_steps", &b_grin_selfoc_100, 20000);
     bench("grin/luneburg_ball", &b_grin_luneburg, 20000);
+    bench("doe/multilevel_efficiency", &b_doe_multilevel, 1000000);
+    bench("doe/dammann_order", &b_doe_dammann, 1000000);
+    bench("doe/kogelnik_efficiency", &b_doe_kogelnik, 1000000);
+    bench("doe/kogelnik_reflection", &b_doe_kogelnik_refl, 1000000);
     return 0;
 }
 

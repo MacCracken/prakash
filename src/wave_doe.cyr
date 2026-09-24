@@ -1,0 +1,681 @@
+# wave_doe.cyr -- diffractive optics: the grating equation, scalar efficiencies of
+# blazed, multilevel, binary and Dammann gratings, the diffractive lens, and volume
+# holograms by Kogelnik's coupled-wave theory
+# Usage: include "lib/wave_doe.cyr"  (requires error.cyr; ganita for asin/acos)
+#
+# New in 2.9.0, and NOT a port: the Rust crate had none of it, so every formula is
+# checked against the literature and an independent evaluation, never against
+# itself — Swanson, "Binary optics technology: the theory and design of multi-level
+# diffractive optical elements", MIT Lincoln Lab TR-854 (1989); Dammann & Gortler,
+# Opt. Commun. 3, 312 (1971); Stone & George, Appl. Opt. 27, 2960 (1988) for the
+# diffractive Abbe number and hybrid achromats; Kogelnik, "Coupled wave theory for
+# thick hologram gratings", Bell Syst. Tech. J. 48, 2909 (1969).
+#
+# CONVENTIONS. Lengths in any ONE unit; `wavelength` is the VACUUM wavelength.
+# Angles in radians from the surface normal, positive toward +x. A phase depth is
+# in WAVES (1 = a 2*pi step). The efficiency functions are SCALAR and THIN-element
+# results: the fraction of transmitted power in each order of a periodic phase (or
+# amplitude) profile, valid while the period is many wavelengths — they are the
+# Fourier coefficients of the profile, not a rigorous (RCWA) solution. Kogelnik's
+# theory is the THICK-grating limit (Klein Q = 2 pi lambda d/(n Lambda^2) >> 1),
+# two waves, lossless, n1 << n.
+
+# 1 if x is finite (not NaN, not +-inf).
+fn _doe_finite(x) {
+    if ((x & _PRK_ABS) >= _PRK_INF) { return 0; }
+    return 1;
+}
+
+# 1 if x is finite and strictly positive. f64_gt is false for NaN.
+fn _doe_pos(x) {
+    if (f64_gt(x, 0) == 0) { return 0; }
+    if (x == _PRK_INF) { return 0; }
+    return 1;
+}
+
+# sin(pi x) with the argument reduced EXACTLY first: x = n + f, |f| <= 1/2, so an
+# integer x gives exactly 0 (sin(pi * 3.0) through a rounded pi*x does not) and a
+# half-integer exactly +-1. From 2^52 up every double is an integer: 0 (x + 1/2
+# would tie to an even n there and leave f = -+1). NaN for a non-finite x.
+fn _doe_sinpi(x) {
+    if (_doe_finite(x) == 0) { return _PRK_NAN; }
+    if (f64_ge(f64_abs(x), 0x4330000000000000) == 1) { return 0; }
+    var n = f64_floor(f64_add(x, F64_HALF));
+    var f = f64_sub(x, n);
+    var s = f64_sin(f64_mul(F64_PI, f));
+    # n odd flips the sign; past 2^53 every double is even.
+    if (f64_sub(n, f64_mul(F64_TWO, f64_floor(f64_mul(F64_HALF, n)))) != 0) { s = f64_neg(s); }
+    return s;
+}
+
+# cos(pi x), reduced as _doe_sinpi: cos(pi f) = sin(pi (1/2 - |f|)), 1/2 - |f|
+# exact, so a half-integer gives exactly 0. From 2^52 up, +-1 by parity.
+fn _doe_cospi(x) {
+    if (_doe_finite(x) == 0) { return _PRK_NAN; }
+    var ax = f64_abs(x);
+    if (f64_ge(ax, 0x4340000000000000) == 1) { return F64_ONE; }
+    var n = ax;
+    if (f64_lt(ax, 0x4330000000000000) == 1) { n = f64_floor(f64_add(ax, F64_HALF)); }
+    # fl(ax + 1/2) rounds to 1 just below 1/2 (round 2): n is 0 there, exactly.
+    if (f64_lt(ax, F64_HALF) == 1) { n = 0; }
+    var c = f64_sin(f64_mul(F64_PI, f64_sub(F64_HALF, f64_abs(f64_sub(ax, n)))));
+    if (f64_sub(n, f64_mul(F64_TWO, f64_floor(f64_mul(F64_HALF, n)))) != 0) { c = f64_neg(c); }
+    return c;
+}
+
+# expm1(y) accurate for small |y| (Kahan: (e^y - 1) y / ln(e^y) cancels the
+# rounding of e^y).
+fn _doe_expm1(y) {
+    var w = f64_exp(y);
+    if (w == F64_ONE) { return y; }
+    var wm = f64_sub(w, F64_ONE);
+    if (f64_gt(f64_abs(y), F64_HALF) == 1) { return wm; }
+    return f64_div(f64_mul(wm, y), f64_ln(w));
+}
+
+# The normalised sinc(x) = sin(pi x)/(pi x), 1 at 0.
+fn _doe_sinc(x) {
+    if ((x & _PRK_ABS) == 0) { return F64_ONE; }
+    return f64_div(_doe_sinpi(x), f64_mul(F64_PI, x));
+}
+
+# |sum_{j<N} e^{2 pi i x j/N}|^2 / N^2 = [sin(pi x)/(N sin(pi x/N))]^2 at
+# x = alpha - m, formed so it keeps its bits where both sines vanish (x near kN):
+# the numerator is sin(pi alpha) (= +-sin(pi x), m an integer), and the
+# denominator's x is carried as fl(alpha - m) plus its exact rounding error
+# (TwoSum), reduced by the multiple of N. (2.9.0 review: fl(alpha - m) alone lost
+# alpha's low bits — a weak grating's orders came back 5e-11 off, and near x = kN
+# up to 78%.) Clamped to the kernel's bound 1, which two rounded sines can pass.
+fn _doe_dirichlet2(alpha, m, nlev) {
+    var fl = f64_from(nlev);
+    # The squared kernel is N-periodic in x: m mod N, in integers, keeps N k exact
+    # whatever m is (round 2).
+    var fm = f64_neg(f64_from(m % nlev));
+    var hi = f64_add(alpha, fm);
+    var bb = f64_sub(hi, alpha);
+    var lo = f64_add(f64_sub(alpha, f64_sub(hi, bb)), f64_sub(fm, bb));
+    var k = f64_floor(f64_add(f64_div(hi, fl), F64_HALF));
+    var d = f64_add(f64_sub(hi, f64_mul(fl, k)), lo);
+    var s2 = _doe_sinpi(f64_div(d, fl));
+    if ((s2 & _PRK_ABS) == 0) { return F64_ONE; }
+    var r = f64_div(_doe_sinpi(alpha), f64_mul(fl, s2));
+    if (f64_gt(f64_abs(r), F64_ONE) == 1) { return F64_ONE; }
+    return f64_mul(r, r);
+}
+
+# ── The grating equation ────────
+
+# The direction of transmitted order m of a grating of period `period` between
+# media n_in and n_out, for incidence theta_in:
+#   n_out sin(theta_m) = n_in sin(theta_in) + m lambda / period.
+# (A reflected order: n_out = n_in, theta_m measured on the incidence side.)
+# Returns theta_m in [-pi/2, pi/2] and writes PK_ERR_NONE; for an evanescent
+# order (|sin| > 1, including one whose m lambda/period is past the double range) PK_ERR_TIR and
+# 0 — for order 0 that IS total internal reflection, as ray_snell reports it;
+# PK_ERR_INVALID_PARAMETER and 0 for indices, wavelength or period not finite and
+# positive, or a non-finite angle.
+#must_use
+fn grating_order_angle(n_in, n_out, theta_in, order, wavelength, period, err_out) {
+    store64(err_out, PK_ERR_INVALID_PARAMETER);
+    if ((_doe_pos(n_in) & _doe_pos(n_out) & _doe_pos(wavelength) & _doe_pos(period)) == 0) { return 0; }
+    var si = _prk_sin(theta_in);
+    if (_doe_finite(si) == 0) { return 0; }
+    var ml = f64_mul(f64_from(order), wavelength);
+    var mt = f64_div(ml, period);
+    # m lambda can overflow where m lambda/period does not (round 2): then m (lambda/period).
+    if (_doe_finite(ml) == 0) { mt = f64_mul(f64_from(order), f64_div(wavelength, period)); }
+    var s = f64_div(f64_add(f64_mul(n_in, si), mt), n_out);
+    if (f64_le(f64_abs(s), F64_ONE) == 0) {
+        # |s| > 1, or +-inf from an order term past the double range (NaN cannot arise).
+        store64(err_out, PK_ERR_TIR);
+        return 0;
+    }
+    store64(err_out, PK_ERR_NONE);
+    return ganita_f64_asin(s);
+}
+
+# The propagating transmitted orders of the grating above: writes the lowest and
+# highest m that grating_order_angle accepts (|sin theta_m| <= 1, grazing orders
+# included) to range_out[0], range_out[1] (i64) and returns how many there are —
+# 0 when none propagates (then range_out[1] < range_out[0]). Returns -1
+# (range_out untouched) for arguments grating_order_angle refuses, a null
+# range_out, or an order index beyond +-(2^31 - 1).
+#must_use
+fn grating_order_count(n_in, n_out, theta_in, wavelength, period, range_out) {
+    if (range_out == 0) { return 0 - 1; }
+    if ((_doe_pos(n_in) & _doe_pos(n_out) & _doe_pos(wavelength) & _doe_pos(period)) == 0) { return 0 - 1; }
+    var si = _prk_sin(theta_in);
+    if (_doe_finite(si) == 0) { return 0 - 1; }
+    # m in [(-n_out - n_in sin) L/lambda, (n_out - n_in sin) L/lambda]
+    var q = f64_div(period, wavelength);
+    var a = f64_mul(f64_neg(f64_add(n_out, f64_mul(n_in, si))), q);
+    var b = f64_mul(f64_sub(n_out, f64_mul(n_in, si)), q);
+    var lim = f64_from(2147483647);
+    if ((f64_lt(f64_abs(a), lim) & f64_lt(f64_abs(b), lim)) == 0) { return 0 - 1; }
+    var lo = f64_to(f64_ceil(a));
+    var hi = f64_to(f64_floor(b));
+    # The bounds are the exact |sin| = 1 orders only to rounding: settle each with
+    # the grating equation itself.
+    var e = 0;
+    var t = grating_order_angle(n_in, n_out, theta_in, lo - 1, wavelength, period, &e);
+    if (e == PK_ERR_NONE) { lo = lo - 1; }
+    t = grating_order_angle(n_in, n_out, theta_in, lo, wavelength, period, &e);
+    if (e != PK_ERR_NONE) { lo = lo + 1; }
+    t = grating_order_angle(n_in, n_out, theta_in, hi + 1, wavelength, period, &e);
+    if (e == PK_ERR_NONE) { hi = hi + 1; }
+    t = grating_order_angle(n_in, n_out, theta_in, hi, wavelength, period, &e);
+    if (e != PK_ERR_NONE) { hi = hi - 1; }
+    store64(range_out, lo);
+    store64(range_out + 8, hi);
+    if (hi < lo) { return 0; }
+    return hi - lo + 1;
+}
+
+# ── Scalar efficiencies of thin gratings ────────
+
+# 1 if alpha - m is exact and meaningful: alpha finite with |alpha| < 2^52 and
+# |m| <= 2^52 (2.9.0 review: past them the staircase's N-periodic factor came back
+# O(1) wrong — Parseval x4 at alpha = 1e300).
+fn _doe_exact(order, alpha) {
+    if (_doe_finite(alpha) == 0) { return 0; }
+    if (f64_lt(f64_abs(alpha), 0x4330000000000000) == 0) { return 0; }
+    if ((order > 4503599627370496) | (order < 0 - 4503599627370496)) { return 0; }
+    return 1;
+}
+
+# Blazed (sawtooth) phase grating of peak phase 2 pi alpha (phase_depth = alpha,
+# in waves): the fraction of power in order m is sinc^2(alpha - m) — 1 in order m
+# when alpha = m, and summing to 1 over all m (Parseval). NaN for a non-finite
+# phase depth, or |alpha| >= 2^52 or |m| > 2^52 (past those alpha - m is not
+# exact, and the answer would be made up).
+#must_use
+fn doe_blazed_efficiency(order, phase_depth) {
+    if (_doe_exact(order, phase_depth) == 0) { return _PRK_NAN; }
+    # sin(pi (alpha - m)) = +-sin(pi alpha): the numerator from alpha itself keeps
+    # the bits fl(alpha - m) drops (a weak blaze's orders).
+    var x = f64_sub(phase_depth, f64_from(order));
+    if ((x & _PRK_ABS) == 0) { return F64_ONE; }
+    var s = f64_div(_doe_sinpi(phase_depth), f64_mul(F64_PI, x));
+    return f64_mul(s, s);
+}
+
+# The phase depth, in waves, at `wavelength` of a surface-relief blaze in a
+# material in air made for order design_order at design_wavelength:
+#   alpha = M (lambda0/lambda) (n(lambda) - 1)/(n(lambda0) - 1),
+# n_design = n(lambda0), n_at_wavelength = n(lambda) — the material dispersion is
+# the caller's. Off design the blazed efficiency is then sinc^2(alpha - m). NaN
+# for wavelengths not finite and positive, a non-finite index, n_design = 1, or a
+# non-finite result.
+#must_use
+fn doe_phase_depth(design_order, design_wavelength, wavelength, n_design, n_at_wavelength) {
+    if ((_doe_pos(design_wavelength) & _doe_pos(wavelength)) == 0) { return _PRK_NAN; }
+    if ((_doe_finite(n_design) & _doe_finite(n_at_wavelength)) == 0) { return _PRK_NAN; }
+    var den = f64_mul(wavelength, f64_sub(n_design, F64_ONE));
+    var num = f64_mul(f64_mul(f64_from(design_order), design_wavelength), f64_sub(n_at_wavelength, F64_ONE));
+    var a = f64_div(num, den);
+    if (_doe_finite(a) == 0) { return _PRK_NAN; }
+    return a;
+}
+
+# An N-level staircase approximation of a blaze of phase depth alpha (levels at
+# 2 pi alpha j/N, j = 0..N-1, each 1/N of the period) — a multilevel kinoform:
+#   eta_m = sinc^2(m/N) [sin(pi (alpha - m)) / (N sin(pi (alpha - m)/N))]^2
+# (Swanson 1989). At alpha = 1 the first order carries sinc^2(1/N): 40.5% for
+# N = 2, 81.1% for 4, 95.0% for 8; the rest goes to orders m = 1 + kN. N = 1 is
+# a flat plate (all in order 0). NaN for levels outside 1..2^30, or alpha and m
+# as doe_blazed_efficiency refuses them.
+#must_use
+fn doe_multilevel_efficiency(order, levels, phase_depth) {
+    if ((levels < 1) | (levels > 1073741824)) { return _PRK_NAN; }
+    if (_doe_exact(order, phase_depth) == 0) { return _PRK_NAN; }
+    # sinc(m/N): sin^2(pi m/N) = sin^2(pi (m mod N)/N), reduced in integers so a
+    # large order keeps its bits (round 2: fl(m/N) put m ~ 1e6 at 1e-10 relative).
+    var s = F64_ONE;
+    if (order != 0) {
+        var fv = f64_from(levels);
+        s = f64_div(_doe_sinpi(f64_div(f64_from(order % levels), fv)), f64_mul(F64_PI, f64_div(f64_from(order), fv)));
+    }
+    return f64_mul(f64_mul(s, s), _doe_dirichlet2(phase_depth, order, levels));
+}
+
+# A binary PHASE grating: phase 2 pi depth (depth in waves) over a fraction `duty`
+# of the period, 0 elsewhere:
+#   eta_0 = 1 - 4 D(1 - D) sin^2(pi depth) = cos^2(pi depth) + (1 - 2D)^2 sin^2(pi depth),
+#   eta_m = [2 sin(pi depth) sin(pi m D) / (pi m)]^2   (m != 0),
+# so a 50% 0/pi grating puts 4/pi^2 = 40.5% in each first order and nothing in
+# the even ones. NaN for duty outside [0, 1] or a non-finite depth.
+#must_use
+fn doe_binary_phase_efficiency(order, duty, depth) {
+    if ((f64_ge(duty, 0) & f64_le(duty, F64_ONE)) == 0) { return _PRK_NAN; }
+    if (_doe_finite(depth) == 0) { return _PRK_NAN; }
+    var sp = _doe_sinpi(depth);
+    if (order == 0) {
+        # cos^2(pi depth) + (1 - 2D)^2 sin^2(pi depth): the same number as
+        # 1 - 4 D(1 - D) sin^2(pi depth) without the cancellation near a dark
+        # zero order — the figure of merit of a 0/pi splitter (2.9.0 review).
+        # Where 4 D(1 - D) <= 1/2 the plain form subtracts at most 1/2 — no
+        # cancellation, never above 1, exactly 1 at D = 0 or 1 (round 2: the
+        # cos^2 + sin^2 form gave 1 + 2 ulp there).
+        var q4 = f64_mul(f64_from(4), f64_mul(duty, f64_sub(F64_ONE, duty)));
+        var e0 = 0;
+        if (f64_le(q4, F64_HALF) == 1) {
+            e0 = f64_sub(F64_ONE, f64_mul(q4, f64_mul(sp, sp)));
+        } else {
+            var cp = _doe_cospi(depth);
+            var od = f64_sub(F64_ONE, f64_mul(F64_TWO, duty));
+            e0 = f64_add(f64_mul(cp, cp), f64_mul(f64_mul(od, od), f64_mul(sp, sp)));
+        }
+        if (f64_gt(e0, F64_ONE) == 1) { return F64_ONE; }
+        return e0;
+    }
+    var fm = f64_from(order);
+    var c = f64_div(f64_mul(f64_mul(F64_TWO, sp), _doe_sinpi(f64_mul(fm, duty))), f64_mul(F64_PI, fm));
+    return f64_mul(c, c);
+}
+
+# A binary AMPLITUDE grating: transmission 1 over a fraction `duty` of the period,
+# 0 elsewhere: eta_0 = D^2, eta_m = [sin(pi m D)/(pi m)]^2 — summing to D, the
+# power it lets through. NaN for duty outside [0, 1].
+#must_use
+fn doe_binary_amplitude_efficiency(order, duty) {
+    if ((f64_ge(duty, 0) & f64_le(duty, F64_ONE)) == 0) { return _PRK_NAN; }
+    if (order == 0) { return f64_mul(duty, duty); }
+    var fm = f64_from(order);
+    var c = f64_div(_doe_sinpi(f64_mul(fm, duty)), f64_mul(F64_PI, fm));
+    return f64_mul(c, c);
+}
+
+# A Dammann grating: a binary 0/pi phase grating, even about x = 0, whose phase
+# flips at the `count` transition points x_1 < ... < x_J in (0, 1/2) of a period
+# (Dammann & Gortler 1971). The order amplitudes are
+#   c_0 = (-1)^J + 4 sum_k (-1)^(k+1) x_k,
+#   c_m = (2/(pi m)) sum_k (-1)^(k+1) sin(2 pi m x_k),
+# and eta_m = c_m^2 (eta_-m = eta_m; the eta sum to 1). A design chooses the x_k
+# so that orders -K..K are equal. `transitions` is a buffer of `count` f64.
+# Writes PK_ERR_NONE, or PK_ERR_INVALID_PARAMETER (returning 0) for a null buffer,
+# count < 1, or transitions not finite, not strictly increasing, or outside
+# (0, 1/2).
+#must_use
+fn doe_dammann_efficiency(transitions, count, order, err_out) {
+    store64(err_out, PK_ERR_INVALID_PARAMETER);
+    if (transitions == 0) { return 0; }
+    if (count < 1) { return 0; }
+    var prev = 0;
+    for (var k = 0; k < count; k = k + 1) {
+        var x = load64(transitions + k * 8);
+        if (f64_gt(x, prev) == 0) { return 0; }
+        if (f64_lt(x, F64_HALF) == 0) { return 0; }
+        prev = x;
+    }
+    var c = 0;
+    var sg = F64_ONE;
+    if (order == 0) {
+        for (var j = 0; j < count; j = j + 1) {
+            c = f64_add(c, f64_mul(sg, load64(transitions + j * 8)));
+            sg = f64_neg(sg);
+        }
+        c = f64_mul(f64_from(4), c);
+        if ((count % 2) == 1) { c = f64_sub(c, F64_ONE); } else { c = f64_add(c, F64_ONE); }
+    } else {
+        var tm = f64_mul(F64_TWO, f64_from(order));
+        for (var i = 0; i < count; i = i + 1) {
+            c = f64_add(c, f64_mul(sg, _doe_sinpi(f64_mul(tm, load64(transitions + i * 8)))));
+            sg = f64_neg(sg);
+        }
+        c = f64_div(f64_mul(F64_TWO, c), f64_mul(F64_PI, f64_from(order)));
+    }
+    store64(err_out, PK_ERR_NONE);
+    return f64_mul(c, c);
+}
+
+# ── The diffractive lens ────────
+
+# The phase, in radians, a diffractive lens of focal length f (f < 0 diverging)
+# must add at radius r to focus its design wavelength lambda0 — the optical-path
+# difference to the focus, EXACT (not the paraxial -pi r^2/(lambda0 f)):
+#   phi(r) = -sign(f) (2 pi/lambda0) (sqrt(f^2 + r^2) - |f|),
+# formed as r^2/(sqrt(f^2 + r^2) + |f|), which keeps its bits at small r. The
+# kinoform's surface wraps this modulo 2 pi. NaN for f zero or non-finite, lambda0
+# not finite and positive, or a non-finite r.
+#must_use
+fn doe_lens_phase(r, focal_length, design_wavelength) {
+    if (_doe_pos(design_wavelength) == 0) { return _PRK_NAN; }
+    if ((_doe_finite(focal_length) == 0) | ((focal_length & _PRK_ABS) == 0)) { return _PRK_NAN; }
+    if (_doe_finite(r) == 0) { return _PRK_NAN; }
+    var af = f64_abs(focal_length);
+    # r (r/(hypot(f, r) + |f|)): no r^2 to overflow, and r/(...) <= 1.
+    var sag = f64_mul(f64_abs(r), f64_div(f64_abs(r), f64_add(f64_hypot(af, r), af)));
+    var ph = f64_div(f64_mul(F64_TAU, sag), design_wavelength);
+    if (f64_gt(focal_length, 0) == 1) { return f64_neg(ph); }
+    return ph;
+}
+
+# The radius of the j-th zone boundary of that lens, where |phi| = 2 pi j:
+#   r_j = sqrt(2 j lambda0 |f| + (j lambda0)^2)  (~ sqrt(2 j lambda0 f) paraxially).
+# NaN for j < 0 or the arguments doe_lens_phase refuses.
+#must_use
+fn doe_lens_zone_radius(zone, focal_length, design_wavelength) {
+    if (zone < 0) { return _PRK_NAN; }
+    if (_doe_pos(design_wavelength) == 0) { return _PRK_NAN; }
+    if ((_doe_finite(focal_length) == 0) | ((focal_length & _PRK_ABS) == 0)) { return _PRK_NAN; }
+    var jl = f64_mul(f64_from(zone), design_wavelength);
+    # sqrt(j lambda0) sqrt(2 |f| + j lambda0): the product is never formed.
+    return f64_mul(f64_sqrt(jl), f64_sqrt(f64_add(f64_mul(F64_TWO, f64_abs(focal_length)), jl)));
+}
+
+# The focal length of diffraction order m of a diffractive lens made with focal
+# length f0 at lambda0, at wavelength lambda: f = f0 lambda0/(m lambda) — the
+# power grows with wavelength, the opposite of glass. NaN for m = 0 (order 0 does
+# not focus), f0 zero or non-finite, or wavelengths not finite and positive.
+#must_use
+fn doe_lens_focal_length(f0, design_wavelength, wavelength, order) {
+    if (order == 0) { return _PRK_NAN; }
+    if ((_doe_pos(design_wavelength) & _doe_pos(wavelength)) == 0) { return _PRK_NAN; }
+    if ((_doe_finite(f0) == 0) | ((f0 & _PRK_ABS) == 0)) { return _PRK_NAN; }
+    var ml = f64_mul(f64_from(order), wavelength);
+    if (_doe_finite(ml) == 0) { return _PRK_NAN; }
+    var f = f64_div(f64_mul(f0, design_wavelength), ml);
+    if (_doe_finite(f) == 0) { return _PRK_NAN; }
+    return f;
+}
+
+# The Abbe number of a diffractive surface, V = lambda_d / (lambda_F - lambda_C):
+# a property of the wavelengths alone — about -3.45 for the Fraunhofer d, F and C
+# lines, negative and small where glasses are +20..+90 (Stone & George 1988). NaN
+# for wavelengths not finite and positive or lambda_F = lambda_C.
+#must_use
+fn doe_abbe_number(lambda_d, lambda_f, lambda_c) {
+    if ((_doe_pos(lambda_d) & _doe_pos(lambda_f) & _doe_pos(lambda_c)) == 0) { return _PRK_NAN; }
+    var den = f64_sub(lambda_f, lambda_c);
+    if ((den & _PRK_ABS) == 0) { return _PRK_NAN; }
+    return f64_div(lambda_d, den);
+}
+
+# The power split of a thin hybrid ACHROMAT — a refractive lens of Abbe number
+# v_refractive with a diffractive surface of Abbe number v_diffractive — of total
+# power P: phi_r/V_r + phi_d/V_d = 0 and phi_r + phi_d = P give
+#   phi_r = P V_r/(V_r - V_d),   phi_d = -P V_d/(V_r - V_d),
+# so with a crown (V_r ~ 64) the diffractive surface carries only ~5% of the
+# power. Writes phi_r, phi_d to out[0], out[1]. Returns PK_ERR_NONE, or
+# PK_ERR_INVALID_PARAMETER (out untouched) for a null out, non-finite arguments,
+# V_r = V_d, V_r - V_d or a power overflowing.
+fn doe_hybrid_achromat(total_power, v_refractive, v_diffractive, out) {
+    if (out == 0) { return PK_ERR_INVALID_PARAMETER; }
+    if ((_doe_finite(total_power) & _doe_finite(v_refractive) & _doe_finite(v_diffractive)) == 0) {
+        return PK_ERR_INVALID_PARAMETER;
+    }
+    var dv = f64_sub(v_refractive, v_diffractive);
+    if ((dv & _PRK_ABS) == 0) { return PK_ERR_INVALID_PARAMETER; }
+    if (_doe_finite(dv) == 0) { return PK_ERR_INVALID_PARAMETER; }
+    var pr = f64_div(f64_mul(total_power, v_refractive), dv);
+    var pd = f64_neg(f64_div(f64_mul(total_power, v_diffractive), dv));
+    if ((_doe_finite(pr) & _doe_finite(pd)) == 0) { return PK_ERR_INVALID_PARAMETER; }
+    store64(out, pr);
+    store64(out + 8, pd);
+    return PK_ERR_NONE;
+}
+
+# ── Volume holograms (Kogelnik 1969) ────────
+
+# A lossless volume phase grating: mean index n, index modulation n1
+# (n(x) = n + n1 cos(K.x)), thickness d, period Lambda, and slant phi — the angle
+# of the grating vector K from the surface normal z (pi/2: an unslanted
+# TRANSMISSION grating, fringes normal to the surface; 0: an unslanted REFLECTION
+# grating, fringes parallel to it). K and -K (phi and phi + pi) are the SAME
+# fringes: the functions below take whichever first order the light meets.
+#derive(accessors)
+struct VolumeGrating { n; n1; thickness; period; slant; }
+
+# A VolumeGrating; n, thickness and period finite and positive, n1 finite and
+# >= 0 (0: a blank plate), |slant| <= 2 pi — an angle; past that it is a unit
+# error, and past 2^52 it would have no phase at all. PK_ERR_INVALID_PARAMETER /
+# PK_ERR_ALLOCATION and 0 otherwise.
+#must_use
+fn volume_grating_new(n, n1, thickness, period, slant, err_out) {
+    store64(err_out, PK_ERR_INVALID_PARAMETER);
+    if ((_doe_pos(n) & _doe_pos(thickness) & _doe_pos(period)) == 0) { return 0; }
+    if ((f64_ge(n1, 0) & _doe_finite(n1)) == 0) { return 0; }
+    if (f64_le(f64_abs(slant), F64_TAU) == 0) { return 0; }
+    var g = alloc(sizeof(VolumeGrating));
+    if (g == 0) {
+        store64(err_out, PK_ERR_ALLOCATION);
+        return 0;
+    }
+    VolumeGrating_set_n(g, n);
+    VolumeGrating_set_n1(g, n1);
+    VolumeGrating_set_thickness(g, thickness);
+    VolumeGrating_set_period(g, period);
+    VolumeGrating_set_slant(g, slant);
+    store64(err_out, PK_ERR_NONE);
+    return g;
+}
+
+# Klein's Q = 2 pi lambda d / (n Lambda^2): Kogelnik's two-wave theory is the
+# Q >> 1 (thick, Bragg) regime — Q > 10 by the usual rule; Q < 1 is a thin
+# (Raman-Nath) grating with many orders. NaN for a null grating or a wavelength
+# not finite and positive.
+#must_use
+fn hologram_q_factor(g, wavelength) {
+    if (g == 0) { return _PRK_NAN; }
+    if (_doe_pos(wavelength) == 0) { return _PRK_NAN; }
+    var p = VolumeGrating_period(g);
+    var num = f64_mul(f64_mul(F64_TAU, wavelength), VolumeGrating_thickness(g));
+    return f64_div(num, f64_mul(VolumeGrating_n(g), f64_mul(p, p)));
+}
+
+# t reduced into (-pi, pi] (t within a few 2 pi of it: the slant is bounded).
+fn _doe_wrap(t) {
+    var r = t;
+    var k = 0;
+    while (k < 4) {
+        if (f64_gt(r, F64_PI) == 1) { r = f64_sub(r, F64_TAU); }
+        if (f64_le(r, f64_neg(F64_PI)) == 1) { r = f64_add(r, F64_TAU); }
+        k = k + 1;
+    }
+    return r;
+}
+
+# The Bragg angle inside the medium: a theta with |cos(phi - theta)| =
+# lambda/(2 n Lambda) — Kogelnik's cos(phi - theta) = K/(2 beta) for K or for -K
+# — at which a wave ENTERS (cos theta > 0). Of the roots phi - a, phi + a,
+# phi + pi - a, phi + pi + a (a = acos(lambda/(2 n Lambda)), each reduced into
+# (-pi, pi]) the one that enters nearest the normal is returned — on a tie (to
+# 2^-40 rad) the one on the side of sin(phi), where K points: asin(lambda/(2 n
+# Lambda)) for an unslanted transmission grating, +-acos(...) by the sign of phi
+# for an unslanted reflection grating (0 at lambda = 2 n Lambda), and always
+# theta_B(-phi) = -theta_B(phi). (2.9.0 review: phi - a alone came back pointing
+# OUT of the slab for a negative slant, as success.) The other entering roots are
+# the mirror incidence and the grating's other first order. A theta_B of +-pi/2
+# grazes: hologram_efficiency has no answer there.
+# PK_ERR_INVALID_ANGLE and 0 when lambda > 2 n Lambda or no root enters;
+# PK_ERR_INVALID_PARAMETER and 0 for a null grating or a wavelength not finite and
+# positive.
+#must_use
+fn hologram_bragg_angle(g, wavelength, err_out) {
+    store64(err_out, PK_ERR_INVALID_PARAMETER);
+    if (g == 0) { return 0; }
+    if (_doe_pos(wavelength) == 0) { return 0; }
+    var r = f64_div(wavelength, f64_mul(F64_TWO, f64_mul(VolumeGrating_n(g), VolumeGrating_period(g))));
+    if (f64_gt(r, F64_ONE) == 1) {
+        store64(err_out, PK_ERR_INVALID_ANGLE);
+        return 0;
+    }
+    var phi = VolumeGrating_slant(g);
+    var a = ganita_f64_acos(r);
+    # A tie is broken toward the sign of sin(phi) — the side K points to — which is
+    # odd in phi and the same for phi and phi +- 2 pi (round 2).
+    var sphi = _prk_sin(phi) & 0x8000000000000000;
+    var best = 0;
+    var found = 0;
+    var k = 0;
+    while (k < 4) {
+        var t = f64_sub(phi, a);
+        if (k == 1) { t = f64_add(phi, a); }
+        if (k == 2) { t = f64_sub(f64_add(phi, F64_PI), a); }
+        if (k == 3) { t = f64_add(f64_add(phi, F64_PI), a); }
+        # A root already in (-pi, pi] is used unreduced: an in-range slant keeps
+        # every bit.
+        if ((f64_gt(t, F64_PI) | f64_le(t, f64_neg(F64_PI))) == 1) { t = _doe_wrap(t); }
+        if (f64_gt(_prk_cos(t), 0) == 1) {
+            # Strictly nearer, by more than the wrap's rounding: +-theta_B of an
+            # unslanted grating tie, and the earlier root keeps them.
+            var tol = f64_mul(0x3D70000000000000, f64_add(F64_ONE, f64_abs(best)));
+            if ((found == 0) | f64_lt(f64_abs(t), f64_sub(f64_abs(best), tol))) {
+                best = t;
+                found = 1;
+            } else {
+                if (f64_le(f64_abs(t), f64_add(f64_abs(best), tol)) == 1) {
+                    if (((t & 0x8000000000000000) == sphi) & ((best & 0x8000000000000000) != sphi)) { best = t; }
+                }
+            }
+        }
+        k = k + 1;
+    }
+    if (found == 0) {
+        store64(err_out, PK_ERR_INVALID_ANGLE);
+        return 0;
+    }
+    store64(err_out, PK_ERR_NONE);
+    return best;
+}
+
+# The diffraction efficiency of the grating for a plane wave at angle theta INSIDE
+# the medium (radians from z; refracting the wave in at the surface,
+# n_outside sin theta_out = n sin theta, is the caller's), vacuum wavelength lambda,
+# polarization 0 (TE, E normal to the plane of incidence) or 1 (TM) — Kogelnik's
+# coupled-wave result for the FIRST ORDER NEAREST BRAGG, sigma = rho -+ K (the
+# grating n1 cos(K.x) has both; the one with the smaller dephasing is taken, so
+# slant phi and phi + pi, and the mirror incidence -theta_B, behave as the physics
+# says — 2.9.0 review). With beta = 2 pi n/lambda, K = 2 pi/Lambda and K taken
+# along the chosen sign,
+#   c_R = cos theta,  c_S = cos theta - (K/beta) cos phi,
+#   dephasing  theta_d = K cos(phi - theta) - K^2/(2 beta),
+#   kappa = pi n1/lambda, times |r.s| for TM: rho.sigma/(|rho||sigma|) =
+#     |beta - K cos(phi - theta)| / sqrt(beta^2 - 2 beta K cos(phi - theta) + K^2)
+#     (Kogelnik eqs. 78-90; -cos 2(theta_B - phi) at Bragg).
+# The diffracted wave's c_S decides the geometry:
+#   TRANSMISSION (c_S > 0): nu = kappa d/sqrt(c_R c_S), xi = theta_d d/(2 c_S),
+#     eta = [(nu/w) sin w]^2, w = sqrt(nu^2 + xi^2)  (sin^2 nu at Bragg; nu/w <= 1
+#     keeps eta <= 1 in rounding too);
+#   REFLECTION (c_S < 0): nu = kappa d/sqrt(c_R |c_S|), xi = theta_d d/(2 |c_S|),
+#     eta = nu^2/(nu^2 + F), F = (s/sinh s)^2, s^2 = nu^2 - xi^2 (tanh^2 nu at
+#     Bragg; past |xi| = nu, (q/sin q)^2 with q^2 = -s^2).
+# Returns eta in [0, 1] and writes PK_ERR_NONE. PK_ERR_INVALID_ANGLE and 0 when
+# c_R <= 2^-50 (the wave does not enter, or grazes) or c_S = 0 (the diffracted wave
+# grazes: the theory has no answer there; sigma = 0 alike), and whenever the doubles
+# do not resolve the answer: the sine's argument w or q to 2^-11 rad (against
+# max(w, 1)), or, inside a reflection band, eta to 2^-11 relative or the band edge
+# at all — a grazing c_S at rounding level, or a grating so strong or thick that
+# the phase carries no fraction (2.9.0 review: those returned rounding noise, or
+# 1.0, as success). PK_ERR_INVALID_PARAMETER and 0 for a null grating, a
+# wavelength not finite and positive, an angle not finite or past 2 pi, or a
+# polarization other than 0/1.
+#must_use
+fn hologram_efficiency(g, theta, wavelength, polarization, err_out) {
+    store64(err_out, PK_ERR_INVALID_PARAMETER);
+    if (g == 0) { return 0; }
+    if (_doe_pos(wavelength) == 0) { return 0; }
+    if ((polarization != 0) & (polarization != 1)) { return 0; }
+    # An angle past 2 pi is a unit error, as for the slant (round 2: an unwrapped
+    # theta of 1e10 slipped phase past the resolution guard).
+    if (f64_le(f64_abs(theta), F64_TAU) == 0) { return 0; }
+    var cr = _prk_cos(theta);
+    if (_doe_finite(cr) == 0) { return 0; }
+    var cpt = _prk_cos(f64_sub(VolumeGrating_slant(g), theta));
+    if (_doe_finite(cpt) == 0) { return 0; }
+    store64(err_out, PK_ERR_INVALID_ANGLE);
+    if (f64_gt(cr, 0x3CD0000000000000) == 0) { return 0; }
+    var n = VolumeGrating_n(g);
+    var d = VolumeGrating_thickness(g);
+    var beta = f64_div(f64_mul(F64_TAU, n), wavelength);
+    var kk = f64_div(F64_TAU, VolumeGrating_period(g));
+    # The order nearer Bragg: -K when cos(phi - theta) < 0 (K^2/(2 beta) > 0 makes
+    # K cos(phi - theta) - K^2/(2 beta) the smaller in magnitude for the sign that
+    # makes K cos(phi - theta) >= 0).
+    var kz = f64_mul(f64_div(kk, beta), _prk_cos(VolumeGrating_slant(g)));
+    if (f64_lt(cpt, 0) == 1) {
+        cpt = f64_neg(cpt);
+        kz = f64_neg(kz);
+    }
+    var cs = f64_sub(cr, kz);
+    if ((cs & _PRK_ABS) == 0) { return 0; }
+    var kcos = f64_mul(kk, cpt);
+    var k2b = f64_div(f64_mul(kk, kk), f64_mul(F64_TWO, beta));
+    var deph = f64_sub(kcos, k2b);
+    var kappa = f64_div(f64_mul(F64_PI, VolumeGrating_n1(g)), wavelength);
+    if (polarization == 1) {
+        var sg2 = f64_add(f64_sub(f64_mul(beta, beta), f64_mul(F64_TWO, f64_mul(beta, kcos))), f64_mul(kk, kk));
+        # sigma = 0 is the degenerate c_S = 0 geometry.
+        if (f64_gt(sg2, 0) == 0) { return 0; }
+        var sg = f64_sqrt(sg2);
+        kappa = f64_mul(kappa, f64_div(f64_abs(f64_sub(beta, kcos)), sg));
+    }
+    var acs = f64_abs(cs);
+    var nu = f64_div(f64_mul(kappa, d), f64_sqrt(f64_mul(cr, acs)));
+    var xi = f64_div(f64_mul(deph, d), f64_mul(F64_TWO, acs));
+    var nu2 = f64_mul(nu, nu);
+    var xi2 = f64_mul(xi, xi);
+    # How well the doubles resolve the sine's argument: the rounding of c_R (fcos
+    # near pi/2 is good to ~2^-68 absolute), of c_S (which cancels near grazing)
+    # and of the dephasing, carried into w^2 = nu^2 + xi^2 (or q^2 = xi^2 - nu^2).
+    var ecr = f64_add(0x3BD0000000000000, f64_mul(0x3CB0000000000000, cr));
+    var ecs = f64_add(f64_mul(0x3CB0000000000000, f64_add(cr, f64_abs(kz))), ecr);
+    var rnu = f64_add(f64_mul(F64_HALF, f64_add(f64_div(ecr, cr), f64_div(ecs, acs))), 0x3CD0000000000000);
+    var edp = f64_add(f64_mul(0x3CB0000000000000, f64_add(kk, k2b)), f64_mul(kk, 0x3BD0000000000000));
+    var exi = f64_add(f64_mul(f64_abs(xi), f64_add(f64_div(ecs, acs), 0x3CD0000000000000)),
+      f64_div(f64_mul(edp, d), f64_mul(F64_TWO, acs)));
+    # Half the uncertainty of w^2 = nu^2 + xi^2 (and of s^2): (|xi| + exi) exi, not
+    # the linear |xi| exi — a computed xi near 0 can hide an unresolved one (round 2).
+    var earg2 = f64_add(f64_mul(nu2, rnu), f64_mul(f64_add(f64_abs(xi), exi), exi));
+    # Past the double range (or NaN) no fraction of the phase survives.
+    if ((_doe_finite(f64_add(nu2, xi2)) & _doe_finite(earg2)) == 0) { return 0; }
+    var eta = 0;
+    if (f64_gt(cs, 0) == 1) {
+        var w = f64_sqrt(f64_add(nu2, xi2));
+        var tw = 0;
+        if ((w & _PRK_ABS) != 0) {
+            # sinc^2 is flat below 1 rad: the argument's error counts against max(w, 1).
+            if (f64_le(f64_div(earg2, f64_max(w, F64_ONE)), 0x3F40000000000000) == 0) { return 0; }
+            # w >= |nu| in rounding too (fl(sqrt(fl(nu^2))) = |nu|), so nu/w <= 1.
+            tw = f64_mul(f64_div(nu, w), _prk_sin(w));
+        }
+        eta = f64_mul(tw, tw);
+    } else {
+        var s2 = f64_sub(nu2, xi2);
+        var ff = F64_ONE;
+        if (f64_ge(s2, 0) == 1) {
+            # Inside the band. The band edge within the uncertainty of s^2 is no
+            # answer; nor is an eta whose propagated error passes 2^-11 (round 2:
+            # this branch had no guard, and a grazing c_S gave tanh^2 nu, 4e4 x off).
+            if (f64_le(f64_mul(F64_TWO, earg2), f64_add(s2, F64_ONE)) == 0) { return 0; }
+            var s = f64_sqrt(s2);
+            if (f64_gt(s2, 0) == 1) {
+                # (s/sinh s)^2 = (2 s e^-s / (1 - e^-2s))^2: no overflow for large s,
+                # and 1 - e^-2s through expm1 keeps its bits for small s.
+                var den = f64_neg(_doe_expm1(f64_mul(f64_from(0 - 2), s)));
+                var r = f64_div(f64_mul(F64_TWO, f64_mul(s, f64_exp(f64_neg(s)))), den);
+                ff = f64_mul(r, r);
+            }
+            var rel = f64_mul(f64_div(ff, f64_add(nu2, ff)), f64_div(f64_mul(F64_TWO, earg2), f64_max(s, F64_ONE)));
+            if (f64_le(rel, 0x3F40000000000000) == 0) { return 0; }
+        }
+        if (f64_lt(s2, 0) == 1) {
+            var qq = f64_sqrt(f64_neg(s2));
+            if (f64_le(f64_div(earg2, f64_max(qq, F64_ONE)), 0x3F40000000000000) == 0) { return 0; }
+            var sq = _prk_sin(qq);
+            if ((sq & _PRK_ABS) == 0) {
+                store64(err_out, PK_ERR_NONE);
+                return 0;
+            }
+            var rr = f64_div(qq, sq);
+            ff = f64_mul(rr, rr);
+        }
+        eta = f64_div(nu2, f64_add(nu2, ff));
+    }
+    if (_doe_finite(eta) == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
+    store64(err_out, PK_ERR_NONE);
+    return eta;
+}

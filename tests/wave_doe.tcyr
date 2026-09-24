@@ -1,0 +1,749 @@
+# wave_doe test suite — diffractive optics (new in 2.9.0).
+#
+# References, none of them the module's closed forms:
+# - mpmath (40 digits) Fourier coefficients of each grating profile, integrated
+#   piece by piece exactly — the staircase, the binary and the Dammann profiles —
+#   at the same double inputs;
+# - Dammann designs solved in mpmath by equalising orders (1x3: 66.4%, 1x5: 77.4%,
+#   the published efficiencies);
+# - Kogelnik's coupled-wave EQUATIONS (not his solutions) integrated by mpmath's
+#   Taylor ODE solver — the reflection case as a two-point boundary problem;
+# - closed forms and invariants: Parseval (the efficiencies of a phase grating sum
+#   to 1), symmetry, the zone radii's phase, the achromat condition.
+
+include "src/error.cyr"
+include "src/wave_doe.cyr"
+
+fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _near(a, b, tol) { return f64_le(f64_abs(f64_sub(a, b)), tol); }
+fn _rel(a, b, tol) { return f64_le(f64_abs(f64_sub(a, b)), f64_mul(tol, f64_abs(b))); }
+fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
+fn _assert_rel(a, b, tol, msg) { assert(_rel(a, b, tol), msg); }
+# The index 1.5 most of these gratings are made of.
+fn N15() { return _fd(3, 2); }
+
+var Z = f64_from(0);
+var ONE = F64_ONE;
+var NAN = 0x7FF8000000000000;
+var INF = 0x7FF0000000000000;
+var T9 = _fd(1, 1000000000);
+var T12 = _fd(1, 1000000000000);
+var REL9 = _fd(1, 1000000000);
+var REL12 = _fd(1, 1000000000000);
+var REL13 = _fd(1, 10000000000000);
+
+alloc_init();
+var e = 0;
+var t = 0;
+var _s = 0;
+
+# ── The grating equation ────────
+test_group("doe_grating");
+
+t = grating_order_angle(ONE, N15(), _fd(3, 10), 1, _fd(55, 100), _fd(12, 10), &e);
+assert_eq(e, PK_ERR_NONE, "order 1 into glass: ok");
+_assert_near(t, 0x3FE0D9A4ACDE4DA5, T12, "n_out sin = n_in sin + m lambda/period (mpmath)");
+t = grating_order_angle(ONE, ONE, _fd(0 - 2, 10), 0 - 2, _fd(633, 1000), _fd(5, 2), &e);
+_assert_near(t, 0xBFE90A6949EFF15A, T12, "order -2 in air (mpmath)");
+t = grating_order_angle(ONE, ONE, _fd(0 - 2, 10), 0, _fd(633, 1000), _fd(5, 2), &e);
+_assert_near(t, _fd(0 - 2, 10), T12, "order 0 goes straight through");
+# Littrow: sin theta = lambda/(2 period) sends order -1 back along -theta.
+var thl = ganita_f64_asin(_fd(1, 4));
+t = grating_order_angle(ONE, ONE, thl, 0 - 1, ONE, F64_TWO, &e);
+_assert_near(t, f64_neg(thl), T12, "Littrow: order -1 at -theta");
+t = grating_order_angle(ONE, ONE, Z, 4, ONE, F64_TWO, &e);
+assert_eq(e, PK_ERR_TIR, "order 4 of lambda/period = 0.5 is evanescent (TIR, as ray_snell for order 0)");
+assert_eq(t, 0, "... and returns 0");
+t = grating_order_angle(ONE, ONE, Z, 2, ONE, F64_TWO, &e);
+assert_eq(e, PK_ERR_NONE, "order 2 grazes (sin = 1): it propagates");
+_assert_near(t, f64_mul(F64_HALF, F64_PI), T12, "... at pi/2");
+var rng = alloc(16);
+assert_eq(grating_order_count(ONE, ONE, Z, _fd(3, 10), ONE, rng), 7, "lambda/period = 0.3: orders -3..3");
+assert_eq(load64(rng), 0 - 3, "... lowest -3");
+assert_eq(load64(rng + 8), 3, "... highest 3");
+assert_eq(grating_order_count(ONE, ONE, Z, ONE, _fd(4, 1), rng), 9, "lambda/period = 1/4: +-4 graze and count");
+# Out of glass at sin theta = 0.9 with period = lambda: order 0 is totally reflected
+# (1.35 > 1); orders -1 and -2 leave.
+var q1 = grating_order_count(N15(), ONE, ganita_f64_asin(_fd(9, 10)), ONE, ONE, rng);
+assert_eq(q1, 2, "TIR of order 0: two orders leave");
+assert_eq(load64(rng), 0 - 2, "... -2");
+assert_eq(load64(rng + 8), 0 - 1, "... to -1");
+var q2 = grating_order_count(N15(), ONE, ganita_f64_asin(_fd(9, 10)), _fd(1, 1000), ONE, rng) >= 0;
+assert_eq(q2, 1, "fine period: counts");
+assert_eq(grating_order_count(ONE, ONE, Z, ONE, _fd(1, 2), rng), 1, "period < lambda: only order 0");
+
+# ── Scalar efficiencies ────────
+test_group("doe_scalar");
+
+# Blazed: sinc^2(alpha - m), against the exact integral of the sawtooth.
+_assert_rel(doe_blazed_efficiency(1, _fd(87, 100)), 0x3FEE428B5D6A8F29, REL13, "blazed alpha 0.87, m = 1");
+_assert_rel(doe_blazed_efficiency(0, _fd(87, 100)), 0x3F959EDAB26D1422, REL13, "blazed alpha 0.87, m = 0");
+_assert_rel(doe_blazed_efficiency(2, _fd(87, 100)), 0x3F89A1B8C033C496, REL13, "blazed alpha 0.87, m = 2");
+_assert_rel(doe_blazed_efficiency(0 - 1, _fd(87, 100)), 0x3F72B80D2E09B58E, REL13, "blazed alpha 0.87, m = -1");
+assert_eq(doe_blazed_efficiency(1, ONE), ONE, "blazed at design: exactly 1");
+assert_eq(doe_blazed_efficiency(3, ONE), 0, "blazed at design: exactly 0 elsewhere");
+_assert_rel(doe_blazed_efficiency(2, _fd(23, 10)), 0x3FE79430E97AA453, REL13, "blazed alpha 2.3, m = 2");
+_assert_rel(doe_blazed_efficiency(0, _fd(0 - 4, 10)), 0x3FE25444C47FC751, REL13, "blazed alpha -0.4, m = 0");
+# Parseval: the orders of a pure phase grating carry all the power. The tail past
+# |m| = K is sin^2(pi a)/pi^2 (psi1(K+1-a) + psi1(K+1+a)) ~ 2 sin^2(pi a)/(pi^2 K):
+# the partial sum to K = 2000 at a = 0.37 is 0.999914681175227 (mpmath).
+var sb = 0;
+for (var ib = 0 - 2000; ib <= 2000; ib = ib + 1) { sb = f64_add(sb, doe_blazed_efficiency(ib, _fd(37, 100))); }
+assert(f64_le(sb, f64_add(ONE, T12)), "blazed: sum <= 1");
+_assert_near(sb, _fd(999914681175227, 1000000000000000), T12, "blazed: partial Parseval sum to |m| = 2000 (mpmath)");
+# The off-design phase depth of a blaze in a dispersive material.
+_assert_rel(doe_phase_depth(1, _fd(55, 100), _fd(45, 100), _fd(15, 10), _fd(151, 100)), f64_div(f64_mul(_fd(55, 45),
+      _fd(51, 100)), _fd(5, 10)), REL13, "phase depth M lambda0 (n - 1)/(lambda (n0 - 1))");
+assert_eq(doe_phase_depth(1, _fd(55, 100), _fd(55, 100), _fd(15, 10), _fd(15, 10)), ONE, "at design: 1 wave");
+# Multilevel staircase against the exact staircase integral.
+_assert_rel(doe_multilevel_efficiency(1, 2, ONE), 0x3FD9F02F6222C720, REL13, "2 levels: 4/pi^2 = 40.5%");
+_assert_rel(doe_multilevel_efficiency(1, 4, ONE), 0x3FE9F02F6222C720, REL13, "4 levels: 81.1%");
+_assert_rel(doe_multilevel_efficiency(1, 8, ONE), 0x3FEE6375F3060C34, REL13, "8 levels: 95.0%");
+_assert_rel(doe_multilevel_efficiency(1, 16, ONE), 0x3FEF97438E889B69, REL13, "16 levels: 98.7%");
+_assert_rel(doe_multilevel_efficiency(1, 4, _fd(9, 10)), 0x3FE925D009DAFCEF, REL13, "4 levels, alpha 0.9, m = 1");
+_assert_rel(doe_multilevel_efficiency(0 - 3, 4, _fd(9, 10)), 0x3FB65A8008C2A7F1, REL13, "4 levels, alpha 0.9, m = -3");
+_assert_rel(doe_multilevel_efficiency(5, 4, _fd(9, 10)), 0x3FA018333981E98F, REL13, "4 levels, alpha 0.9, m = 5");
+_assert_rel(doe_multilevel_efficiency(0, 4, _fd(9, 10)), 0x3F8CFAAA8C992CC1, REL13, "4 levels, alpha 0.9, m = 0");
+_assert_rel(doe_multilevel_efficiency(2, 8, _fd(17, 10)), 0x3FE333736C6D94F2, REL13, "8 levels, alpha 1.7, m = 2");
+_assert_rel(doe_multilevel_efficiency(0 - 2, 3, ONE), 0x3FC5E2A7FACD5803, REL13, "3 levels, alpha 1, m = -2 (1 - 3)");
+# At design only orders 1 + kN light up.
+assert_eq(doe_multilevel_efficiency(2, 4, ONE), 0, "4 levels at design: order 2 dark");
+assert(f64_gt(doe_multilevel_efficiency(5, 4, ONE), 0), "4 levels at design: order 5 = 1 + 4 lit");
+# Limits: one level is a flat plate; many levels are the blaze.
+assert_eq(doe_multilevel_efficiency(0, 1, _fd(3, 10)), ONE, "1 level: all in order 0");
+assert_eq(doe_multilevel_efficiency(1, 1, _fd(3, 10)), 0, "1 level: nothing in order 1");
+_assert_near(doe_multilevel_efficiency(1, 1048576, _fd(87, 100)), doe_blazed_efficiency(1, _fd(87, 100)), T9,
+  "2^20 levels: the blaze");
+# (These tails fall as ~1/K too, with larger constants: sum to K = 2e5.)
+var sm = 0;
+for (var im = 0 - 200000; im <= 200000; im = im + 1) { sm = f64_add(sm, doe_multilevel_efficiency(im, 4, _fd(9, 10))); }
+assert(f64_le(sm, f64_add(ONE, T12)), "multilevel: sum <= 1");
+assert(f64_ge(sm, f64_sub(ONE, _fd(1, 10000))), "multilevel: sum within the tail of 1 (Parseval)");
+# Binary phase and amplitude gratings against their exact integrals.
+var q3 = doe_binary_phase_efficiency(1, F64_HALF, F64_HALF);
+_assert_rel(q3, 0x3FD9F02F6222C720, REL13, "0/pi, 50%: 4/pi^2 in order 1");
+assert_eq(doe_binary_phase_efficiency(0, F64_HALF, F64_HALF), 0, "0/pi, 50%: order 0 exactly dark");
+assert_eq(doe_binary_phase_efficiency(2, F64_HALF, F64_HALF), 0, "0/pi, 50%: order 2 exactly dark");
+_assert_rel(doe_binary_phase_efficiency(0, _fd(3, 10), _fd(37, 100)), 0x3FD2B828E180F98A, REL13, "binary phase m = 0");
+_assert_rel(doe_binary_phase_efficiency(1, _fd(3, 10), _fd(37, 100)), 0x3FCC99238169FC87, REL13, "binary phase m = 1");
+var q4 = doe_binary_phase_efficiency(0 - 2, _fd(3, 10), _fd(37, 100));
+_assert_rel(q4, 0x3FB3C2C84C9C8B28, REL13, "binary phase m = -2");
+_assert_rel(doe_binary_phase_efficiency(3, _fd(3, 10), _fd(37, 100)), 0x3F6DABA90E50779C, REL13, "binary phase m = 3");
+var sp = 0;
+for (var ip = 0 - 200000; ip <= 200000; ip = ip + 1) {
+    sp = f64_add(sp, doe_binary_phase_efficiency(ip, _fd(3, 10), _fd(37, 100)));
+}
+assert(f64_ge(sp, f64_sub(ONE, _fd(1, 10000))), "binary phase: Parseval");
+_assert_rel(doe_binary_amplitude_efficiency(0, _fd(3, 10)), 0x3FB70A3D70A3D70A, REL13, "amplitude D = 0.3: D^2");
+_assert_rel(doe_binary_amplitude_efficiency(1, _fd(3, 10)), 0x3FB0FA0EBC95BDFC, REL13, "amplitude D = 0.3, m = 1");
+_assert_rel(doe_binary_amplitude_efficiency(4, _fd(3, 10)), 0x3F61EC414B1A1245, REL13, "amplitude D = 0.3, m = 4");
+var sa = 0;
+for (var ia = 0 - 2000; ia <= 2000; ia = ia + 1) { sa = f64_add(sa, doe_binary_amplitude_efficiency(ia, _fd(3, 10))); }
+_assert_near(sa, _fd(3, 10), _fd(1, 10000), "amplitude: the orders carry the D it lets through");
+# Dammann gratings: designs solved in mpmath by equalising the orders.
+var dm = alloc(24);
+store64(dm, 0x3FD7873C0130AEBC);
+_assert_rel(doe_dammann_efficiency(dm, 1, 0, &e), 0x3FCC565C33FDBAB3, REL12, "1x3 Dammann: order 0");
+_assert_rel(doe_dammann_efficiency(dm, 1, 1, &e), 0x3FCC565C33FDBAB3, REL12, "1x3 Dammann: order 1 equal");
+_assert_rel(doe_dammann_efficiency(dm, 1, 0 - 1, &e), 0x3FCC565C33FDBAB3, REL12, "1x3 Dammann: order -1 equal");
+_assert_rel(doe_dammann_efficiency(dm, 1, 2, &e), 0x3FB9B760B68A26B0, REL12, "1x3 Dammann: order 2");
+var d3 = f64_add(doe_dammann_efficiency(dm, 1, 0, &e), f64_mul(F64_TWO, doe_dammann_efficiency(dm, 1, 1, &e)));
+_assert_near(d3, _fd(664, 1000), _fd(1, 1000), "1x3 Dammann: 66.4% (the published efficiency)");
+store64(dm, 0x3FC0F09AF3BB1C61);
+store64(dm + 8, 0x3FDEC3BB03FBF148);
+_assert_rel(doe_dammann_efficiency(dm, 2, 0, &e), 0x3FC3CFADEB9CADC7, REL12, "1x5 Dammann: order 0");
+_assert_rel(doe_dammann_efficiency(dm, 2, 1, &e), 0x3FC3CFADEB9CADC5, REL12, "1x5 Dammann: order 1");
+_assert_rel(doe_dammann_efficiency(dm, 2, 2, &e), 0x3FC3CFADEB9CADC0, REL12, "1x5 Dammann: order 2");
+_assert_rel(doe_dammann_efficiency(dm, 2, 3, &e), 0x3F667CFB2B3C47F5, REL12, "1x5 Dammann: order 3");
+var d5 = doe_dammann_efficiency(dm, 2, 0, &e);
+for (var i5 = 1; i5 <= 2; i5 = i5 + 1) { d5 = f64_add(d5, f64_mul(F64_TWO, doe_dammann_efficiency(dm, 2, i5, &e))); }
+_assert_near(d5, _fd(7739, 10000), _fd(1, 10000), "1x5 Dammann: 77.4% (the published efficiency)");
+store64(dm, 0x3FCDD02E524BCFEE);
+store64(dm + 8, 0x3FD8C5AF90AB6EBF);
+store64(dm + 16, 0x3FDEAD29F2BF25D9);
+_assert_rel(doe_dammann_efficiency(dm, 3, 0, &e), 0x3FB724D90BB32AC3, REL12, "1x7 Dammann: order 0");
+_assert_rel(doe_dammann_efficiency(dm, 3, 3, &e), 0x3FB724D90BB32ABF, REL12, "1x7 Dammann: order 3");
+_assert_rel(doe_dammann_efficiency(dm, 3, 4, &e), 0x3F83948EF2241571, REL12, "1x7 Dammann: order 4");
+assert_eq(doe_dammann_efficiency(dm, 3, 0 - 2, &e), doe_dammann_efficiency(dm, 3, 2, &e), "Dammann: eta_-m = eta_m");
+var sd = 0;
+for (var id = 0 - 200000; id <= 200000; id = id + 1) { sd = f64_add(sd, doe_dammann_efficiency(dm, 3, id, &e)); }
+assert(f64_ge(sd, f64_sub(ONE, _fd(1, 10000))), "Dammann: Parseval (all orders sum to 1)");
+assert(f64_le(sd, f64_add(ONE, T12)), "Dammann: sum <= 1");
+# One transition at 1/4 is the 50% 0/pi grating.
+store64(dm, _fd(1, 4));
+_assert_near(doe_dammann_efficiency(dm, 1, 0, &e), Z, T12, "x = 1/4: order 0 dark");
+_assert_rel(doe_dammann_efficiency(dm, 1, 1, &e), 0x3FD9F02F6222C720, REL13, "x = 1/4: 4/pi^2 in order 1");
+
+# ── The diffractive lens ────────
+test_group("doe_lens");
+
+var q5 = doe_lens_phase(_fd(3, 2), f64_from(50), _fd(55, 100000));
+_assert_rel(q5, 0xC0700FB498D81237, REL13, "lens phase r = 1.5 (exact)");
+_assert_rel(doe_lens_phase(_fd(1, 10000), f64_from(50), _fd(55, 100000)), 0xBEB32A8F25749CBD, REL13,
+  "lens phase at r = 1e-4: no cancellation");
+_assert_rel(doe_lens_phase(f64_from(3), f64_from(0 - 20), _fd(633, 1000000)), 0x40A159DF73E66A06, REL13,
+  "diverging lens: positive phase");
+assert_eq(doe_lens_phase(Z, f64_from(50), _fd(55, 100000)), 0, "zero phase on axis");
+# Paraxially -pi r^2/(lambda f).
+var ppx = f64_neg(f64_div(f64_mul(F64_PI, _fd(1, 1000000)), f64_mul(_fd(55, 100000), f64_from(50))));
+_assert_rel(doe_lens_phase(_fd(1, 1000), f64_from(50), _fd(55, 100000)), ppx, _fd(1, 1000000000), "paraxial limit");
+# Zone j ends where |phi| = 2 pi j.
+_assert_rel(doe_lens_zone_radius(10, f64_from(50), _fd(55, 100000)), 0x3FE7BB84519F33C5, REL13, "zone 10 radius");
+for (var jz = 1; jz <= 5; jz = jz + 1) {
+    var rz = doe_lens_zone_radius(jz * 7, f64_from(50), _fd(55, 100000));
+    _assert_rel(doe_lens_phase(rz, f64_from(50), _fd(55, 100000)), f64_neg(f64_mul(F64_TAU, f64_from(jz * 7))), REL12,
+      "phase at zone boundary j = -2 pi j");
+}
+assert_eq(doe_lens_zone_radius(0, f64_from(50), _fd(55, 100000)), 0, "zone 0 is the centre");
+# The focal length scales as 1/(m lambda).
+var q6 = doe_lens_focal_length(f64_from(50), _fd(55, 100), _fd(45, 100), 1);
+_assert_rel(q6, f64_div(f64_from(2750), f64_from(45)), REL13,
+  "f(lambda) = f0 lambda0/lambda");
+_assert_rel(doe_lens_focal_length(f64_from(50), _fd(55, 100), _fd(55, 100), 2), f64_from(25), REL13, "order 2: f0/2");
+_assert_rel(doe_lens_focal_length(f64_from(50), _fd(55, 100), _fd(55, 100), 0 - 1), f64_from(0 - 50), REL13,
+  "order -1: a diverging image");
+# The diffractive Abbe number, d/F/C lines: -3.4534.
+_assert_rel(doe_abbe_number(_fd(5875618, 10000), _fd(4861327, 10000), _fd(6562725, 10000)), 0xC00BA0934E52B625, REL13,
+  "diffractive Abbe number -3.4534 (d, F, C)");
+# A hybrid achromat with a crown (V = 64.17): the diffractive part carries ~5%.
+var hy = alloc(16);
+var vd = doe_abbe_number(_fd(5875618, 10000), _fd(4861327, 10000), _fd(6562725, 10000));
+assert_eq(doe_hybrid_achromat(_fd(2, 100), _fd(6417, 100), vd, hy), PK_ERR_NONE, "hybrid achromat ok");
+_assert_rel(load64(hy), 0x3F936F22B206AFE9, REL13, "refractive power");
+_assert_rel(load64(hy + 8), 0x3F50BBE95A764921, REL13, "diffractive power (~5.1%)");
+_assert_near(f64_add(load64(hy), load64(hy + 8)), _fd(2, 100), T12, "powers add to the total");
+_assert_near(f64_add(f64_div(load64(hy), _fd(6417, 100)), f64_div(load64(hy + 8), vd)), Z, T12,
+  "achromatic: phi_r/V_r + phi_d/V_d = 0");
+
+# ── Volume holograms: Kogelnik against the coupled-wave ODEs ────────
+test_group("doe_hologram");
+
+var HP = f64_mul(F64_HALF, F64_PI);
+var gt = volume_grating_new(N15(), _fd(1, 100), f64_from(40), ONE, HP, &e);
+assert_eq(e, PK_ERR_NONE, "transmission grating ok");
+var thb = hologram_bragg_angle(gt, _fd(633, 1000), &e);
+var tba = ganita_f64_asin(f64_div(_fd(633, 1000), f64_from(3)));
+_assert_rel(thb, tba, REL13, "unslanted Bragg angle asin(lambda/(2 n L))");
+var q7 = hologram_efficiency(gt, thb, _fd(633, 1000), 0, &e);
+_assert_rel(q7, 0x3FE9B08C8903F9F8, REL9, "transmission at Bragg, TE (ODE)");
+var nub = f64_div(f64_mul(F64_PI, f64_mul(_fd(1, 100), f64_from(40))), f64_mul(_fd(633, 1000), _prk_cos(thb)));
+var snb = _prk_sin(nub);
+_assert_rel(hologram_efficiency(gt, thb, _fd(633, 1000), 0, &e), f64_mul(snb, snb), REL12, "... = sin^2 nu");
+_assert_rel(hologram_efficiency(gt, f64_add(thb, _fd(4, 1000)), _fd(633, 1000), 0, &e), 0x3FE6A06744B5A4AF, REL9,
+  "transmission 4 mrad off Bragg, TE (ODE)");
+_assert_rel(hologram_efficiency(gt, f64_add(thb, _fd(4, 1000)), _fd(633, 1000), 1, &e), 0x3FEA576CA0A0F367, REL9,
+  "transmission 4 mrad off Bragg, TM (ODE)");
+_assert_rel(hologram_efficiency(gt, f64_sub(thb, _fd(11, 1000)), _fd(633, 1000), 0, &e), 0x3FD1B189668CB860, REL9,
+  "transmission 11 mrad off Bragg, TE (ODE)");
+var gs = volume_grating_new(_fd(152, 100), _fd(12, 1000), f64_from(30), _fd(8, 10), _fd(12, 10), &e);
+var ths = hologram_bragg_angle(gs, _fd(532, 1000), &e);
+_assert_rel(hologram_efficiency(gs, f64_add(ths, _fd(3, 1000)), _fd(532, 1000), 0, &e), 0x3FDD71BF44A60132, REL9,
+  "slanted transmission off Bragg, TE (ODE)");
+var q8 = hologram_efficiency(gs, ths, _fd(532, 1000), 1, &e);
+_assert_rel(q8, 0x3FE73A00CF66C367, REL9, "slanted transmission at Bragg, TM (ODE)");
+# TM coupling vanishes when the two waves are orthogonal: theta_B = 45 deg.
+var p45 = f64_div(_fd(633, 1000), f64_mul(f64_from(3), f64_sqrt(F64_HALF)));
+var go = volume_grating_new(N15(), _fd(1, 100), f64_from(40), p45, HP, &e);
+_assert_near(hologram_efficiency(go, f64_mul(F64_HALF, HP), _fd(633, 1000), 1, &e), Z, _fd(1, 1000000000000000),
+  "orthogonal waves: TM does not couple");
+assert(f64_gt(hologram_efficiency(go, f64_mul(F64_HALF, HP), _fd(633, 1000), 0, &e), _fd(1, 10)), "... TE does");
+# Reflection gratings: tanh^2 nu at Bragg, the ODE's two-point problem off it.
+var gr = volume_grating_new(N15(), _fd(1, 100), f64_from(20), _fd(2, 10), Z, &e);
+# (With exactly representable n, L, lambda: acos near 1 turns the rounding of
+# 2 n L = 0.6000000000000001 into a 2e-8 rad angle, which is right for those doubles.)
+var gre = volume_grating_new(N15(), _fd(1, 100), f64_from(20), _fd(1, 4), Z, &e);
+assert_eq(hologram_bragg_angle(gre, _fd(3, 4), &e), 0, "reflection: normal incidence when lambda = 2 n L");
+assert_eq(e, PK_ERR_NONE, "... and that is an angle, not INVALID_ANGLE");
+_assert_rel(hologram_efficiency(gr, Z, _fd(6, 10), 0, &e), 0x3FE38125A9CEB3C4, REL9, "reflection at Bragg (ODE)");
+var nur = f64_div(f64_mul(F64_PI, f64_mul(_fd(1, 100), f64_from(20))), _fd(6, 10));
+var thr = f64_tanh(nur);
+_assert_rel(hologram_efficiency(gr, Z, _fd(6, 10), 0, &e), f64_mul(thr, thr), REL12, "... = tanh^2 nu");
+var q9 = hologram_efficiency(gr, Z, _fd(605, 1000), 0, &e);
+_assert_rel(q9, 0x3FB61992C1CE8235, REL9, "reflection detuned 5 nm (ODE)");
+var q10 = hologram_efficiency(gr, Z, _fd(62, 100), 0, &e);
+_assert_rel(q10, 0x3F52BBEC3907AF03, REL9, "reflection outside the band (ODE)");
+var grs = volume_grating_new(N15(), _fd(1, 100), f64_from(20), _fd(2, 10), _fd(3, 10), &e);
+var q11 = hologram_efficiency(grs, _fd(33, 100), _fd(58, 100), 1, &e);
+_assert_rel(q11, 0x3F81FC3C937DA340, REL9, "slanted reflection, TM (ODE)");
+# Klein's Q: the thick regime.
+var q12 = hologram_q_factor(gt, _fd(633, 1000));
+_assert_rel(q12, f64_div(f64_mul(F64_TAU, f64_mul(_fd(633, 1000), f64_from(40))), N15()), REL13,
+  "Q = 2 pi lambda d/(n L^2)");
+assert(f64_gt(hologram_q_factor(gt, _fd(633, 1000)), f64_from(10)), "... > 10: Bragg regime");
+
+# ── Round 1 of the 2.9.0 verification ────────
+test_group("doe_review");
+
+# Weak gratings and dark orders keep their RELATIVE accuracy (mpmath at the doubles).
+_assert_rel(doe_blazed_efficiency(1, 0x3EB0C6F7A0B5ED8D), 0x3D71979BCF799EB0, REL13, "weak blaze alpha = 1e-6, m = 1");
+_assert_rel(doe_blazed_efficiency(0 - 39, 0x3E112E0BE826D695), 0x3B88D6958D9FA938, REL13, "alpha = 1e-9, m = -39");
+var q101 = doe_multilevel_efficiency(0 - 9, 24, 0x3E112E0BE826D695);
+_assert_rel(q101, 0x3BCD26814B843941, REL13, "24 levels, alpha 1e-9, m = -9");
+var q102 = doe_multilevel_efficiency(0 - 2, 3, 0x3FF0000000000002);
+_assert_rel(q102, 0x3FC5E2A7FACD5803, REL13, "3 levels, alpha = 1 + 2 ulp, m = -2");
+var q103 = doe_multilevel_efficiency(0 - 2, 3, 0x3FEFFFFFFFFFFFFC);
+_assert_rel(q103, 0x3FC5E2A7FACD5803, REL13, "3 levels, alpha = 1 - 2 ulp, m = -2");
+var a5 = f64_add(ONE, _fd(1, 1000000000000));
+_assert_rel(doe_multilevel_efficiency(0 - 4, 5, a5), 0x3FAC01260558BC8E, REL13, "5 levels, x = 5 + 1e-12 (mpmath)");
+var bd1 = doe_binary_phase_efficiency(0, F64_HALF, 0x3FE00014F8B588E3);
+_assert_rel(bd1, 0x3E10F4B2AACDA3CF, REL13, "0/pi 50%, depth 0.50001: zero-order leakage");
+var bd2 = doe_binary_phase_efficiency(0, 0x3FDFFFFFF543388F, F64_HALF);
+_assert_rel(bd2, 0x3CBCD2B2975637F8, REL13, "depth 1/2, D = 0.49999999: eta_0 = (1 - 2D)^2");
+assert_eq(doe_blazed_efficiency(0, 0x4330000000000001), NAN, "alpha = 2^52 + 1: past exact, refused");
+assert(f64_le(doe_multilevel_efficiency(0, 3, 0x3E4373F6B87421EF), ONE), "multilevel order 0 near alpha = 0: eta <= 1");
+var big = f64_add(f64_from(9007199254740992), F64_TWO);
+assert_eq(doe_multilevel_efficiency(1, 4, big), NAN, "alpha = 2^53 + 2: refused, not 0.81");
+assert_eq(doe_blazed_efficiency(1, 0x7E37E43C8800759C), NAN, "alpha = 1e300: refused");
+assert_eq(doe_multilevel_efficiency(1, 4, NAN), NAN, "multilevel: NaN depth");
+assert_eq(doe_blazed_efficiency(0, 0x8000000000000000), ONE, "blazed depth -0.0: sinc(0) = 1");
+# Edges of the documented domains.
+assert_eq(doe_binary_phase_efficiency(0, Z, _fd(37, 100)), ONE, "binary phase D = 0: uniform, all in 0");
+assert_eq(doe_binary_phase_efficiency(0, ONE, _fd(37, 100)), ONE, "binary phase D = 1: uniform, all in 0");
+assert_eq(doe_binary_phase_efficiency(1, ONE, _fd(37, 100)), 0, "binary phase D = 1: none in 1");
+assert_eq(doe_binary_amplitude_efficiency(0, ONE), ONE, "amplitude D = 1: all in 0");
+assert_eq(doe_binary_amplitude_efficiency(0, Z), 0, "amplitude D = 0: dark");
+var q3 = doe_phase_depth(3, _fd(55, 100), _fd(45, 100), _fd(15, 10), _fd(151, 100));
+_assert_rel(q3, 0x400DEB851EB851EC, REL13, "phase depth, design order 3 (mpmath 3.74)");
+assert_eq(doe_phase_depth(1, ONE, ONE, INF, N15()), NAN, "phase depth: infinite n_design is NaN, not 0");
+assert_eq(doe_phase_depth(1, ONE, f64_neg(ONE), N15(), N15()), NAN, "phase depth: lambda < 0");
+# Dammann validation: x > 0, strictly increasing.
+store64(dm, f64_neg(_fd(1, 10)));
+t = doe_dammann_efficiency(dm, 1, 0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "dammann: x < 0");
+store64(dm, Z);
+store64(dm + 8, _fd(3, 10));
+t = doe_dammann_efficiency(dm, 2, 0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "dammann: x = 0");
+store64(dm, _fd(2, 10));
+store64(dm + 8, _fd(2, 10));
+t = doe_dammann_efficiency(dm, 2, 0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "dammann: equal transitions");
+# The lens, diverging, and its guards.
+_assert_rel(doe_lens_zone_radius(10, f64_from(0 - 50), _fd(55, 100000)), 0x3FE7BB84519F33C5, REL13, "zone 10, f = -50");
+var rzd = doe_lens_zone_radius(7, f64_from(0 - 50), _fd(55, 100000));
+_assert_rel(doe_lens_phase(rzd, f64_from(0 - 50), _fd(55, 100000)), f64_mul(F64_TAU, f64_from(7)), REL12,
+  "diverging lens: phase +2 pi j at zone j");
+assert_eq(doe_lens_zone_radius(1, Z, ONE), NAN, "zone radius: f = 0");
+assert_eq(doe_lens_zone_radius(1, ONE, Z), NAN, "zone radius: lambda 0");
+assert_eq(doe_lens_phase(ONE, INF, ONE), NAN, "lens phase: f = inf");
+assert_eq(doe_lens_focal_length(ONE, Z, ONE, 1), NAN, "focal: lambda0 0");
+assert_eq(doe_lens_focal_length(Z, ONE, ONE, 1), NAN, "focal: f0 0");
+assert_eq(doe_lens_focal_length(0x7E37E43C8800759C, 0x4202A05F20000000, ONE, 1), NAN, "focal: f0 lambda0 overflows");
+var q104 = doe_lens_focal_length(ONE, ONE, 0x7E37E43C8800759C, 4611686018427387904);
+assert_eq(q104, NAN, "focal: m lambda overflows (not 0)");
+assert_eq(doe_abbe_number(Z, ONE, F64_TWO), NAN, "abbe: lambda_d 0");
+var rcz = doe_hybrid_achromat(_fd(2, 100), 0x7FE1CCF385EBC8A0, 0xFFE1CCF385EBC8A0, hy);
+assert_eq(rcz, PK_ERR_INVALID_PARAMETER, "achromat: V_r - V_d overflows: refused, not 0 and 0");
+_s = doe_hybrid_achromat(0x7E37E43C8800759C, 0x4202A05F20000000, 0x3DDB7CDFD9D7BDBB, hy);
+assert_eq(_s, PK_ERR_INVALID_PARAMETER, "achromat: phi_r overflows");
+# The grating equation's guards and the order count's settling of its ends.
+t = grating_order_angle(ONE, f64_neg(ONE), Z, 1, ONE, F64_TWO, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "angle: n_out < 0");
+t = grating_order_angle(ONE, ONE, Z, 1, Z, F64_TWO, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "angle: wavelength 0");
+t = grating_order_angle(ONE, ONE, Z, 4611686018427387904, 0x7E37E43C8800759C, ONE, &e);
+assert_eq(e, PK_ERR_TIR, "angle: an overflowing order term is evanescent");
+assert_eq(grating_order_count(Z, ONE, Z, ONE, ONE, rng), 0 - 1, "count: n_in 0");
+assert_eq(grating_order_count(ONE, ONE, Z, ONE, Z, rng), 0 - 1, "count: period 0");
+assert_eq(grating_order_count(ONE, Z, Z, ONE, ONE, rng), 0 - 1, "count: n_out 0");
+assert_eq(grating_order_count(ONE, ONE, NAN, ONE, ONE, rng), 0 - 1, "count: NaN angle");
+var q105 = grating_order_count(ONE, ONE, HP, ONE, f64_from(1500000000), rng);
+assert_eq(q105, 0 - 1, "count: one-sided 3e9 orders refused");
+var th9 = ganita_f64_asin(_fd(9, 10));
+var q106 = grating_order_count(N15(), ONE, th9, ONE, _fd(1, 5), rng);
+assert_eq(q106, 0, "|1.35 + 5 m| > 1 for all m: no order propagates");
+assert(load64(rng + 8) < load64(rng), "... and the written range is empty");
+# 29 x 0.01/0.29 == 1.0 in double (order 29 grazes); 35 x 0.01/0.35 = 1.0000000000000002
+# (order 35 is evanescent): the settled ends are exactly what grating_order_angle says.
+assert_eq(grating_order_count(ONE, ONE, Z, _fd(1, 100), _fd(29, 100), rng), 59, "settle up: order 29 grazes");
+assert_eq(grating_order_count(ONE, ONE, Z, _fd(1, 100), _fd(35, 100), rng), 69, "settle down: order 35 is evanescent");
+var icl = 0;
+while (icl < 3) {
+    var clw = _fd(1, 100);
+    var clp = _fd(29, 100);
+    var cln = ONE;
+    var clt = Z;
+    if (icl == 1) { clp = _fd(35, 100); }
+    if (icl == 2) {
+        clw = _fd(1, 1000);
+        clp = ONE;
+        cln = N15();
+        clt = th9;
+    }
+    var nc = grating_order_count(cln, ONE, clt, clw, clp, rng);
+    var clo = load64(rng);
+    var chi = load64(rng + 8);
+    assert_eq(nc, chi - clo + 1, "count = hi - lo + 1");
+    t = grating_order_angle(cln, ONE, clt, clo, clw, clp, &e);
+    assert_eq(e, PK_ERR_NONE, "lo propagates");
+    t = grating_order_angle(cln, ONE, clt, clo - 1, clw, clp, &e);
+    assert_eq(e, PK_ERR_TIR, "lo - 1 is evanescent");
+    t = grating_order_angle(cln, ONE, clt, chi, clw, clp, &e);
+    assert_eq(e, PK_ERR_NONE, "hi propagates");
+    t = grating_order_angle(cln, ONE, clt, chi + 1, clw, clp, &e);
+    assert_eq(e, PK_ERR_TIR, "hi + 1 is evanescent");
+    icl = icl + 1;
+}
+# Holograms: K and -K are the same fringes, and the mirror of a grating diffracts
+# like the grating (ODE with the other sign of K; first cut: 8e-4 and 6e-6).
+_assert_rel(hologram_efficiency(gt, f64_neg(thb), _fd(633, 1000), 0, &e), 0x3FE9B08C8903F9F8, REL9,
+  "-theta_B diffracts as +theta_B (the rho + K order)");
+var gpi = volume_grating_new(N15(), _fd(1, 100), f64_from(20), _fd(2, 10), F64_PI, &e);
+var q107 = hologram_efficiency(gpi, Z, _fd(6, 10), 0, &e);
+_assert_rel(q107, 0x3FE38125A9CEB3C4, REL9, "slant pi is the same fringes as slant 0");
+var gneg = volume_grating_new(N15(), _fd(1, 100), f64_from(40), ONE, f64_neg(HP), &e);
+var tn = hologram_bragg_angle(gneg, _fd(633, 1000), &e);
+assert_eq(e, PK_ERR_NONE, "K reversed: a Bragg angle exists");
+_assert_rel(tn, f64_neg(thb), REL13, "K reversed: theta_B(-phi) = -theta_B(phi)");
+_assert_rel(hologram_efficiency(gneg, tn, _fd(633, 1000), 0, &e), 0x3FE9B08C8903F9F8, REL9, "... = sin^2 nu");
+var gbm = volume_grating_new(_fd(152, 100), _fd(12, 1000), f64_from(30), _fd(8, 10), f64_neg(_fd(12, 10)), &e);
+var tbm = hologram_bragg_angle(gbm, _fd(532, 1000), &e);
+_assert_rel(tbm, f64_neg(ths), REL13, "slant -1.2: the mirror of slant 1.2");
+assert(f64_gt(_prk_cos(tbm), 0), "... an angle a wave enters at");
+var q108 = hologram_efficiency(gbm, tbm, _fd(532, 1000), 1, &e);
+_assert_rel(q108, 0x3FE73A00CF66C367, REL9, "... TM as slant 1.2 (ODE)");
+var grm = volume_grating_new(N15(), _fd(1, 100), f64_from(20), _fd(2, 10), f64_neg(_fd(3, 10)), &e);
+_assert_rel(hologram_bragg_angle(grm, _fd(58, 100), &e), f64_neg(hologram_bragg_angle(grs, _fd(58, 100), &e)), REL13,
+  "reflection: theta_B(-phi) = -theta_B(phi)");
+# TM coupling: kappa |r.s| with sigma = rho - K (Kogelnik eqs. 78-90), not cos 2(theta
+# - phi) at the incidence angle — 0.4% of eta apart 4 mrad off Bragg (pinned above).
+# Reflection INSIDE the band, off Bragg (0 < s^2 < nu^2), against the ODE.
+var q109 = hologram_efficiency(gr, Z, _fd(601, 1000), 0, &e);
+_assert_rel(q109, 0x3FE2C746F530B886, REL9, "reflection in band 0.601 (ODE)");
+var q110 = hologram_efficiency(gr, Z, _fd(5995, 10000), 0, &e);
+_assert_rel(q110, 0x3FE36000FB6B5403, REL9, "reflection in band 0.5995 (ODE)");
+var q111 = hologram_efficiency(grs, _fd(5, 100), _fd(58, 100), 1, &e);
+_assert_rel(q111, 0x3FE17CF92C7732B4, REL9, "slanted reflection in band, TM (ODE)");
+# Across the dynamic range of the reflection formula: tanh^2 nu at Bragg.
+var gw = volume_grating_new(N15(), _fd(1, 100000000), f64_from(20), _fd(2, 10), Z, &e);
+var q112 = hologram_efficiency(gw, Z, _fd(6, 10), 0, &e);
+_assert_rel(q112, 0x3D734ABFE7FDF603, REL12, "weak reflection: tanh^2 nu, nu = 1e-6");
+var gv = volume_grating_new(N15(), 0x3BFD83C94FB6D2AC, f64_from(20), _fd(2, 10), Z, &e);
+var q113 = hologram_efficiency(gv, Z, _fd(6, 10), 0, &e);
+_assert_rel(q113, 0x38E2388463C6C088, REL12, "vanishing reflection: nu = 1e-17");
+var gg = volume_grating_new(N15(), _fd(1, 100), f64_from(8000), _fd(2, 10), Z, &e);
+_assert_near(hologram_efficiency(gg, Z, _fd(6, 10), 0, &e), ONE, T12, "strong reflection, nu = 419: tanh^2 -> 1");
+assert_eq(e, PK_ERR_NONE, "... not an error");
+# A transmission grating designed for 100% (nu = pi/2) returns at most 1.
+var g1 = volume_grating_new(N15(), _fd(1, 200), 0x4043D248E897C2CA, ONE, HP, &e);
+var tb1 = hologram_bragg_angle(g1, _fd(2, 5), &e);
+var et1 = hologram_efficiency(g1, tb1, _fd(2, 5), 0, &e);
+assert(f64_le(et1, ONE), "nu = pi/2: eta <= 1");
+_assert_near(et1, ONE, T12, "... = sin^2(pi/2) = 1");
+# A blank plate (n1 = 0) diffracts nothing — an answer, not an error.
+var g0 = volume_grating_new(N15(), Z, f64_from(20), _fd(1, 4), Z, &e);
+assert_eq(e, PK_ERR_NONE, "n1 = 0 is a valid (blank) grating");
+assert_eq(hologram_efficiency(g0, Z, _fd(3, 4), 0, &e), 0, "n1 = 0: nothing diffracted");
+assert_eq(e, PK_ERR_NONE, "... an answer");
+# Grazing and unresolvable phases are refused, not answered.
+var gcg = volume_grating_new(N15(), _fd(1, 100), f64_from(20), _fd(1, 4), HP, &e);
+var tcg = hologram_bragg_angle(gcg, _fd(3, 4), &e);
+t = hologram_efficiency(gcg, tcg, _fd(3, 4), 0, &e);
+assert_eq(e, PK_ERR_INVALID_ANGLE, "Bragg cutoff: theta_B = pi/2 grazes (first cut: eta = 1)");
+var gk = volume_grating_new(N15(), _fd(1, 100), f64_from(10000), _fd(2, 10), Z, &e);
+t = hologram_efficiency(gk, ganita_f64_acos(F64_HALF), _fd(15, 100), 0, &e);
+assert_eq(e, PK_ERR_INVALID_ANGLE, "c_S at rounding level in a thick grating: INVALID_ANGLE");
+var gc2 = volume_grating_new(N15(), _fd(1, 100), f64_from(20), _fd(1, 2), Z, &e);
+t = hologram_efficiency(gc2, Z, _fd(3, 4), 0, &e);
+assert_eq(e, PK_ERR_INVALID_ANGLE, "c_S = 0 exactly (lambda = n L, theta = phi = 0)");
+var gz = volume_grating_new(ONE, _fd(1, 100), f64_from(20), ONE, Z, &e);
+t = hologram_efficiency(gz, Z, ONE, 0, &e);
+assert_eq(e, PK_ERR_INVALID_ANGLE, "c_S = 1 - 1 = 0: grazing");
+var gh = volume_grating_new(N15(), _fd(1, 100), 0x444B1AE4D6E2EF50, ONE, HP, &e);
+t = hologram_efficiency(gh, _fd(2, 10), _fd(633, 1000), 0, &e);
+assert_eq(t, 0, "d = 1e21: the phase has no fraction left");
+assert(e != PK_ERR_NONE, "... and says so");
+t = hologram_efficiency(gt, NAN, _fd(633, 1000), 0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "efficiency: NaN angle");
+t = hologram_efficiency(gt, thb, f64_neg(_fd(633, 1000)), 0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "efficiency: lambda < 0");
+t = hologram_bragg_angle(0, ONE, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "Bragg: null grating");
+t = hologram_bragg_angle(gt, Z, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "Bragg: lambda 0");
+_assert_rel(hologram_q_factor(gs, _fd(532, 1000)), 0x4059C55835E7E83D, REL13, "Q, Lambda = 0.8 (mpmath)");
+assert_eq(hologram_q_factor(gt, Z), NAN, "Q: lambda 0");
+t = volume_grating_new(Z, _fd(1, 100), ONE, ONE, Z, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "grating: n 0");
+t = volume_grating_new(N15(), _fd(1, 100), ONE, Z, Z, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "grating: period 0");
+t = volume_grating_new(N15(), _fd(1, 100), ONE, ONE, NAN, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "grating: slant NaN");
+t = volume_grating_new(N15(), INF, ONE, ONE, Z, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "grating: n1 inf");
+assert_eq(volume_grating_new(N15(), _fd(1, 100), f64_from(20), ONE, 0x7E37E43C8800759C, &e), 0, "slant 1e300 refused");
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "... an angle past 2 pi is a unit error");
+
+# ── Round 2 of the 2.9.0 verification ────────
+test_group("doe_review2");
+
+# Reflection inside the band with a grazing diffracted wave (c_S = -2.4e-15, TM):
+# the first cut of the guard let tanh^2 nu = 0.99999758 through; the coupled-wave
+# value at these doubles is 0.443 and its one-ulp envelope [0.005, 0.443].
+var g21n = 0x3FF7E2E3FAF3760B;
+var g21 = volume_grating_new(g21n, 0x3E63013B7F0E4FE3, 0x40508BCD8554447F, 0x3FD0A981FDDE88A5, 0x3FE99222A0FF6BB4, &e);
+t = hologram_efficiency(g21, 0x3F9C09D32ECFA9A0, 0x3FE1D40A96161B7E, 1, &e);
+var q201 = (e == PK_ERR_INVALID_ANGLE) | ((e == PK_ERR_NONE) & f64_le(t, _fd(45, 100)));
+assert(q201, "grazing reflection: refused, not 0.99999");
+# A computed xi near 0 hid an unresolved one (transmission, c_S = 4e-14): 6.3e-3
+# came back where the coupled-wave value is 1.3e-4.
+var g22n = 0x3FFA61A84F6384E0;
+var g22 = volume_grating_new(g22n, 0x3D76C6738FBCC782, 0x40A51A3A621778CD, 0x3FD677705700FE97, 0x3FE4A9977E4491D1, &e);
+t = hologram_efficiency(g22, 0xBFD1E18F57FE7000, 0x3FE64A9CFB1F9B97, 0, &e);
+var q202 = (e == PK_ERR_INVALID_ANGLE) | ((e == PK_ERR_NONE) & f64_le(t, _fd(13, 100000)));
+assert(q202, "unresolved xi: refused, not 6e-3");
+# Large orders keep their bits: m mod N in integers (mpmath).
+_assert_rel(doe_multilevel_efficiency(1200001, 12, ONE), 0x3D67E1629D4824CC, REL13, "12 levels, m = 1200001");
+_assert_rel(doe_multilevel_efficiency(4503599627370496, 3, _fd(1, 4)), 0x39337423899A1558, REL12, "3 levels, m = 2^52");
+_assert_rel(doe_multilevel_efficiency(0 - 4503599627370496, 5, 0x432FFFFFFFFFFFFF), 0x392B623ADC455D2D, REL12,
+  "5 levels, m = -2^52, alpha 2^52 - 1/2");
+# The TwoSum carry, where fl(alpha - m) is INEXACT near x = kN (mpmath).
+var q203 = doe_multilevel_efficiency(0 - 4, 5, 0x3FF0000000000003);
+_assert_rel(q203, 0x3FAC01260558BC8E, REL13, "x = 5 + 3 ulp(1): lo carried");
+var q204 = doe_multilevel_efficiency(0 - 2, 5, 0x4008000000000003);
+_assert_rel(q204, 0x3FE25444C47FC751, REL13, "x = 5 + 6 ulp(1): fm - bb carried");
+var q205 = doe_multilevel_efficiency(0 - 4, 5, 0x3FEFFFFFFFFFFFF3);
+_assert_rel(q205, 0x3FAC01260558BC8E, REL13, "x = 5 - 6.5 ulp(1): k rounds");
+# The Dirichlet clamp: ~1, not 0, and never above 1 on either side of r = -1.
+_assert_rel(doe_multilevel_efficiency(0, 3, 0x3E4373F6B87421EF), 0x3FEFFFFFFFFFFFFE, REL13, "clamp gives ~1, not 0");
+var over = 0;
+for (var jo = 1; jo < 2000; jo = jo + 1) {
+    if (f64_gt(doe_multilevel_efficiency(0, 3, 0x4008000000000000 + jo), ONE) == 1) { over = over + 1; }
+    if (f64_gt(doe_multilevel_efficiency(0, 3, 0x4008000000000000 - jo), ONE) == 1) { over = over + 1; }
+}
+assert_eq(over, 0, "eta <= 1 where r = -1 - ulp (x = 3 = N, 4000 alphas)");
+# Levels bounds.
+_assert_near(doe_multilevel_efficiency(1, 1073741824, _fd(87, 100)), doe_blazed_efficiency(1, _fd(87, 100)), T9,
+  "2^30 levels: accepted, the blaze");
+assert_eq(doe_multilevel_efficiency(1, 1073741825, _fd(87, 100)), NAN, "2^30 + 1 levels refused");
+assert_eq(doe_multilevel_efficiency(1, 0 - 4, ONE), NAN, "negative levels refused (not 0.81)");
+# The exactness bounds, both sides.
+var q206 = doe_binary_phase_efficiency(1, _fd(3, 10), 0x4330000000000001);
+assert_eq(q206, 0, "binary depth 2^52 + 1 (whole waves): eta_1 = 0");
+assert_eq(doe_binary_phase_efficiency(1, _fd(3, 10), 0xC330000000000001), 0, "... depth -(2^52 + 1)");
+assert_eq(doe_binary_phase_efficiency(0, _fd(3, 10), 0x4330000000000001), ONE, "... eta_0 = 1");
+assert_eq(doe_binary_phase_efficiency(0, _fd(3, 10), 0x4340000000000000), ONE, "... depth 2^53: eta_0 = 1");
+var q207 = doe_binary_phase_efficiency(0, _fd(3, 10), 0x4320000000000001);
+_assert_rel(q207, 0x3FC47AE147AE147C, REL13, "depth 2^51 + 1/2: (1 - 2D)^2");
+var q208 = doe_binary_phase_efficiency(1, F64_HALF, 0x4320000000000001);
+_assert_rel(q208, 0x3FD9F02F6222C720, REL13, "depth 2^51 + 1/2: 4/pi^2");
+var q209 = doe_blazed_efficiency(2251799813685249, 0x4320000000000001);
+_assert_rel(q209, 0x3FD9F02F6222C720, REL13, "blazed 2^51 + 1/2, m 2^51 + 1");
+_assert_rel(doe_blazed_efficiency(4503599627370496, F64_HALF), 0x3939F02F6222C721, REL13, "blazed m = 2^52: accepted");
+assert_eq(doe_blazed_efficiency(0, 0x4330000000000000), NAN, "blazed alpha = 2^52 refused");
+assert_eq(doe_blazed_efficiency(4503599627370497, F64_HALF), NAN, "blazed m = 2^52 + 1 refused");
+assert_eq(doe_multilevel_efficiency(1152921504606846977, 4, _fd(9, 10)), NAN, "multilevel m = 2^60 + 1 refused");
+assert_eq(doe_multilevel_efficiency(0 - 1152921504606846977, 4, _fd(9, 10)), NAN, "multilevel m = -(2^60 + 1) refused");
+assert_eq(_doe_cospi(0x3FDFFFFFFFFFFFFF), 0x3CA921FB54442D18, "cos(pi (1/2 - 2^-54)) = pi 2^-54, not 0");
+# duty 0 and 1 are uniform plates: eta_0 = 1 exactly, never above.
+var d01 = 0;
+for (var kd = 1; kd < 100; kd = kd + 1) {
+    if (doe_binary_phase_efficiency(0, Z, _fd(kd, 100)) != ONE) { d01 = d01 + 1; }
+    if (doe_binary_phase_efficiency(0, ONE, _fd(kd, 100)) != ONE) { d01 = d01 + 1; }
+}
+assert_eq(d01, 0, "duty 0 and 1: eta_0 = 1 exactly at every depth (first cut: 1 + 2 ulp)");
+# An overflowing m lambda: the order term is m (lambda/period).
+var HPn = f64_neg(f64_mul(F64_HALF, F64_PI));
+t = grating_order_angle(N15(), ONE, HPn, 2, 0x7FE1CCF385EBC8A0, 0x7FE1CCF385EBC8A0, &e);
+assert_eq(e, PK_ERR_NONE, "lambda = period = 1e308: order 2 propagates (not TIR)");
+_assert_rel(t, f64_div(F64_PI, f64_from(6)), REL13, "... at pi/6");
+assert_eq(grating_order_count(N15(), ONE, HPn, 0x7FE1CCF385EBC8A0, 0x7FE1CCF385EBC8A0, rng), 2, "... and two orders");
+_assert_rel(doe_lens_phase(0x6974E718D7D7625A, ONE, ONE), f64_neg(f64_mul(F64_TAU, 0x6974E718D7D7625A)), REL12,
+  "lens phase at r = 1e200: no r^2 overflow");
+assert(f64_lt(f64_abs(doe_lens_zone_radius(4611686018427387904, 0x7E37E43C8800759C, ONE)), INF), "zone radius: finite");
+# Slants outside [-pi/2, pi]: wrapped roots, the 2 pi bound, and K's side on a tie.
+var gs1 = volume_grating_new(N15(), _fd(1, 100), f64_from(40), ONE, f64_mul(_fd(3, 2), F64_PI), &e);
+var ts1 = hologram_bragg_angle(gs1, _fd(633, 1000), &e);
+_assert_rel(ts1, f64_neg(thb), REL13, "slant 3 pi/2 (K along -x): -theta_B, as slant -pi/2");
+_assert_rel(hologram_efficiency(gs1, ts1, _fd(633, 1000), 0, &e), 0x3FE9B08C8903F9F8, REL9, "... sin^2 nu (ODE)");
+var gs2 = volume_grating_new(N15(), _fd(1, 100), f64_from(40), ONE, f64_neg(f64_mul(_fd(3, 2), F64_PI)), &e);
+_assert_rel(hologram_bragg_angle(gs2, _fd(633, 1000), &e), thb, REL13, "slant -3 pi/2 (K along +x): +theta_B");
+var gs3 = volume_grating_new(N15(), _fd(1, 100), f64_from(20), _fd(2, 10), F64_PI, &e);
+var gs0 = volume_grating_new(N15(), _fd(1, 100), f64_from(20), _fd(2, 10), Z, &e);
+_assert_rel(hologram_bragg_angle(gs3, _fd(58, 100), &e), hologram_bragg_angle(gs0, _fd(58, 100), &e), REL12,
+  "slant pi: the Bragg angle of slant 0");
+var gs4 = volume_grating_new(N15(), _fd(1, 100), f64_from(20), _fd(2, 10), f64_sub(f64_neg(F64_PI), _fd(1, 10)), &e);
+_assert_rel(hologram_bragg_angle(gs4, _fd(58, 100), &e), 0x3FC4578A84C5F765, REL13, "slant -pi - 0.1: acos(r) - 0.1");
+var gz0 = volume_grating_new(N15(), _fd(1, 100), f64_from(20), _fd(3, 10), Z, &e);
+var q210 = hologram_bragg_angle(gz0, F64_HALF, &e);
+_assert_rel(q210, 0x3FEF6A9F2E5B3B17, REL13, "reflection, slant +0: +acos(lambda/(2 n L))");
+var gz1 = volume_grating_new(N15(), _fd(1, 100), f64_from(20), _fd(3, 10), 0x8000000000000000, &e);
+_assert_rel(hologram_bragg_angle(gz1, F64_HALF, &e), 0xBFEF6A9F2E5B3B17, REL13, "reflection, slant -0: -acos(...)");
+var gpp = volume_grating_new(N15(), _fd(1, 100), f64_from(20), _fd(3, 10), _fd(1, 1000000000000), &e);
+var gpm = volume_grating_new(N15(), _fd(1, 100), f64_from(20), _fd(3, 10), f64_neg(_fd(1, 1000000000000)), &e);
+_assert_rel(hologram_bragg_angle(gpm, F64_HALF, &e), f64_neg(hologram_bragg_angle(gpp, F64_HALF, &e)), REL13,
+  "slant -+1e-12: theta_B(-phi) = -theta_B(phi) in the tie band");
+t = volume_grating_new(N15(), _fd(1, 100), f64_from(40), ONE, F64_TAU, &e);
+assert_eq(e, PK_ERR_NONE, "slant 2 pi accepted (the documented bound)");
+t = volume_grating_new(N15(), _fd(1, 100), f64_from(40), ONE, f64_from(7), &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "slant 7 > 2 pi refused");
+t = volume_grating_new(N15(), _fd(1, 100), f64_from(40), ONE, f64_from(0 - 7), &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "slant -7 refused");
+var gq1 = volume_grating_new(N15(), _fd(1, 100), f64_from(40), ONE, 0x3FF921FB6F1C1FB3, &e);
+var q211 = hologram_bragg_angle(gq1, _fd(633, 1000), &e);
+_assert_rel(q211, 0xBFCB36676F101476, REL13, "slant pi/2 + 1e-7: the nearer root");
+var gq2 = volume_grating_new(N15(), _fd(1, 100), f64_from(40), ONE, 0x3FF921FB544B0C50, &e);
+var q212 = hologram_bragg_angle(gq2, _fd(633, 1000), &e);
+_assert_rel(q212, 0xBFCB36684598AF8E, REL13, "slant pi/2 + 1e-10: the nearer root");
+var gu = volume_grating_new(N15(), _fd(1, 100), f64_from(20), _fd(2, 10), HP, &e);
+var ubad = 0;
+for (var ul = 1; ul <= 599; ul = ul + 1) {
+    var ulam = _fd(ul, 1000);
+    var uref = ganita_f64_asin(f64_div(ulam, _fd(6, 10)));
+    if (_near(hologram_bragg_angle(gu, ulam, &e), uref, _fd(1, 100000000000000)) == 0) {
+        ubad = ubad + 1;
+    }
+}
+assert_eq(ubad, 0, "slant pi/2: +asin(lambda/(2 n L)) at every lambda (the tie kept)");
+var gcu = volume_grating_new(N15(), _fd(1, 100), f64_from(20), _fd(1, 4), 0x3FF921FB54442D19, &e);
+t = hologram_bragg_angle(gcu, _fd(3, 4), &e);
+assert_eq(e, PK_ERR_NONE, "cutoff lambda = 2 n L, slant pi/2 + ulp: a root");
+assert(f64_gt(_prk_cos(t), 0), "... that enters (cos > 0)");
+# theta is an angle: past 2 pi a unit error.
+t = hologram_efficiency(gt, f64_from(7), _fd(633, 1000), 0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "theta = 7 refused");
+t = hologram_efficiency(gt, f64_add(thb, f64_mul(F64_TAU, f64_from(1000000000000))), _fd(633, 1000), 0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "theta_B + 2 pi 1e12 refused");
+# TM and TE refuse the same way where sigma -> 0.
+var gsg = volume_grating_new(N15(), _fd(1, 100), f64_from(10), _fd(4, 10), _fd(3, 10), &e);
+var eg0 = 0;
+var eg1 = 0;
+t = hologram_efficiency(gsg, _fd(300000001, 1000000000), _fd(6, 10), 0, &eg0);
+t = hologram_efficiency(gsg, _fd(300000001, 1000000000), _fd(6, 10), 1, &eg1);
+assert_eq(eg1, eg0, "sigma -> 0: TM refuses as TE does");
+# Each term of the resolution guards decides somewhere (mutation round 2).
+var gd1 = volume_grating_new(N15(), _fd(1, 100), f64_from(100000000000000000), ONE, HP, &e);
+t = hologram_efficiency(gd1, thb, _fd(633, 1000), 0, &e);
+assert_eq(e, PK_ERR_INVALID_ANGLE, "Bragg, d = 1e17: the nu^2 term refuses");
+var cth = f64_sub(HP, _fd(1, 100000000000000));
+var cpr = f64_div(_fd(75, 100), f64_mul(F64_TWO, f64_mul(N15(), _prk_cos(f64_sub(F64_TWO, cth)))));
+var gd2 = volume_grating_new(N15(), _fd(1, 100), f64_from(10), cpr, F64_TWO, &e);
+t = hologram_efficiency(gd2, cth, _fd(75, 100), 0, &e);
+assert_eq(e, PK_ERR_INVALID_ANGLE, "c_R = 1e-14 at Bragg, d = 10: cos's 2^-66 floor refuses");
+var qf = f64_neg(f64_mul(F64_HALF, HP));
+var qpr = f64_div(f64_mul(_fd(633, 1000), _prk_cos(qf)), f64_mul(N15(), f64_sub(ONE, _fd(1, 1000000000000))));
+var gd3 = volume_grating_new(N15(), _fd(1, 100), ONE, qpr, qf, &e);
+t = hologram_efficiency(gd3, Z, _fd(633, 1000), 0, &e);
+assert_eq(e, PK_ERR_INVALID_ANGLE, "c_S = 1e-12: ecs/|c_S| refuses");
+var gd4 = volume_grating_new(N15(), _fd(1, 1000000), f64_from(10000000000000000), ONE, HP, &e);
+t = hologram_efficiency(gd4, f64_add(thb, _fd(1, 1000000)), _fd(633, 1000), 0, &e);
+assert_eq(e, PK_ERR_INVALID_ANGLE, "near Bragg, the dephasing cancels: the xi term refuses");
+var gd5 = volume_grating_new(N15(), _fd(1, 100), 0x3F33A92A30553262, _fd(1, 4), 0x3FF921FB5440BD93, &e);
+t = hologram_efficiency(gd5, 0x3FF921FB543D4DE0, _fd(3, 4), 0, &e);
+assert_eq(e, PK_ERR_INVALID_ANGLE, "double grazing (c_R 1e-10, c_S 1e-12): refused");
+var gr1 = volume_grating_new(N15(), _fd(1, 100), f64_from(10000000000000000), _fd(2, 10), Z, &e);
+t = hologram_efficiency(gr1, Z, _fd(62, 100), 0, &e);
+assert_eq(e, PK_ERR_INVALID_ANGLE, "reflection outside the band, q ~ 5e15: the q guard refuses");
+assert_eq(t, 0, "... and returns 0");
+var rqf = f64_neg(f64_mul(F64_HALF, HP));
+var rqp = f64_div(f64_mul(_fd(633, 1000), _prk_cos(rqf)), f64_mul(N15(), f64_add(ONE, _fd(1, 1000000000000))));
+var gr2 = volume_grating_new(N15(), _fd(1, 100), f64_from(10), rqp, rqf, &e);
+t = hologram_efficiency(gr2, f64_mul(F64_TWO, _fd(1, 100000)), _fd(633, 1000), 0, &e);
+assert_eq(e, PK_ERR_INVALID_ANGLE, "reflection, c_S = -2e-10, d = 10: the q guard refuses");
+# ... and lets resolved answers through (the thresholds from both sides).
+var gh1 = volume_grating_new(N15(), _fd(1, 100), f64_from(1000000000000), ONE, HP, &e);
+t = hologram_efficiency(gh1, thb, _fd(633, 1000), 0, &e);
+assert_eq(e, PK_ERR_NONE, "Bragg, d = 1e12 (w error 6e-5 rad): answered");
+_assert_near(t, 0x3FEC04405D970261, _fd(1, 100000), "... = closed form to 1e-5");
+var gh2 = volume_grating_new(N15(), _fd(1, 100), f64_from(30000000000000), ONE, HP, &e);
+t = hologram_efficiency(gh2, thb, _fd(633, 1000), 0, &e);
+assert_eq(e, PK_ERR_INVALID_ANGLE, "Bragg, d = 3e13 (w error 1.9e-3 rad): refused");
+# The 2^-11 threshold itself: d = 6e12 answered, d = 1e13 (between 2^-11 and 2^-10) refused.
+var gt6 = volume_grating_new(N15(), _fd(1, 100), f64_from(6000000000000), ONE, HP, &e);
+t = hologram_efficiency(gt6, hologram_bragg_angle(gt6, _fd(633, 1000), &e), _fd(633, 1000), 0, &e);
+assert_eq(e, PK_ERR_NONE, "Bragg, d = 6e12: inside 2^-11, answered");
+var gt7 = volume_grating_new(N15(), _fd(1, 100), f64_from(10000000000000), ONE, HP, &e);
+t = hologram_efficiency(gt7, hologram_bragg_angle(gt7, _fd(633, 1000), &e), _fd(633, 1000), 0, &e);
+assert_eq(e, PK_ERR_INVALID_ANGLE, "Bragg, d = 1e13: past 2^-11, refused");
+var gh3 = volume_grating_new(N15(), _fd(1, 100), f64_from(1000000), _fd(2, 10), Z, &e);
+t = hologram_efficiency(gh3, Z, _fd(62, 100), 0, &e);
+assert_eq(e, PK_ERR_NONE, "reflection out of band, d = 1e6: answered");
+_assert_rel(t, 0x3F825DD341B01242, REL9, "... = closed form");
+var gh4 = volume_grating_new(N15(), _fd(1, 100), f64_from(10000000000), _fd(2, 10), Z, &e);
+t = hologram_efficiency(gh4, Z, _fd(62, 100), 0, &e);
+assert_eq(e, PK_ERR_NONE, "reflection, d = 1e10 (7.6e-5 rad): answered");
+_assert_near(t, 0x3F1F3585340C69CC, _fd(1, 10000000), "... = closed form to 1e-7");
+var gh5 = volume_grating_new(N15(), _fd(1, 100), f64_from(1000000000000), _fd(2, 10), Z, &e);
+t = hologram_efficiency(gh5, Z, _fd(62, 100), 0, &e);
+assert_eq(e, PK_ERR_INVALID_ANGLE, "reflection, d = 1e12 (7.6e-3 rad): refused");
+var ct2 = f64_sub(HP, _fd(1, 100000000000000));
+var cp2 = f64_div(_fd(75, 100), f64_mul(F64_TWO, f64_mul(N15(), _prk_cos(f64_sub(F64_TWO, ct2)))));
+var gh6 = volume_grating_new(N15(), _fd(1, 1000000), _fd(1, 10), cp2, F64_TWO, &e);
+t = hologram_efficiency(gh6, ct2, _fd(75, 100), 0, &e);
+assert_eq(e, PK_ERR_NONE, "c_R = 1e-14 > 2^-50, weak and thin: answered");
+_assert_near(t, 0x3FEFBE08E32E34B0, _fd(1, 1000000), "... = closed form to 1e-6");
+# Overflow is a refusal, the same code everywhere; the band edge and w = 0 answer.
+var gv1 = volume_grating_new(N15(), _fd(1, 100), 0x5F138D352E5096AF, ONE, HP, &e);
+t = hologram_efficiency(gv1, thb, _fd(633, 1000), 0, &e);
+assert_eq(e, PK_ERR_INVALID_ANGLE, "d = 1e150: the phase carries no fraction");
+var gv2 = volume_grating_new(N15(), _fd(1, 100), 0x612E7B7C6E2A8D6F, ONE, HP, &e);
+t = hologram_efficiency(gv2, thb, _fd(633, 1000), 0, &e);
+assert_eq(e, PK_ERR_INVALID_ANGLE, "d = 1e160 (nu^2 overflows): the same refusal");
+var gv3 = volume_grating_new(N15(), _fd(1, 100), 0x6067F5BD4A746951, _fd(2, 10), Z, &e);
+t = hologram_efficiency(gv3, Z, _fd(6, 10), 0, &e);
+assert_eq(e, PK_ERR_INVALID_ANGLE, "reflection at Bragg, d = 2.6e156: refused, not INVALID_PARAMETER");
+var gv4 = volume_grating_new(N15(), 0x7E37E43C8800759C, 0x7E37E43C8800759C, ONE, HP, &e);
+t = hologram_efficiency(gv4, thb, _fd(633, 1000), 0, &e);
+assert_eq(t, 0, "nu^2 overflows: 0, not NaN");
+assert_eq(e, PK_ERR_INVALID_ANGLE, "... refused");
+var gw0 = volume_grating_new(N15(), _fd(1, 100), 0x01A56E1FC2F8F359, ONE, HP, &e);
+t = hologram_efficiency(gw0, f64_add(thb, _fd(4, 1000)), _fd(633, 1000), 0, &e);
+assert_eq(t, 0, "d = 1e-300 (w underflows to 0): nothing diffracted");
+assert_eq(e, PK_ERR_NONE, "... an answer");
+var gbe = volume_grating_new(N15(), 0x3F9999D2E5F423B2, f64_from(20), _fd(2, 10), Z, &e);
+t = hologram_efficiency(gbe, Z, _fd(605, 1000), 0, &e);
+assert_eq(e, PK_ERR_NONE, "band edge, nu == |xi| exactly (s^2 = 0): an answer");
+_assert_rel(t, 0x3FEBCE7C8135E159, REL13, "... nu^2/(nu^2 + 1)");
+
+# ── Errors ────────
+test_group("doe_errors");
+
+t = grating_order_angle(0, ONE, Z, 1, ONE, ONE, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "grating: n_in 0");
+t = grating_order_angle(ONE, ONE, NAN, 1, ONE, ONE, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "grating: NaN angle");
+t = grating_order_angle(ONE, ONE, Z, 1, ONE, INF, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "grating: period inf");
+assert_eq(grating_order_count(ONE, ONE, Z, ONE, ONE, 0), 0 - 1, "count: null range");
+assert_eq(grating_order_count(ONE, ONE, Z, _fd(1, 10000000000), ONE, rng), 0 - 1, "count: 1e10 orders refused");
+assert_eq(doe_blazed_efficiency(1, NAN), NAN, "blazed: NaN depth");
+assert_eq(doe_multilevel_efficiency(1, 0, ONE), NAN, "multilevel: 0 levels");
+assert_eq(doe_binary_phase_efficiency(1, _fd(11, 10), ONE), NAN, "binary: duty > 1");
+assert_eq(doe_binary_amplitude_efficiency(1, f64_neg(_fd(1, 10))), NAN, "amplitude: duty < 0");
+assert_eq(doe_phase_depth(1, Z, ONE, N15(), N15()), NAN, "phase depth: design wavelength 0");
+assert_eq(doe_phase_depth(1, ONE, ONE, ONE, N15()), NAN, "phase depth: n_design = 1");
+assert_eq(doe_dammann_efficiency(0, 1, 0, &e), 0, "dammann: null buffer");
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "... invalid parameter");
+store64(dm, _fd(3, 10));
+store64(dm + 8, _fd(2, 10));
+assert_eq(doe_dammann_efficiency(dm, 2, 0, &e), 0, "dammann: not increasing");
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "... invalid parameter");
+store64(dm, _fd(3, 10));
+store64(dm + 8, F64_HALF);
+t = doe_dammann_efficiency(dm, 2, 0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "dammann: a transition at 1/2");
+t = doe_dammann_efficiency(dm, 0, 0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "dammann: count 0");
+assert_eq(doe_lens_phase(ONE, Z, ONE), NAN, "lens: f = 0");
+assert_eq(doe_lens_phase(ONE, ONE, Z), NAN, "lens: lambda 0");
+assert_eq(doe_lens_zone_radius(0 - 1, ONE, ONE), NAN, "lens: zone -1");
+assert_eq(doe_lens_focal_length(ONE, ONE, ONE, 0), NAN, "lens: order 0 has no focus");
+assert_eq(doe_abbe_number(ONE, ONE, ONE), NAN, "abbe: F = C");
+assert_eq(doe_hybrid_achromat(ONE, _fd(64, 1), _fd(64, 1), hy), PK_ERR_INVALID_PARAMETER, "achromat: V_r = V_d");
+assert_eq(doe_hybrid_achromat(ONE, _fd(64, 1), vd, 0), PK_ERR_INVALID_PARAMETER, "achromat: null out");
+assert_eq(volume_grating_new(ONE, f64_neg(_fd(1, 100)), ONE, ONE, Z, &e), 0, "grating: n1 < 0");
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "... invalid parameter");
+assert_eq(volume_grating_new(ONE, Z, Z, ONE, Z, &e), 0, "grating: thickness 0");
+assert_eq(hologram_bragg_angle(gt, f64_from(4), &e), 0, "Bragg: lambda > 2 n L");
+assert_eq(e, PK_ERR_INVALID_ANGLE, "... no Bragg angle");
+t = hologram_efficiency(gt, thb, _fd(633, 1000), 2, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "efficiency: polarization 2");
+t = hologram_efficiency(gt, f64_mul(F64_TWO, F64_PI), _fd(633, 1000), 0, &e);
+assert_eq(e, PK_ERR_NONE, "efficiency: theta = 2 pi is theta = 0");
+t = hologram_efficiency(gt, F64_PI, _fd(633, 1000), 0, &e);
+assert_eq(e, PK_ERR_INVALID_ANGLE, "efficiency: a wave heading out (c_R < 0)");
+t = hologram_efficiency(0, Z, ONE, 0, &e);
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "efficiency: null grating");
+assert_eq(hologram_q_factor(0, ONE), NAN, "Q: null grating");
+
+var rr = assert_summary();

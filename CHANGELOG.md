@@ -2,6 +2,121 @@
 
 ## [Unreleased]
 
+## [2.9.0] - 2026-09-23 — diffractive optics
+
+Closes the 2.9.0 roadmap row: blazed-grating and multilevel-kinoform scalar
+efficiencies, the diffractive lens and its negative Abbe number, binary and Dammann
+gratings, and volume holograms by Kogelnik's coupled-wave theory. Suite
+**8826 → 9161 assertions across 35 suites**, 0 failed; `cyrius audit` exits 0;
+`#must_use` 475 → **491**, 0 lost. Benchmarks 155 → **159**.
+
+### Added — `wave_doe` (new module)
+Not a port, so nothing is checked against itself. Every efficiency is pinned to an
+exact Fourier integral of its profile, and every hologram to Kogelnik's coupled-wave
+EQUATIONS integrated numerically.
+- **The grating equation** — `grating_order_angle` (oblique incidence between any two
+  media; an evanescent order is `PK_ERR_INVALID_ANGLE`) and `grating_order_count` (the
+  propagating orders, grazing ones included).
+- **Scalar efficiencies of thin gratings:**
+  - `doe_blazed_efficiency`, sinc²(α − m), with `doe_phase_depth` for the
+    off-design depth of a dispersive blaze;
+  - `doe_multilevel_efficiency`, the N-level staircase: 40.5, 81.1, 95.0 and 98.7%
+    for N = 2, 4, 8 and 16;
+  - `doe_binary_phase_efficiency` and `doe_binary_amplitude_efficiency`;
+  - `doe_dammann_efficiency`, for a Dammann grating given its transitions.
+
+  sin πx is reduced exactly, so dark orders are exactly 0.
+- **The diffractive lens:**
+  - `doe_lens_phase`, exact and free of cancellation at small r;
+  - `doe_lens_zone_radius`;
+  - `doe_lens_focal_length`, f ∝ 1/(mλ);
+  - `doe_abbe_number`: −3.4534 for d, F, C;
+  - `doe_hybrid_achromat`, the refractive/diffractive power split, with the
+    diffractive surface carrying about 5% alongside a crown.
+- **Volume holograms** — `VolumeGrating` / `volume_grating_new`, `hologram_bragg_angle`,
+  `hologram_q_factor` (Klein's Q) and `hologram_efficiency`. That last one is
+  Kogelnik's lossless two-wave result, TE and TM. The diffracted wave's obliquity
+  decides between transmission, sin²w·ν²/w², and reflection, ν²/(ν² + (s/sinh s)²),
+  including past |ξ| = ν. Both are written in forms that keep their bits where the
+  textbook expressions cancel.
+
+### Fixed during the release's verification (never shipped)
+Round 1 was a literature audit (including Kogelnik 1969 in full), an independent
+mpmath reference sweep, a robustness hunt, mutation testing and an API review. It
+confirmed 38 findings against the first cut. Every fix has a test that fails on the
+first cut.
+- **Only one order of a volume grating was computed.** It was always σ = ρ − K. The
+  same fringes written with slant φ + π, and the mirror incidence −θ_B, returned
+  6e-6 and 8e-4 where the physics gives 0.61 and 0.80, as success. The order nearer
+  Bragg is now taken: K and −K are the same grating.
+- **The Bragg angle could point out of the slab.** φ − acos(λ/2nΛ) came back with
+  cos θ < 0 for a negative slant, as success. It is now the entering root nearest the
+  normal, and θ_B(−φ) = −θ_B(φ).
+- **The TM coupling was taken at the incidence angle.** Kogelnik's factor is the
+  exact r·s (his eqs. 78–90). The difference is 0.4% of η at 4 mrad of detuning. The
+  first cut's ODE reference had copied the same approximation, so it could not see it.
+- **A transmission grating designed for 100% returned η = 1 + 2⁻⁵²,** and grazing
+  geometry returned rounding noise or η = 1.0 as success. Now η = ((ν/w) sin w)² ≤ 1.
+  Grazing incidence, a c_S at rounding level, and a phase with no fractional bits left
+  are refused as `PK_ERR_INVALID_ANGLE`.
+- **Scalar efficiencies lost relative accuracy.**
+  - Forming fl(α − m) before sin π(·) put a weak blaze's orders 5.75e-11 off, and a
+    staircase within 2 ulp of design up to 78% off.
+  - The binary zero order cancelled near dark.
+  - α or m past 2⁵³ returned made-up O(1) values (Parseval ×4 at α = 1e300).
+  - A Dirichlet factor passed 1 by 2 ulp.
+
+  Each is now formed exactly or refused.
+- **Evanescent orders are `PK_ERR_TIR`,** as `ray_snell` reports order 0, rather than
+  `PK_ERR_INVALID_ANGLE`.
+- **Overflow and domain guards:** the hybrid achromat, the phase depth, the focal
+  length, the slant (|φ| ≤ 2π), and the documented order-count range.
+- **Round 2 fixes** (the round-1 rework, re-verified):
+  - The new resolution guard missed the reflection passband: a grazing diffracted wave
+    in a weak grating returned tanh²ν up to 4e4× off. It also linearised ξ's
+    uncertainty, so a computed ξ near 0 hid an unresolved one. Now:
+    - the band has its own guard, on η's propagated error and on the band edge;
+    - ξ's uncertainty is bounded non-linearly;
+    - the guards are NaN-safe and measured against max(w, 1) at 2⁻¹¹;
+    - θ past 2π is a unit error.
+  - The binary zero order's cancellation-free form reached 1 + 2 ulp at duty 0 and 1.
+  - Large orders lost relative accuracy: m/N and N·k were rounded. Both are now reduced
+    modulo N in integer arithmetic.
+  - cos π(½ − 2⁻⁵⁴) returned 0.
+  - Bragg-angle ties now go to the side K points to, the sign of sin φ, so
+    θ_B(−φ) = −θ_B(φ) holds everywhere. The same K gives the same angle whether written
+    as φ or φ ± 2π.
+  - An overflowing m·λ was reported as TIR for an order that propagates.
+  - The lens formulas no longer form r².
+### Tests — tests/wave_doe.tcyr, 335 assertions (new)
+- Efficiencies against mpmath's exact piecewise Fourier integrals of each profile, at
+  the same doubles:
+  - blazed;
+  - staircase (N = 2…16 and off design);
+  - binary phase and amplitude;
+  - Dammann designs solved in mpmath (1×3 66.4% and 1×5 77.4%, matching the published
+    values; 1×7).
+
+  Parseval sums to 1, and the 2^20-level limit matches the blaze.
+- Kogelnik against the coupled-wave ODEs (mpmath Taylor solver; reflection as a
+  two-point boundary problem): transmission at and off Bragg, TE and TM, slanted and
+  unslanted; reflection at Bragg (tanh²ν), detuned and out of band, slanted TM; the
+  TM null for orthogonal waves.
+- The lens: exact vs paraxial phase, the phase at every zone boundary, focal-length
+  scaling, the Abbe number, and the achromat condition.
+- Every verification finding's regression test: the mirror and ±K symmetries, weak
+  gratings and dark orders to 1e-13 relative, grazing and unresolved phases refused,
+  the guards' thresholds pinned from both sides, and every documented refusal with its
+  code. Mutation: every round-2 fix is killed by a test except three guards whose
+  refusals other checks already make. Those are the two complementary band guards
+  (killed together) and the σ = 0 and finiteness checks behind the NaN-safe
+  comparisons.
+
+### Performance (new benchmarks)
+- `doe/multilevel_efficiency` 218 ns, `doe/dammann_order` 199 ns (three transitions),
+  `doe/kogelnik_efficiency` 259 ns (slanted transmission), `doe/kogelnik_reflection`
+  253 ns (the in-band sinh branch, TM).
+
 ## [2.8.0] - 2026-09-23 — gradient-index (GRIN) ray tracing
 
 Closes the 2.8.0 roadmap row: ray tracing through a continuously varying index —

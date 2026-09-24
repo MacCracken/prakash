@@ -13,7 +13,7 @@ after the port-completeness review; recover it with
 | `error` | error.cyr | (smoke) | `PK_ERR_*` codes | Shared error codes + `prakash_set_log_level` / `_prk_trace` (sakshi logging) |
 | `ray` | ray_core, ray_fresnel, ray_trace, ray_simulate, ray_system, ray_dispersion, ray_fiber, ray_grin | 1155 | `Medium`, `ComplexMedium`, `*Coefficients`, `TraceRay`, `OpticalSurface`, `PolarizedTraceHit`, `ParaxialRay`, `Prescription`, `GrinProfile` | Geometric optics: Snell, Fresnel (real + complex), dispersion (Sellmeier/Cauchy/Herzberger/Schott/Conrady), chromatic aberration, fiber optics, sequential/recursive tracing with polarization, ray fans, spot diagrams, OPD; gradient-index tracing (SELFOC, sech, polynomial, Luneburg, fish-eye) by RK-Nyström with optical path |
 | `spectral` | spectral_core, spectral_cie, spectral_photometry | 2232 | `Rgb`, `Xyz`, `Spd`, `Observer` (tag constants) | Color science: wavelength↔RGB, Planck (numerically stable), Wien, CIE 1931/1964/2015 XYZ, SPD, illuminants, CRI, photometry (V(λ), luminous flux/efficacy) |
-| `wave` | wave_core, wave_polarization, wave_coherence, wave_airy, wave_fabry_perot, wave_diffraction, wave_zernike, wave_pattern, wave_beam | 2687 | `Polarization`, `StokesVector`, `MuellerMatrix` (16-f64 buffer), `Pattern2D`, `ZernikeWavefront`, `ThinFilmResult`, `GaussianBeam` | Wave optics: interference, coherence, Airy/Bessel, Fabry-Pérot, Fraunhofer/Fresnel diffraction, TMM (oblique s/p), AR coatings, Jones/Stokes/Mueller, Zernike polynomials, 2D FFT patterns, PSF; Gaussian beams (q/ABCD, resonator modes, HG/LG modes, M², OAM) |
+| `wave` | wave_core, wave_polarization, wave_coherence, wave_airy, wave_fabry_perot, wave_diffraction, wave_doe, wave_zernike, wave_pattern, wave_beam | 3022 | `Polarization`, `StokesVector`, `MuellerMatrix` (16-f64 buffer), `Pattern2D`, `ZernikeWavefront`, `ThinFilmResult`, `GaussianBeam`, `VolumeGrating` | Wave optics: interference, coherence, Airy/Bessel, Fabry-Pérot, Fraunhofer/Fresnel diffraction, TMM (oblique s/p), AR coatings, Jones/Stokes/Mueller, Zernike polynomials, 2D FFT patterns, PSF; Gaussian beams (q/ABCD, resonator modes, HG/LG modes, M², OAM); diffractive optics (grating equation, blazed/multilevel/binary/Dammann efficiencies, diffractive lens, Kogelnik volume holograms) |
 | `lens` | lens.cyr | 358 | `CardinalPoints`, `SeidelCoefficients`, `WavefrontCoefficients` | Lens/mirror geometry: thin/thick lens, aberrations, wavefront coefficients from the Seidel sums, MTF (mono + poly + through-focus), aberrated OTF/MTF by pupil autocorrelation (Zernike or Seidel, sagittal/tangential, polychromatic complex sum), DoF, Petzval, multi-element |
 | `pbr` | pbr_core, pbr_advanced | 1428 | (free functions) | PBR shading: Cook-Torrance, GGX, sheen, clearcoat, SSS, iridescence, volumetric, importance sampling, split-sum IBL |
 | `atmosphere` | atmosphere.cyr | 378 | (free functions + constants) | Rayleigh/Mie scattering, King correction, sky color, air mass, optical depth, sunset model |
@@ -21,8 +21,8 @@ after the port-completeness review; recover it with
 | `serialize` | serialize.cyr | 55 | (free functions) | JSON roundtrips for the seven serde-tested types. ⚠ **Encode goes straight into a `str_builder`** since 2.3.4/2.3.5 — bayan is used only for Grisu2 float rendering; **decode** still walks a bayan value tree. The encoder emits round-trip-correct floats; bayan's decoder mis-rounds ~1 in 10⁵ doubles by 1 ULP (see serialize.cyr); every `*_from_json` reports via `err_out`; every wire format is pinned to exact bytes |
 | `ai` | ai.cyr | 62 | `DaimonClient`, `DaimonConfig`, `HooshConfig` | AI-assisted optics queries via sandhi HTTP POST — **not in the core bundle** |
 
-**Total**: 27 science modules + error, **8826 test assertions across 34 suites**,
-155 benchmarks. (`tests/hardening.tcyr` is the cross-module regression suite for the
+**Total**: 28 science modules + error, **9161 test assertions across 35 suites**,
+159 benchmarks. (`tests/hardening.tcyr` is the cross-module regression suite for the
 2.0.2 audit repairs and the 2.1.0 error channels — see those CHANGELOG entries.)
 
 ## Design Principles
@@ -99,7 +99,7 @@ avoid cross-module coupling:
   `spectral`.
 
 `[lib]` order (dependency order): `error` → the 8 ray modules → the 3 spectral →
-the 9 wave → pbr_core, pbr_advanced → lens → atmosphere → bridge → serialize.
+the 10 wave → pbr_core, pbr_advanced → lens → atmosphere → bridge → serialize.
 `[lib.ai]` is the same list plus `ai.cyr`.
 
 ### The `dist/*.deps` sidecars
