@@ -130,7 +130,7 @@ fn _fib_g(u) {
 
 # Steed's continued fraction z for W >= 1, with W K1(W)/K0(W) = W + 1/2 - z/4
 # (Thompson & Barnett 1987; Numerical Recipes' CF2 at order 0): partial
-# numerators -(i - 1/2)^2, denominators 2(i + W). Needs 61 levels at W = 1 and
+# numerators -(i - 1/2)^2, denominators 2(i + W). Needs 60 levels at W = 1 and
 # fewer above. The U-branch derivatives use z itself: 4(h - W) - 2 = -z, which
 # is O(1/W) and would otherwise be recovered by cancelling O(1) terms.
 fn _fib_kcf(w) {
@@ -297,8 +297,10 @@ fn _fib_lp01(v, out) {
 # value, g' = U + X^2/U and g'' = 1 + 2Xg'/U - X^2/U^2 (from (x J1)' = x J0,
 # J0' = -J1), and h' = (X^2 - W^2)/W, h'' = 2Xh'/W - X^2/W^2 - 1 (from
 # (x K1)' = -x K0, K0' = -K1). Two forms, one per solve branch, each free of the
-# cancellation the other suffers; both checked against 60-digit finite
-# differences of the root to 17 digits.
+# cancellation the other suffers. The formulas agree with 60-digit finite
+# differences of the root to 17 digits; the double implementation is within
+# ~3e-15 relative across V = 0.5..10 (3e-16 absolute at the factor's zero near
+# V = 3).
 #
 # s-branch (small V, W -> 0), in s = ln W, H(s) = h(e^s), H_s = X^2 - W^2,
 # H_ss = 2X H_s - 2W^2:
@@ -523,15 +525,17 @@ fn fiber_dispersion(clad, delta, core_radius_um, wavelength_um, err_out) {
 }
 
 # The zero-dispersion wavelength (um) of fiber_dispersion(clad, delta,
-# core_radius_um, .) between lo_um and hi_um, by Illinois false position — both
-# ends move, so the bracket shrinks to 2^-51 relative. delta = 0 finds the
-# MATERIAL zero: 1.2727539 um for fused silica, the roadmap's pin. Writes
-# PK_ERR_INVALID_PARAMETER (returns 0) if lo_um >= hi_um, if fiber_dispersion
-# refuses either end or any iterate, unless D is nonzero with OPPOSITE signs at
-# the two ends, or if the bracket has not converged in 200 steps. An end where D
-# is exactly 0 is refused, not returned: at 1e60 um D underflows to 0 while the
-# true value is -5e-160, and round 1 of the review had that end come back as a
-# "zero".
+# core_radius_um, .) between lo_um and hi_um: Illinois false position, with a
+# bisection whenever three steps have not halved the bracket — at the GEOMETRIC
+# mean while the ends are more than a factor 4 apart, so a bracket spanning
+# decades converges too (round 2: [1e-3, 1e60] um ran out of steps). Converges to
+# 2^-51 relative. delta = 0 finds the MATERIAL zero: 1.2727539 um for fused
+# silica, the roadmap's pin. Writes PK_ERR_INVALID_PARAMETER (returns 0) if
+# lo_um >= hi_um, if fiber_dispersion refuses either end or any iterate, unless D
+# is nonzero with OPPOSITE signs at the two ends, or if the bracket has not
+# converged in 400 steps. An end where D is exactly 0 is refused, not returned:
+# past ~2e81 um D underflows to 0 (at 1e100 um the true value is -5.1e-295), and
+# such an end must not come back as a "zero".
 #must_use
 fn fiber_zero_dispersion_wavelength(clad, delta, core_radius_um, lo_um, hi_um, err_out) {
     store64(err_out, PK_ERR_INVALID_PARAMETER);
@@ -549,9 +553,19 @@ fn fiber_zero_dispersion_wavelength(clad, delta, core_radius_um, lo_um, hi_um, e
     var side = 0;
     var c = a;
     var done = 0;
+    var wref = f64_sub(b, a);
     var it = 0;
-    while ((it < 200) & (done == 0)) {
+    while ((it < 400) & (done == 0)) {
         c = f64_div(f64_sub(f64_mul(a, fb), f64_mul(b, fa)), f64_sub(fb, fa));
+        # Every third step, bisect unless the last three halved the bracket.
+        if ((it % 3) == 2) {
+            var w = f64_sub(b, a);
+            if (f64_gt(w, f64_mul(F64_HALF, wref)) == 1) {
+                c = f64_add(a, f64_mul(F64_HALF, w));
+                if (f64_gt(b, f64_mul(f64_from(4), a)) == 1) { c = f64_sqrt(f64_mul(a, b)); }
+            }
+            wref = f64_sub(b, a);
+        }
         if ((f64_gt(c, a) & f64_lt(c, b)) == 0) { c = f64_add(a, f64_mul(F64_HALF, f64_sub(b, a))); }
         var fc = fiber_dispersion(clad, delta, core_radius_um, c, &e);
         if (e != PK_ERR_NONE) { return 0; }

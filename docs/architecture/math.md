@@ -107,8 +107,12 @@ crosses zero just above V = 3.
   - ⚠ **Weak guidance.** b is the scalar LP01 mode. Against an exact vector (HE11)
     solution of the same model, the error grows as ~Δ²: −0.035 (0.2%) at
     Δ = 0.36%, and −0.49 (11%) at Δ = 1% with a = 2 µm.
-  - Zero dispersion is found by Illinois false position. At SMF-like parameters it is
-    at 1.29680 µm.
+  - Zero dispersion is found by Illinois false position. Three steps that fail to
+    halve the bracket trigger a bisection, geometric while the ends are more than 4×
+    apart.
+  - The ends must have strictly opposite, nonzero D. D underflows to exactly 0
+    past ~2e81 µm, so such an end is refused rather than returned.
+  - At SMF-like parameters the zero is at 1.29680 µm.
 
 ## GRIN Ray Tracing (`ray_grin`, 2.8.0)
 
@@ -266,24 +270,30 @@ M_j = [[cos δ, −i sin δ/η], [−iη sin δ, cos δ]], with δ = 2πq_j d_j/
 - R = |(η₀B − C)/(η₀B + C)|²;
 - T = 4η₀ Re η_sub/|η₀B + C|², the flux into the substrate;
 - A = 4η₀ Re(BC* − η_sub)/|η₀B + C|², the power the layers absorb;
-- R + T + A = 1.
+- R + T + A = 1. A is not formed as this difference: it is summed from the flux
+  each absorbing layer (2nk ≠ 0) removes, so a lossless stack gives A = 0 exactly.
 
 **Implementation:**
 - cos δ and sin δ/q are even in q, and q² needs no root, so layers have no
   branch cut and no q = 0 singularity. sin δ/q = (2πd/λ) sinc δ near δ = 0.
 - Only the substrate takes a branch: the principal root, Im q ≥ 0.
+- q² = (n − n₀)(n + n₀) + (n₀ cos θ₀)² − k² + 2ink: algebraically ñ² − β², but exact
+  for a medium index-matched to the incident one, even at grazing.
 - p starts from [1/η; 1], so a substrate at exactly its critical angle is finite.
 - Each layer is scaled by e^{−|Im δ|} and the vector by exact powers of 2⁻²⁵⁶.
   Opaque layers therefore underflow T to 0 instead of overflowing the matrix; the
   test cases include 10 µm of gold (T = 1.87e−249) and 800 layers.
 
 **Limits and refusals:**
-- A is accurate to ~1e−16 of the incident power, not relative to itself: it is a
-  difference of fluxes.
-- T through a strongly attenuating stack carries ~2e−16 · Σ Im δ relative error.
-  That is the conditioning of e^(−2Σ Im δ); the substrate flux is carried in the
-  scaled frame, not restored by one large exp.
-- Every |ñ| must lie in [2⁻¹⁰⁰, 2¹⁰¹]. Beyond that, squares leave the double range.
+- Each absorbing layer's share of A is a difference of fluxes, so A is accurate to
+  a few 1e−16 of the incident power per absorbing layer, not relative to itself.
+- R and T carry a few ulps per layer. Through a strongly attenuating stack T is
+  conditioned by its own exponent, up to ~8e−16 · Σ Im δ relative: 3e−14 at
+  Σ = 182 and 2e−13 at Σ = 640. The substrate and absorbed fluxes are carried in
+  the scaled frame, not restored by one large exp.
+- Every n and k must be finite and in [0, 2¹⁰⁰], with max(n, k) ≥ 2⁻¹⁰⁰ and
+  n₀ ∈ [2⁻¹⁰⁰, 2¹⁰⁰]. Every accepted |ñ| therefore lies within [2⁻¹⁰⁰, 2¹⁰¹],
+  where no square leaves the double range.
 - cos θ₀ near grazing is computed as sin(π/2 − |θ|), with π/2 split into its
   double part and remainder.
 - A layer phase past 2⁴² rad is refused, because an input's last bit would move it

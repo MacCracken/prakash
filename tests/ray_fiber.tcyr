@@ -280,7 +280,8 @@ var vmax = 0x42F0000000000000;
 _assert_rel(fiber_lp01_b(vmax, &ev), F64_ONE, _fd(3, 10000000000000000), "b(2^48) = 1 to an ulp");
 assert_eq(ev, PK_ERR_NONE, "V = 2^48 answered");
 var fmax = fiber_waveguide_factor(vmax, &ev);
-_assert_rel(fmax, f64_neg(f64_div(f64_mul(F64_TWO, f64_mul(0x40033D152E971B3F, 0x40033D152E971B3F)), f64_mul(vmax, vmax))),
+var j2 = f64_mul(0x40033D152E971B3F, 0x40033D152E971B3F);
+_assert_rel(fmax, f64_neg(f64_div(f64_mul(F64_TWO, j2), f64_mul(vmax, vmax))),
   _fd(1, 1000000000000), "V(Vb)'' at 2^48 = -2 j01^2/V^2");
 var _bv1 = fiber_lp01_b(0x42F0000000000001, &ev);
 assert_eq(ev, PK_ERR_INVALID_PARAMETER, "V past 2^48 refused (b)");
@@ -295,7 +296,8 @@ assert_eq(fiber_lp01_b(1, &ev), Z, "b(5e-324) = 0");
 assert_eq(fiber_waveguide_factor(0x2B2BFF2EE48E0530, &ev), Z, "V(Vb)'' at 1e-100 = 0");
 assert_eq(ev, PK_ERR_NONE, "factor(1e-100) answered");
 # ... and a vanishing core is the bulk glass.
-assert_eq(fiber_dispersion(fsf, dcore, 0x2B2BFF2EE48E0530, _fd(155, 100), &ed), fiber_material_dispersion(fsf, _fd(155, 100)),
+var dtiny = fiber_dispersion(fsf, dcore, 0x2B2BFF2EE48E0530, _fd(155, 100), &ed);
+assert_eq(dtiny, fiber_material_dispersion(fsf, _fd(155, 100)),
   "1e-100 um core: material dispersion");
 # delta = -0.0 is zero (the first cut refused it: `delta == 0` compares bits).
 var nz = f64_mul(Z, f64_neg(F64_ONE));
@@ -314,12 +316,21 @@ assert_eq(ed, PK_ERR_INVALID_PARAMETER, "infinite Sellmeier coefficient refused"
 var _nf4 = fiber_zero_dispersion_wavelength(fsf, Z, F64_ONE, F64_ONE, 0x7FF0000000000000, &ez);
 assert_eq(ez, PK_ERR_INVALID_PARAMETER, "zero finder: infinite end refused");
 # Huge wavelengths: D keeps its sign (the first cut formed d^3, which overflowed
-# past 2.4e51 um and flipped D positive) and underflows rather than crossing zero.
+# past 2.4e51 um and flipped D positive), and keeps it at 2e77 um, where d^2
+# alone would overflow.
 var dhuge = fiber_dispersion(fsf, Z, F64_ONE, 0x4AB0A0B0AA5A7B31, &ed);
-assert_eq(ed, PK_ERR_NONE, "D at 2.5e51 um answered");
-assert(f64_lt(dhuge, Z), "D at 2.5e51 um is negative, as the true value is");
-# An exactly-zero end is refused, not returned: D(1e60) underflows to 0 while the
-# true value is -5e-160, and the first cut returned 1e60 as the zero.
+assert_eq(ed, PK_ERR_NONE, "D at 6.2e51 um answered");
+assert(f64_lt(dhuge, Z), "D at 6.2e51 um is negative, as the true value is");
+assert(f64_lt(fiber_material_dispersion(fsf, 0x4FFBA2BFD0D5FF5B), Z), "D at 2e77 um < 0 (true -6.3e-227)");
+assert(f64_lt(sellmeier_dn_dlambda(fsf, 0x4FFBA2BFD0D5FF5B), Z), "dn/dl at 2e77 um < 0 (true -6.3e-231)");
+# An exactly-zero end is refused, not returned: D(1e100) underflows to 0 while the
+# true value is -5.1e-295, and must not come back as a zero from either side.
+assert_eq(fiber_dispersion(fsf, Z, F64_ONE, 0x54B249AD2594C37D, &ed), Z, "D(1e100 um) underflows to exactly 0");
+var _z100 = fiber_zero_dispersion_wavelength(fsf, Z, F64_ONE, F64_ONE, 0x54B249AD2594C37D, &ez);
+assert_eq(ez, PK_ERR_INVALID_PARAMETER, "[1, 1e100] um: D < 0 and exactly 0 -> refused");
+var _z15 = fiber_zero_dispersion_wavelength(fsf, Z, F64_ONE, _fd(15, 10), 0x54B249AD2594C37D, &ez);
+assert_eq(ez, PK_ERR_INVALID_PARAMETER, "[1.5, 1e100] um: D > 0 and exactly 0 -> refused");
+# 1e60 is RESOLVED (-5.08e-175, as mpmath gives), so [1, 1e60] is simply one-signed.
 var _z60 = fiber_zero_dispersion_wavelength(fsf, Z, F64_ONE, F64_ONE, 0x4C63E9E4E4C2F344, &ez);
 assert_eq(ez, PK_ERR_INVALID_PARAMETER, "no zero between 1 um and 1e60 um");
 # An iterate the dispersion refuses aborts the search: on [5, 20] um silica's
@@ -341,5 +352,58 @@ var _wv = fiber_waveguide_dispersion(fsf, dcore, 0x7FE0000000000000, _fd(155, 10
 assert_eq(ew, PK_ERR_INVALID_PARAMETER, "core radius 2^1023 -> V overflows -> refused");
 var _wv2 = fiber_dispersion(fsf, dcore, f64_from(100000000000000000), _fd(155, 100), &ed);
 assert_eq(ed, PK_ERR_INVALID_PARAMETER, "1e17 um core -> V past 2^48 -> refused");
+
+# ── Round-2 review regressions ────────
+test_group("fiber review 2");
+# A zero where D falls through it (the mirror of silica's rising zero): a strongly
+# guiding core at delta 0.3, a 0.3 um has D > 0 at 1 um and D < 0 at 2 um.
+var zdesc = fiber_zero_dispersion_wavelength(fsf, _fd(3, 10), _fd(3, 10), F64_ONE, F64_TWO, &ez);
+assert_eq(ez, PK_ERR_NONE, "a falling zero is found");
+assert(f64_gt(fiber_dispersion(fsf, _fd(3, 10), _fd(3, 10), f64_sub(zdesc, _fd(1, 1000)), &ed), Z), "D > 0 below it");
+assert(f64_lt(fiber_dispersion(fsf, _fd(3, 10), _fd(3, 10), f64_add(zdesc, _fd(1, 1000)), &ed), Z), "D < 0 above it");
+# Brackets spanning 63 and 160 decades converge (the first cut's 200-step cap ran
+# out on the first). n^2 = 1 + l^2/(l^2 + 1) has its only
+# zero of D at 0.52372882790374616 um (mpmath).
+var s1 = _sellmeier_mk(F64_ONE, f64_neg(F64_ONE), Z, F64_ONE, Z, F64_ONE);
+_assert_rel(fiber_zero_dispersion_wavelength(s1, Z, F64_ONE, 0x3F50624DD2F1A9FC, 0x4C63E9E4E4C2F344, &ez),
+  0x3FE0C262F57A3542, _fd(1, 1000000000000000), "zero from [1e-3, 1e60] um");
+assert_eq(ez, PK_ERR_NONE, "wide bracket converged");
+_assert_rel(fiber_zero_dispersion_wavelength(s1, Z, F64_ONE, 0x3F50624DD2F1A9FC, 0x46293E5939A08CEA, &ez),
+  0x3FE0C262F57A3542, _fd(1, 1000000000000000), "zero from [1e-3, 1e30] um");
+_assert_rel(fiber_zero_dispersion_wavelength(s1, Z, F64_ONE, 0x2B2BFF2EE48E0530, 0x4C63E9E4E4C2F344, &ez),
+  0x3FE0C262F57A3542, _fd(1, 1000000000000000), "zero from [1e-100, 1e60] um");
+# V = 2^37: the root sits 1.7e-11 below j01. With the bound on the pole's far side
+# (the pre-fix constant) the solve returned the bound itself and lost the 6/V term.
+_assert_rel(fiber_waveguide_factor(0x4240000000000000, &ev), 0xBB8721FB8041D55C, R13,
+  "V(Vb)'' at 2^37 = -6.1232e-22 (70-digit reference)");
+_assert_rel(fiber_lp01_b(_fd(2405, 1000), &ev), 0x3FE1001697F5DA20, R13, "b(2.405) = 0.5312608");
+# Finiteness refusals, each reached by an input nothing earlier refuses: P1 has f, f'
+# and f'' finite but n'^2 overflows.
+var p1 = _sellmeier_mk(0x59E0000000000000, 0x3FEFFFFFFFFFFFF0, 0xDCF0000000000000, Z, Z, F64_ONE);
+var _p1a = fiber_dispersion(p1, Z, F64_ONE, F64_ONE, &ed);
+assert_eq(ed, PK_ERR_INVALID_PARAMETER, "n'^2 overflow refused (delta = 0)");
+var _p1b = fiber_dispersion(p1, dcore, acore, F64_ONE, &ed);
+assert_eq(ed, PK_ERR_INVALID_PARAMETER, "n'^2 overflow refused (delta > 0)");
+var p4 = _sellmeier_mk(0x7FE0000000000000, Z, 0x7FE0000000000000, Z, Z, F64_ONE);
+var _p4 = fiber_dispersion(p4, Z, F64_ONE, F64_ONE, &ed);
+assert_eq(ed, PK_ERR_INVALID_PARAMETER, "n^2 overflow refused");
+# The waveguide dispersion reads the cladding through the refusing derivative core,
+# not the clamping sellmeier_n_at: water at 3.1 um (n^2 < 1) is refused, and so is
+# a set whose f'' overflows.
+var _ww = fiber_waveguide_dispersion(sellmeier_water(), dcore, acore, _fd(31, 10), &ew);
+assert_eq(ew, PK_ERR_INVALID_PARAMETER, "clamped cladding index refused");
+var p290 = _sellmeier_mk(0x7C2485CE9E7A065F, F64_ONE, Z, F64_ONE, Z, F64_ONE);
+var _w290 = fiber_waveguide_dispersion(p290, dcore, 0x22E0000000000000, 0x3FF0000002AF31DC, &ew);
+assert_eq(ew, PK_ERR_INVALID_PARAMETER, "f'' overflow refused");
+var cinf = _sellmeier_mk(F64_ONE, 0x7FF0000000000000, Z, F64_ONE, Z, F64_ONE);
+var _wci = fiber_waveguide_dispersion(cinf, 0x3F6D7DBF487FCB92, 0x4010666666666666, F64_ONE, &ew);
+assert_eq(ew, PK_ERR_INVALID_PARAMETER, "infinite C (f finite, f' NaN) refused");
+# All b = 0 is vacuum: chi = 0 is accepted (not refused as n^2 < 1), D = 0.
+var vac = _sellmeier_mk(Z, F64_ONE, Z, F64_ONE, Z, F64_ONE);
+assert_eq(fiber_dispersion(vac, Z, F64_ONE, F64_ONE, &ed), Z, "vacuum: D = 0");
+assert_eq(ed, PK_ERR_NONE, "vacuum accepted");
+# l^2 underflowing to 0 is refused (every term 0, chi a true +0).
+var _lu = fiber_dispersion(fsf, Z, F64_ONE, 0x1CA3529BA7D19EAF, &ed);
+assert_eq(ed, PK_ERR_INVALID_PARAMETER, "1e-170 um refused");
 
 var r = assert_summary();

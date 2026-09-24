@@ -749,15 +749,14 @@ fn _stack(pairs, n1, k1, d1, n2, k2, d2) {
 # 200 periods of dielectric (n 2) and lossless Drude metal (n 0, k 2): the stack
 # absorbs nothing, sum Im delta = 182. The first cut restored e^(-2 sum) from a
 # plain running sum: T 1.3e-12 relative off and A = +5.7e-13. The flux now rides
-# in the scaled frame. This stack also drives the vector BELOW 2^-256, the only
-# case in the suite that runs the upward rescaling.
+# in the scaled frame, and A is summed from lossy layers only — so it is exactly 0.
 var ldr = _stack(200, F64_TWO, Z, f64_from(60), Z, F64_TWO, f64_from(40));
 assert_eq(_rta(W550, Z, F64_ONE, _fd(15, 10), Z, ldr, 400), PK_ERR_NONE, "Drude stack ok");
 _assert_rel(AbsorbingFilmResult_r_s(AF), 0x3FE23279E6E9F850, R13, "Drude stack R_s");
 _assert_rel(AbsorbingFilmResult_t_s(AF), 0x3FDB9B0C322C0F60, _fd(2, 10000000000000), "Drude stack T_s (2e-13)");
 _assert_rel(AbsorbingFilmResult_t_p(AF), 0x3FDB9B0C322C0F60, _fd(2, 10000000000000), "Drude stack T_p");
-assert(f64_lt(f64_abs(AbsorbingFilmResult_a_s(AF)), R13), "lossless Drude stack: |A_s| < 1e-13 (was 5.7e-13)");
-assert(f64_lt(f64_abs(AbsorbingFilmResult_a_p(AF)), R13), "lossless Drude stack: |A_p| < 1e-13");
+assert_eq(AbsorbingFilmResult_a_s(AF), Z, "lossless Drude stack: A_s = 0 exactly (was 5.7e-13)");
+assert_eq(AbsorbingFilmResult_a_p(AF), Z, "lossless Drude stack: A_p = 0 exactly");
 # 30 periods of 10 nm silver and 60 nm dielectric, 20 deg.
 var lag30 = _stack(30, _fd(562, 10000), _fd(4276, 1000), f64_from(10), _fd(23, 10), Z, f64_from(60));
 assert_eq(_rta(W633, _deg(f64_from(20)), F64_ONE, N152, Z, lag30, 60), PK_ERR_NONE, "Ag stack ok");
@@ -775,17 +774,21 @@ _assert_rel(AbsorbingFilmResult_t_s(AF), 0x00000C8088A934CB, _fd(1, 100000000000
 assert_eq(_rta(W550, _deg(f64_from(30)), F64_ONE, N152, Z, _lay1(AUN, AUK, F64_ONE), 1), PK_ERR_NONE, "1nm Au ok");
 _pin6("1 nm gold, 30 deg (series branch)", 0x3FB0FFF8F0FB4459, 0x3FED6151A0BF8528, 0x3F8FABD04844933B,
   0x3F9F36AA77FECF64, 0x3FEE8EC44F107F17, 0x3F8DE1974BE29B85);
-assert_eq(_rta(W550, Z, F64_ONE, N152, Z, _lay1(_fd(15, 10), _fd(2, 10), 0x3FFCA21B16E7AF55), 1), PK_ERR_NONE, "dser ok");
+assert_eq(_rta(W550, Z, F64_ONE, N152, Z, _lay1(_fd(15, 10), _fd(2, 10), 0x3FFCA21B16E7AF55), 1), PK_ERR_NONE,
+  "dser ok");
 _assert_rel(AbsorbingFilmResult_r_s(AF), 0x3FA69DD2071C2610, R13, "|delta| = 0.99 * 2^-5: R");
 _assert_rel(AbsorbingFilmResult_t_s(AF), 0x3FEE5773A28B0883, R13, "|delta| = 0.99 * 2^-5: T");
 _assert_rel(AbsorbingFilmResult_a_s(AF), 0x3F7F579E819A8E21, R13, "|delta| = 0.99 * 2^-5: A");
 var _ls = _rta(W550, _deg(f64_from(30)), F64_ONE, N152, Z, _lay1(F64_TWO, Z, _fd(13, 10)), 1);
-assert(f64_lt(f64_abs(AbsorbingFilmResult_a_s(AF)), _fd(1, 1000000000000000)), "lossless 1.3 nm film (series): A_s = 0");
-assert(f64_lt(f64_abs(AbsorbingFilmResult_a_p(AF)), _fd(1, 1000000000000000)), "lossless 1.3 nm film (series): A_p = 0");
+assert(f64_lt(f64_abs(AbsorbingFilmResult_a_s(AF)), _fd(1, 1000000000000000)),
+  "lossless 1.3 nm film (series): A_s = 0");
+assert(f64_lt(f64_abs(AbsorbingFilmResult_a_p(AF)), _fd(1, 1000000000000000)),
+  "lossless 1.3 nm film (series): A_p = 0");
 # Grazing: cos theta_0 from sin(pi/2 - theta), not x87 fcos (2e-21 absolute near
 # pi/2 — R_p was 2.7e-6 off on a 1e15 substrate at pi/2 - 1 ulp).
 assert_eq(_rta(F64_ONE, 0x3FF921FB54442D17, F64_ONE, 0x430C6BF526340000, Z, 0, 0), PK_ERR_NONE, "graze ok");
-_assert_rel(AbsorbingFilmResult_r_p(AF), 0x3FD3F6B7C4EAC7BE, _fd(1, 1000000000000000), "pi/2 - 1 ulp, 1e15 substrate: R_p");
+_assert_rel(AbsorbingFilmResult_r_p(AF), 0x3FD3F6B7C4EAC7BE, _fd(1, 1000000000000000),
+  "pi/2 - 1 ulp, 1e15 substrate: R_p");
 _assert_rel(AbsorbingFilmResult_t_p(AF), 0x3FE604A41D8A9C21, _fd(1, 1000000000000000), "... and T_p");
 _assert_rel(AbsorbingFilmResult_t_s(AF), 0x39B6FB6E9531E255, _fd(1, 1000000000000), "... and T_s = 1.1e-30");
 # Magnitude bounds: every |n~| in [2^-100, 2^101]. Past them squares left the
@@ -798,11 +801,13 @@ _assert_near(AbsorbingFilmResult_r_s(AF), fresnel_normal(_fd(1, 1000000000), _fd
 store64(AF, 0x4045000000000000);
 assert_eq(_rta(F64_ONE, Z, 0x3970000000000000, 0x3970000000000000, Z, 0, 0), PK_ERR_INVALID_PARAMETER,
   "n0 = 2^-104 refused");
-assert_eq(_rta(F64_ONE, Z, F64_ONE, 0x6974000000000000, Z, 0, 0), PK_ERR_INVALID_PARAMETER, "substrate n = 1e200 refused");
+assert_eq(_rta(F64_ONE, Z, F64_ONE, 0x6974000000000000, Z, 0, 0), PK_ERR_INVALID_PARAMETER,
+  "substrate n = 1e200 refused");
 assert_eq(_rta(F64_ONE, Z, 0x6974000000000000, N152, Z, 0, 0), PK_ERR_INVALID_PARAMETER, "n0 = 1e200 refused");
 assert_eq(load64(AF), 0x4045000000000000, "refused: out untouched");
 assert_eq(_rta(F64_ONE, Z, F64_ONE, 0x4630000000000000, Z, 0, 0), PK_ERR_NONE, "n = 2^100 accepted");
-assert_eq(_rta(F64_ONE, Z, F64_ONE, 0x4630000000000001, Z, 0, 0), PK_ERR_INVALID_PARAMETER, "n = 2^100 + 1 ulp refused");
+assert_eq(_rta(F64_ONE, Z, F64_ONE, 0x4630000000000001, Z, 0, 0), PK_ERR_INVALID_PARAMETER,
+  "n = 2^100 + 1 ulp refused");
 assert_eq(_rta(F64_ONE, Z, F64_ONE, N152, Z, _lay1(0x39A0000000000000, 0x39A0000000000000, f64_from(5)), 1),
   PK_ERR_INVALID_PARAMETER, "layer with n, k both below 2^-100 refused");
 assert_eq(_rta(F64_ONE, Z, F64_ONE, N152, Z, _lay1(Z, 0x39B0000000000000, f64_from(5)), 1), PK_ERR_NONE,
@@ -815,5 +820,83 @@ assert_eq(_rta(W550, _deg(f64_from(30)), F64_ONE, f64_neg(N152), _fd(1, 10), 0, 
   "substrate -1.52 + 0.1i refused");
 assert_eq(_rta(W550, _deg(f64_from(30)), F64_ONE, N152, Z, _lay1(f64_neg(_fd(15, 10)), Z, f64_from(100)), 1),
   PK_ERR_INVALID_PARAMETER, "layer -1.5 + 0i refused");
+
+# ── Round-2 review regressions ────────
+test_group("multilayer_rta review 2");
+# 400 periods of the Drude stack: the vector falls below 2^-256 and the flux below
+# 2^-512, so deleting either upward rescaling refuses the call or returns T = 0.
+var ldr4 = _stack(400, F64_TWO, Z, f64_from(60), Z, F64_TWO, f64_from(40));
+assert_eq(_rta(W550, Z, F64_ONE, _fd(15, 10), Z, ldr4, 800), PK_ERR_NONE, "400-period Drude stack ok");
+_assert_rel(AbsorbingFilmResult_t_s(AF), 0x3FE6C5EA13D93067, _fd(5, 10000000000000), "400 periods: T_s (5e-13)");
+_assert_rel(AbsorbingFilmResult_t_p(AF), 0x3FE6C5EA13D93067, _fd(5, 10000000000000), "400 periods: T_p");
+assert_eq(AbsorbingFilmResult_a_s(AF), Z, "400 periods: A = 0 exactly");
+# 800 x (60 nm n = 2, 35 nm Drude): sum Im delta = 640 drives the flux far below
+# 2^-1074 without the 2^512 steps into its exponent.
+var ldr8 = _stack(800, F64_TWO, Z, f64_from(60), Z, F64_TWO, f64_from(35));
+assert_eq(_rta(W550, Z, F64_ONE, _fd(15, 10), Z, ldr8, 1600), PK_ERR_NONE, "1600-layer Drude stack ok");
+_assert_rel(AbsorbingFilmResult_t_s(AF), 0x3FDE32664CC241E1, _fd(5, 10000000000000), "1600 layers: T_s (5e-13)");
+_assert_rel(AbsorbingFilmResult_t_p(AF), 0x3FDE32664CC241E1, _fd(5, 10000000000000), "1600 layers: T_p");
+assert_eq(AbsorbingFilmResult_a_p(AF), Z, "1600 layers: A = 0 exactly (was -9e-14)");
+# 6.5 um of gold: the flux has been rescaled into its exponent but T 2^512 is still
+# O(1e-5), so A must take the exponent into account; everything entering is absorbed.
+assert_eq(_rta(W550, Z, F64_ONE, N152, Z, _lay1(AUN, AUK, f64_from(6500)), 1), PK_ERR_NONE, "6.5um gold ok");
+_assert_rel(AbsorbingFilmResult_a_s(AF), 0x3FCB3126AF739D09, R13, "6.5 um gold: A = bare-gold transmittance 0.21244");
+_assert_rel(AbsorbingFilmResult_r_s(AF), 0x3FE933B6542318BE, R13, "6.5 um gold: R = bare-gold R");
+_assert_rel(AbsorbingFilmResult_t_s(AF), 0x1F0CEE2156A061CD, _fd(1, 1000000000000), "6.5 um gold: T = 6.9e-157");
+_energy("6.5 um gold");
+# A substrate index-matched to the incident medium near grazing: q^2 against n0
+# keeps it exact (from beta it rounded to R = 1, T = 0).
+var _mt = _rta(W550, 0x3FF921FB54442D17, _fd(15, 10), _fd(15, 10), Z, 0, 0);
+assert_eq(AbsorbingFilmResult_r_s(AF), Z, "matched substrate at pi/2 - 1 ulp: R_s = 0");
+assert_eq(AbsorbingFilmResult_t_s(AF), F64_ONE, "matched substrate at pi/2 - 1 ulp: T_s = 1");
+assert(f64_lt(AbsorbingFilmResult_r_p(AF), _fd(1, 1000000000000000)), "matched substrate: R_p ~ 0");
+_assert_near(AbsorbingFilmResult_t_p(AF), F64_ONE, _fd(1, 1000000000000000), "matched substrate: T_p = 1");
+var lfg = _lay1(F64_TWO, Z, f64_from(5));
+assert_eq(_rta(W550, 0x3FF921FB396C3A7D, _fd(15, 10), _fd(15, 10), Z, lfg, 1), PK_ERR_NONE, "grazing film ok");
+_assert_rel(AbsorbingFilmResult_t_s(AF), 0x3DA3D84A638A6FBD, _fd(1, 1000000000000),
+  "5 nm film at pi/2 - 1e-7: T_s = 9.02e-12");
+_assert_rel(AbsorbingFilmResult_t_p(AF), 0x3DBF5C1D0F1108BC, _fd(1, 1000000000000), "... T_p = 2.85e-11");
+# The grazing cosine uses |theta|: -(pi/2 - 1 ulp) is the same incidence, bit for bit.
+var _gn = _rta(F64_ONE, 0xBFF921FB54442D17, F64_ONE, 0x430C6BF526340000, Z, 0, 0);
+assert_eq(AbsorbingFilmResult_r_p(AF), 0x3FD3F6B7C4EAC7BE, "-(pi/2 - 1 ulp), 1e15 substrate: R_p as for +theta");
+var _g80a = _rta(W550, _deg(f64_from(80)), F64_ONE, N152, Z, lau, 1);
+var r80 = AbsorbingFilmResult_r_p(AF);
+var t80 = AbsorbingFilmResult_t_s(AF);
+var _g80b = _rta(W550, f64_neg(_deg(f64_from(80))), F64_ONE, N152, Z, lau, 1);
+assert_eq(AbsorbingFilmResult_r_p(AF), r80, "80 deg -> -80 deg: same R_p (grazing branch)");
+assert_eq(AbsorbingFilmResult_t_s(AF), t80, "80 deg -> -80 deg: same T_s");
+# The grazing branch reaches back to pi/4, not just to the last few ulps: at
+# pi/2 - 1e-10 x87 cos is already 2e-11 off T.
+var _g10 = _rta(F64_ONE, 0x3FF921FB543D4DE0, F64_ONE, 0x430C6BF526340000, Z, 0, 0);
+_assert_rel(AbsorbingFilmResult_t_s(AF), 0x3ADEF2D25EC05059, _fd(1, 1000000000000000), "pi/2 - 1e-10: T_s");
+# Each index bound on its own (every other check passes these).
+assert_eq(_rta(F64_ONE, Z, 0x39A0000000000000, N152, Z, 0, 0), PK_ERR_INVALID_PARAMETER, "n0 = 2^-101 refused");
+assert_eq(_rta(F64_ONE, Z, 0x4630000000000001, N152, Z, 0, 0), PK_ERR_INVALID_PARAMETER, "n0 = 2^100 + 1 ulp refused");
+assert_eq(_rta(F64_ONE, Z, F64_ONE, N152, 0x4630000000000001, 0, 0), PK_ERR_INVALID_PARAMETER,
+  "substrate k = 2^100 + 1 ulp refused");
+assert_eq(_rta(F64_ONE, Z, F64_ONE, N152, Z, _lay1(F64_ONE, 0x4630000000000001, f64_from(5)), 1),
+  PK_ERR_INVALID_PARAMETER, "layer k = 2^100 + 1 ulp refused");
+assert_eq(_rta(F64_ONE, Z, F64_ONE, N152, 0x4630000000000000, 0, 0), PK_ERR_NONE, "substrate k = 2^100 accepted");
+
+# The absorbed flux rides through the rescalings with the vector: an absorber at
+# the BACK of a stack whose vector is later rescaled up (400 Drude periods in
+# front) or down (a 400-pair mirror in front). References at 40 and 260 digits.
+var lu = _stack(401, F64_TWO, Z, f64_from(60), Z, F64_TWO, f64_from(40));
+store64(lu + 800 * 24, _fd(15, 10));
+store64(lu + 800 * 24 + 8, _fd(1, 100));
+store64(lu + 800 * 24 + 16, f64_from(100));
+assert_eq(_rta(W550, Z, F64_ONE, _fd(15, 10), Z, lu, 801), PK_ERR_NONE, "absorber behind Drude stack ok");
+_assert_rel(AbsorbingFilmResult_a_s(AF), 0x3F90537664E2EF2A, _fd(5, 10000000000000),
+  "absorber behind 400 Drude periods: A = 0.0159");
+_assert_rel(AbsorbingFilmResult_t_s(AF), 0x3FE628DDF943E58E, _fd(5, 10000000000000), "... T");
+var ld = _stack(401, _fd(23, 10), Z, f64_div(W550, f64_mul(f64_from(4), _fd(23, 10))),
+  N138, Z, f64_div(W550, f64_mul(f64_from(4), N138)));
+store64(ld + 800 * 24, AUN);
+store64(ld + 800 * 24 + 8, AUK);
+store64(ld + 800 * 24 + 16, f64_from(20));
+assert_eq(_rta(W550, Z, F64_ONE, N152, Z, ld, 801), PK_ERR_NONE, "gold behind mirror ok");
+_assert_rel(AbsorbingFilmResult_a_s(AF), 0x1AFBA41B169C3637, _fd(5, 10000000000000),
+  "gold behind a 400-pair mirror: A = 1.07e-178");
+_assert_rel(AbsorbingFilmResult_t_s(AF), 0x1B12C263A6D925CE, _fd(5, 10000000000000), "... T = 1.29e-177");
 
 var r = assert_summary();

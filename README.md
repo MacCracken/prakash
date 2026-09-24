@@ -115,10 +115,10 @@ prakash (Cyrius)
 
 ```sh
 cyrius deps                 # resolve the hisab git dep
-for f in tests/*.tcyr; do cyrius test "$f"; done   # 9161 assertions, 35 suites
+for f in tests/*.tcyr; do cyrius test "$f"; done   # 9605 assertions, 35 suites
 cyrius distlib              # regenerate dist/prakash.cyr
 cyrius distlib ai           # regenerate dist/prakash-ai.cyr
-cyrius bench tests/prakash.bcyr                     # 159 benchmarks
+cyrius bench tests/prakash.bcyr                     # 166 benchmarks
 ./scripts/bench-history.sh  # append to the CSV history + benchmarks.md
 ```
 

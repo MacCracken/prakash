@@ -10,8 +10,8 @@ Closes the 2.10.0 roadmap row and the last two gaps that
 - fiber chromatic dispersion: material, waveguide and total. The pin is fused
   silica's zero at 1.2727539 µm.
 
-Suite **9161 → @TOTAL@ assertions across 35 suites**, 0 failed; `cyrius audit`
-exits 0; `#must_use` 491 → **@MU@**, 0 lost. Benchmarks 159 → **166**.
+Suite **9161 → 9605 assertions across 35 suites**, 0 failed; `cyrius audit`
+exits 0; `#must_use` 491 → **500**, 0 lost. Benchmarks 159 → **166**.
 
 ### Added — absorbing multilayers (`wave_diffraction`)
 - **`multilayer_rta`** returns R, T and A for s and p, and their means, into an
@@ -27,8 +27,20 @@ exits 0; `#must_use` 491 → **@MU@**, 0 lost. Benchmarks 159 → **166**.
   rescaled by exact powers of 2²⁵⁶, so opaque layers underflow T to 0 instead of
   overflowing. 10 µm of gold transmits 1.87e−249, 1 mm transmits 0, and an
   800-layer mirror transmits 8.7e−178.
-- **Refusals:** a coherent layer phase past 2⁴² rad, an absorbing incident medium,
-  gain (k < 0), and |θ| ≥ π/2.
+- **Refusals:**
+  - a coherent layer phase past 2⁴² rad;
+  - an absorbing incident medium;
+  - gain (k < 0);
+  - |θ| ≥ π/2;
+  - n or k outside [0, 2¹⁰⁰], or max(n, k) < 2⁻¹⁰⁰.
+- **A** is summed from the flux each absorbing layer removes, so a lossless stack
+  returns A = 0 exactly.
+- **Accuracy:**
+  - A is accurate to a few 1e−16 of the incident power per absorbing layer, not
+    relative to itself.
+  - R and T carry a few ulps per layer. T through a strongly attenuating stack
+    carries up to ~8e−16·Σ Im δ relative error, the conditioning of its own
+    exponent.
 
 ### Added — dispersion and fibers (`ray_dispersion`, `ray_fiber`)
 - **`sellmeier_dn_dlambda`, `sellmeier_d2n_dlambda2`, `sellmeier_group_index`:**
@@ -41,16 +53,125 @@ exits 0; `#must_use` 491 → **@MU@**, 0 lost. Benchmarks 159 → **166**.
 - **`fiber_waveguide_factor`:** V d²(Vb)/dV², by implicit differentiation of that
   equation. It gives 1.34557, 0.462258 and 0.195086 at V = 1, 2 and 2.4, and crosses
   zero just above V = 3.
-- **`fiber_waveguide_dispersion`:** Gloge's D_w.
+- **`fiber_waveguide_dispersion`:** Gloge's and Keiser's textbook D_w. It takes
+  the cladding's Sellmeier set, as the other dispersion functions do.
 - **`fiber_dispersion`:** total D of a step-index fibre, a Sellmeier cladding plus a
-  constant Δ, through n_eff″. It keeps the cross terms D_m + D_w drops.
-- **`fiber_zero_dispersion_wavelength`:** Illinois false position.
+  constant Δ, through n_eff″. It keeps the terms D_m + D_w drops.
+- **Weak guidance:** the fibre model is the scalar LP01 mode. Against the exact
+  vector mode it is off by ~Δ²: 0.2% of D at Δ = 0.36%, and 11% at Δ = 1% with
+  a = 2 µm. The docs say so.
+- **LP01 domain:** V ≤ 2⁴⁸.
+- **`fiber_zero_dispersion_wavelength`:** Illinois false position with a bisection
+  backstop. It needs strictly opposite, nonzero D at the ends.
   - Δ = 0 gives the material zero.
   - An SMF-like fibre (Δ = 0.36%, a = 4.1 µm) puts it at 1.29680 µm.
 
-@FIXES@
+### Changed
+- `src/ray_fiber.cyr` now requires `src/ray_dispersion.cyr`, which the dispersion
+  functions call. A program that includes the modules one by one must include it
+  first; both bundles already list it first.
+
+### Fixed during the release's verification (never shipped)
+Round 1 ran five reviews: literature, an independent reference sweep, robustness,
+mutation and API. The reference reviewer was stopped for machine load after its
+mpmath pool ran 20 minutes. 35 findings were confirmed and 3 rejected. Every fix has
+a test that fails on the first cut.
+- **T and A drifted through long absorbing stacks.** Σ Im δ was summed into one
+  exponent and restored at the end.
+  - Effect: 200 metal/dielectric periods lost 1.3e−12 of T, and a lossless
+    1600-layer stack reported A = −5.6e−12.
+  - Fix: the substrate flux is now carried in the scaled frame, multiplied by the
+    same e^{−2 Im δ} each layer's matrix was built from, with exact 2⁵¹² steps.
+  - Result: 3e−14 relative T error through the 200 periods, the conditioning limit.
+- **Extreme index magnitudes returned wrong answers as success.** Squares left the
+  double range. For example, n₀ = 1e−161 on 1.3e−161 gave R_s 9.9% high. Every
+  |ñ| is now bounded to [2⁻¹⁰⁰, 2¹⁰¹].
+- **Near-grazing incidence:** x87 fcos is 2e−21 off near π/2, which put R_p 2.7e−6
+  off on a 1e15 substrate. cos θ₀ is now sin(π/2 − |θ|) with π/2 split exactly.
+- **LP01 at the extremes returned NaN as success.**
+  - The j01 constant was the double 1.2e−16 ABOVE J0's zero, so V > 3e16 converged
+    onto the pole.
+  - V ≥ 2⁵¹² overflowed V².
+  - V < 1.6e−162 computed b = 0/0.
+  - Fix: the bound is now the double below j01, V ≤ 2⁴⁸, and W² = 0 gives b = 0.
+- **The zero finder returned non-roots.**
+  - It accepted an endpoint where D had underflowed to 0: 1e60 µm came back as the
+    zero.
+  - NaN counted as a sign change.
+  - 200 unconverged steps still reported success.
+  - Fix: it now needs strictly opposite nonzero signs and refuses non-convergence.
+- **Sellmeier derivatives:**
+  - (λ² − C)³ overflowed past 2.4e51 µm and flipped D's sign; the forms no longer
+    cube.
+  - The n² < 1 test missed a region where 1 + χ rounds to 1 (silica below 6e−10 µm);
+    χ is now tested on its own.
+  - An infinite coefficient gave NaN as success through fiber_dispersion's Δ = 0
+    path.
+- **`fiber_waveguide_dispersion` took an index while its siblings take a Sellmeier
+  set.** A set passed by mistake read as a subnormal "index" and returned 0 as
+  success.
+- **Δ = −0.0** was refused where +0 is the bulk glass.
+- **Doc errors:**
+  - anomalous dispersion was described backwards;
+  - the small-V asymptote is 1.44 e^(−2/V²), not e^(−1/V²);
+  - b(2.405) is 0.5312608, not 0.5307;
+  - the D_m + D_w gap of −0.048 ps/(nm·km) was attributed wholly to the cross term.
+    It is +0.085 cross term, −0.123 prefactor (Keiser's n₂ where the expansion has
+    Agrawal's N_g²/n₂) and −0.010 second order.
+- **Test gaps closed:**
+  - t_avg;
+  - the upward rescaling, which no test reached (round 2 found the new case ran
+    through it without detecting a deleted loop; see below);
+  - the series coefficients, via A pins on a 1 nm film;
+  - negative real parts;
+  - the pole guard band;
+  - the U/s branch switch at V = 2.28344;
+  - large V (500 and 1e4);
+  - wide zero brackets;
+  - every refusal whose deletion no test saw.
+
+- **Round 2** re-ran the reference sweep, the robustness hunt, and mutation of the
+  round-1 fixes, and re-checked every numeric claim. The machine load was capped
+  this time. 31 findings were confirmed and none rejected.
+  - **A was formed as w·Re(BC*) − T, so every error in T landed on A.** A lossless
+    1600-layer stack reported A = −9e−14 as success. A is now summed from the flux
+    each absorbing layer removes, carried and rescaled with the vector, so
+    lossless stacks return exactly 0. The accuracy comments now give the measured
+    growth instead of "1e−16".
+  - **A substrate index-matched to the incident medium near grazing returned R = 1,
+    T = 0.** n² − β² rounded to 0 where it equals (n₀ cos θ₀)². q² is now formed
+    as (n − n₀)(n + n₀) + (n₀ cos θ₀)² − k², exact for matched media.
+  - **λ² underflowing to 0** (below 1.6e−162 µm) made χ a true +0 that passed the
+    n² < 1 test. It is refused.
+  - **Wrong or stale statements:**
+    - "D(1e60) underflows to 0": D(1e60) is resolved as −5.08e−175, and 1e100 is
+      where it underflows;
+    - the 7.7e−14 T accuracy figure;
+    - 61 → 60 continued-fraction levels;
+    - "checked to 17 digits" (the formulas are; the double implementation is
+      within 3e−15);
+    - two test labels;
+    - the index-bound wording;
+    - a header comment describing the first cut.
+  - **Test gaps closed:**
+    - both upward rescalings (400- and 1600-layer Drude stacks);
+    - the absorbed flux through rescaling in both directions (an absorber behind
+      a Drude stack and behind a 400-pair mirror, at 260 digits);
+    - 6.5 µm gold, where A needs the flux exponent;
+    - negative grazing angles and the grazing threshold at π/2 − 1e−10;
+    - each index bound on its own;
+    - exactly-zero bracket ends from both sides, a falling zero, and 63- and
+      160-decade brackets;
+    - V = 2^37 at 70 digits and b(2.405);
+    - every finiteness refusal in the Sellmeier core and the fibre functions,
+      each with an input nothing earlier refuses;
+    - water's clamped index through the waveguide dispersion;
+    - vacuum (all B = 0), which is accepted.
+  - **Mutation of the round-2 fixes:** every one is killed, except the zero
+    finder's bisection backstop. Illinois converges within the step cap on every
+    tested bracket, so the backstop never runs.
 ### Tests
-- **tests/wave_diffraction.tcyr** (@TMMT@ new):
+- **tests/wave_diffraction.tcyr** (269 new):
   - Pinned against an independent 50-digit implementation of the other TMM
     formalism, Byrnes' interface/propagation matrices. That implementation agrees
     with Byrnes' published `tmm` package to 8e−16.
@@ -62,19 +183,25 @@ exits 0; `#must_use` 491 → **@MU@**, 0 lost. Benchmarks 159 → **166**.
   - Invariants: zero thickness and ±θ bit for bit, unit scaling, a layer and a
     substrate at exactly critical, every refusal, and the 2⁴² guard from both
     sides.
-- **tests/ray_fiber.tcyr** (@FIBT@ new):
+- **tests/ray_fiber.tcyr** (131 new):
   - Material D, the silica and BK7 zeros, b(V) and V(Vb)″ at nine V, Gloge D_w and
     the total D, all against 45–60-digit mpmath. The references are computed by
     bisection plus Illinois on mpmath's own J and K, and by numerical
     differentiation of that root, not by the library's implicit formulas.
   - The literature fits within their quoted accuracy, the D_m + D_w split, and the
     refusals.
-- **tests/ray_dispersion.tcyr** (@DISPT@ new): the Sellmeier derivatives and
+- **tests/ray_dispersion.tcyr** (44 new): the Sellmeier derivatives and
   group index for silica, BK7 and diamond, against mpmath differentiation and
   against differences of `sellmeier_n_at`, plus the NaN refusals.
 
 ### Performance (new benchmarks)
-@PERF@
+- `film/multilayer_rta_3` 1.45 µs. That is the complex-index TMM on `multilayer_rt`'s own
+  3-layer stack; `wave/multilayer_rt` itself takes 0.98 µs.
+- `film/multilayer_rta_gold` 702 ns (20 nm gold, 45°).
+- `fiber/sellmeier_group_index` 111 ns, `fiber/material_dispersion` 128 ns.
+- `fiber/lp01_b` 6.5 µs: the Bessel-ratio root, about 5 Newton steps at V = 2.
+- `fiber/dispersion_smf` 5.8 µs: the mode solve plus the chain rule.
+- `fiber/zero_dispersion_material` 2.1 µs: silica's material zero on [1, 2] µm.
 
 ## [2.9.0] - 2026-09-23 — diffractive optics
 

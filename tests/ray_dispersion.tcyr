@@ -302,7 +302,7 @@ _assert_rel(sellmeier_d2n_dlambda2(fsd, F64_ONE), 0x3F88783D9BD2BDDD, R13, "sili
 _assert_rel(sellmeier_dn_dlambda(fsd, _fd(155, 100)), 0xBF888A46D0BC8D5F, R13, "silica dn/dl at 1.55 um");
 _assert_rel(sellmeier_d2n_dlambda2(fsd, _fd(155, 100)), 0xBF715BED7B11B3C3, R13,
   "silica d2n/dl2 at 1.55 um (negative: past the zero)");
-_assert_rel(sellmeier_group_index(fsd, _fd(155, 100)), 0x3FF766CB92173C16, R13, "silica N_g at 1.55 um = 1.46243");
+_assert_rel(sellmeier_group_index(fsd, _fd(155, 100)), 0x3FF766CB92173C16, R13, "silica N_g at 1.55 um = 1.46260");
 _assert_rel(sellmeier_d2n_dlambda2(fsd, _fd(131, 100)), 0xBF4ADC1C1237983F, _fd(1, 100000000000),
   "silica d2n/dl2 at 1.31 um (small)");
 _assert_rel(sellmeier_dn_dlambda(bkd, _fd(58756, 100000)), 0xBFA566C8395E21A2, R13, "BK7 dn/dl at the d line");
@@ -353,5 +353,26 @@ assert(_isnan(sellmeier_dn_dlambda(pole, 0x3FE0000000000001)), "one ulp above a 
 assert(_isnan(sellmeier_d2n_dlambda2(pole, 0x3FE0000000000001)), "one ulp above a resonance -> NaN (d2n)");
 assert(_isnan(sellmeier_group_index(fsd, 0x3E012E0BE826D695)), "silica at 5e-10 um (n^2 < 1 by an ulp) -> NaN");
 assert(_isnan(sellmeier_d2n_dlambda2(fsd, 0x3E012E0BE826D695)), "silica at 5e-10 um -> NaN (d2n)");
+
+# Round 2: every one of f, f', f'' must be finite. P2: f finite, f' and f''
+# infinite. P3: only f'' infinite. P4: chi = inf with f' = f'' = 0. And 2^875 with
+# C = 1 - 2^-49: f'' overflows while n'^2 does not.
+var p2 = _sellmeier_mk(0x79F0000000000000, 0x3FEFFFFFFFFFFFF0, Z, F64_ONE, Z, F64_ONE);
+assert(_isnan(sellmeier_dn_dlambda(p2, F64_ONE)), "P2: dn -> NaN");
+assert(_isnan(sellmeier_group_index(p2, F64_ONE)), "P2: N_g -> NaN");
+var p3 = _sellmeier_mk(0x7800000000000000, 0x3FEFFFFFFFFFFFF0, Z, F64_ONE, Z, F64_ONE);
+assert(_isnan(sellmeier_dn_dlambda(p3, F64_ONE)), "P3: dn -> NaN");
+assert(_isnan(sellmeier_group_index(p3, F64_ONE)), "P3: N_g -> NaN");
+var p4d = _sellmeier_mk(0x7FE0000000000000, Z, 0x7FE0000000000000, Z, Z, F64_ONE);
+assert(_isnan(sellmeier_dn_dlambda(p4d, F64_ONE)), "P4: dn -> NaN");
+assert(_isnan(sellmeier_group_index(p4d, F64_ONE)), "P4: N_g -> NaN");
+var p875 = _sellmeier_mk(0x76A0000000000000, 0x3FEFFFFFFFFFFFF0, Z, F64_ONE, Z, F64_ONE);
+assert(_isnan(sellmeier_d2n_dlambda2(p875, F64_ONE)), "f'' overflow -> NaN");
+assert(_isnan(sellmeier_d2n_dlambda2(fsd, 0x5FE7DDDF6B095FF1)), "1e154 um (l^2 overflows) -> NaN");
+assert(_isnan(sellmeier_d2n_dlambda2(fsd, 0x1CA3529BA7D19EAF)), "1e-170 um (l^2 underflows) -> NaN");
+# Vacuum (every b = 0) is n = 1 exactly, with zero derivatives — not a refusal.
+var vacd = _sellmeier_mk(Z, F64_ONE, Z, F64_ONE, Z, F64_ONE);
+assert_eq(sellmeier_dn_dlambda(vacd, F64_ONE), Z, "vacuum: dn/dl = 0");
+assert_eq(sellmeier_group_index(vacd, F64_ONE), F64_ONE, "vacuum: N_g = 1");
 
 var r = assert_summary();

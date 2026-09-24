@@ -579,26 +579,42 @@ fn multilayer_rt(wavelength, angle, n_incident, n_substrate, layers, num_layers)
 #   A = 4 eta_0 Re(B C* - eta_sub)/|eta_0 B + C|^2,
 # which is R + T + A = 1 with A the power the LAYERS absorb and T the power that
 # crosses into the substrate (for an absorbing substrate, the flux just inside
-# it — Macleod's and Byrnes' convention). ⚠ A is a difference of two O(1)
-# fluxes, so like R and T it is accurate to ~1e-16 of the INCIDENT power, not
-# relative to itself: a 1e-8 absorptance carries ~2e-8 relative error (measured,
-# k = 1e-9). Resolving ppb absorption relatively needs the per-layer field
-# integral, which this does not compute. T through a strongly attenuating stack
-# is conditioned by its own exponent: rounding moves e^(-2 sum Im delta) by
-# ~2e-16 sum Im delta relative (measured 7.7e-14 through 200 metal layers,
-# sum Im delta = 182), and that is the accuracy T is computed to.
+# it — Macleod's and Byrnes' convention). A is not formed as that difference: it is
+# summed from the flux each ABSORBING layer (Im n~^2 = 2nk != 0) removes, so a
+# stack whose layers are all lossless returns A = 0 exactly and T's error does not
+# land on A (round 2 of the review: through 1600 lossless layers the difference
+# came back as -9e-14).
+#
+# ⚠ ACCURACY, measured against 50-digit references:
+#   - Each absorbing layer's share of A is a difference of the fluxes entering and
+#     leaving it, so A is accurate to a few 1e-16 of the INCIDENT power per
+#     absorbing layer, not relative to itself: k = 1e-9 gives A = 1.1e-8 with
+#     2e-8 relative error. Resolving ppb absorption relatively needs the per-layer
+#     field integral, which this does not compute.
+#   - R and T carry a few ulps per layer, and through a strongly attenuating stack
+#     T is conditioned by its own exponent: up to ~8e-16 sum Im delta relative
+#     (3e-14 through 200 metal/dielectric periods, sum Im delta = 182; 2e-13
+#     through 800 periods, sum Im delta = 640).
 #
 # Three things make it robust where the real-index TMM needed special branches:
 #   - cos(delta) and sin(delta)/q are EVEN in q, and q^2 is known without a root,
 #     so the layer matrix does not depend on which square root is taken — there
 #     is no propagating/evanescent branch and no grazing (q = 0) singularity.
 #     sin(delta)/q is formed as (2 pi d/lambda) sinc(delta) near delta = 0.
-#   - Each layer matrix is scaled by exp(-|Im delta|) and the exponent summed, and
-#     the vector is rescaled by exact powers of two when it leaves [2^-256, 2^256].
-#     An opaque layer's T underflows to 0 instead of the matrix overflowing to
-#     NaN, which is what the real-index code's cosh/sinh clamp at 350 is for.
+#   - Each layer matrix is scaled by exp(-|Im delta|), and the substrate flux and
+#     the absorbed flux are multiplied by the same rounded exp(-2|Im delta|) (see
+#     _diff_rta_apply). The vector is rescaled by exact powers of two when it
+#     leaves [2^-256, 2^256], the substrate flux by 2^512 steps kept in an integer
+#     exponent. An opaque layer's T underflows to 0 instead of the matrix
+#     overflowing to NaN, which is what the real-index code's cosh/sinh clamp at
+#     350 is for.
 #   - Only the SUBSTRATE needs a branch: the principal root, Im q >= 0 (decaying
-#     or, lossless, outgoing), taken where q^2 = (n - beta)(n + beta) - k^2 + 2ink.
+#     or, lossless, outgoing).
+#   - q^2 is formed against the incident medium, q^2 = (n - n0)(n + n0) +
+#     (n0 cos theta0)^2 - k^2 + 2ink: algebraically n~^2 - beta^2, but exact for a
+#     medium index-matched to the incident one. Formed from beta, a matched
+#     substrate near grazing lost q^2 to rounding and returned R = 1, T = 0 as
+#     success (round 2).
 # Validated against an independent 50-digit implementation of the interface /
 # propagation formalism (Byrnes, arXiv:1603.02720) and Byrnes' own `tmm` package.
 
@@ -671,20 +687,23 @@ fn _diff_cdiv(ar, ai, br, bi, out) {
 }
 
 # One layer applied to a polarization's state
-#   st = [B_re, B_im, C_re, C_im, fe, fm],
-# where fm 2^(512 fe) is the substrate flux Re(u w*) carried in the SAME frame as
-# the scaled vector: [B; C] <- [[cd, m12], [m21, cd]] [B; C] is the true layer
-# times e^-b, so the flux is multiplied by e2 = e^-2b — the same rounded
-# exponential the layer's cosh/sinh were built from, so the two frames agree to
-# rounding with no large exp at the end. The vector is then rescaled by 2^-+256
-# (the flux by 2^-+512, exactly) while its largest component is outside
-# [2^-256, 2^256], and fm is kept in [2^-512, 2^512] by moving whole 2^512 steps
-# into fe.
+#   st = [B_re, B_im, C_re, C_im, fe, fm, am],
+# where fm 2^(512 fe) is the substrate flux Re(u w*) and am the flux absorbed so
+# far, both carried in the SAME frame as the scaled vector:
+# [B; C] <- [[cd, m12], [m21, cd]] [B; C] is the true layer times e^-b, so both
+# are multiplied by e2 = e^-2b — the same rounded exponential the layer's
+# cosh/sinh were built from, so the frames agree to rounding with no large exp at
+# the end. A lossy layer (lossy = 1) then adds what it absorbed: the flux
+# entering its front, Re(B C*) of the new vector, minus the flux leaving its back,
+# the old Re(B C*) carried into the new frame by e2. The vector is rescaled by
+# 2^-+256 while its largest component is outside [2^-256, 2^256] — fm by moving
+# whole 2^512 steps into fe, am by multiplying (am <= Re(B C*) <= |v|^2, so it
+# cannot overflow, and what underflows is below 2^-500 of the incident power) —
+# and fm is kept in [2^-512, 2^512] by further steps into fe.
 # (Round 1 of the review: the first cut summed Im delta into one exponent and
 # applied e^(-2 sum) at the end; the sum's rounding landed on T and A, 1.3e-12
-# relative through 200 absorbing layers, and a lossless 1600-layer stack
-# reported A = -5.6e-12.)
-fn _diff_rta_apply(st, cdr, cdi, m12r, m12i, m21r, m21i, e2) {
+# relative through 200 absorbing layers.)
+fn _diff_rta_apply(st, cdr, cdi, m12r, m12i, m21r, m21i, e2, lossy) {
     var br = load64(st);
     var bi = load64(st + 8);
     var cr = load64(st + 16);
@@ -700,6 +719,12 @@ fn _diff_rta_apply(st, cdr, cdi, m12r, m12i, m21r, m21i, e2) {
     var m = f64_max(f64_max(f64_abs(nbr), f64_abs(nbi)), f64_max(f64_abs(ncr), f64_abs(nci)));
     var fe = load64(st + 32);
     var fm = f64_mul(load64(st + 40), e2);
+    var am = f64_mul(load64(st + 48), e2);
+    if (lossy == 1) {
+        var pre = f64_mul(f64_add(f64_mul(br, cr), f64_mul(bi, ci)), e2);
+        var post = f64_add(f64_mul(nbr, ncr), f64_mul(nbi, nci));
+        am = f64_add(am, f64_sub(post, pre));
+    }
     # 2^256 = 0x4FF0000000000000, 2^-256 = 0x2FF0000000000000,
     # 2^512 = 0x5FF0000000000000, 2^-512 = 0x1FF0000000000000: exact rescalings.
     while ((f64_gt(m, 0x4FF0000000000000) & _diff_finite(m)) == 1) {
@@ -708,6 +733,7 @@ fn _diff_rta_apply(st, cdr, cdi, m12r, m12i, m21r, m21i, e2) {
         ncr = f64_mul(ncr, 0x2FF0000000000000);
         nci = f64_mul(nci, 0x2FF0000000000000);
         m = f64_mul(m, 0x2FF0000000000000);
+        am = f64_mul(am, 0x1FF0000000000000);
         fe = fe - 1;
     }
     while ((f64_lt(m, 0x2FF0000000000000) & f64_gt(m, 0)) == 1) {
@@ -716,6 +742,7 @@ fn _diff_rta_apply(st, cdr, cdi, m12r, m12i, m21r, m21i, e2) {
         ncr = f64_mul(ncr, 0x4FF0000000000000);
         nci = f64_mul(nci, 0x4FF0000000000000);
         m = f64_mul(m, 0x4FF0000000000000);
+        am = f64_mul(am, 0x5FF0000000000000);
         fe = fe + 1;
     }
     while ((f64_gt(fm, 0) & f64_lt(fm, 0x1FF0000000000000)) == 1) {
@@ -732,6 +759,7 @@ fn _diff_rta_apply(st, cdr, cdi, m12r, m12i, m21r, m21i, e2) {
     store64(st + 24, nci);
     store64(st + 32, fe);
     store64(st + 40, fm);
+    store64(st + 48, am);
     return 0;
 }
 
@@ -739,7 +767,7 @@ fn _diff_rta_apply(st, cdr, cdi, m12r, m12i, m21r, m21i, e2) {
 # (s: n0 cos0 and 1; p: n0 and cos0 — eta_0 = a0/b0 without dividing by a
 # grazing cosine). T = w fm 2^(512 fe) with w = 4 a0 b0/|a0 B + b0 C|^2, the power
 # of two applied in exact steps after the product so nothing underflows early;
-# A = w Re(B C*) - T. Writes out[0..2].
+# A = w am. Writes out[0..2].
 fn _diff_rta_finish(st, a0, b0, out) {
     var br = load64(st);
     var bi = load64(st + 8);
@@ -764,7 +792,7 @@ fn _diff_rta_finish(st, a0, b0, out) {
     }
     store64(out, r);
     store64(out + 8, t);
-    store64(out + 16, f64_sub(f64_mul(w, f64_add(f64_mul(br, cr), f64_mul(bi, ci))), t));
+    store64(out + 16, f64_mul(w, load64(st + 48)));
     return 0;
 }
 
@@ -793,7 +821,6 @@ fn multilayer_rta(wavelength, angle, n_incident, n_substrate, k_substrate, layer
     if ((f64_gt(n_incident, 0) & _diff_medium_ok(n_incident, 0)) == 0) { return PK_ERR_INVALID_PARAMETER; }
     if (_diff_medium_ok(n_substrate, k_substrate) == 0) { return PK_ERR_INVALID_PARAMETER; }
     if (f64_lt(f64_abs(angle), F64_PI_2) == 0) { return PK_ERR_INVALID_ANGLE; }
-    var beta = f64_mul(n_incident, _prk_sin(angle));
     # cos theta_0 near grazing as sin(pi/2 - |theta|), pi/2 split into its double
     # and the 6.1e-17 remainder: the subtraction is exact (Sterbenz) past pi/4, and
     # x87 fcos's ~2e-21 absolute error near pi/2 would otherwise be the whole of a
@@ -803,12 +830,16 @@ fn multilayer_rta(wavelength, angle, n_incident, n_substrate, k_substrate, layer
     if (f64_gt(f64_abs(angle), F64_PI_4) == 1) {
         c0 = _prk_sin(f64_add(f64_sub(F64_PI_2, f64_abs(angle)), 0x3C91A62633145C07));
     }
+    # (n0 cos theta0)^2 = n0^2 - beta^2: q^2 is formed against it below.
+    var n0c0 = f64_mul(n_incident, c0);
+    var n0c02 = f64_mul(n0c0, n0c0);
     var tmp[16];
-    # Substrate: q_s = principal sqrt(n~^2 - beta^2), eps_s = n~^2.
+    # Substrate: q_s = principal sqrt(n~^2 - beta^2), eps_s = n~^2, with
+    # n~^2 - beta^2 = (n - n0)(n + n0) + (n0 cos0)^2 - k^2 + 2ink.
     var esr = f64_mul(f64_sub(n_substrate, k_substrate), f64_add(n_substrate, k_substrate));
     var esi = f64_mul(f64_add(n_substrate, n_substrate), k_substrate);
-    var qs2r = f64_sub(f64_mul(f64_sub(n_substrate, beta), f64_add(n_substrate, beta)),
-      f64_mul(k_substrate, k_substrate));
+    var nsd = f64_mul(f64_sub(n_substrate, n_incident), f64_add(n_substrate, n_incident));
+    var qs2r = f64_sub(f64_add(nsd, n0c02), f64_mul(k_substrate, k_substrate));
     _diff_csqrt(qs2r, esi, &tmp);
     var qsr = load64(&tmp);
     var qsi = load64(&tmp + 8);
@@ -816,14 +847,15 @@ fn multilayer_rta(wavelength, angle, n_incident, n_substrate, k_substrate, layer
     # vector divided through by eta_s so a substrate at exactly its critical angle
     # (q_s = 0, eta_p infinite) needs no special case. The flux Re(u w*) is
     # Re(eta_s) and Re(1/eta_s) respectively.
-    var sts[48];
-    var stp[48];
+    var sts[56];
+    var stp[56];
     store64(&sts, F64_ONE);
     store64(&sts + 8, 0);
     store64(&sts + 16, qsr);
     store64(&sts + 24, qsi);
     store64(&sts + 32, 0);
     store64(&sts + 40, qsr);
+    store64(&sts + 48, 0);
     _diff_cdiv(qsr, qsi, esr, esi, &tmp);
     store64(&stp, load64(&tmp));
     store64(&stp + 8, load64(&tmp + 8));
@@ -831,6 +863,7 @@ fn multilayer_rta(wavelength, angle, n_incident, n_substrate, k_substrate, layer
     store64(&stp + 24, 0);
     store64(&stp + 32, 0);
     store64(&stp + 40, load64(&tmp));
+    store64(&stp + 48, 0);
     var kap0 = f64_div(F64_TAU, wavelength);
     var j = num_layers - 1;
     while (j >= 0) {
@@ -842,7 +875,8 @@ fn multilayer_rta(wavelength, angle, n_incident, n_substrate, k_substrate, layer
         if ((f64_ge(d, 0) & _diff_finite(d)) == 0) { return PK_ERR_INVALID_PARAMETER; }
         var epr = f64_mul(f64_sub(n, k), f64_add(n, k));
         var epi = f64_mul(f64_add(n, n), k);
-        var q2r = f64_sub(f64_mul(f64_sub(n, beta), f64_add(n, beta)), f64_mul(k, k));
+        var nd = f64_mul(f64_sub(n, n_incident), f64_add(n, n_incident));
+        var q2r = f64_sub(f64_add(nd, n0c02), f64_mul(k, k));
         _diff_csqrt(q2r, epi, &tmp);
         var qr = load64(&tmp);
         var qi = load64(&tmp + 8);
@@ -896,11 +930,14 @@ fn multilayer_rta(wavelength, angle, n_incident, n_substrate, k_substrate, layer
         # P = q^2 S. s: m12 = -iS, m21 = -iP. p: m12 = -iP/eps, m21 = -i eps S.
         var pvr = f64_sub(f64_mul(q2r, sr), f64_mul(epi, si));
         var pvi = f64_add(f64_mul(q2r, si), f64_mul(epi, sr));
-        _diff_rta_apply(&sts, cdr, cdi, si, f64_neg(sr), pvi, f64_neg(pvr), e2);
+        # Lossy iff Im n~^2 = 2nk != 0 (n = 0 with k > 0 is a lossless Drude metal).
+        var lossy = 0;
+        if ((epi & _PRK_ABS) != 0) { lossy = 1; }
+        _diff_rta_apply(&sts, cdr, cdi, si, f64_neg(sr), pvi, f64_neg(pvr), e2, lossy);
         _diff_cdiv(pvr, pvi, epr, epi, &tmp);
         var esr2 = f64_sub(f64_mul(epr, sr), f64_mul(epi, si));
         var esi2 = f64_add(f64_mul(epr, si), f64_mul(epi, sr));
-        _diff_rta_apply(&stp, cdr, cdi, load64(&tmp + 8), f64_neg(load64(&tmp)), esi2, f64_neg(esr2), e2);
+        _diff_rta_apply(&stp, cdr, cdi, load64(&tmp + 8), f64_neg(load64(&tmp)), esi2, f64_neg(esr2), e2, lossy);
         j = j - 1;
     }
     var rs[24];

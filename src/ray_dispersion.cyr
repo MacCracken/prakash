@@ -205,6 +205,9 @@ fn sellmeier_n_at(coef, wavelength_um) {
 fn _sellmeier_f012_term(b, c, wl, acc) {
     if ((b & 0x7FFFFFFFFFFFFFFF) == 0) { return 1; }
     var l2 = f64_mul(wl, wl);
+    # l^2 underflowing to 0 (l < 1.6e-162 um) makes every term exactly 0 and chi a
+    # true +0 that passes the chi < 0 test (round 2 of the review).
+    if (l2 == 0) { return 0; }
     var d = f64_sub(l2, c);
     if (f64_gt(f64_abs(d), _disp_eps15()) == 0) { return 0; }
     var g = f64_div(f64_mul(F64_TWO, f64_mul(b, c)), d);
@@ -219,8 +222,8 @@ fn _sellmeier_f012_term(b, c, wl, acc) {
 # into out[0..2]:  f  = 1 + chi, chi = sum B l^2/(l^2 - C),
 #                  f' = sum -2 B C l/(l^2 - C)^2,
 #                  f''= sum 2 B C (3 l^2 + C)/(l^2 - C)^3.
-# Returns 1, or 0 for a null set, a wavelength that is not finite and positive,
-# a term within sellmeier_n_at's pole guard, chi < 0 — the n^2 < 1 region
+# Returns 1, or 0 for a null set, a wavelength that is not finite and positive
+# or whose square underflows, a term within sellmeier_n_at's pole guard, chi < 0 — the n^2 < 1 region
 # sellmeier_n_at clamps to 1, where its derivatives would describe a curve it
 # does not return — or any of f, f', f'' not finite. chi is summed on its own and
 # tested before 1 is added: below l = 6e-10 um silica's first term is under half
