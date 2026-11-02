@@ -2,6 +2,281 @@
 
 ## [Unreleased]
 
+## [2.15.1] - 2026-11-02 — a P(-1) audit of the whole library, and the documentation brought up to date
+
+The first whole-library audit since 2.4.8. Ten modules or major features have landed since then
+(`wave_beam`, the aberrated OTF, `ray_grin`, `wave_doe`, absorbing multilayers and fiber
+dispersion, `ray_prt`, `wave_focus`, `lens_aberration`, `spectral_fluor`), each reviewed only as
+it shipped.
+
+The method:
+- mechanical sweeps across all 33 modules for the classes earlier audits found by hand: unchecked
+  allocations, handles and buffers dereferenced before a null check, per-call scratch that a bump
+  allocator never frees, and pure functions without `#must_use`;
+- four independent reviews in parallel, by module group, each judging the code against the
+  literature rather than its own comments. `wave_focus`, `lens_aberration` and
+  `spectral_fluor` had each been reviewed as they shipped in the last three releases, and are
+  out of this pass's scope;
+- every finding reproduced before it was repaired, and given a test that fails on the old code.
+
+No API is removed or renamed. Toolchain unchanged, cyrius 6.7.18.
+
+Suite **13,681 → 14,187 assertions across 39 suites**, 0 failed. Every new group was run against
+the 2.15.0 code and fails there, except the R_p/R_s pin, which was right and simply never read.
+`cyrius audit` exits 0 with its bench section passing; `deps --verify` 114/114; `#must_use`
+540 → **551**, 0 lost; reference coverage **550/550**. Benchmarks 184 → **185**. Both consumer-link
+checks pass: the pinned toolchain bare, and cyrius 6.6.13's stdlib.
+
+### Fixed
+- **Fourteen functions wrote through a null output pointer or read a null input buffer**
+  (SIGSEGV). This is the class 2.2.8 repaired for `multilayer_rt` and `pbr_integrate_brdf_lut`,
+  and 2.7.0 for the OTF entry points; nothing had swept for the rest. They now refuse, writing
+  nothing:
+  - outputs: `atm_sky_color_rgb`, `atm_sunlight_color`, `atm_sunset_gradient`,
+    `br_stellar_temperature_to_rgb`, `lens_depth_of_field`, `lens_petzval_radius`,
+    `pbr_iridescence_rgb`, `pbr_sample_ggx`, `pbr_sample_cosine_hemisphere`,
+    `pbr_split_sum_scale_bias`, `fresnel_integral_cs`, `zernike_noll_to_nm`;
+  - input buffers: `fraunhofer_1d` and `huygens_fresnel_1d`, NaN for a null aperture with
+    pairs > 0.
+
+  Each returned 0 before and still returns 0 (`PK_ERR_NONE`) on success, so no caller's success
+  check moves. A null now gives `PK_ERR_INVALID_PARAMETER`. `lens_petzval_radius` keeps 1 for
+  a curved field and 0 for a flat one.
+- **`zernike_noll_to_nm` answered indices that do not exist.** Noll indices start at 1:
+  - j = 0 returned piston's (0, 0) as success;
+  - a negative j returned garbage as success;
+  - a j near 2⁶³ looped for minutes on its way to an overflow.
+
+  It now refuses j outside [1, 2³¹ − 1].
+- **The colour rendering index kept 392 bytes of internal scratch per call** on an allocator
+  that never frees: the 88-byte context and four 16-byte (u, v), (c, d) pairs. They are stack
+  locals now. One Ra costs 1528 → 1136 bytes and one R_i 968 → 800, with the values unchanged
+  to the bit. The rest is the reference spectrum and the XYZ results the public API returns.
+- **`cri_special` and `color_rendering_index` returned 0.0 for an internal failure**, a
+  legitimate score. The 2.2.8 note above `cri_special` promised NaN, and they now return it.
+- **wave_core, wave_polarization, wave_airy, wave_fabry_perot — five wrong results:**
+  - `thin_film_reflectance` added the reflection's π to the phase and then halved it with the
+    rest, returning cos²(2πnd/λ), which is 1 − R. A vanishing film read 1, its brightest. It is
+    sin²(2πnd/λ) (Hecht 9.4.1).
+  - `polarization_through_polarizer` applied Malus to atan2(e_y, e_x) and ignored the phase.
+    Circular light passed whole at any angle, and linear light at −45° passed whole through a
+    polarizer at +45°. It is the Jones projection now. The Jones phase convention is documented.
+  - `biref_mica` used n_α = 1.5601 and n_β = 1.5936, a pair a cleaved sheet never sees, so Δn was
+    0.0335. Every mica retardation was 8.2× too large. It is n_β = 1.5936, n_γ = 1.5977: Δn 0.0041,
+    and a 589 nm quarter wave of 35.9 µm.
+  - `stokes_degree_of_polarization` and `stokes_ellipticity_angle` compared with an absolute
+    1e-15, so a fully polarized vector of intensity 1e-16 had DOP 0. Both are ratios and now
+    test for exact zero.
+  - `airy_first_zero` used 1.2196705, 5e-7 from j₁,₁/π = 1.2196698913 (A&S Table 9.5).
+  - Fabry-Pérot took any reflectance: R = −0.5 gave T = 9 at a half order. The coefficient,
+    finesse, transmittance and resolving power are NaN unless R is in [0, 1).
+  - `grating_maxima` ran every order to `max_order`, hours for 2⁴⁰. It now stops at the first
+    order that does not propagate, and checks its `vec`.
+- **wave_diffraction:**
+  - **The Fresnel integrals were the A&S 7.3.32 fit, good to 2e-3 at best.** Against a
+    120-digit reference they were 2.2e-3 off (S at 2.08) and 6.2e-3 relative (C at 1.81). They
+    jumped 1.6e-3 at the x = 1 seam between a three-term series and the fit, so C was
+    discontinuous at its own first maximum. From x = 1e10 they returned NaN. They are now
+    Moshier's Cephes rational fits, with the phase reduced from an exact x²: 2.6e-16 absolute and
+    5.0e-16 relative at 4786 points over [0, 40), and finite at every x. The suite pins them at
+    every eighth to x = 12, at both seams and out to 1e15.
+  - `multilayer_rt` took |θ| ≥ π/2. Past grazing the incident admittance went negative and
+    R_s > 1, T_s < 0 came back as a result. It refuses those angles and NaN, as `multilayer_rta`
+    does.
+  - A `multilayer_rt` layer at exactly its critical angle has cos θ = 0. s evaluated 0/0 = NaN
+    and p reduced the layer to the identity. Both now use the analytic limit matrices, and agree
+    with `multilayer_rta` to 1e-13.
+- **Ray tracing:**
+  - **`trace_recursive` sent every crossing into the surface's n_after,** whichever way the ray
+    travelled. A ray reflected inside a glass slab crossed the front face glass-to-glass
+    (R = 0) and escaped at n = 1.5, so the slab's multiple-reflection series stopped after one
+    term: T = 0.9216, R = 0.0784. A crossing toward −z now enters the medium in front of the
+    surface, and the series sums to Born & Wolf's 12/13 and 1/13. The off-axis biconvex tree the
+    suite pinned at 8 segments and 3 interactions was itself wrong. It is 11 and 4. A null
+    config SIGSEGVed.
+  - `ray_fan_sagittal` tilted the field into x-z as well as spreading the rays in x, so it was
+    the meridional fan turned 90°. Its field is now in y, shared with the meridional fan's
+    chief ray.
+  - `find_system_properties` returned reduced distances:
+    - `bfd` was 1/φ for a single surface into glass, where a traced ray crosses the axis at
+      n′/φ (20 against 30);
+    - `ffd` never saw the object medium;
+    - `entrance_pupil` was a hard-coded 0, and `exit_pupil` was bfd − efl, the rear principal
+      plane.
+
+    Now: BFD = −n′y/(n′u′), FFD = n times the reverse trace's, and NaN for both pupils, since a
+    prescription has no stop. A radius of 0 or NaN is refused. Pinned against Hecht's thick-lens
+    formulas from water through glass into n′ = 1.2.
+  - `prescription_doublet` with v₁ = v₂ built a lens of infinite radii. It is refused.
+  - `optical_path_length` dropped the last leg without a word when the image plane lay behind the
+    final ray. It is subtracted now, the sign the OPD functions use. A ray parallel to the plane
+    is refused.
+  - Back-side incidence (d·n > 0) is refused by `ray_refract_3d`, `ray_snell_3d` and
+    `fresnel_unpolarized` (past 90°) with `PK_ERR_INVALID_ANGLE`. `ray_snell_3d` had returned
+    R = 25.
+  - At the angle `ray_critical_angle` returns, about one n₁ in three rounded to sin θ_t = 1 + 1 ulp,
+    and `ray_snell` and `fresnel_unpolarized` reported TIR at the angle that defines its onset.
+    A sine at most 4 ulps above 1 is now grazing; 1e-9 rad beyond is still TIR.
+  - Indices that are ≤ 0, NaN or infinite are refused:
+    - by `ray_snell`, `ray_critical_angle` (n₂ = 0 gave 0, n₂ = −1 gave −0.73 rad) and
+      `fresnel_unpolarized` (NaN with no error);
+    - by `fiber_na`: (−1.5, −1.4) gave NA = 0.54;
+    - by `medium_custom`, which took NaN and ∞.
+  - `sellmeier_n_at` clamped n² < 1 to 1.0, so just below a pole, where n² = −5e6, it answered
+    vacuum. It also dropped a term at its pole, read λ = 0 and NaN as 1.0, and a negative λ as
+    n(|λ|). It is now NaN for a wavelength that is not finite and > 0, at a pole, and where
+    n² < 0. Between 0 and 1 it returns the model's own value. `schott_n_at`, `cauchy_n_at` and
+    `conrady_n_at` share the wavelength domain, and `prism_dispersion` reports
+    `PK_ERR_WAVELENGTH_RANGE`.
+  - `trace_sequential_polarized`, `prism_angular_spread` and `lens_cardinal_points` returned 0
+    without an error code when an allocation failed. They now write `PK_ERR_ALLOCATION`.
+  - Pins tightened where the old ones could not fail. `R_p/R_s` had never been read; it is pinned
+    at 45° and at Brewster. Others went:
+    - MFD, ±2 µm → 1e-17 m;
+    - mismatched coupling, a range → 16/25;
+    - gold's reflectance, 0.82 ± 0.05 → 0.787563.
+- **Zernike, patterns, beams:**
+  - **`zernike_radial` summed the explicit series with i64 factorials.** (n − s)! passes 2⁶³ at
+    n = 21, so from there every value was garbage: R₂₂⁰(1) = −1.2e3. Below that, the
+    alternating terms cost R₂₀⁰ six digits near ρ = 1. It is the Jacobi-polynomial recurrence now.
+    It is within 1.4e-15 of exact rational arithmetic at 84 points through n = 60, and
+    Rₙᵐ(1) = 1 exactly through n = 200.
+  - `zernike_nm_to_noll` mapped pairs that are not Zernikes onto real indices: (2, 1) onto
+    astigmatism and (1, 0) onto tilt. They return 0. Noll's table is pinned through j = 28,
+    and the round trip through j = 5000.
+  - `zernike_wf_evaluate` dropped coefficients below 1e-15, which in metres is a wavefront of
+    1e-15 m. It counts every nonzero one now.
+  - `zernike_wf_to_grid(wf, 1)` evaluated at 0/0 and left the cell 0. It is the pupil centre.
+  - `zernike_wf_peak_to_valley` of no samples was 0, a perfect wavefront. It is NaN.
+  - `zernike_wf_strehl_ratio`, `interference_pattern` and `psf_from_wavefront` took λ ≤ 0 or
+    NaN. `diffraction_pattern_circular` took a NaN or negative radius. All are refused.
+  - `point_source_new` had no length header, so `point_source_set` read the heap word before it as
+    a length and wrote past the 32-byte source, as success. It is a one-element array now.
+  - `spectrum_strip_range` painted NaN red, and both strip functions leaked a 24-byte scratch
+    per call.
+  - **wave_beam:** `beam_m2`, `beam_parameter_product`, `oam_flux` and
+    `spiral_phase_plate_step` overflowed to +∞ from finite inputs and returned it with
+    `PK_ERR_NONE`. `gaussian_divergence` underflowed to 0 the same way. All are refused now.
+    `beam_second_moment_radius` squared offsets in metres, so dx = 1e200 gave W = ∞. It forms
+    its moments in sample units.
+  - The pins that were too weak to fail are pinned against textbook polynomials and Noll's
+    table: the named-aberration constructors, interior radial values, and Noll indices past
+    j = 11. The PSF is pinned by exact identities: centre = N², Parseval's total = n²N.
+- **lens:**
+  - **`lens_mtf_through_focus` multiplied the in-focus MTF by |sinc(πW₀₂₀v)|,** which is not the
+    defocused OTF at any defocus. At f/2.8, 550 nm and 200 c/mm it read 0.606 at Δz = 10 µm,
+    where the pupil gives 0.452, and 0.582 at 20 µm, where it gives 0.132. It could never show
+    the contrast reversal past the first zero. It is now the defocused pupil's autocorrelation
+    (`lens_mtf_seidel` with W₀₂₀ = Δz/(8N²)). It matches a separate one-dimensional
+    quadrature to 1e-12 at 15 points, including the reversal at 40 µm.
+  - `lens_lensmaker_focal_length`, `lens_thick_focal_length` and `lens_cardinal_points` took
+    R = 0, and 1/0 made f = 0 as success. They refuse 0 and NaN. An infinite radius is still a
+    plane.
+  - `lens_mtf_diffraction_limited` read every negative frequency as 1. The MTF is even.
+- **pbr:**
+  - **`pbr_iridescence_fresnel` lost the sign of the amplitude product and modelled s only.**
+    A soap film has r₀₁ = −r₁₂, so a vanishing film read 0.077 (the quarter-wave maximum) and a
+    quarter-wave film read 0. It is now the Airy sum with signed amplitudes, s and p averaged,
+    and 1 under total reflection. It agrees with a 50-digit characteristic-matrix computation
+    to 6e-17 at ten films.
+  - `pbr_sss_profile_burley` returned 1/(2πd²) below r = 1e-15 and called it the limit. There
+    is none: it went from 0.159 at r = 1e-16 to 4.1e13 at 1e-15. It is +∞ at r = 0, and NaN for
+    d ≤ 0 (d < 0 gave a negative profile).
+  - `pbr_subsurface_diffuse` used F_ss90 = roughness², which is not Burley's (l·h)²·roughness
+    at any l·h, and returned 2.5e13 at grazing. It is Burley at l·h = 1, and 0 for n·l or
+    n·v ≤ 0, as Disney's code is.
+  - GGX (isotropic and anisotropic) clamped a back-facing half vector to n·h = 0 and answered
+    α²/π. It is 0, χ⁺(n·h).
+  - `pbr_henyey_greenstein` returned −0.021 for g = 2, and 0 at the forward peak of any g
+    within ~1e-8 of 1, where the true value is up to ~1e15. It is NaN unless |g| < 1, and the
+    floor is gone.
+  - `pbr_ior_to_f0(−1)` gave +∞ and `pbr_sss_transmittance` with negative extinction gave
+    2.72. Both are NaN.
+  - `pbr_clearcoat_geometry` was documented as Kelemen. It is the G = 1 Cook-Torrance
+    denominator, and now says so.
+- **spectral:**
+  - `planck_radiance` read λ = 0 as 0 and a negative λ as a negative radiance. Both are NaN now.
+  - `color_rendering_index` scored an 800 K blackbody 82.9 against its own Planckian
+    reference. The CCT search converges on its 1000 K edge, so the reference was wrong.
+    CIE 13.3's own limit now applies: NaN when the source is more than DC = 5.4e-3 from the
+    Planckian locus at its CCT. Every illuminant the library ships passes; the farthest is E,
+    at 4.4e-3.
+  - Per-call scratch the allocator never frees, now kept on the stack:
+    - `xyz_to_srgb`: 48 bytes;
+    - `rgb_to_u8`: 24 bytes;
+    - `spd_to_srgb`: 96 bytes;
+    - `spectral_band_similarity`: 784 bytes. It allocates nothing, and the reference SPD is a
+      stack `Spd`.
+
+    Each allocates its result only, and the values are bit-identical.
+- **atmosphere, bridge:**
+  - `atm_air_mass` read a NaN zenith as the horizon (37.92), and a negative angle as −z in the
+    degree term (1.99948 at −60° against 1.99429). It takes |z| now, and gives NaN for NaN or ∞.
+  - `br_spectral_class_to_temperature` answered G's 5500 K for every unknown letter, so G's own
+    test could not fail. Unknown letters are NaN now.
+  - `br_color_index_to_temperature` went negative past B − V = −0.674 (−9436 K at −1). It is NaN
+    there.
+- **serialize, ai:**
+  - A number literal past the double range decoded as ±∞, as success. It is refused now; the
+    only infinity on the wire is `null`.
+  - An unbounded aperture encoded as `null` and was refused on the way back in. It decodes to +∞.
+  - `lens_type_to_json` laundered `LENS_TYPE_INVALID` and every unknown code into "Diverging".
+    It returns 0.
+  - `spd_from_json` took a step ≤ 0.
+  - A null name (`medium_custom`, `prescription_new`) or endpoint (`ai_*_config_new`) was taken
+    at construction, and the encoder then read it off address 0. Both are refused now, at
+    construction and in the encoders.
+  - An endpoint or key holding a control byte is refused, which closes CR-LF request
+    splitting through the URL.
+  - A non-string `api_key` is refused. It used to be dropped without a word.
+
+### Changed — documentation
+- **Conventions written down:**
+  - `wave_core`: the Jones phase convention;
+  - `wave_doe`: its time convention, e^(−iωt), opposite to `wave_beam`'s e^(+iωt), so the two
+    lens phases read with opposite signs;
+  - `ray_prt`: "e^(−iωt) everywhere else in prakash" was false, since `wave_beam` is not.
+- `docs/architecture/math.md` gains sections and corrects others:
+  - new: Vectorial Focusing (2.13.0), photometry, CIE 13.3 CRI, the Zernike radial recurrence,
+    the Jones polarizer and the through-focus OTF;
+  - corrected: thin film, the Fresnel integrals, the Airy zero, Fabry-Pérot, Sellmeier, and
+    the Burley, iridescence, clearcoat and Henyey-Greenstein entries.
+- `docs/guides/upgrading.md` lists every value this release moves and every new refusal.
+- `README.md`:
+  - a paragraph on how errors are reported;
+  - the tag and counts.
+- `SECURITY.md` has a supported-versions table.
+- `CONTRIBUTING.md`:
+  - the `err_out` precondition and null refusals;
+  - that correctness comes from the literature, not the Rust original, with the modules that
+    were never ported;
+  - same-binary or interleaved benchmarking;
+  - `cyrius audit`'s exit code, which hides a bench that does not compile.
+- `docs/architecture/overview.md` carries this release's per-module test counts.
+
+### Performance
+Measured two ways, both on a host whose load average sat near 35 from another session's run:
+- the whole suite, 2.15.0 export against this tree, interleaved three rounds each: per-row medians
+  give a median ratio of 0.995 and a geometric mean of 1.006, so no whole-suite movement. Single
+  rows swing from −68% to +326% on code that did not change, so none is quoted from it;
+- the functions whose cost changed on purpose, old and new copies in ONE binary, four rounds,
+  medians. An A/A pair of the same function read 1028 against 707 ns, a 45% spread, so a smaller
+  difference than that is not claimed.
+
+What clears that spread:
+- `zernike_radial` (8, 2): 520 → 110 ns (−79%). The Jacobi recurrence is cheaper than the
+  factorial sum it replaced, as well as right.
+- `fresnel_integral_c` at x = 2.3: 320 → 972 ns (about 3×, 2.2–3.2× across the A/A spread). This
+  is the price of 3e-16 accuracy instead of 2e-3: two rational fits of degree 10, and an exact x²
+  for the phase.
+- `lens_mtf_through_focus`: 0.31 µs → 1.03 ms per defocus point. It now integrates the defocused
+  pupil's autocorrelation on at least 64 × 64 nodes instead of evaluating a formula that was wrong.
+  A new bench row, `lens/mtf_through_focus` (185 benchmarks), records it.
+
+The scratch removed from `xyz_to_srgb`, `spd_to_srgb`, `rgb_to_u8` and `spectral_band_similarity`
+is claimed in bytes, which `alloc_used` measures exactly: 48, 96, 24 and 784 per call. Their time
+differences sit inside the A/A spread.
+
 ## [2.15.0] - 2026-11-02 — Fluorescence
 
 Closes the 2.15.0 roadmap row and the gap `docs/research/physics-completeness-audit.md` §18

@@ -964,4 +964,62 @@ if (_rs_p2 != 0) {
     assert_eq(pattern2d_max_intensity(_rs_p2), _rs_m, "the peak is bit-identical after reset + forget");
 }
 
+# 2.15.1: a null output pointer or a null input buffer is refused, not written through or
+# read from. Each of these took the process down with SIGSEGV through 2.15.0, the class 2.2.8
+# repaired for multilayer_rt and pbr_integrate_brdf_lut and 2.7.0 for the OTF entry points;
+# the 2.15.1 sweep found the fourteen it had not reached.
+test_group("2.15.1 null outputs and inputs");
+var nb[24];
+assert_eq(atm_sky_color_rgb(F64_HALF, F64_ONE, 0), PK_ERR_INVALID_PARAMETER, "atm_sky_color_rgb: null out");
+assert_eq(atm_sky_color_rgb(F64_HALF, F64_ONE, &nb), PK_ERR_NONE, "atm_sky_color_rgb: out given");
+assert_eq(atm_sunlight_color(F64_HALF, 0), PK_ERR_INVALID_PARAMETER, "atm_sunlight_color: null out");
+assert_eq(atm_sunset_gradient(F64_HALF, F64_HALF, F64_HALF, 0), PK_ERR_INVALID_PARAMETER,
+  "atm_sunset_gradient: null out");
+assert_eq(br_stellar_temperature_to_rgb(f64_from(5800), 0), PK_ERR_INVALID_PARAMETER, "br_stellar: null out");
+assert_eq(br_stellar_temperature_to_rgb(f64_from(5800), &nb), PK_ERR_NONE, "br_stellar: out given");
+assert_eq(lens_depth_of_field(f64_from(50), f64_from(8), _h_frac(3, 100), f64_from(3000), 0), PK_ERR_INVALID_PARAMETER,
+  "lens_depth_of_field: null out");
+assert_eq(lens_petzval_radius(_h_frac(1, 100), 0), PK_ERR_INVALID_PARAMETER, "lens_petzval_radius: null out");
+assert_eq(lens_petzval_radius(_h_frac(1, 100), &nb), 1, "lens_petzval_radius: out given, curved field");
+assert_eq(lens_petzval_radius(ZERO, 0), 0, "lens_petzval_radius: a flat field writes nothing, so null is fine");
+assert_eq(pbr_iridescence_rgb(F64_ONE, _h_frac(13, 10), _h_frac(15, 10), f64_from(300), F64_ONE, 0),
+  PK_ERR_INVALID_PARAMETER, "pbr_iridescence_rgb: null out");
+assert_eq(pbr_sample_ggx(F64_HALF, F64_HALF, F64_HALF, 0), PK_ERR_INVALID_PARAMETER, "pbr_sample_ggx: null out");
+assert_eq(pbr_sample_cosine_hemisphere(F64_HALF, F64_HALF, 0), PK_ERR_INVALID_PARAMETER,
+  "pbr_sample_cosine_hemisphere: null out");
+assert_eq(pbr_split_sum_scale_bias(F64_HALF, F64_HALF, 0), PK_ERR_INVALID_PARAMETER, "pbr_split_sum: null out");
+assert_eq(fresnel_integral_cs(F64_ONE, 0, &nb), PK_ERR_INVALID_PARAMETER, "fresnel_integral_cs: null c_out");
+assert_eq(fresnel_integral_cs(F64_ONE, &nb, 0), PK_ERR_INVALID_PARAMETER, "fresnel_integral_cs: null s_out");
+assert_eq(fresnel_integral_cs(F64_ONE, &nb, &nb + 8), PK_ERR_NONE, "fresnel_integral_cs: both given");
+assert_eq(zernike_noll_to_nm(4, 0, &nb), PK_ERR_INVALID_PARAMETER, "zernike_noll_to_nm: null n_out");
+assert_eq(zernike_noll_to_nm(4, &nb, 0), PK_ERR_INVALID_PARAMETER, "zernike_noll_to_nm: null m_out");
+assert_eq(zernike_noll_to_nm(4, &nb, &nb + 8), PK_ERR_NONE, "zernike_noll_to_nm: j = 4");
+assert((load64(&nb) == 2) & (load64(&nb + 8) == 0), "zernike_noll_to_nm: j = 4 is defocus, (2, 0)");
+# Noll indices start at 1. j = 0 used to return piston's (0, 0) and j < 0 garbage, both
+# reported as success; a j past 2^31 - 1 looped for minutes on its way to an overflow.
+store64(&nb, 77);
+assert_eq(zernike_noll_to_nm(0, &nb, &nb + 8), PK_ERR_INVALID_PARAMETER,
+  "zernike_noll_to_nm: j = 0 is not a Noll index");
+assert_eq(load64(&nb), 77, "zernike_noll_to_nm: a refusal writes nothing");
+assert_eq(zernike_noll_to_nm(0 - 3, &nb, &nb + 8), PK_ERR_INVALID_PARAMETER, "zernike_noll_to_nm: j = -3");
+assert_eq(zernike_noll_to_nm(2147483648, &nb, &nb + 8), PK_ERR_INVALID_PARAMETER, "zernike_noll_to_nm: j = 2^31");
+assert(_h_bits(fraunhofer_1d(0, 4, _h_frac(55, 100000), _h_frac(1, 100)), NAN) == 1,
+  "fraunhofer_1d: null aperture, 4 pairs");
+assert(_h_bits(huygens_fresnel_1d(0, 4, _h_frac(55, 100000), F64_ONE, ZERO), NAN) == 1,
+  "huygens_fresnel_1d: null aperture, 4 pairs");
+assert(_h_bits(fraunhofer_1d(0, 0, _h_frac(55, 100000), _h_frac(1, 100)), ZERO) == 1,
+  "fraunhofer_1d: no pairs, no light, null or not");
+
+# 2.15.1: a colour rendering index kept 392 bytes of internal scratch per call, on an allocator
+# that never frees: the 88-byte context and four 16-byte (u, v), (c, d) pairs. They live on the
+# caller's stack now; what remains is the reference spectrum and the XYZ results the public
+# API returns. 1528 -> 1136 bytes for one Ra, the values unchanged to the bit.
+test_group("2.15.1 CRI scratch");
+var cri_f2 = illuminant_f2();
+var cri_w = color_rendering_index(cri_f2);
+var cri_u0 = alloc_used();
+var cri_ra = color_rendering_index(cri_f2);
+assert(alloc_used() - cri_u0 <= 1136, "one Ra allocates at most 1136 bytes");
+assert(_h_bits(cri_ra, cri_w) == 1, "and the same value as the call before it");
+
 var r = assert_summary();

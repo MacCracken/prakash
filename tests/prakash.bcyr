@@ -680,6 +680,14 @@ var _otf_im = 0;
 # Aberrated OTF of a Seidel wavefront (0.5 waves coma + 1 wave defocus), tangential,
 # at v = 0.3 with 64 Gauss-Legendre nodes per axis: 8192 wavefront evaluations.
 fn b_lens_otf_seidel() { var r = lens_otf_seidel(_otf_wc, F64_ONE, _bf(3, 10), 1, 64, &_otf_re, &_otf_im); return 0; }
+var _tf_dz[8];
+var _tf_out[16];
+# 2.15.1: one through-focus point, f/2.8 at 550 nm, 200 c/mm, 10 um of defocus. Since 2.15.1 it is
+# the defocused pupil's autocorrelation (64 nodes per axis), not a sinc factor.
+fn b_mtf_through_focus() {
+    lens_mtf_through_focus(_bf(55, 100000), _bf(28, 10), f64_from(200), &_tf_dz, 1, &_tf_out);
+    return 0;
+}
 # ── GRIN ray tracing (2.8.0) ────────
 var _grin_sf = 0;
 var _grin_lu = 0;
@@ -1178,6 +1186,8 @@ fn main() {
     bench("beam/interface", &b_beam_interface, 500000);
     bench("beam/lg_mode_field_60_60", &b_lg_mode_field_60, 50000);
     bench("lens/otf_seidel_64", &b_lens_otf_seidel, 500);
+    store64(&_tf_dz, _bf(1, 100));
+    bench("lens/mtf_through_focus", &b_mtf_through_focus, 200);
     bench("grin/index", &b_grin_index, 1000000);
     bench("grin/selfoc_100_steps", &b_grin_selfoc_100, 20000);
     bench("grin/luneburg_ball", &b_grin_luneburg, 20000);

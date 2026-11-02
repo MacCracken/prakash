@@ -2,6 +2,7 @@
 # from rust-old/src/lens.rs (inline #[cfg(test)] mod).
 
 include "src/error.cyr"
+include "src/wave_zernike.cyr"
 include "src/lens.cyr"
 include "src/ray_core.cyr"
 include "src/ray_fresnel.cyr"
@@ -498,4 +499,58 @@ store64(MG, f64_neg(F64_ONE));
 _assert_near(lens_system_magnification(MG, 1), f64_neg(F64_ONE), EPS, "system mag single");
 _assert_near(lens_system_magnification(MG, 0), F64_ONE, EPS, "system mag empty = 1");
 
+# ── 2.15.1: through-focus MTF is the defocused pupil's autocorrelation ────────
+# A focus shift dz is W020 = dz/(8 N^2); the reference integrates the sheared-pupil overlap with one
+# dimension in closed form, OTF(v) = (4/(pi b)) int_0^sqrt(1-v^2) sin(b (sqrt(1-y^2) - v)) dy,
+# b = 8 pi W020 v/lambda, by 400-node Gauss-Legendre (200 and 400 nodes agree to 7e-15). The old
+# |sinc(pi W020 v)| attenuation read 0.606 at dz = 10 um, 200 c/mm where the pupil gives 0.452,
+# and 0.582 at 20 um where it gives 0.132. At 40 um the OTF reverses sign; the MTF is its modulus.
+test_group("2.15.1 through-focus MTF");
+var _tfd = alloc(5 * 8);
+var _tfo = alloc(5 * 16);
+if ((_tfd == 0) | (_tfo == 0)) { syscall(60, 1); }
+store64(_tfd + 0, _fd(2, 1000));
+store64(_tfd + 8, _fd(1, 100));
+store64(_tfd + 16, _fd(2, 100));
+store64(_tfd + 24, _fd(4, 100));
+store64(_tfd + 32, _fd(0 - 1, 100));
+lens_mtf_through_focus(_fd(55, 100000), _fd(28, 10), f64_from(50), _tfd, 5, _tfo);
+_assert_near(load64(_tfo + 8), 0x3FECD3D7D6A715BE, _fd(1, 1000000000000), "dz = 0.002 mm, 50 c/mm: MTF 0.900860");
+_assert_near(load64(_tfo + 24), 0x3FEBEAF65C51AE08, _fd(1, 1000000000000), "dz = 0.01 mm, 50 c/mm: MTF 0.872432");
+_assert_near(load64(_tfo + 40), 0x3FE932C9E683B811, _fd(1, 1000000000000), "dz = 0.02 mm, 50 c/mm: MTF 0.787450");
+_assert_near(load64(_tfo + 56), 0x3FE007B87C0C0DC9, _fd(1, 1000000000000), "dz = 0.04 mm, 50 c/mm: MTF 0.500942");
+_assert_near(load64(_tfo + 72), 0x3FEBEAF65C51AE08, _fd(1, 1000000000000), "dz = -0.01 mm, 50 c/mm: MTF 0.872432");
+lens_mtf_through_focus(_fd(55, 100000), _fd(28, 10), f64_from(200), _tfd, 5, _tfo);
+_assert_near(load64(_tfo + 8), 0x3FE36C9250ACC4AC, _fd(1, 1000000000000), "dz = 0.002 mm, 200 c/mm: MTF 0.607003");
+_assert_near(load64(_tfo + 24), 0x3FDCEF02925C8AC7, _fd(1, 1000000000000), "dz = 0.01 mm, 200 c/mm: MTF 0.452088");
+_assert_near(load64(_tfo + 40), 0x3FC0EF350B743156, _fd(1, 1000000000000), "dz = 0.02 mm, 200 c/mm: MTF 0.132300");
+_assert_near(load64(_tfo + 56), 0x3FA3A74CEC72C69C, _fd(1, 1000000000000), "dz = 0.04 mm, 200 c/mm: MTF 0.038386");
+_assert_near(load64(_tfo + 72), 0x3FDCEF02925C8AC7, _fd(1, 1000000000000), "dz = -0.01 mm, 200 c/mm: MTF 0.452088");
+lens_mtf_through_focus(_fd(55, 100000), _fd(28, 10), f64_from(400), _tfd, 5, _tfo);
+_assert_near(load64(_tfo + 8), 0x3FD0F34E517B6F19, _fd(1, 1000000000000), "dz = 0.002 mm, 400 c/mm: MTF 0.264850");
+_assert_near(load64(_tfo + 24), 0x3FC7BE78116C0F42, _fd(1, 1000000000000), "dz = 0.01 mm, 400 c/mm: MTF 0.185500");
+_assert_near(load64(_tfo + 40), 0x3FA2D7E0A192A7E0, _fd(1, 1000000000000), "dz = 0.02 mm, 400 c/mm: MTF 0.036803");
+_assert_near(load64(_tfo + 56), 0x3F2A18BEA5314B78, _fd(1, 1000000000000), "dz = 0.04 mm, 400 c/mm: MTF 0.000199");
+_assert_near(load64(_tfo + 72), 0x3FC7BE78116C0F42, _fd(1, 1000000000000), "dz = -0.01 mm, 400 c/mm: MTF 0.185500");
+
+# ── 2.15.1: radius 0 has no curvature to give ────────
+test_group("2.15.1 lens radii");
+var _le = 0;
+var _lf = lens_lensmaker_focal_length(_fd(15, 10), f64_from(0), f64_from(0 - 100), &_le);
+assert_eq(_le, PK_ERR_INVALID_PARAMETER, "lensmaker with R1 = 0 refused (was f = 0 as success)");
+var _lt = lens_thick_focal_length(_fd(15, 10), f64_from(100), f64_from(0), f64_from(5), &_le);
+assert_eq(_le, PK_ERR_INVALID_PARAMETER, "thick lens with R2 = 0 refused");
+var _ln = lens_lensmaker_focal_length(_fd(15, 10), 0x7FF8000000000000, f64_from(0 - 100), &_le);
+assert_eq(_le, PK_ERR_INVALID_PARAMETER, "lensmaker with a NaN radius refused");
+var _lp = lens_lensmaker_focal_length(_fd(15, 10), 0x7FF0000000000000, f64_from(0 - 100), &_le);
+assert_eq(_le, PK_ERR_NONE, "an infinite radius is a plane: plano-convex f = 200");
+_assert_near(_lp, f64_from(200), _fd(1, 1000000000000), "... f = R/(n - 1) = 200");
+var _lc = lens_cardinal_points(_fd(15, 10), f64_from(0), f64_from(0 - 50), f64_from(5), &_le);
+assert_eq(_le, PK_ERR_INVALID_PARAMETER, "cardinal points with R1 = 0 refused");
+
+# The diffraction-limited MTF is even in frequency (2.15.1: every negative frequency read 1).
+assert_eq(lens_mtf_diffraction_limited(f64_from(0 - 100), f64_from(400)),
+  lens_mtf_diffraction_limited(f64_from(100), f64_from(400)),
+  "MTF(-nu) = MTF(nu)");
+assert_eq(lens_mtf_diffraction_limited(f64_from(0 - 400), f64_from(400)), f64_from(0), "MTF(-cutoff) = 0");
 var r = assert_summary();

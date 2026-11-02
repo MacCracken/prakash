@@ -298,4 +298,49 @@ assert_eq(_mal_rx("{\"name\":\"x\",\"name\":\"y\",\"n_initial\":1.0,\"surfaces\"
 assert_eq(_mal_rx("{\"name\":\"x\",\"n_initial\":1.0,\"surfaces\":[{\"a\":1,\"a\":2}]}"), PK_ERR_PARSE,
   "a duplicate key nested in a surface is refused");
 
+# ── 2.15.1: infinities on the wire, unknown lens types, a backward grid, null names ────────
+test_group("2.15.1 serialize domain");
+var _se = 0;
+var _t1 = "{\"r\":1e400,\"g\":0,\"b\":0}";
+var _r1 = rgb_from_json(_t1, strlen(_t1), &_se);
+assert_eq(_se, PK_ERR_INVALID_PARAMETER, "a literal past the double range is refused (1e400 decoded as +inf)");
+assert(_r1 == 0, "... no Rgb");
+var _t2 = "{\"start_nm\":380,\"step_nm\":0,\"values\":[1,2,3]}";
+assert(spd_from_json(_t2, strlen(_t2), &_se) == 0, "SPD with step 0 refused (every spd_at was NaN)");
+assert_eq(_se, PK_ERR_INVALID_PARAMETER, "... INVALID_PARAMETER");
+var _t3 = "{\"start_nm\":780,\"step_nm\":-5,\"values\":[1,2,3]}";
+assert(spd_from_json(_t3, strlen(_t3), &_se) == 0, "SPD with a negative step refused");
+var _t4 = "{\"start_nm\":380,\"step_nm\":5,\"values\":[1,1e999,3]}";
+assert(spd_from_json(_t4, strlen(_t4), &_se) == 0, "SPD value past the double range refused");
+assert(lens_type_to_json(LENS_TYPE_INVALID) == 0,
+  "LENS_TYPE_INVALID does not encode (it was laundered into Diverging)");
+assert(lens_type_to_json(42) == 0, "an unknown lens type does not encode");
+var _ld = lens_type_to_json(LENS_DIVERGING);
+assert(_ld != 0, "Diverging still encodes");
+# An unbounded aperture is +inf, which the encoder writes as null: it now decodes back.
+var _pa = prescription_new("open");
+var _pa1 = prescription_add_surface(_pa, f64_from(50), f64_from(5), _fd(15, 10), 0x7FF0000000000000);
+var _pj = prescription_to_json(_pa);
+assert(_pj != 0, "a prescription with an infinite aperture encodes");
+var _pb = prescription_from_json(str_data(_pj), str_len(_pj), &_se);
+assert_eq(_se, PK_ERR_NONE, "... and decodes (the encoder's null aperture was refused)");
+assert_eq(PrescriptionSurface_aperture_radius(vec_get(Prescription_surfaces(_pb), 0)), 0x7FF0000000000000,
+  "... back to +inf");
+var _t5a = "{\"name\":\"x\",\"surfaces\":[{\"radius\":1e400,\"thickness\":5.0,";
+var _t5s = str_cat(str_from(_t5a), str_from("\"n_after\":1.5,\"aperture_radius\":10.0}],\"n_initial\":1.0}"));
+var _t5 = str_data(_t5s);
+var _t5n = str_len(_t5s);
+assert(prescription_from_json(_t5, _t5n, &_se) == 0,
+  "a radius literal past the range is refused: null is the plane");
+# Null names: refused at construction, and the encoders no longer read address 0.
+var _me = 0;
+assert(medium_custom(_fd(15, 10), 0, &_me) == 0, "medium_custom with a null name refused");
+assert_eq(_me, PK_ERR_INVALID_PARAMETER, "... INVALID_PARAMETER");
+assert(prescription_new(0) == 0, "prescription_new(null) refused");
+var _mm = medium_custom(_fd(15, 10), "m", &_me);
+Medium_set_name(_mm, 0);
+assert(medium_to_json(_mm) == 0, "medium_to_json of a null name: 0, not a read of address 0");
+var _pn = prescription_new("p");
+Prescription_set_name(_pn, 0);
+assert(prescription_to_json(_pn) == 0, "prescription_to_json of a null name: 0");
 var r = assert_summary();

@@ -1611,9 +1611,14 @@ fn xyz_from_xyy(cx, cy, big_y) {
 #must_use
 fn xyz_to_linear_srgb(xyz) {
     if (xyz == 0) { return 0; }
-    var x = Xyz_x(xyz);
-    var y = Xyz_y(xyz);
-    var z = Xyz_z(xyz);
+    var o[24];
+    _xyz_lin3(Xyz_x(xyz), Xyz_y(xyz), Xyz_z(xyz), &o);
+    return rgb_new(load64(&o), load64(&o + 8), load64(&o + 16));
+}
+
+# The XYZ -> linear sRGB matrix into out[0..2]: the arithmetic xyz_to_linear_srgb always did,
+# split out (2.15.1) so the sRGB paths can run it on the stack instead of allocating an Rgb.
+fn _xyz_lin3(x, y, z, out) {
     var r = f64_sub(f64_sub(
         f64_mul(_cie_r(32404542, 10000000), x),
         f64_mul(_cie_r(15371385, 10000000), y)),
@@ -1626,18 +1631,28 @@ fn xyz_to_linear_srgb(xyz) {
         f64_mul(_cie_r(556434, 10000000), x),
         f64_mul(_cie_r(2040259, 10000000), y)),
       f64_mul(_cie_r(10572252, 10000000), z));
-    return rgb_new(r, g, b);
+    store64(out, r);
+    store64(out + 8, g);
+    store64(out + 16, b);
+    return 0;
 }
 
-# Gamma-corrected, clamped sRGB from XYZ.
+# Gamma-corrected, clamped sRGB of (x, y, z) as an Rgb, the only allocation.
+fn _xyz_srgb_new(x, y, z) {
+    var o[24];
+    _xyz_lin3(x, y, z, &o);
+    return rgb_new(
+      f64_clamp(linear_to_srgb_gamma(load64(&o)), f64_from(0), F64_ONE),
+      f64_clamp(linear_to_srgb_gamma(load64(&o + 8)), f64_from(0), F64_ONE),
+      f64_clamp(linear_to_srgb_gamma(load64(&o + 16)), f64_from(0), F64_ONE));
+}
+
+# Gamma-corrected, clamped sRGB from XYZ. Allocates its result only (2.15.1: the linear and the
+# unclamped intermediates were two more Rgbs, 48 bytes leaked per call).
 #must_use
 fn xyz_to_srgb(xyz) {
     if (xyz == 0) { return 0; }
-    var lin = xyz_to_linear_srgb(xyz);
-    return rgb_clamp(rgb_new(
-        linear_to_srgb_gamma(Rgb_r(lin)),
-        linear_to_srgb_gamma(Rgb_g(lin)),
-        linear_to_srgb_gamma(Rgb_b(lin))));
+    return _xyz_srgb_new(Xyz_x(xyz), Xyz_y(xyz), Xyz_z(xyz));
 }
 
 # XYZ from linear sRGB (inverse matrix).
@@ -1802,9 +1817,19 @@ fn spd_at(s, wavelength_nm) {
 
 # Integrate an SPD against a CMF table (81 rows, 5nm), scaled by the 5nm step.
 fn _spd_integrate(s, cmf) {
+    var o[24];
+    _spd_integrate3(s, cmf, &o);
+    return xyz_new(load64(&o), load64(&o + 8), load64(&o + 16));
+}
+
+# _spd_integrate's sums into out[0..2] instead of a fresh Xyz (2.15.1), zeros for a null SPD or CMF.
+fn _spd_integrate3(s, cmf, out) {
+    store64(out, f64_from(0));
+    store64(out + 8, f64_from(0));
+    store64(out + 16, f64_from(0));
     # 2.2.8: same class as spd_at above.
-    if (s == 0) { return xyz_new(f64_from(0), f64_from(0), f64_from(0)); }
-    if (cmf == 0) { return xyz_new(f64_from(0), f64_from(0), f64_from(0)); }
+    if (s == 0) { return 0; }
+    if (cmf == 0) { return 0; }
     var x = f64_from(0);
     var y = f64_from(0);
     var z = f64_from(0);
@@ -1833,7 +1858,10 @@ fn _spd_integrate(s, cmf) {
         z = f64_add(z, f64_mul(power, _cmf_z(cmf, i)));
         i = i + 1;
     }
-    return xyz_new(f64_mul(x, f64_from(5)), f64_mul(y, f64_from(5)), f64_mul(z, f64_from(5)));
+    store64(out, f64_mul(x, f64_from(5)));
+    store64(out + 8, f64_mul(y, f64_from(5)));
+    store64(out + 16, f64_mul(z, f64_from(5)));
+    return 0;
 }
 
 # Integrate the SPD against the CIE 1931 2-degree CMFs -> Xyz.
@@ -1855,16 +1883,31 @@ fn spd_to_xyz(s) {
 #must_use
 fn spd_to_xyz_observer(s, observer) { return _spd_integrate(s, observer_cmf(observer)); }
 
-# SPD -> linear sRGB (D65), scaled so Y = 1 first (unscaled when Y < 1e-15).
+# SPD -> gamma-corrected, clamped sRGB (D65), scaled so Y = 1 first (unscaled when Y < 1e-15).
+# Allocates its result only (2.15.1: the XYZ, the scaled XYZ and xyz_to_srgb's two intermediates
+# were 96 bytes leaked per call).
 #must_use
 fn spd_to_srgb(s) {
-    var xyz = spd_to_xyz(s);
+    var xyz[24];
+    _spd_integrate3(s, _cie1931(), &xyz);
     var norm = F64_ONE;
-    if (f64_gt(Xyz_y(xyz), _cie_eps15()) == 1) {
-        norm = f64_div(F64_ONE, Xyz_y(xyz));
+    if (f64_gt(load64(&xyz + 8), _cie_eps15()) == 1) {
+        norm = f64_div(F64_ONE, load64(&xyz + 8));
     }
-    return xyz_to_srgb(xyz_new(
-        f64_mul(Xyz_x(xyz), norm), f64_mul(Xyz_y(xyz), norm), f64_mul(Xyz_z(xyz), norm)));
+    var sx = f64_mul(load64(&xyz), norm);
+    var sz = f64_mul(load64(&xyz + 16), norm);
+    return _xyz_srgb_new(sx, f64_mul(load64(&xyz + 8), norm), sz);
+}
+
+# Planck radiance at 380, 385, ... 780 nm into values[0..80].
+fn _bb_fill(values, temperature_k) {
+    var i = 0;
+    while (i < 81) {
+        var wl_m = f64_mul(f64_from(380 + i * 5), _cie_r(1, 1000000000));
+        store64(values + i * 8, planck_radiance(wl_m, temperature_k));
+        i = i + 1;
+    }
+    return 0;
 }
 
 # Blackbody SPD at temperature_k, 5nm from 380-780nm (81 samples).
@@ -1872,12 +1915,7 @@ fn spd_to_srgb(s) {
 fn spd_blackbody(temperature_k) {
     var values = alloc(648);
     if (values == 0) { return 0; }
-    var i = 0;
-    while (i < 81) {
-        var wl_m = f64_mul(f64_from(380 + i * 5), _cie_r(1, 1000000000));
-        store64(values + i * 8, planck_radiance(wl_m, temperature_k));
-        i = i + 1;
-    }
+    _bb_fill(values, temperature_k);
     return spd_new(f64_from(380), f64_from(5), values, 81);
 }
 
@@ -2001,22 +2039,38 @@ fn spectral_band_similarity(test_spd) {
     return _cri_impl(test_spd);
 }
 
+# 2.15.1: allocation-free. The XYZ, its xyY, the reference SPD (an 81-sample blackbody when it is
+# one) and the reference XYZ were 784 bytes per call; they are this frame's now, the reference an
+# Spd on the stack over a stack (or the static D65) table.
 #must_use
 fn _cri_impl(test_spd) {
     _prk_trace("color_rendering_index");
-    var test_xyz = spd_to_xyz(test_spd);
-    var xyy = xyz_to_xyy(test_xyz);
-    var test_cct = cct_from_xy(XyY_x(xyy), XyY_y(xyy));
-    var ref_spd = illuminant_d65();
-    if (f64_lt(test_cct, f64_from(5000)) == 1) {
-        ref_spd = spd_blackbody(test_cct);
+    var txyz[24];
+    _spd_integrate3(test_spd, _cie1931(), &txyz);
+    var tsum = f64_add(f64_add(load64(&txyz), load64(&txyz + 8)), load64(&txyz + 16));
+    var cx = f64_from(0);
+    var cy = f64_from(0);
+    if (f64_lt(tsum, _cie_eps15()) == 0) {
+        cx = f64_div(load64(&txyz), tsum);
+        cy = f64_div(load64(&txyz + 8), tsum);
     }
-    # 2.2.8: spd_blackbody can return 0 on allocation failure; this then
-    # dereferenced it. _cri_context already guards the same step.
-    if (ref_spd == 0) { return f64_from(0); }
-    var ref_xyz = spd_to_xyz(ref_spd);
-    var ty = Xyz_y(test_xyz);
-    var ry = Xyz_y(ref_xyz);
+    var test_cct = cct_from_xy(cx, cy);
+    var rvals[648];
+    var rs[32];
+    if (f64_lt(test_cct, f64_from(5000)) == 1) {
+        _bb_fill(&rvals, test_cct);
+        Spd_set_values(&rs, &rvals);
+    } else {
+        Spd_set_values(&rs, _illum_d65_data());
+    }
+    Spd_set_start_nm(&rs, f64_from(380));
+    Spd_set_step_nm(&rs, f64_from(5));
+    Spd_set_len(&rs, 81);
+    var ref_spd = &rs;
+    var rxyz[24];
+    _spd_integrate3(ref_spd, _cie1931(), &rxyz);
+    var ty = load64(&txyz + 8);
+    var ry = load64(&rxyz + 8);
     var s = _cri_band_delta(test_spd, ref_spd, ty, ry, f64_from(400), f64_from(450));
     s = f64_add(s, _cri_band_delta(test_spd, ref_spd, ty, ry, f64_from(450), f64_from(490)));
     s = f64_add(s, _cri_band_delta(test_spd, ref_spd, ty, ry, f64_from(490), f64_from(520)));
@@ -3353,18 +3407,26 @@ fn _cri_cct_refine(uk, vk, seed) {
     return res;
 }
 
+# Fills the caller's 88-byte ctx for test_spd and returns 1, or 0 if an allocation is refused.
+# ⛔ 2.15.1: the context and four 16-byte scratch pairs were alloc()ed per call, 392 of the 1528
+# bytes one Ra cost, on an allocator that never frees. They are the caller's stack now.
+# It also returns 0, so the CRI is NaN, for a source CIE 13.3 gives no CRI: a CCT below 1000 K or
+# NaN, or a chromaticity farther than DC = 5.4e-3 (CIE 1960 uv) from the Planckian locus at its
+# CCT (CIE 13.3-1995 sec. 5.3: "not sufficiently white"). The refinement searches 1000-25000 K, so
+# a cooler source converges on the 1000 K edge and DC is what shows it: an 800 K blackbody is
+# 0.052 from the locus at 1000 K, and scored Ra = 82.9 against that wrong reference (2.15.1).
+# Every illuminant the library ships passes, the farthest E at 4.4e-3.
 #must_use
-fn _cri_context(test_spd) {
-    var ctx = alloc(88);
-    if (ctx == 0) { return 0; }
+fn _cri_context(test_spd, ctx) {
     var t_xyz = spd_to_xyz(test_spd);
     if (t_xyz == 0) { return 0; }
     var xyy = xyz_to_xyy(t_xyz);
     var t_cct = cct_from_xy(XyY_x(xyy), XyY_y(xyy));
-    var uv0 = alloc(16);
-    if (uv0 == 0) { return 0; }
-    _cri_uv(t_xyz, uv0);
-    t_cct = _cri_cct_refine(load64(uv0), load64(uv0 + 8), t_cct);
+    var uv0[16];
+    _cri_uv(t_xyz, &uv0);
+    t_cct = _cri_cct_refine(load64(&uv0), load64(&uv0 + 8), t_cct);
+    if (f64_ge(t_cct, f64_from(1000)) == 0) { return 0; }
+    if (f64_le(_cri_locus_dist2(t_cct, load64(&uv0), load64(&uv0 + 8)), 0x3EFE9393F10E1FA9) == 0) { return 0; }
     # 2.4.9: choose the reference, THEN build it. This used to construct the full
     # 81-sample D-series SPD first and overwrite it with the blackbody whenever the
     # source was below 5000 K — on a bump allocator that never frees, a discarded
@@ -3379,26 +3441,24 @@ fn _cri_context(test_spd) {
     if (ref_spd == 0) { return 0; }
     var r_xyz = spd_to_xyz(ref_spd);
     if (r_xyz == 0) { return 0; }
-    var uv = alloc(16);
-    var cd = alloc(16);
-    if (uv == 0) { return 0; }
-    if (cd == 0) { return 0; }
+    var uv[16];
+    var cd[16];
     store64(ctx, ref_spd);
-    _cri_uv(t_xyz, uv);
-    store64(ctx + 8, load64(uv));
-    store64(ctx + 16, load64(uv + 8));
-    _cri_cd(load64(uv), load64(uv + 8), cd);
-    store64(ctx + 56, load64(cd));
-    store64(ctx + 64, load64(cd + 8));
-    _cri_uv(r_xyz, uv);
-    store64(ctx + 24, load64(uv));
-    store64(ctx + 32, load64(uv + 8));
-    _cri_cd(load64(uv), load64(uv + 8), cd);
-    store64(ctx + 72, load64(cd));
-    store64(ctx + 80, load64(cd + 8));
+    _cri_uv(t_xyz, &uv);
+    store64(ctx + 8, load64(&uv));
+    store64(ctx + 16, load64(&uv + 8));
+    _cri_cd(load64(&uv), load64(&uv + 8), &cd);
+    store64(ctx + 56, load64(&cd));
+    store64(ctx + 64, load64(&cd + 8));
+    _cri_uv(r_xyz, &uv);
+    store64(ctx + 24, load64(&uv));
+    store64(ctx + 32, load64(&uv + 8));
+    _cri_cd(load64(&uv), load64(&uv + 8), &cd);
+    store64(ctx + 72, load64(&cd));
+    store64(ctx + 80, load64(&cd + 8));
     store64(ctx + 40, Xyz_y(t_xyz));
     store64(ctx + 48, Xyz_y(r_xyz));
-    return ctx;
+    return 1;
 }
 
 # R_i for sample `i` given a prepared context. The only per-sample work.
@@ -3409,19 +3469,17 @@ fn _cri_ri(test_spd, ctx, i) {
     var ri_xyz = _cri_tcs_xyz(ref_spd, i);
     if (ki_xyz == 0) { return _PRK_NAN; }
     if (ri_xyz == 0) { return _PRK_NAN; }
-    var uv = alloc(16);
-    var cd = alloc(16);
-    if (uv == 0) { return _PRK_NAN; }
-    if (cd == 0) { return _PRK_NAN; }
-    _cri_uv(ki_xyz, uv);
-    var uki = load64(uv);
-    var vki = load64(uv + 8);
-    _cri_cd(uki, vki, cd);
-    var cki = load64(cd);
-    var dki = load64(cd + 8);
-    _cri_uv(ri_xyz, uv);
-    var uri = load64(uv);
-    var vri = load64(uv + 8);
+    var uv[16];
+    var cd[16];
+    _cri_uv(ki_xyz, &uv);
+    var uki = load64(&uv);
+    var vki = load64(&uv + 8);
+    _cri_cd(uki, vki, &cd);
+    var cki = load64(&cd);
+    var dki = load64(&cd + 8);
+    _cri_uv(ri_xyz, &uv);
+    var uri = load64(&uv);
+    var vri = load64(&uv + 8);
 
     var ur = load64(ctx + 24);
     var vr = load64(ctx + 32);
@@ -3468,9 +3526,11 @@ fn cri_special(test_spd, i) {
     if (test_spd == 0) { return f64_from(0); }
     if (i < 1) { return f64_from(0); }
     if (i > 8) { return f64_from(0); }
-    var ctx = _cri_context(test_spd);
-    if (ctx == 0) { return f64_from(0); }
-    return _cri_ri(test_spd, ctx, i);
+    var ctx[88];
+    # An internal failure is NaN, as the note above says: until 2.15.1 a refused allocation
+    # here returned 0.0, which is a legitimate R_i.
+    if (_cri_context(test_spd, &ctx) == 0) { return _PRK_NAN; }
+    return _cri_ri(test_spd, &ctx, i);
 }
 
 # General Colour Rendering Index Ra: the mean of R1..R8.
@@ -3485,11 +3545,12 @@ fn cri_special(test_spd, i) {
 fn color_rendering_index(test_spd) {
     _prk_trace("color_rendering_index");
     if (test_spd == 0) { return f64_from(0); }
-    var ctx = _cri_context(test_spd);
-    if (ctx == 0) { return f64_from(0); }
+    var ctx[88];
+    # An internal failure is NaN, as for cri_special (2.15.1: it was 0.0, a legitimate Ra).
+    if (_cri_context(test_spd, &ctx) == 0) { return _PRK_NAN; }
     var sum = f64_from(0);
     for (var i = 1; i <= 8; i = i + 1) {
-        sum = f64_add(sum, _cri_ri(test_spd, ctx, i));
+        sum = f64_add(sum, _cri_ri(test_spd, &ctx, i));
     }
     return f64_div(sum, f64_from(8));
 }

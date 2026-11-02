@@ -1,5 +1,6 @@
 # lens.cyr -- lens & mirror geometry, aberrations, MTF, depth of field
-# Usage: include "lib/lens.cyr"  (requires error.cyr; ganita for atan2/acos/hypot)
+# Usage: include "lib/lens.cyr"  (requires error.cyr, and wave_zernike.cyr for the aberrated
+#   OTF and lens_mtf_through_focus; ganita for atan2/acos/hypot)
 #
 # Ported from the Rust `lens.rs`. Two sections: (1) thin/thick lens equations,
 # f-number/NA, field of view; (2) MTF, Seidel aberrations, Petzval, multi-element
@@ -37,10 +38,22 @@ fn lens_magnification(object_distance, image_distance) {
     return f64_div(f64_neg(image_distance), object_distance);
 }
 
-# Lensmaker's equation: 1/f = (n-1)*(1/R1 - 1/R2).
+# 1 if r is a usable radius of curvature: not 0 and not NaN (an infinite one is a plane).
+#must_use
+fn _lens_radius_ok(r) {
+    if ((r & 0x7FFFFFFFFFFFFFFF) == 0) { return 0; }
+    return f64_eq(r, r);
+}
+
+# Lensmaker's equation: 1/f = (n-1)*(1/R1 - 1/R2). PK_ERR_INVALID_PARAMETER (returns 0) for a
+# radius of 0 or NaN (2.15.1: 1/0 made the power infinite and f = 0 came back as success).
 #must_use
 fn lens_lensmaker_focal_length(n, r1, r2, err_out) {
     store64(err_out, PK_ERR_NONE);
+    if ((_lens_radius_ok(r1) & _lens_radius_ok(r2)) == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return f64_from(0);
+    }
     var power = f64_mul(f64_sub(n, F64_ONE),
       f64_sub(f64_div(F64_ONE, r1), f64_div(F64_ONE, r2)));
     if (f64_lt(f64_abs(power), _lens_eps15()) == 1) {
@@ -99,8 +112,10 @@ fn lens_combined_focal_length(f1, f2, err_out) {
     return f64_div(f64_mul(f1, f2), sum);
 }
 
-# Depth of field: writes (near, far) to out+0/+8; far = INFINITY beyond hyperfocal.
+# Depth of field: writes (near, far) to out+0/+8; far = INFINITY beyond hyperfocal. Returns PK_ERR_NONE, or
+# PK_ERR_INVALID_PARAMETER and writes nothing for a null out (2.15.1: it was written through).
 fn lens_depth_of_field(focal_length, f_number, coc, subject_dist, out) {
+    if (out == 0) { return PK_ERR_INVALID_PARAMETER; }
     var h = f64_div(f64_mul(focal_length, focal_length), f64_mul(f_number, coc));
     var sd_minus_f = f64_sub(subject_dist, focal_length);
     var near = f64_div(f64_mul(h, subject_dist), f64_add(h, sd_minus_f));
@@ -116,10 +131,15 @@ fn lens_depth_of_field(focal_length, f_number, coc, subject_dist, out) {
 
 # ── Thick lens ────────
 
-# Thick lens focal length: 1/f = (n-1)*[1/R1 - 1/R2 + (n-1)*d/(n*R1*R2)].
+# Thick lens focal length: 1/f = (n-1)*[1/R1 - 1/R2 + (n-1)*d/(n*R1*R2)]. PK_ERR_INVALID_PARAMETER
+# (returns 0) for a radius of 0 or NaN, as lens_lensmaker_focal_length (2.15.1).
 #must_use
 fn lens_thick_focal_length(n, r1, r2, thickness, err_out) {
     store64(err_out, PK_ERR_NONE);
+    if ((_lens_radius_ok(r1) & _lens_radius_ok(r2)) == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return f64_from(0);
+    }
     var nm1 = f64_sub(n, F64_ONE);
     var inner = f64_add(
       f64_sub(f64_div(F64_ONE, r1), f64_div(F64_ONE, r2)),
@@ -158,7 +178,10 @@ fn lens_cardinal_points(n, r1, r2, thickness, err_out) {
     var bfd = f64_mul(f, f64_sub(F64_ONE, f64_div(f64_mul(phi1, thickness), n)));
     var ffd = f64_mul(f64_neg(f), f64_sub(F64_ONE, f64_div(f64_mul(phi2, thickness), n)));
     var cp = alloc(sizeof(CardinalPoints));
-    if (cp == 0) { return 0; }
+    if (cp == 0) {
+        store64(err_out, PK_ERR_ALLOCATION);
+        return 0;
+    }
     CardinalPoints_set_focal_length(cp, f);
     CardinalPoints_set_ffd(cp, ffd);
     CardinalPoints_set_bfd(cp, bfd);
@@ -233,11 +256,13 @@ fn lens_mtf_cutoff_frequency(wavelength, f_num) {
     return f64_div(F64_ONE, f64_mul(wavelength, f_num));
 }
 
-# Diffraction-limited MTF: (2/pi)*(acos(v) - v*sqrt(1-v^2)), v = freq/cutoff.
-# 0 above cutoff (v>=1), 1 at/below zero (v<=0).
+# Diffraction-limited MTF: (2/pi)*(acos(v) - v*sqrt(1-v^2)), v = |freq/cutoff|.
+# 0 at and above cutoff (|v| >= 1), 1 at zero.
 #must_use
 fn lens_mtf_diffraction_limited(spatial_freq, cutoff_freq) {
-    var v = f64_div(spatial_freq, cutoff_freq);
+    # |v|: the MTF is even in frequency (the OTF of a real PSF is Hermitian). 2.15.1: v < 0 read
+    # as v = 0 and answered 1 at every negative frequency.
+    var v = f64_abs(f64_div(spatial_freq, cutoff_freq));
     if (f64_ge(v, F64_ONE) == 1) {
         return f64_from(0);
     }
@@ -275,8 +300,18 @@ fn lens_mtf_polychromatic(wavelengths, n_wl, weights, n_weights, f_num, spatial_
     return f64_div(sum_mtf, sum_w);
 }
 
-# Through-focus MTF: writes (defocus, mtf) pairs to out+i*16. w20 = defocus /
-# (8*N^2*lambda); attenuation = |sinc(pi*w20*v)|.
+# Through-focus MTF: writes (defocus, mtf) pairs to out+i*16, the defocus a longitudinal shift of
+# the image plane in the wavelength's unit. A shift dz is the pupil wavefront W020 rho^2 with
+# W020 = dz/(8 N^2) (dz NA^2/2 at NA = 1/(2N); Hopkins 1955), and the MTF is the modulus of that
+# pupil's OTF by autocorrelation: lens_mtf_seidel with the defocus as w220, which at the field
+# edge (H = 1) is exactly W020 rho^2, at 64 nodes or more. NaN where the defocus is too large to
+# resolve at 256 nodes (a bound of 32 waves) or an input is invalid; the sign of dz does not
+# change the MTF.
+# ⛔ 2.15.1: this was the in-focus MTF times |sinc(pi W020 v)|, W020 in waves, which is not the
+# defocused OTF at any defocus: at f/2.8, 550 nm and 200 cycles/mm it read 0.606 at dz = 10 um,
+# where the pupil gives 0.452, and 0.582 at 20 um, where it gives 0.132; past the first zero (OTF
+# < 0, a contrast reversal) it could not go at all. It now agrees with a separate quadrature of
+# the defocused OTF, one dimension in closed form, to 1e-12.
 fn lens_mtf_through_focus(wavelength, f_num, spatial_freq, defocus_range, n_defocus, out) {
     if (n_defocus > 0) {
         if (defocus_range == 0) { return 0; }
@@ -284,20 +319,15 @@ fn lens_mtf_through_focus(wavelength, f_num, spatial_freq, defocus_range, n_defo
     }
     var cutoff = lens_mtf_cutoff_frequency(wavelength, f_num);
     var v = f64_div(spatial_freq, cutoff);
+    var w8n2 = f64_mul(f64_mul(f64_from(8), f_num), f_num);
+    # A WavefrontCoefficients on the stack, defocus only.
+    var wc[40];
+    for (var k = 0; k < 40; k = k + 8) { store64(&wc + k, 0); }
     for (var i = 0; i < n_defocus; i = i + 1) {
         var defocus = load64(defocus_range + i * 8);
-        var w20 = f64_div(defocus,
-          f64_mul(f64_mul(f64_mul(f64_from(8), f_num), f_num), wavelength));
-        var attenuation = F64_ONE;
-        if (f64_lt(f64_abs(w20), _lens_eps15()) == 0) {
-            var phi = f64_mul(f64_mul(F64_PI, w20), v);
-            if (f64_lt(f64_abs(phi), _lens_eps15()) == 0) {
-                attenuation = f64_abs(f64_div(_prk_sin(phi), phi));
-            }
-        }
+        WavefrontCoefficients_set_w220(&wc, f64_div(defocus, w8n2));
         store64(out + i * 16, defocus);
-        store64(out + i * 16 + 8,
-          f64_mul(lens_mtf_diffraction_limited(spatial_freq, cutoff), attenuation));
+        store64(out + i * 16 + 8, lens_mtf_seidel(&wc, wavelength, v, 0, 64));
     }
     return 0;
 }
@@ -521,11 +551,13 @@ fn lens_petzval_sum(elements, n_elements) {
 }
 
 # Petzval radius R_p = -1/S. Returns 1 and writes R_p to out if S != 0, else 0
-# (flat field, Rust None).
+# (flat field, Rust None), writing nothing. A curved field with a null out returns
+# PK_ERR_INVALID_PARAMETER (2.15.1: it was written through).
 fn lens_petzval_radius(petzval_sum, out) {
     if (f64_lt(f64_abs(petzval_sum), _lens_eps15()) == 1) {
         return 0;
     }
+    if (out == 0) { return PK_ERR_INVALID_PARAMETER; }
     store64(out, f64_div(f64_neg(F64_ONE), petzval_sum));
     return 1;
 }

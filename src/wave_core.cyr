@@ -52,14 +52,15 @@ fn path_to_phase(wavelength, path_diff) {
 
 # ── Thin film interference ────────
 
-# Reflected intensity for a thin film (near-normal): sin^2(delta/2) with a pi
-# phase shift on reflection.
+# Normalised reflected intensity of a thin film in a medium of lower index (a soap film or an oil
+# film in air) near normal incidence: two equal beams, the one from the top face shifted by pi,
+# so sin^2(2 pi n d/lambda). 0 for a vanishing film (black), 1 at a quarter wave (Hecht 9.4.1).
+# ⛔ 2.15.1: this added the pi to the phase and then took sin^2 of half of it, counting the pi
+# twice. It returned cos^2(2 pi n d/lambda), 1 minus the answer: a vanishing film was at its
+# brightest. A film with a pi shift at both faces (an AR coating) is coating_reflectance's case.
 #must_use
 fn thin_film_reflectance(wavelength_nm, thickness_nm, n_film) {
-    var path = f64_mul(f64_mul(F64_TWO, n_film), thickness_nm);
-    var phase = f64_add(f64_div(f64_mul(F64_TAU, path), wavelength_nm), F64_PI);
-    var half = f64_div(phase, F64_TWO);
-    var s = _prk_sin(half);
+    var s = _prk_sin(f64_div(f64_mul(F64_TAU, f64_mul(n_film, thickness_nm)), wavelength_nm));
     return f64_mul(s, s);
 }
 
@@ -92,19 +93,21 @@ fn double_slit_intensity(wavelength, slit_width, slit_spacing, angle, i0) {
     return f64_mul(f64_mul(f64_mul(i0, envelope), interference), f64_from(4));
 }
 
-# Diffraction-grating maxima angles (m = 0, +-1, ... up to max_order) as a `vec`.
+# Diffraction-grating maxima angles (m = 0, +-1, ... up to max_order) as a `vec`; 0 if the vec
+# cannot be allocated. |m lambda/d| only grows with m, so the search stops at the first order
+# that does not propagate: 2.15.1 found it running every order to max_order, hours for 2^40.
 #must_use
 fn grating_maxima(wavelength, grating_spacing, max_order) {
     var angles = vec_new();
+    if (angles == 0) { return 0; }
     var m = 0;
     while (m <= max_order) {
         var sin_theta = f64_div(f64_mul(f64_from(m), wavelength), grating_spacing);
-        if (f64_le(f64_abs(sin_theta), F64_ONE) == 1) {
-            var angle = ganita_f64_asin(sin_theta);
-            vec_push(angles, angle);
-            if (m != 0) {
-                vec_push(angles, f64_neg(angle));
-            }
+        if (f64_le(f64_abs(sin_theta), F64_ONE) == 0) { return angles; }
+        var angle = ganita_f64_asin(sin_theta);
+        vec_push(angles, angle);
+        if (m != 0) {
+            vec_push(angles, f64_neg(angle));
         }
         m = m + 1;
     }
@@ -118,7 +121,10 @@ fn grating_maxima(wavelength, grating_spacing, max_order) {
 struct Polarization { ex; ey; phase; }
 
 # Polarization {ex, ey: field amplitudes; phase: ey relative to ex, radians};
-# 0 on allocation failure.
+# 0 on allocation failure. The Jones vector is (e_x, e_y e^(i phase)), so
+#   S1 = e_x^2 - e_y^2,  S2 = 2 e_x e_y cos(phase),  S3 = 2 e_x e_y sin(phase),
+# and phase = +pi/2 with e_x = e_y is S3 = +1, right-circular in the Stokes convention
+# wave_polarization uses. polarization_through_polarizer reads the phase the same way.
 #must_use
 fn polarization_new(ex, ey, phase) {
     var p = alloc(sizeof(Polarization));
@@ -163,15 +169,22 @@ fn polarization_circular_left() {
     return polarization_new(F64_FRAC_1_SQRT2, F64_FRAC_1_SQRT2, f64_neg(F64_PI_2));
 }
 
-# Intensity after a linear polarizer (Malus): cos^2(theta - pol_angle) * |E|^2.
+# Intensity after a linear polarizer at angle theta from x (Jones):
+#   |e_x cos(theta) + e_y e^(i phase) sin(theta)|^2
+#     = e_x^2 cos^2(theta) + e_y^2 sin^2(theta) + 2 e_x e_y sin(theta) cos(theta) cos(phase),
+# Malus's law for linear light (phase 0). ⛔ 2.15.1: this applied Malus to the angle
+# atan2(e_y, e_x) and ignored the phase, so circular light passed whole at 45 degrees (1, not
+# 1/2) and linear light at -45 degrees (phase pi) passed whole through a polarizer at +45.
 #must_use
 fn polarization_through_polarizer(p, polarizer_angle) {
     if (p == 0) { return f64_from(0); }
     var ex = Polarization_ex(p);
     var ey = Polarization_ey(p);
-    var pol_angle = ganita_f64_atan2(ey, ex);
-    var c = _prk_cos(f64_sub(polarizer_angle, pol_angle));
-    return f64_mul(f64_mul(c, c), f64_add(f64_mul(ex, ex), f64_mul(ey, ey)));
+    var c = _prk_cos(polarizer_angle);
+    var s = _prk_sin(polarizer_angle);
+    var direct = f64_add(f64_mul(f64_mul(ex, ex), f64_mul(c, c)), f64_mul(f64_mul(ey, ey), f64_mul(s, s)));
+    var cross = f64_mul(f64_mul(f64_mul(F64_TWO, ex), ey), f64_mul(f64_mul(s, c), _prk_cos(Polarization_phase(p))));
+    return f64_add(direct, cross);
 }
 
 # Total intensity: ex^2 + ey^2.
@@ -199,11 +212,13 @@ fn stokes_new(s0, s1, s2, s3) {
     return s;
 }
 
-# Degree of polarization: sqrt(s1^2 + s2^2 + s3^2) / s0.
+# Degree of polarization: sqrt(s1^2 + s2^2 + s3^2) / s0; 0 for zero intensity. A ratio, so the
+# same at every scale: 2.15.1 found a 1e-15 threshold on s0 answering 0 for a fully polarized
+# vector of intensity 1e-16.
 #must_use
 fn stokes_degree_of_polarization(s) {
     if (s == 0) { return f64_from(0); }
-    if (f64_lt(f64_abs(StokesVector_s0(s)), _wave_r(1, 1000000000000000)) == 1) {
+    if ((StokesVector_s0(s) & _PRK_ABS) == 0) {
         return f64_from(0);
     }
     var pol = f64_sqrt(f64_add(f64_add(

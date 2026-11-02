@@ -274,4 +274,43 @@ _assert_near(ray_deg_to_rad(f64_from(90)), F64_PI_2, TOL6, "deg2rad 90 = pi/2");
 _assert_near(ray_deg_to_rad(f64_from(180)), F64_PI, TOL6, "deg2rad 180 = pi");
 _assert_near(ray_deg_to_rad(f64_from(360)), F64_TAU, TOL6, "deg2rad 360 = tau");
 
+# ── 2.15.1: indices, the critical angle, the back of a surface ────────
+test_group("2.15.1 ray_core domain");
+var _ce = 0;
+var _cm = medium_custom(0x7FF8000000000000, "nan", &_ce);
+assert_eq(_ce, PK_ERR_INVALID_INDEX, "medium_custom: NaN refused (was accepted)");
+var _ci = medium_custom(0x7FF0000000000000, "inf", &_ce);
+assert_eq(_ce, PK_ERR_INVALID_INDEX, "medium_custom: +inf refused (was accepted)");
+var _sx = ray_snell(F64_ONE, f64_from(0), _fd(3, 10), &_ce);
+assert_eq(_ce, PK_ERR_INVALID_INDEX, "ray_snell: n2 = 0 refused");
+var _sy = ray_snell(0x7FF8000000000000, _fd(15, 10), _fd(3, 10), &_ce);
+assert_eq(_ce, PK_ERR_INVALID_INDEX, "ray_snell: NaN n1 refused");
+var _cz = ray_critical_angle(_fd(15, 10), f64_from(0), &_ce);
+assert_eq(_ce, PK_ERR_INVALID_INDEX, "critical angle: n2 = 0 refused (was 0)");
+var _cn = ray_critical_angle(_fd(15, 10), f64_neg(F64_ONE), &_ce);
+assert_eq(_ce, PK_ERR_INVALID_INDEX, "critical angle: n2 = -1 refused (was -0.73 rad)");
+# Feeding the critical angle back into Snell is grazing refraction, pi/2, at every n1: through
+# 2.15.0 about one n1 in three rounded to sin = 1 + 1 ulp and reported TIR at the very angle that
+# defines its onset. 1e-9 rad past it is still TIR: the clamp is 4 ulps wide, nothing more.
+var _cg = 1;
+var _ct = 1;
+for (var k = 1001; k < 3000; k = k + 7) {
+    var n1 = _fd(k, 1000);
+    var ca = ray_critical_angle(n1, F64_ONE, &_ce);
+    var th = ray_snell(n1, F64_ONE, ca, &_ce);
+    if (_ce != PK_ERR_NONE) { _cg = 0; }
+    if (f64_lt(th, f64_sub(F64_PI_2, _fd(1, 10000000))) == 1) { _cg = 0; }
+    var _past = ray_snell(n1, F64_ONE, f64_add(ca, _fd(1, 1000000000)), &_ce);
+    if (_ce != PK_ERR_TIR) { _ct = 0; }
+}
+assert_eq(_cg, 1, "Snell at the critical angle is grazing, not TIR, for 286 indices");
+assert_eq(_ct, 1, "... and 1e-9 rad past it is TIR");
+# The back of the surface: d.n > 0 means the normal faces away from the incoming ray.
+var _rb = ray_refract_3d(_n3(f64_from(0), f64_from(0), F64_ONE), _n3(f64_from(0), f64_from(0), F64_ONE),
+  F64_ONE, _fd(15, 10), &_ce);
+assert_eq(_ce, PK_ERR_INVALID_ANGLE, "ray_refract_3d: back-side incidence refused (sent the ray backward)");
+var _rf = ray_refract_3d(_n3(f64_from(0), f64_from(0), F64_ONE), _n3(f64_from(0), f64_from(0), f64_neg(F64_ONE)),
+  F64_ONE, _fd(15, 10), &_ce);
+assert_eq(_ce, PK_ERR_NONE, "ray_refract_3d: front-side incidence still refracts");
+
 var r = assert_summary();

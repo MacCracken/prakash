@@ -82,4 +82,19 @@ _assert_near(f64_div(_fp_long(), 0x3FA14FF24F1457A3), F64_ONE, _fd(1, 100000000)
 assert_eq(fabry_perot_transmittance(F64_HALF, 0x4130000000000000, F64_ONE, Z, 0x3FEFFFFFFF800000), F64_ONE,
   "2^22 orders at finesse 3e9: T = 1 exactly");
 
+# ── 2.15.1 audit ────────
+test_group("2.15.1 reflectance outside [0, 1)");
+# A reflectance outside [0, 1) has no Airy function: R = -0.5 gave T = 9 at a half order, and R = 1
+# a NaN at resonance and 0 elsewhere. Each is refused with NaN now.
+fn _fp_nan(x) { return (x & 0x7FFFFFFFFFFFFFFF) > 0x7FF0000000000000; }
+assert(_fp_nan(fabry_perot_transmittance(f64_from(500), f64_from(1000), F64_ONE, Z, f64_neg(F64_HALF))), "T: R = -0.5");
+assert(_fp_nan(fabry_perot_transmittance(f64_from(500), f64_from(1000), F64_ONE, Z, F64_ONE)), "T: R = 1");
+assert(_fp_nan(fabry_perot_transmittance(f64_from(500), f64_from(1000), F64_ONE, Z, _fd(12, 10))), "T: R = 1.2");
+assert(_fp_nan(fabry_perot_transmittance(f64_from(500), f64_from(1000), F64_ONE, Z, 0x7FF8000000000000)), "T: R NaN");
+assert(_fp_nan(fabry_perot_finesse(F64_ONE)), "finesse: R = 1");
+assert(_fp_nan(fabry_perot_finesse(f64_neg(_fd(1, 10)))), "finesse: R < 0");
+assert(_fp_nan(fabry_perot_finesse_coefficient(F64_ONE)), "coefficient: R = 1");
+assert(_fp_nan(fabry_perot_resolving_power(f64_from(500), f64_from(1000), F64_ONE, F64_ONE)), "resolving power: R = 1");
+assert(fabry_perot_finesse(Z) == Z, "R = 0: finesse 0, still an answer");
+
 var r = assert_summary();

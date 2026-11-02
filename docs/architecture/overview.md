@@ -11,18 +11,18 @@ after the port-completeness review; recover it with
 | Module | Files | Tests | Key Types | Purpose |
 |--------|-------|-------|-----------|---------|
 | `error` | error.cyr | (smoke) | `PK_ERR_*` codes | Shared error codes + `prakash_set_log_level` / `_prk_trace` (sakshi logging) |
-| `ray` | ray_core, ray_fresnel, ray_trace, ray_prt, ray_simulate, ray_system, ray_dispersion, ray_fiber, ray_grin | 2064 | `Medium`, `ComplexMedium`, `*Coefficients`, `TraceRay`, `OpticalSurface`, `PolarizedTraceHit`, `FresnelAmplitudes`, `PrtStep`, `PrtTraceHit`, `ParaxialRay`, `Prescription`, `GrinProfile` | Geometric optics: Snell, Fresnel (real + complex), dispersion (Sellmeier/Cauchy/Herzberger/Schott/Conrady, analytic derivatives and group index), chromatic aberration, fiber optics and fiber chromatic dispersion (material, waveguide, total; LP01 exact within weak guidance), sequential/recursive tracing with polarization, ray fans, spot diagrams, OPD; gradient-index tracing (SELFOC, sech, polynomial, Luneburg, fish-eye) by RK-Nyström with optical path |
-| `spectral` | spectral_core, spectral_cie, spectral_photometry, spectral_fluor | 2453 | `Rgb`, `Xyz`, `Spd`, `Observer` (tag constants), `Donaldson` | Color science: wavelength↔RGB, Planck (numerically stable), Wien, CIE 1931/1964/2015 XYZ, SPD, illuminants, CRI, photometry (V(λ), luminous flux/efficacy); fluorescence (peaks, Stokes shift, quantum yield, the Donaldson re-radiation matrix, Förster transfer) |
-| `wave` | wave_core, wave_polarization, wave_coherence, wave_airy, wave_fabry_perot, wave_diffraction, wave_doe, wave_zernike, wave_pattern, wave_beam, wave_focus | 5132 | `Polarization`, `StokesVector`, `MuellerMatrix` (16-f64 buffer), `Pattern2D`, `ZernikeWavefront`, `ThinFilmResult`, `AbsorbingFilmResult`, `GaussianBeam`, `VolumeGrating`, `FocusLens` | Wave optics: interference, coherence, Airy/Bessel, Fabry-Pérot, Fraunhofer/Fresnel diffraction, TMM (oblique s/p; complex-index R/T/A for absorbing layers), AR coatings, Jones/Stokes/Mueller, Zernike polynomials, 2D FFT patterns, PSF; Gaussian beams (q/ABCD, resonator modes, HG/LG modes, M², OAM); diffractive optics (grating equation, blazed/multilevel/binary/Dammann efficiencies, diffractive lens, Kogelnik volume holograms); vectorial focusing (Richards-Wolf: linear/elliptical, radial, azimuthal; uniform, Gaussian, doughnut or `GaussianBeam` pupil) |
-| `lens` | lens.cyr, lens_aberration.cyr | 1605 | `CardinalPoints`, `SeidelCoefficients`, `WavefrontCoefficients`, `AberrSums` | Lens/mirror geometry: thin/thick lens, aberrations, wavefront coefficients from the Seidel sums, MTF (mono + poly + through-focus), aberrated OTF/MTF by pupil autocorrelation (Zernike or Seidel, sagittal/tangential, polychromatic complex sum), DoF, Petzval, multi-element; the Seidel and Buchdahl fifth-order sums of a `Prescription`, surface by surface, each fifth-order term split into intrinsic and induced |
-| `pbr` | pbr_core, pbr_advanced | 1428 | (free functions) | PBR shading: Cook-Torrance, GGX, sheen, clearcoat, SSS, iridescence, volumetric, importance sampling, split-sum IBL |
-| `atmosphere` | atmosphere.cyr | 378 | (free functions + constants) | Rayleigh/Mie scattering, King correction, sky color, air mass, optical depth, sunset model |
-| `bridge` | bridge.cyr | 28 | (free functions) | Primitive-value cross-crate hooks (bijli/tara/badal) — no dependency on sibling crates |
-| `serialize` | serialize.cyr | 62 | (free functions) | JSON roundtrips for the seven serde-tested types. ⚠ **Encode goes straight into a `str_builder`** since 2.3.4/2.3.5 — bayan is used only for Grisu2 float rendering; **decode** still walks a bayan value tree. The encoder emits round-trip-correct floats; bayan's decoder mis-rounds ~1 in 10⁵ doubles by 1 ULP (see serialize.cyr); every `*_from_json` reports via `err_out`; every wire format is pinned to exact bytes |
-| `ai` | ai.cyr | 62 | `DaimonClient`, `DaimonConfig`, `HooshConfig` | AI-assisted optics queries via sandhi HTTP POST — **not in the core bundle** |
+| `ray` | ray_core, ray_fresnel, ray_trace, ray_prt, ray_simulate, ray_system, ray_dispersion, ray_fiber, ray_grin | 2128 | `Medium`, `ComplexMedium`, `*Coefficients`, `TraceRay`, `OpticalSurface`, `PolarizedTraceHit`, `FresnelAmplitudes`, `PrtStep`, `PrtTraceHit`, `ParaxialRay`, `Prescription`, `GrinProfile` | Geometric optics: Snell, Fresnel (real + complex), dispersion (Sellmeier/Cauchy/Herzberger/Schott/Conrady, analytic derivatives and group index), chromatic aberration, fiber optics and fiber chromatic dispersion (material, waveguide, total; LP01 exact within weak guidance), sequential/recursive tracing with polarization, ray fans, spot diagrams, OPD; gradient-index tracing (SELFOC, sech, polynomial, Luneburg, fish-eye) by RK-Nyström with optical path |
+| `spectral` | spectral_core, spectral_cie, spectral_photometry, spectral_fluor | 2473 | `Rgb`, `Xyz`, `Spd`, `Observer` (tag constants), `Donaldson` | Color science: wavelength↔RGB, Planck (numerically stable), Wien, CIE 1931/1964/2015 XYZ, SPD, illuminants, CRI, photometry (V(λ), luminous flux/efficacy); fluorescence (peaks, Stokes shift, quantum yield, the Donaldson re-radiation matrix, Förster transfer) |
+| `wave` | wave_core, wave_polarization, wave_coherence, wave_airy, wave_fabry_perot, wave_diffraction, wave_doe, wave_zernike, wave_pattern, wave_beam, wave_focus | 5428 | `Polarization`, `StokesVector`, `MuellerMatrix` (16-f64 buffer), `Pattern2D`, `ZernikeWavefront`, `ThinFilmResult`, `AbsorbingFilmResult`, `GaussianBeam`, `VolumeGrating`, `FocusLens` | Wave optics: interference, coherence, Airy/Bessel, Fabry-Pérot, Fraunhofer/Fresnel diffraction, TMM (oblique s/p; complex-index R/T/A for absorbing layers), AR coatings, Jones/Stokes/Mueller, Zernike polynomials, 2D FFT patterns, PSF; Gaussian beams (q/ABCD, resonator modes, HG/LG modes, M², OAM); diffractive optics (grating equation, blazed/multilevel/binary/Dammann efficiencies, diffractive lens, Kogelnik volume holograms); vectorial focusing (Richards-Wolf: linear/elliptical, radial, azimuthal; uniform, Gaussian, doughnut or `GaussianBeam` pupil) |
+| `lens` | lens.cyr, lens_aberration.cyr | 1628 | `CardinalPoints`, `SeidelCoefficients`, `WavefrontCoefficients`, `AberrSums` | Lens/mirror geometry: thin/thick lens, aberrations, wavefront coefficients from the Seidel sums, MTF (mono + poly + through-focus), aberrated OTF/MTF by pupil autocorrelation (Zernike or Seidel, sagittal/tangential, polychromatic complex sum), DoF, Petzval, multi-element; the Seidel and Buchdahl fifth-order sums of a `Prescription`, surface by surface, each fifth-order term split into intrinsic and induced |
+| `pbr` | pbr_core, pbr_advanced | 1461 | (free functions) | PBR shading: Cook-Torrance, GGX, sheen, clearcoat, SSS, iridescence, volumetric, importance sampling, split-sum IBL |
+| `atmosphere` | atmosphere.cyr | 381 | (free functions + constants) | Rayleigh/Mie scattering, King correction, sky color, air mass, optical depth, sunset model |
+| `bridge` | bridge.cyr | 35 | (free functions) | Primitive-value cross-crate hooks (bijli/tara/badal) — no dependency on sibling crates |
+| `serialize` | serialize.cyr | 80 | (free functions) | JSON roundtrips for the seven serde-tested types. ⚠ **Encode goes straight into a `str_builder`** since 2.3.4/2.3.5 — bayan is used only for Grisu2 float rendering; **decode** still walks a bayan value tree. The encoder emits round-trip-correct floats; bayan's decoder mis-rounds ~1 in 10⁵ doubles by 1 ULP (see serialize.cyr); every `*_from_json` reports via `err_out`; every wire format is pinned to exact bytes |
+| `ai` | ai.cyr | 74 | `DaimonClient`, `DaimonConfig`, `HooshConfig` | AI-assisted optics queries via sandhi HTTP POST — **not in the core bundle** |
 
-**Total**: 32 science modules + error, **13681 test assertions across 39 suites**,
-184 benchmarks. (`tests/hardening.tcyr` is the cross-module regression suite for the
+**Total**: 32 science modules + error, **14187 test assertions across 39 suites**,
+185 benchmarks. (`tests/hardening.tcyr` is the cross-module regression suite for the
 2.0.2 audit repairs and the 2.1.0 error channels — see those CHANGELOG entries.)
 
 ## Design Principles
@@ -31,15 +31,15 @@ after the port-completeness review; recover it with
   `#derive(accessors)`), enums as tag constants.
 - `f64` precision throughout — optics demands double precision. Values are
   IEEE-754 bit patterns in `i64`; arithmetic goes through `f64_*`.
-- **Bit-fidelity to the Rust original** — constants encoded as exact ratios or
-  IEEE-754 hex; `powi` replicated as square-and-multiply; left-associative fold
-  order preserved so results match to the ULP.
-  ⚠ **Deliberately NOT bit-faithful at six sites.** 2.2.6 found six wrong physics
-  formulas, five character-for-character identical in the Rust archive, and fixed
-  them — GGX at low roughness, both Fresnel-integral branches, the sphere vertex
-  cap, the doublet prescription, third-order spherical, and `atm_air_mass` past
-  the horizon. 2.2.8 added four more. Fidelity is the default, not the rule: the
-  Rust original is a fidelity reference, never a correctness one.
+- **Correctness from the literature; fidelity to the Rust only where it was right.**
+  Constants are exact ratios or IEEE-754 hex, and the ported modules keep the Rust's
+  arithmetic (`powi` as square-and-multiply, left-associative folds) where it was correct. It
+  often was not: 2.2.6 found six wrong formulas, five character for character in the Rust
+  archive, 2.2.8 four more, and the 2.15.1 audit replaced ported arithmetic outright where it
+  was wrong — the thin-film and polarizer formulas, the Fresnel integrals (now Cephes),
+  `zernike_radial` (now a Jacobi recurrence), the through-focus MTF (now the defocused OTF).
+  The modules added since 2.6.0 were never ports. Every value is pinned against an
+  independent reference, never against the code's own output.
 - `#must_use` on pure functions.
 - Errors are `PK_ERR_*` codes returned via an `err_out` pointer — never
   `unwrap`/`panic` in library code.

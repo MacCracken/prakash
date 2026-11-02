@@ -55,6 +55,7 @@ fn cauchy_fused_silica() { return _cauchy_mk(_disp_r(14483, 10000), _disp_r(351,
 #must_use
 fn cauchy_n_at(coef, wavelength_um) {
     if (coef == 0) { return f64_from(0); }
+    if (_disp_wl_ok(wavelength_um) == 0) { return _PRK_NAN; }
     var l2 = f64_mul(wavelength_um, wavelength_um);
     return f64_add(CauchyCoefficients_b(coef), f64_div(CauchyCoefficients_c(coef), l2));
 }
@@ -172,26 +173,41 @@ fn sellmeier_diamond() {
       f64_from(0), F64_ONE);
 }
 
-# One Sellmeier term with a resonance-pole guard: b*l2/(l2-c), or 0 near the pole.
+# 1 if a wavelength is one a dispersion formula can take: finite and > 0.
+#must_use
+fn _disp_wl_ok(wl) {
+    if (f64_gt(wl, f64_from(0)) == 0) { return 0; }
+    return f64_lt(wl, 0x7FF0000000000000);
+}
+
+# One Sellmeier term with a resonance-pole guard: b*l2/(l2-c), or NaN within 1e-15 of the pole
+# (2.15.1: it was 0, which dropped the term and answered with the other two). A b = 0 term
+# contributes nothing and has no pole, as in _sellmeier_f012_term.
 fn _sellmeier_term(b, l2, c) {
+    if ((b & 0x7FFFFFFFFFFFFFFF) == 0) { return f64_from(0); }
     var d = f64_sub(l2, c);
     if (f64_gt(f64_abs(d), _disp_eps15()) == 1) {
         return f64_div(f64_mul(b, l2), d);
     }
-    return f64_from(0);
+    return _PRK_NAN;
 }
 
-# Refractive index at wavelength_um. Clamps to 1.0 in the unphysical n^2 < 1 region.
+# Refractive index at wavelength_um. NaN for a wavelength that is not finite and > 0, within
+# 1e-15 um^2 of a pole, or where the model gives n^2 < 0 (inside an absorption band, where it
+# has no real index). 0 < n < 1 is returned as computed.
+# ⛔ 2.15.1: n^2 < 1 was clamped to 1.0, so one ulp below a pole, where n^2 is -5e7, the answer
+# was vacuum; lambda = 0 and NaN answered 1.0, and a negative lambda answered n(|lambda|).
 #must_use
 fn sellmeier_n_at(coef, wavelength_um) {
     if (coef == 0) { return f64_from(0); }
+    if (_disp_wl_ok(wavelength_um) == 0) { return _PRK_NAN; }
     var l2 = f64_mul(wavelength_um, wavelength_um);
     var t1 = _sellmeier_term(SellmeierCoefficients_b1(coef), l2, SellmeierCoefficients_c1(coef));
     var t2 = _sellmeier_term(SellmeierCoefficients_b2(coef), l2, SellmeierCoefficients_c2(coef));
     var t3 = _sellmeier_term(SellmeierCoefficients_b3(coef), l2, SellmeierCoefficients_c3(coef));
     var n2 = f64_add(f64_add(f64_add(F64_ONE, t1), t2), t3);
-    if (f64_lt(n2, F64_ONE) == 1) {
-        return F64_ONE;
+    if (f64_lt(n2, f64_from(0)) == 1) {
+        return _PRK_NAN;
     }
     return f64_sqrt(n2);
 }
@@ -311,7 +327,8 @@ fn prism_deviation(apex_angle, n, err_out) {
     return f64_sub(f64_mul(F64_TWO, ganita_f64_asin(arg)), apex_angle);
 }
 
-# Prism deviation using the Sellmeier index at wavelength_um.
+# Prism deviation using the Sellmeier index at wavelength_um. PK_ERR_WAVELENGTH_RANGE (returns
+# 0) where the index is NaN (2.15.1: lambda = 0 answered a deviation, 0, as success).
 #must_use
 fn prism_dispersion(apex_angle, sellmeier, wavelength_um, err_out) {
     if (sellmeier == 0) {
@@ -319,6 +336,10 @@ fn prism_dispersion(apex_angle, sellmeier, wavelength_um, err_out) {
         return 0;
     }
     var n = sellmeier_n_at(sellmeier, wavelength_um);
+    if (f64_eq(n, n) == 0) {
+        store64(err_out, PK_ERR_WAVELENGTH_RANGE);
+        return 0;
+    }
     return prism_deviation(apex_angle, n, err_out);
 }
 
@@ -347,7 +368,10 @@ fn prism_angular_spread(apex_angle, sellmeier, wavelength_short_um, wavelength_l
         return 0;
     }
     var ps = alloc(sizeof(PrismSpread));
-    if (ps == 0) { return 0; }
+    if (ps == 0) {
+        store64(err_out, PK_ERR_ALLOCATION);
+        return 0;
+    }
     PrismSpread_set_dev_short(ps, dev_short);
     PrismSpread_set_dev_long(ps, dev_long);
     PrismSpread_set_spread(ps, f64_abs(f64_sub(dev_short, dev_long)));
@@ -420,10 +444,12 @@ fn schott_bk7() {
       f64_neg(_disp_r(76472538, 10000000000000)), _disp_r(49240991, 100000000000000));
 }
 
-# Schott power-series index: sqrt(a0 + a1*l^2 + a2/l^2 + a3/l^4 + a4/l^6 + a5/l^8); 1 if n^2 <= 0.
+# Schott power-series index: sqrt(a0 + a1*l^2 + a2/l^2 + a3/l^4 + a4/l^6 + a5/l^8). NaN if n^2 < 0
+# or the wavelength is not finite and > 0 (2.15.1: those answered 1.0, NaN included).
 #must_use
 fn schott_n_at(coef, wavelength_um) {
     if (coef == 0) { return f64_from(0); }
+    if (_disp_wl_ok(wavelength_um) == 0) { return _PRK_NAN; }
     var l2 = f64_mul(wavelength_um, wavelength_um);
     var li = f64_div(F64_ONE, l2);
     # Match Rust's left-associative coefficient-first folds: a3*x*x = (a3*x)*x.
@@ -435,10 +461,8 @@ fn schott_n_at(coef, wavelength_um) {
               f64_mul(SchottCoefficients_a1(coef), l2)),
             f64_mul(SchottCoefficients_a2(coef), li)),
           t3), t4), t5);
-    if (f64_gt(n2, f64_from(0)) == 1) {
-        return f64_sqrt(n2);
-    }
-    return F64_ONE;
+    if (f64_lt(n2, f64_from(0)) == 1) { return _PRK_NAN; }
+    return f64_sqrt(n2);
 }
 
 # Conrady (3-term): n = n0 + a/l + b/l^3.5.
@@ -458,6 +482,7 @@ fn _conrady_mk(n0, a, b) {
 #must_use
 fn conrady_n_at(coef, wavelength_um) {
     if (coef == 0) { return f64_from(0); }
+    if (_disp_wl_ok(wavelength_um) == 0) { return _PRK_NAN; }
     var term_a = f64_div(ConradyCoefficients_a(coef), wavelength_um);
     var term_b = f64_div(ConradyCoefficients_b(coef), _prk_pow(wavelength_um, _disp_r(7, 2)));
     return f64_add(f64_add(ConradyCoefficients_n0(coef), term_a), term_b);
@@ -485,7 +510,10 @@ fn longitudinal_chromatic_aberration(focal_length, abbe_num) {
     return f64_div(focal_length, abbe_num);
 }
 
-# Lateral (transverse) chromatic aberration: TCA = h / V.
+# Lateral colour as the chromatic difference of magnification: TCA = h / V, the spread between
+# the F and C image heights h = f tan(theta), each on its own focal plane (delta h = delta f tan
+# theta = h/V). On ONE image plane a thin lens with its stop at the lens has none: the chief ray
+# goes through the centre undeviated in every colour. Stop shift is what produces that kind.
 #must_use
 fn lateral_chromatic_aberration(image_height, abbe_num) {
     return f64_div(image_height, abbe_num);

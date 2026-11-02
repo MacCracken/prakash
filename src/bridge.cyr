@@ -65,8 +65,10 @@ fn br_refractive_index_cauchy_bk7(wavelength_nm) {
 
 # ── Tara bridges (stellar astrophysics) ────────
 
-# Stellar effective temperature (K) -> RGB [r,g,b] in 0..1, into a 3-f64 buffer.
+# Stellar effective temperature (K) -> RGB [r,g,b] in 0..1, into a 3-f64 buffer. Returns PK_ERR_NONE, or
+# PK_ERR_INVALID_PARAMETER and writes nothing for a null out (2.15.1: it was written through).
 fn br_stellar_temperature_to_rgb(temperature_k, out) {
+    if (out == 0) { return PK_ERR_INVALID_PARAMETER; }
     var t = f64_clamp(f64_div(temperature_k, f64_from(100)), f64_from(10), f64_from(400));
     var r = F64_ONE;
     if (f64_le(t, f64_from(66)) == 0) {
@@ -108,16 +110,20 @@ fn br_stellar_temperature_to_rgb(temperature_k, out) {
 }
 
 # B-V color index -> temperature (K), Ballesteros (2012):
-# T = 4600*(1/(0.92*bv+1.7) + 1/(0.92*bv+0.62)).
+# T = 4600*(1/(0.92*bv+1.7) + 1/(0.92*bv+0.62)). NaN where 0.92 bv + 0.62 <= 0 (bv <= -0.674) or
+# for NaN: there the formula is infinite or NEGATIVE (2.15.1: bv = -1 answered -9,436 K).
 #must_use
 fn br_color_index_to_temperature(b_minus_v) {
+    if (f64_gt(f64_add(f64_mul(_br_r(92, 100), b_minus_v), _br_r(62, 100)), f64_from(0)) == 0) { return _PRK_NAN; }
     var a = f64_add(f64_mul(_br_r(92, 100), b_minus_v), _br_r(17, 10));
     var c = f64_add(f64_mul(_br_r(92, 100), b_minus_v), _br_r(62, 100));
     return f64_mul(f64_from(4600),
       f64_add(f64_div(F64_ONE, a), f64_div(F64_ONE, c)));
 }
 
-# Spectral class letter (ASCII code) -> midpoint temperature (K).
+# Spectral class letter (ASCII code) -> midpoint temperature (K): O B A F G K M L T Y, either case.
+# NaN for any other code (2.15.1: every unknown letter answered 5500 K, G's value, so G's own test
+# could not fail).
 #must_use
 fn br_spectral_class_to_temperature(class) {
     var cu = class;
@@ -156,7 +162,7 @@ fn br_spectral_class_to_temperature(class) {
     if (cu == 89) {
         return f64_from(500);
     }
-    return f64_from(5500);
+    return _PRK_NAN;
 }
 
 # Absolute magnitude -> luminosity relative to the Sun: 10^((M_sun - M)/2.5).

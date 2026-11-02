@@ -74,15 +74,24 @@ fn trace_config_default() {
 #derive(accessors)
 struct TraceTree { segments; interactions; }
 
-# Trace a ray recursively, following refracted + reflected paths at each surface.
+# Trace a ray recursively, following refracted + reflected paths at each surface. The surfaces
+# are a sequential system in order along +z: surface i separates the medium before it (surface
+# i-1's n_after, or the starting ray's index for i = 0) from its own n_after, so a ray crossing
+# it toward -z passes into the medium before it. 0 for a null ray, surfaces or config, or on
+# allocation failure.
+# ⛔ 2.15.1: every crossing went into n_after, whichever way the ray travelled. A ray reflected
+# inside a glass slab crossed its front face back into the GLASS, with R = 0 (glass to glass), and
+# escaped at n = 1.5; the slab's back-and-forth series never formed. A null config SIGSEGVed.
 #must_use
 fn trace_recursive(ray, surfaces, config) {
     _prk_trace("trace_recursive");
     if (ray == 0) { return 0; }
     if (surfaces == 0) { return 0; }
+    if (config == 0) { return 0; }
     var segments = vec_new();
+    if (segments == 0) { return 0; }
     var interactions = 0;
-    _trace_recursive_inner(ray, surfaces, config, F64_ONE, 0, segments, &interactions);
+    _trace_recursive_inner(ray, surfaces, config, F64_ONE, 0, segments, &interactions, TraceRay_n(ray));
     var tree = alloc(sizeof(TraceTree));
     if (tree == 0) { return 0; }
     TraceTree_set_segments(tree, segments);
@@ -90,7 +99,14 @@ fn trace_recursive(ray, surfaces, config) {
     return tree;
 }
 
-fn _trace_recursive_inner(ray, surfaces, config, energy, depth, segments, inter_ptr) {
+# The medium in front of surface i: surface i-1's n_after, or n0 (the starting ray's) for i = 0.
+#must_use
+fn _trace_n_before(surfaces, i, n0) {
+    if (i == 0) { return n0; }
+    return OpticalSurface_n_after(vec_get(surfaces, i - 1));
+}
+
+fn _trace_recursive_inner(ray, surfaces, config, energy, depth, segments, inter_ptr, n0) {
     if (depth >= TraceConfig_max_depth(config)) {
         vec_push(segments, _seg_new(TraceRay_pos(ray), TraceRay_dir(ray), TraceRay_n(ray),
             f64_from(0), f64_from(0), energy, depth, EVENT_TERMINATED, f64_from(0), 0));
@@ -107,10 +123,21 @@ fn _trace_recursive_inner(ray, surfaces, config, energy, depth, segments, inter_
     var best_dist = f64_from(0);
     var best_hit = 0;
     var count = vec_len(surfaces);
+    # Travelling toward -z, a crossing leads into the medium in front of the surface: test each
+    # surface as a copy whose n_after is that medium. trace_surface reads the surface only while
+    # it runs, so a stack copy is enough.
+    var backward = f64_lt(RayVec3_z(TraceRay_dir(ray)), f64_from(0));
+    var flip[40];
     var i = 0;
     while (i < count) {
         var e = 0;
-        var hit = trace_surface(ray, vec_get(surfaces, i), &e);
+        var surf = vec_get(surfaces, i);
+        if (backward == 1) {
+            for (var w = 0; w < 40; w = w + 8) { store64(&flip + w, load64(surf + w)); }
+            OpticalSurface_set_n_after(&flip, _trace_n_before(surfaces, i, n0));
+            surf = &flip;
+        }
+        var hit = trace_surface(ray, surf, &e);
         # ⚠ 2.2.8: PK_ERR_TIR is a HIT, not a miss. This filter lumped it in
         # with a geometric miss and an aperture rejection, so a totally-
         # internally-reflecting surface was removed from the nearest-surface
@@ -155,7 +182,7 @@ fn _trace_recursive_inner(ray, surfaces, config, energy, depth, segments, inter_
     if (TraceHit_ray_after(best_hit) != 0) {
         if (f64_ge(refracted_energy, TraceConfig_min_energy(config)) == 1) {
             _trace_recursive_inner(TraceHit_ray_after(best_hit), surfaces, config,
-              refracted_energy, depth + 1, segments, inter_ptr);
+              refracted_energy, depth + 1, segments, inter_ptr, n0);
         }
     }
 
@@ -166,7 +193,7 @@ fn _trace_recursive_inner(ray, surfaces, config, energy, depth, segments, inter_
         vec_push(segments, _seg_new(TraceHit_hit_point(best_hit), reflected_dir, TraceRay_n(ray),
             f64_from(0), f64_from(0), reflected_energy, depth, EVENT_REFLECTION, f64_from(0), best_idx));
         _trace_recursive_inner(reflected_ray, surfaces, config,
-          reflected_energy, depth + 1, segments, inter_ptr);
+          reflected_energy, depth + 1, segments, inter_ptr, n0);
     }
     return 0;
 }
@@ -210,18 +237,22 @@ fn ray_fan_meridional(aperture_radius, num_rays, field_angle, start_z) {
     return rays;
 }
 
-# Sagittal ray fan (rays spread across x in the x-z plane).
+# Sagittal ray fan: the same field as ray_fan_meridional (tilted in the y-z plane, so the two
+# fans share their chief ray), with the rays spread across x, perpendicular to the meridional
+# plane. ⛔ 2.15.1: this tilted the field into x-z as well, which made it the meridional fan
+# turned 90 degrees, with that fan's aberrations: no sagittal fan at all.
 #must_use
 fn ray_fan_sagittal(aperture_radius, num_rays, field_angle, start_z) {
     _prk_trace("ray_fan_sagittal");
     var rays = vec_new();
+    if (rays == 0) { return 0; }
     var sin_f = _prk_sin(field_angle);
     var cos_f = _prk_cos(field_angle);
     var i = 0;
     while (i < num_rays) {
         var t = _fan_t(i, num_rays);
         var tr = trace_ray_new(ray_vec3(f64_mul(t, aperture_radius), f64_from(0), start_z),
-          ray_vec3(sin_f, f64_from(0), cos_f), F64_ONE);
+          ray_vec3(f64_from(0), sin_f, cos_f), F64_ONE);
         vec_push(rays, _fan_ray(tr, t));
         i = i + 1;
     }
@@ -355,7 +386,11 @@ fn spot_rms_radius(spots) {
 # ── Optical path difference ────────
 
 # Optical path length of a ray through the system to image_z (n * distance,
-# summed). Writes the error code to err_out (0 on error return).
+# summed). Writes the error code to err_out (0 on error return). The last leg is signed: a plane
+# behind the final ray (a virtual image) subtracts n' times the distance back to it, the sign the
+# OPD functions give it. PK_ERR_INVALID_PARAMETER if the final ray runs parallel to the plane.
+# ⛔ 2.15.1: a plane behind the final ray, or one it never reaches, dropped the last leg without
+# a word and returned the path to the last surface.
 #must_use
 fn optical_path_length(ray, surfaces, image_z, err_out) {
     store64(err_out, PK_ERR_NONE);
@@ -388,17 +423,17 @@ fn optical_path_length(ray, surfaces, image_z, err_out) {
     var fdir = TraceRay_dir(final_ray);
     var fpos = TraceRay_pos(final_ray);
     var dz = RayVec3_z(fdir);
-    if (f64_gt(f64_abs(dz), _sim_eps15()) == 1) {
-        var t = f64_div(f64_sub(image_z, RayVec3_z(fpos)), dz);
-        if (f64_gt(t, f64_from(0)) == 1) {
-            var end = ray_vec3(
-              f64_add(RayVec3_x(fpos), f64_mul(t, RayVec3_x(fdir))),
-              f64_add(RayVec3_y(fpos), f64_mul(t, RayVec3_y(fdir))),
-              image_z);
-            opl = f64_add(opl, f64_mul(prev_n, _sim_dist(prev_pos, end)));
-        }
+    if (f64_gt(f64_abs(dz), _sim_eps15()) == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return f64_from(0);
     }
-    return opl;
+    var t = f64_div(f64_sub(image_z, RayVec3_z(fpos)), dz);
+    var ex = f64_sub(f64_add(RayVec3_x(fpos), f64_mul(t, RayVec3_x(fdir))), RayVec3_x(prev_pos));
+    var ey = f64_sub(f64_add(RayVec3_y(fpos), f64_mul(t, RayVec3_y(fdir))), RayVec3_y(prev_pos));
+    var ez = f64_sub(image_z, RayVec3_z(prev_pos));
+    var leg = f64_mul(prev_n, f64_sqrt(f64_add(f64_add(f64_mul(ex, ex), f64_mul(ey, ey)), f64_mul(ez, ez))));
+    if (f64_lt(t, f64_from(0)) == 1) { leg = f64_neg(leg); }
+    return f64_add(opl, leg);
 }
 
 # ── Wavefront reference ────────

@@ -351,10 +351,12 @@ fn diffraction_pattern_2d(aperture, width, height) {
     return _pat_fftshift_to_pattern(grid, nw, nh);
 }
 
-# 2D diffraction pattern of a circular aperture (radius in grid pixels) -> Airy.
+# 2D diffraction pattern of a circular aperture (radius in grid pixels) -> Airy. 0 unless the
+# radius is >= 0 (2.15.1: NaN gave an all-dark pattern and a negative radius |radius|'s).
 #must_use
 fn diffraction_pattern_circular(grid_size, radius) {
     _prk_trace("diffraction_pattern_circular");
+    if (f64_ge(radius, f64_from(0)) == 0) { return 0; }
     var n = _pat_npot(grid_size);
     if (n == 0) { return 0; }
     if (_pat_dims_bad(n, n, 8) == 1) { return 0; }
@@ -436,12 +438,17 @@ fn point_source_at(arr, i) {
     return arr + i * sizeof(PointSource);
 }
 
-# A single standalone PointSource. NOT indexable as an array — see
-# `point_source_array_new` for building `interference_pattern` input.
+# A single PointSource: a one-element array, with the same length header as
+# `point_source_array_new`'s, so point_source_set / point_source_at accept index 0 only and it
+# can be passed to `interference_pattern` with num_sources = 1.
+# ⛔ 2.15.1: it had no header, so point_source_set read whatever word preceded it on the heap as
+# the length and wrote past the 32-byte source for any index under it, as success.
 #must_use
 fn point_source_new(x, y, amplitude, phase) {
-    var s = alloc(sizeof(PointSource));
-    if (s == 0) { return 0; }
+    var base = alloc(8 + sizeof(PointSource));
+    if (base == 0) { return 0; }
+    store64(base, 1);
+    var s = base + 8;
     PointSource_set_x(s, x);
     PointSource_set_y(s, y);
     PointSource_set_amplitude(s, amplitude);
@@ -451,10 +458,12 @@ fn point_source_new(x, y, amplitude, phase) {
 
 # Interference of N point sources on a 2D grid: |sum E|^2 with 1/r falloff.
 # grid_x = (gx0, gx1), grid_y = (gy0, gy1) flattened. sources = contiguous
-# PointSource array (element i at sources + i*sizeof(PointSource)).
+# PointSource array (element i at sources + i*sizeof(PointSource)). 0 unless the wavelength is
+# finite and > 0 (2.15.1: lambda = 0 gave a NaN grid, a negative one a mirrored phase).
 #must_use
 fn interference_pattern(sources, num_sources, wavelength, distance, gx0, gx1, gy0, gy1, nx, ny) {
     _prk_trace("interference_pattern");
+    if (_pat_wl_ok(wavelength) == 0) { return 0; }
     # 2.2.6: the one grid entry point the 2.0.2 null-guard sweep missed.
     # diffraction_pattern_2d and psf_from_wavefront both guard their buffer;
     # this read PointSource fields straight off address 0.
@@ -502,10 +511,18 @@ fn interference_pattern(sources, num_sources, wavelength, distance, gx0, gx1, gy
 #derive(accessors)
 struct StripColor { r; g; b; }
 
+# 1 if a wavelength is finite and > 0.
+#must_use
+fn _pat_wl_ok(wl) {
+    if (f64_gt(wl, f64_from(0)) == 0) { return 0; }
+    return f64_lt(wl, 0x7FF0000000000000);
+}
+
 # Piecewise wavelength(nm) -> linear RGB (approx CIE 1931). Writes r,g,b to
-# out+0/+8/+16. Black outside 380..780 nm.
+# out+0/+8/+16. Black outside 380..780 nm, and for NaN (2.15.1: NaN fell through every
+# comparison to the last branch and was painted red).
 fn _pat_wl_to_rgb(nm, out) {
-    if (f64_lt(nm, f64_from(380)) == 1) {
+    if (f64_ge(nm, f64_from(380)) == 0) {
         store64(out, f64_from(0));
         store64(out + 8, f64_from(0));
         store64(out + 16, f64_from(0));
@@ -559,43 +576,45 @@ fn spectrum_strip(num_samples) {
     if (_pat_dims_bad(num_samples, 1, sizeof(StripColor)) == 1) { return 0; }
     var colors = alloc(num_samples * sizeof(StripColor));
     if (colors == 0) { return 0; }
-    var rgb = alloc(24);
-    if (rgb == 0) { return 0; }
+    # A stack local: 2.15.1 found a 24-byte alloc here, leaked on every call.
+    var rgb[24];
     for (var i = 0; i < num_samples; i = i + 1) {
         var denom = f64_sub(f64_from(num_samples), F64_ONE);
         if (f64_lt(denom, F64_ONE) == 1) {
             denom = F64_ONE;
         }
         var t = f64_div(f64_from(i), denom);
-        _pat_wl_to_rgb(f64_add(f64_from(380), f64_mul(t, f64_from(400))), rgb);
+        _pat_wl_to_rgb(f64_add(f64_from(380), f64_mul(t, f64_from(400))), &rgb);
         var c = colors + i * sizeof(StripColor);
-        StripColor_set_r(c, load64(rgb));
-        StripColor_set_g(c, load64(rgb + 8));
-        StripColor_set_b(c, load64(rgb + 16));
+        StripColor_set_r(c, load64(&rgb));
+        StripColor_set_g(c, load64(&rgb + 8));
+        StripColor_set_b(c, load64(&rgb + 16));
     }
     return colors;
 }
 
-# Spectrum strip for a custom [start_nm, end_nm] range.
+# Spectrum strip for a custom [start_nm, end_nm] range. 0 unless both ends are finite (2.15.1:
+# a NaN end painted the strip red).
 #must_use
 fn spectrum_strip_range(start_nm, end_nm, num_samples) {
     _prk_trace("spectrum_strip_range");
+    if (f64_lt(f64_abs(start_nm), 0x7FF0000000000000) == 0) { return 0; }
+    if (f64_lt(f64_abs(end_nm), 0x7FF0000000000000) == 0) { return 0; }
     if (_pat_dims_bad(num_samples, 1, sizeof(StripColor)) == 1) { return 0; }
     var colors = alloc(num_samples * sizeof(StripColor));
     if (colors == 0) { return 0; }
-    var rgb = alloc(24);
-    if (rgb == 0) { return 0; }
+    var rgb[24];
     for (var i = 0; i < num_samples; i = i + 1) {
         var denom = f64_sub(f64_from(num_samples), F64_ONE);
         if (f64_lt(denom, F64_ONE) == 1) {
             denom = F64_ONE;
         }
         var t = f64_div(f64_from(i), denom);
-        _pat_wl_to_rgb(f64_add(start_nm, f64_mul(t, f64_sub(end_nm, start_nm))), rgb);
+        _pat_wl_to_rgb(f64_add(start_nm, f64_mul(t, f64_sub(end_nm, start_nm))), &rgb);
         var c = colors + i * sizeof(StripColor);
-        StripColor_set_r(c, load64(rgb));
-        StripColor_set_g(c, load64(rgb + 8));
-        StripColor_set_b(c, load64(rgb + 16));
+        StripColor_set_r(c, load64(&rgb));
+        StripColor_set_g(c, load64(&rgb + 8));
+        StripColor_set_b(c, load64(&rgb + 16));
     }
     return colors;
 }
@@ -603,10 +622,12 @@ fn spectrum_strip_range(start_nm, end_nm, num_samples) {
 # ── PSF ────────
 
 # Point Spread Function from wavefront error: PSF = |FT{P * exp(i*k*W)}|^2.
-# pupil/wavefront_error are row-major f64 grids (width x height); k = TAU/wl.
+# pupil/wavefront_error are row-major f64 grids (width x height); k = TAU/wl. 0 unless the
+# wavelength is finite and > 0 (2.15.1: lambda = 0 made k infinite and the PSF NaN).
 #must_use
 fn psf_from_wavefront(pupil, wavefront_error, width, height, wavelength) {
     _prk_trace("psf_from_wavefront");
+    if (_pat_wl_ok(wavelength) == 0) { return 0; }
     if (pupil == 0) { return 0; }
     if (wavefront_error == 0) { return 0; }
     var nw = _pat_npot(width);

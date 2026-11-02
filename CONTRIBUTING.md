@@ -85,6 +85,9 @@ grep -nE '\bsandhi_|\btls_[a-z]|\bhttp_[a-z]|\btcp_|\bdynlib_|\brand_[a-z]' \
   dist/prakash.cyr && echo "TLS leaked into the math-only bundle"
 
 # Or run the whole project sweep in one command — it must exit 0.
+# ⚠ Exit 0 is not enough: at 6.7.18 `cyrius audit` exits 0 even when the bench fails
+# to compile (2.15.0 hit it). Read its bench section for `=== 1 passed, 0 failed ===`.
+# `cyrius bench` and `cyrius test` on their own do exit 1 on a compile error.
 cyrius audit
 ```
 
@@ -118,20 +121,30 @@ cyrius test tests/ | grep -E '^[0-9]+ passed, [0-9]+ failed \([0-9]+ total\)$' \
   `src/error.cyr`): `0` (`PK_ERR_NONE`) = success, negative = error — there are
   no enums.
 - No `unwrap`/`panic` equivalents in library code — return `PK_ERR_*` via an
-  `err_out` pointer.
+  `err_out` pointer, or NaN from a scalar function, and never a plausible-looking
+  number for an input the function cannot answer. `err_out` is a precondition (it
+  must point to 8 writable bytes and is written first); a null handle, a null output
+  buffer or a null input buffer is refused.
 - Physics functions document their units.
-- **Bit-fidelity to the Rust source** is the porting contract: encode `f64`
+- **Correctness comes from the literature, not from the Rust original.** Encode `f64`
   constants as exact ratios (numerator/denominator < 2^53) or IEEE-754 hex bit
-  patterns; replicate `powi` as square-and-multiply; preserve left-associative
-  fold order. When in doubt, compare against the Rust original and add a test.
-  It is no longer in-tree (removed in 2.2.3) — retrieve it with
-  `git checkout 2.2.2 -- rust-old/`, or `git show 1.2.0:src/<file>.rs`.
+  patterns, and pin a value against an independent reference (a closed form, a
+  high-precision computation, a published table), never against the code's own
+  output. The modules ported from Rust keep its arithmetic where it was right — but
+  2.2.6 found six wrong formulas, five copied character for character from it, so
+  "it matches Rust" is never evidence. The modules added since 2.6.0 (`wave_beam`,
+  `ray_grin`, `wave_doe`, `ray_prt`, `wave_focus`, `lens_aberration`,
+  `spectral_fluor`, and more) are not ports at all. The Rust source is retrievable
+  with `git checkout 2.2.2 -- rust-old/`, or `git show 1.2.0:src/<file>.rs`.
 
 ## Testing Requirements
 
 - All public API changes need unit tests in a `tests/*.tcyr` suite.
-- Performance-sensitive changes: run `./scripts/bench-history.sh` before and
-  after and cite the CSV numbers — **never claim a speedup without benchmarks.**
+- Performance-sensitive changes: **never claim a speedup without benchmarks**, and
+  never from two runs at different times — this kind of host moves 20% between
+  identical runs. Put the old and new code in one bench binary and compare them there
+  (with an A/A pair), or interleave runs of both trees and compare per-row medians.
+  `./scripts/bench-history.sh` records the history row.
 - Target: maintain or improve coverage (80%+) on every PR.
 
 ## Commit Messages

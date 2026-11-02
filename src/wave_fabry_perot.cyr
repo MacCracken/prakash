@@ -3,25 +3,39 @@
 #
 # Ported from the Rust `wave/fabry_perot.rs`. Self-contained (no prakash deps).
 
-# Coefficient of finesse: F = 4R / (1-R)^2.
+# 1 if R is a mirror reflectance this module can use: finite and in [0, 1). R = 1 is a lossless
+# limit with no finite finesse, and outside [0, 1] there is no mirror at all: 2.15.1 found R = -0.5
+# giving T = 9 at a half order.
+#must_use
+fn _fp_r_ok(r) {
+    if ((r & 0x7FFFFFFFFFFFFFFF) > 0x7FF0000000000000) { return 0; }
+    if (f64_lt(r, 0) == 1) { return 0; }
+    return f64_lt(r, F64_ONE);
+}
+
+# Coefficient of finesse: F = 4R / (1-R)^2. NaN unless R is in [0, 1).
 #must_use
 fn fabry_perot_finesse_coefficient(reflectance) {
+    if (_fp_r_ok(reflectance) == 0) { return 0x7FF8000000000000; }
     var one_minus = f64_sub(F64_ONE, reflectance);
     return f64_div(f64_mul(f64_from(4), reflectance), f64_mul(one_minus, one_minus));
 }
 
-# Finesse (fringe sharpness): F = pi*sqrt(R) / (1-R).
+# Finesse (fringe sharpness): F = pi*sqrt(R) / (1-R). NaN unless R is in [0, 1).
 #must_use
 fn fabry_perot_finesse(reflectance) {
+    if (_fp_r_ok(reflectance) == 0) { return 0x7FF8000000000000; }
     return f64_div(f64_mul(F64_PI, f64_sqrt(reflectance)), f64_sub(F64_ONE, reflectance));
 }
 
 # Transmittance (Airy function): T = 1 / (1 + F*sin^2(delta/2)),
 # delta = 4*pi*n*d*cos(theta)/lambda. delta/2 = pi*m in the order m =
 # 2*n*d*cos(theta)/lambda, and sin^2 has period 1 in m, so the whole orders go first:
-# a cavity of optical length 0.14 m at 550 nm is past where sin takes full reduction.
+# a cavity of optical length 0.14 m at 550 nm is past where sin takes full reduction. NaN unless
+# R is in [0, 1).
 #must_use
 fn fabry_perot_transmittance(wavelength, thickness, n, angle, reflectance) {
+    if (_fp_r_ok(reflectance) == 0) { return 0x7FF8000000000000; }
     var m = f64_div(f64_mul(f64_mul(f64_mul(F64_TWO, n), thickness), _prk_cos(angle)), wavelength);
     var f_coeff = fabry_perot_finesse_coefficient(reflectance);
     var s = _prk_sin(f64_mul(F64_HALF, _prk_cycles_phase(m)));

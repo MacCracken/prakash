@@ -49,13 +49,24 @@ fn fresnel_normal(n1, n2) {
 }
 
 # Average (unpolarized) Fresnel reflectance. Writes PK_ERR_TIR (returns 0) if
-# the incident angle exceeds the critical angle.
+# the incident angle exceeds the critical angle, PK_ERR_INVALID_ANGLE past 90 degrees (cos < 0,
+# the back of the surface), PK_ERR_INVALID_INDEX unless both indices are finite and > 0. At the
+# critical angle itself, as ray_critical_angle rounds it, R = 1 (grazing), not TIR. (2.15.1: all
+# three were computed through, R = NaN at n2 = 0.)
 #must_use
 fn fresnel_unpolarized(n1, n2, incident_angle, err_out) {
     store64(err_out, PK_ERR_NONE);
+    if ((_ray_index_ok(n1) & _ray_index_ok(n2)) == 0) {
+        store64(err_out, PK_ERR_INVALID_INDEX);
+        return 0;
+    }
     var sin_i = _prk_sin(incident_angle);
     var cos_i = _prk_cos(incident_angle);
-    var sin_t = f64_mul(f64_div(n1, n2), sin_i);
+    if (f64_lt(cos_i, f64_from(0)) == 1) {
+        store64(err_out, PK_ERR_INVALID_ANGLE);
+        return 0;
+    }
+    var sin_t = _ray_snell_sin(f64_mul(f64_div(n1, n2), sin_i));
     if (f64_gt(f64_abs(sin_t), F64_ONE) == 1) {
         store64(err_out, PK_ERR_TIR);
         return 0;
@@ -367,6 +378,12 @@ fn _ray_snell_3d_out(direction, nx, ny, nz, n1, n2, rx_out, ry_out, rz_out, refl
     var dz = RayVec3_z(direction);
     var dot = f64_add(f64_add(f64_mul(dx, nx), f64_mul(dy, ny)), f64_mul(dz, nz));
     var cos_i = f64_neg(dot);
+    # The back of the surface (2.15.1: R = 25 came back as a reflectance). trace_surface turns
+    # its normal to face the ray, so only a direct caller can land here.
+    if (f64_lt(cos_i, f64_from(0)) == 1) {
+        store64(err_out, PK_ERR_INVALID_ANGLE);
+        return 0;
+    }
     var ratio = f64_div(n1, n2);
     var sin2_t = f64_mul(f64_mul(ratio, ratio), f64_sub(F64_ONE, f64_mul(cos_i, cos_i)));
     if (f64_gt(sin2_t, F64_ONE) == 1) {
@@ -387,7 +404,7 @@ fn _ray_snell_3d_out(direction, nx, ny, nz, n1, n2, rx_out, ry_out, rz_out, refl
 # Compute the refracted direction and unpolarized Fresnel reflectance for a 3D
 # ray. Returns the refracted RayVec3 (0 on TIR); writes the reflectance to
 # refl_out and the error code to err_out. `direction` and outward `normal`
-# should be normalized.
+# should be normalized, the normal facing the incoming ray; d.n > 0 writes PK_ERR_INVALID_ANGLE.
 #
 # A thin wrapper over _ray_snell_3d_out since 2.3.6 — it boxes the result the
 # caller-slot form answers through. Callers on a hot path should use that form

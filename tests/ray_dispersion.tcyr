@@ -134,11 +134,12 @@ _assert_near(
   SellmeierCoefficients_c2(sellmeier_sapphire()), _fd(1423826, 100000000), TOL8, "sapphire c2 = 0.1193242^2");
 _assert_near(SellmeierCoefficients_b3(sellmeier_sapphire()), _fd(53414021, 10000000), TOL8, "sapphire b3 literal");
 
-# resonance guard: at l^2 = c1, n stays finite and >= 1
+# The resonance itself: at l^2 = c1 the term is infinite, and n is NaN (2.15.1). Through 2.15.0
+# this asserted "finite and >= 1", which the guard met by DROPPING the term and answering with
+# the other two: a fabricated index at the one wavelength where the model has none.
 var res_wl = f64_sqrt(SellmeierCoefficients_c1(sellmeier_bk7()));
 var res_n = sellmeier_n_at(sellmeier_bk7(), res_wl);
-assert_eq(_is_finite(res_n), 1, "resonance n finite");
-assert(f64_ge(res_n, F64_ONE), "resonance n >= 1");
+assert(f64_eq(res_n, res_n) == 0, "at the resonance n is NaN, not the other two terms' answer");
 
 # ── Abbe ────────
 test_group("abbe");
@@ -337,9 +338,12 @@ assert(_isnan(sellmeier_d2n_dlambda2(fsd, Z)), "zero wavelength -> NaN");
 assert(_isnan(sellmeier_group_index(fsd, f64_neg(F64_ONE))), "negative wavelength -> NaN");
 assert(_isnan(sellmeier_dn_dlambda(fsd, 0x7FF0000000000000)), "infinite wavelength -> NaN");
 assert(_isnan(sellmeier_dn_dlambda(fsd, 0x7FF8000000000000)), "NaN wavelength -> NaN");
-# Water's IR resonance puts n^2 < 1 near 3.1 um, where sellmeier_n_at clamps to 1.
+# Water's IR resonance puts n^2 = 0.763 at 3.1 um, past the fit's range: the model's own answer
+# is n = 0.8734, which is what comes back (2.15.1). It was clamped to 1.0, vacuum, and this test
+# pinned the clamp. Reference: the six coefficients as exact rationals, 60 digits.
 var wat = sellmeier_water();
-assert_eq(sellmeier_n_at(wat, _fd(31, 10)), F64_ONE, "water at 3.1 um is in the clamped region");
+_assert_near(sellmeier_n_at(wat, _fd(31, 10)), 0x3FEBF27DF581A2C4, _fd(1, 10000000000000),
+  "water at 3.1 um: n = sqrt(0.76274) = 0.87335, the model's value");
 assert(_isnan(sellmeier_dn_dlambda(wat, _fd(31, 10))), "no derivative of a clamped index");
 assert(_isnan(sellmeier_d2n_dlambda2(wat, _fd(31, 10))), "no second derivative of a clamped index");
 # A real pole: lambda^2 = c exactly, for a term whose b is nonzero.
@@ -374,5 +378,23 @@ assert(_isnan(sellmeier_d2n_dlambda2(fsd, 0x1CA3529BA7D19EAF)), "1e-170 um (l^2 
 var vacd = _sellmeier_mk(Z, F64_ONE, Z, F64_ONE, Z, F64_ONE);
 assert_eq(sellmeier_dn_dlambda(vacd, F64_ONE), Z, "vacuum: dn/dl = 0");
 assert_eq(sellmeier_group_index(vacd, F64_ONE), F64_ONE, "vacuum: N_g = 1");
+
+# ── 2.15.1: the wavelength domain of the index formulas ────────
+test_group("2.15.1 dispersion domain");
+var _bk = sellmeier_bk7();
+assert(_isnan(sellmeier_n_at(_bk, Z)), "Sellmeier: lambda = 0 -> NaN (was 1.0)");
+assert(_isnan(sellmeier_n_at(_bk, _fd(0 - 58756, 100000))), "Sellmeier: lambda < 0 -> NaN (was n(|lambda|))");
+assert(_isnan(sellmeier_n_at(_bk, 0x7FF8000000000000)), "Sellmeier: NaN -> NaN (was 1.0)");
+assert(_isnan(sellmeier_n_at(_bk, 0x7FF0000000000000)), "Sellmeier: +inf -> NaN");
+# 1e-6 um below BK7's 10.18 um pole n^2 = -5.1e6: no real index. It was clamped to vacuum.
+assert(_isnan(sellmeier_n_at(_bk, 0x402459FB71D4D5A7)), "Sellmeier: n^2 = -5e6 below the c3 pole -> NaN (was 1.0)");
+assert(_isnan(cauchy_n_at(cauchy_bk7(), Z)), "Cauchy: lambda = 0 -> NaN (was inf)");
+assert(_isnan(schott_n_at(schott_bk7(), Z)), "Schott: lambda = 0 -> NaN (was 1.0)");
+assert(_isnan(schott_n_at(schott_bk7(), 0x7FF8000000000000)), "Schott: NaN -> NaN (was 1.0)");
+var _pde = 0;
+var _pdv = prism_dispersion(_fd(1, 1), _bk, Z, &_pde);
+assert_eq(_pde, PK_ERR_WAVELENGTH_RANGE, "prism_dispersion at lambda = 0 refuses (was 0 deviation, no error)");
+_assert_near(sellmeier_n_at(_bk, fraunhofer_d()), 0x3FF844D0311E6ED1, _fd(1, 1000000000000000),
+  "inside the domain nothing moved: BK7 n_d bit pattern as before");
 
 var r = assert_summary();

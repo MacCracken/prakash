@@ -112,11 +112,16 @@ fn medium_acrylic() { return _medium_mk(f64_div(f64_from(149), f64_from(100)), "
 fn medium_polycarbonate() { return _medium_mk(f64_div(f64_from(1585), f64_from(1000)), "polycarbonate"); }
 
 # Custom medium with a given refractive index. Writes PK_ERR_INVALID_INDEX and
-# returns 0 if n < 1.0.
+# returns 0 unless 1 <= n < infinity (2.15.1: NaN and infinity were accepted), and
+# PK_ERR_INVALID_PARAMETER for a null name (2.15.1: accepted, and medium_to_json then read it).
 #must_use
 fn medium_custom(n, name, err_out) {
     store64(err_out, PK_ERR_NONE);
-    if (f64_lt(n, F64_ONE) == 1) {
+    if (name == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
+    if ((f64_ge(n, F64_ONE) == 0) | (n == 0x7FF0000000000000)) {
         store64(err_out, PK_ERR_INVALID_INDEX);
         return 0;
     }
@@ -139,13 +144,37 @@ fn medium_permittivity(m) {
 
 # ── Snell's Law ────────
 
+# 1 if n is a refractive index these functions can use: finite and > 0.
+#must_use
+fn _ray_index_ok(n) {
+    if (f64_gt(n, f64_from(0)) == 0) { return 0; }
+    return f64_lt(n, 0x7FF0000000000000);
+}
+
+# sin(theta_t) as Snell gives it, with the critical angle's rounding taken back: a |sin| that
+# is above 1 by at most 4 ulps is 1 (grazing). ray_critical_angle's own angle, fed back, gave
+# n1 sin(theta_c)/n2 = 1 + 1 ulp for about one n1 in three, and TIR was reported at the very
+# angle that defines its onset (2.15.1).
+#must_use
+fn _ray_snell_sin(sin_t) {
+    if (f64_gt(f64_abs(sin_t), F64_ONE) == 0) { return sin_t; }
+    if (f64_gt(f64_abs(sin_t), 0x3FF0000000000004) == 1) { return sin_t; }
+    if (f64_lt(sin_t, f64_from(0)) == 1) { return f64_neg(F64_ONE); }
+    return F64_ONE;
+}
+
 # Apply Snell's law: n1 sin(t1) = n2 sin(t2). Returns the refracted angle in
-# radians, or writes PK_ERR_TIR (and returns 0) on total internal reflection.
+# radians, or writes PK_ERR_TIR (and returns 0) on total internal reflection, or
+# PK_ERR_INVALID_INDEX (returns 0) unless both indices are finite and > 0 (2.15.1).
 #must_use
 fn ray_snell(n1, n2, incident_angle, err_out) {
     _prk_trace("snell");
     store64(err_out, PK_ERR_NONE);
-    var sin_t = f64_mul(f64_div(n1, n2), _prk_sin(incident_angle));
+    if ((_ray_index_ok(n1) & _ray_index_ok(n2)) == 0) {
+        store64(err_out, PK_ERR_INVALID_INDEX);
+        return 0;
+    }
+    var sin_t = _ray_snell_sin(f64_mul(f64_div(n1, n2), _prk_sin(incident_angle)));
     if (f64_gt(f64_abs(sin_t), F64_ONE) == 1) {
         store64(err_out, PK_ERR_TIR);
         return 0;
@@ -154,10 +183,15 @@ fn ray_snell(n1, n2, incident_angle, err_out) {
 }
 
 # Critical angle for total internal reflection (requires n1 > n2). Writes
-# PK_ERR_INVALID_PARAMETER (returns 0) if n1 <= n2.
+# PK_ERR_INVALID_PARAMETER (returns 0) if n1 <= n2, or PK_ERR_INVALID_INDEX unless both are
+# finite and > 0 (2.15.1: n2 = 0 answered 0 and n2 = -1 a negative angle).
 #must_use
 fn ray_critical_angle(n1, n2, err_out) {
     store64(err_out, PK_ERR_NONE);
+    if ((_ray_index_ok(n1) & _ray_index_ok(n2)) == 0) {
+        store64(err_out, PK_ERR_INVALID_INDEX);
+        return 0;
+    }
     if (f64_le(n1, n2) == 1) {
         store64(err_out, PK_ERR_INVALID_PARAMETER);
         return 0;
@@ -212,7 +246,9 @@ fn ray_reflect_3d(direction, normal) {
 #   t = ratio*d + (ratio*cos_i - cos_t)*n
 # with ratio = n1/n2, cos_i = -(d.n), cos_t = sqrt(1 - ratio^2 (1 - cos_i^2)).
 # Returns the refracted RayVec3, or writes PK_ERR_TIR (returns 0) if the
-# discriminant is negative. `direction` and outward `normal` should be normalized.
+# discriminant is negative. `direction` and outward `normal` should be normalized, with the
+# normal facing the incoming ray: d.n > 0 is the back of the surface, and writes
+# PK_ERR_INVALID_ANGLE (2.15.1: the formula ran on and sent the ray back the way it came).
 #must_use
 fn ray_refract_3d(direction, normal, n1, n2, err_out) {
     store64(err_out, PK_ERR_NONE);
@@ -233,6 +269,10 @@ fn ray_refract_3d(direction, normal, n1, n2, err_out) {
     var ratio = f64_div(n1, n2);
     var dot = f64_add(f64_add(f64_mul(dx, nx), f64_mul(dy, ny)), f64_mul(dz, nz));
     var cos_i = f64_neg(dot);
+    if (f64_lt(cos_i, f64_from(0)) == 1) {
+        store64(err_out, PK_ERR_INVALID_ANGLE);
+        return 0;
+    }
     var sin2_t = f64_mul(f64_mul(ratio, ratio), f64_sub(F64_ONE, f64_mul(cos_i, cos_i)));
     if (f64_gt(sin2_t, F64_ONE) == 1) {
         store64(err_out, PK_ERR_TIR);

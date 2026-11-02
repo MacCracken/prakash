@@ -84,15 +84,15 @@ fn _r_sat_u8(ch) {
 }
 
 # Clamp to [0, 1] and quantise to 8-bit channels (RgbU8; NaN -> 0); 0 on allocation failure.
+# Allocates its result only (2.15.1: the clamped copy was an Rgb, 24 bytes leaked per call).
 #must_use
 fn rgb_to_u8(c) {
     if (c == 0) { return 0; }
-    var cc = rgb_clamp(c);
     var u = alloc(sizeof(RgbU8));
     if (u == 0) { return 0; }
-    RgbU8_set_r(u, _r_sat_u8(Rgb_r(cc)));
-    RgbU8_set_g(u, _r_sat_u8(Rgb_g(cc)));
-    RgbU8_set_b(u, _r_sat_u8(Rgb_b(cc)));
+    RgbU8_set_r(u, _r_sat_u8(f64_clamp(Rgb_r(c), f64_from(0), F64_ONE)));
+    RgbU8_set_g(u, _r_sat_u8(f64_clamp(Rgb_g(c), f64_from(0), F64_ONE)));
+    RgbU8_set_b(u, _r_sat_u8(f64_clamp(Rgb_b(c), f64_from(0), F64_ONE)));
     return u;
 }
 
@@ -186,9 +186,14 @@ fn _expm1(x) {
 }
 
 # Planck's law: spectral radiance (W*sr^-1*m^-3) at wavelength_m and temperature_k.
-# Uses the Wien approximation for x > 500 to avoid exp overflow; 0 for T <= 0.
+# Uses the Wien approximation for x > 500 to avoid exp overflow; 0 for T <= 0 (no emission).
+# NaN for a wavelength that is not finite and > 0 (2.15.1: lambda = 0 answered 0 and a negative
+# lambda a negative radiance).
 #must_use
 fn planck_radiance(wavelength_m, temperature_k) {
+    if ((f64_gt(wavelength_m, f64_from(0)) & f64_lt(wavelength_m, 0x7FF0000000000000)) == 0) {
+        return _PRK_NAN;
+    }
     if (f64_le(temperature_k, f64_from(0)) == 1) {
         return f64_from(0);
     }

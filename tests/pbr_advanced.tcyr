@@ -552,4 +552,88 @@ for (var _ka = 0; _ka <= 10; _ka = _ka + 1) {
 _assert_near(_kmax_s, _fd(1803, 10000), _fd(5, 1000), "Karis split-sum scale max err = 0.1803 over the grid");
 _assert_near(_kmax_b, _fd(1357, 10000), _fd(5, 1000), "Karis split-sum bias max err = 0.1357 over the grid");
 
+# ── 2.15.1: iridescence with signed amplitudes, s and p ────────
+# References: the characteristic matrix of the film (Macleod ch. 2), R = |(eta0 B - C)/(eta0 B + C)|^2
+# for s and p, averaged, at 50 digits: a different formalism from the Airy sum the code uses.
+# Through 2.15.0 a vanishing soap film read 0.077 and a quarter-wave one 0.
+test_group("2.15.1 iridescence");
+_assert_near(pbr_iridescence_fresnel(0x3FF0000000000000, 0x3FF547AE147AE148, 0x3FF0000000000000, 0x0000000000000000,
+    0x4081300000000000, 0x3FF0000000000000), 0x0000000000000000, 0x3C9CD2B297D889BC, "soap, vanishing film");
+_assert_near(pbr_iridescence_fresnel(0x3FF0000000000000, 0x3FF547AE147AE148, 0x3FF0000000000000, 0x3FF0000000000000,
+    0x4081300000000000, 0x3FF0000000000000), 0x3EF43967C6DF4AF6, 0x3C9CD2B297D889BC, "soap, 1 nm");
+_assert_near(pbr_iridescence_fresnel(0x3FF0000000000000, 0x3FF547AE147AE148, 0x3FF0000000000000, 0x4059D88A9622A588,
+    0x4081300000000000, 0x3FF0000000000000), 0x3FB3BDA63F929D58, 0x3C9CD2B297D889BC, "soap, quarter wave");
+_assert_near(pbr_iridescence_fresnel(0x3FF0000000000000, 0x3FF547AE147AE148, 0x3FF0000000000000, 0x4069D88A9622A588,
+    0x4081300000000000, 0x3FF0000000000000), 0x39181E3736D770F8, 0x3C9CD2B297D889BC, "soap, half wave");
+_assert_near(pbr_iridescence_fresnel(0x3FF0000000000000, 0x3FF547AE147AE148, 0x3FF0000000000000, 0x4072C00000000000,
+    0x4081300000000000, 0x3FE6A09E667F3BCD), 0x3FA8B62D90362AD0, 0x3C9CD2B297D889BC, "soap, 300 nm at 45 deg");
+_assert_near(pbr_iridescence_fresnel(0x3FF0000000000000, 0x3FF8000000000000, 0x3FF547AE147AE148, 0x0000000000000000,
+    0x4081300000000000, 0x3FF0000000000000), 0x3F948A6DA782440E, 0x3C9CD2B297D889BC, "oil on water, 0 nm");
+_assert_near(pbr_iridescence_fresnel(0x3FF0000000000000, 0x3FF8000000000000, 0x3FF547AE147AE148, 0x4079000000000000,
+    0x407C200000000000, 0x3FE0000000000000), 0x3FB44FA886FF6B28, 0x3C9CD2B297D889BC, "oil on water, 400 nm at 60 deg");
+_assert_near(pbr_iridescence_fresnel(0x3FF0000000000000, 0x3FF4CCCCCCCCCCCD, 0x3FF8000000000000, 0x4075E00000000000,
+    0x4084500000000000,
+    0x3FEBB67AE8584CAB), 0x3F92A6F76E441280, 0x3C9CD2B297D889BC, "1.3 on 1.5, 350 nm at 30 deg, 650");
+_assert_near(pbr_iridescence_fresnel(0x3FF0000000000000, 0x3FF4CCCCCCCCCCCD, 0x3FF8000000000000, 0x4075E00000000000,
+    0x407C200000000000,
+    0x3FEBB67AE8584CAB), 0x3FA2320484529627, 0x3C9CD2B297D889BC, "1.3 on 1.5, 350 nm at 30 deg, 450");
+_assert_near(pbr_iridescence_fresnel(0x3FF0000000000000, 0x4003333333333333, 0x3FF8000000000000, 0x4054000000000000,
+    0x4081300000000000,
+    0x3FEF838B8C811C17), 0x3FD10E8BF4E8A3CB, 0x3C9CD2B297D889BC, "TiO2 2.4 on glass 1.5, 80 nm, 550, 10 deg");
+
+# ── 2.15.1: Burley's profile has no finite value at r = 0, and needs d > 0 ────────
+test_group("2.15.1 Burley profile");
+assert_eq(pbr_sss_profile_burley(f64_from(0), F64_ONE), 0x7FF0000000000000, "R(0) = +inf: it diverges as 1/(4 pi d r)");
+_assert_near(pbr_sss_profile_burley(0x3C9CD2B297D889BC, F64_ONE), 0x43069E05E9E3BCA5,
+  f64_mul(0x43069E05E9E3BCA5, 0x3CB0000000000000), "R(1e-16) at d = 1 (1e-16 read 0.159, 1e-15 4.1e13)");
+_assert_near(pbr_sss_profile_burley(0x3CD203AF9EE75616, F64_ONE), 0x42D21804BB1C96E7,
+  f64_mul(0x42D21804BB1C96E7, 0x3CB0000000000000), "R(1e-15) at d = 1 (1e-16 read 0.159, 1e-15 4.1e13)");
+_assert_near(pbr_sss_profile_burley(0x3EB0C6F7A0B5ED8D, F64_ONE), 0x40F36D96B2271A2E,
+  f64_mul(0x40F36D96B2271A2E, 0x3CB0000000000000), "R(1e-6) at d = 1 (1e-16 read 0.159, 1e-15 4.1e13)");
+_assert_near(pbr_sss_profile_burley(0x3FE0000000000000, F64_ONE), 0x3FBD99BC058C73E6,
+  f64_mul(0x3FBD99BC058C73E6, 0x3CB0000000000000), "R(0.5) at d = 1 (1e-16 read 0.159, 1e-15 4.1e13)");
+_assert_near(pbr_sss_profile_burley(0x4008000000000000, F64_ONE), 0x3F76B08F4396F735,
+  f64_mul(0x3F76B08F4396F735, 0x3CB0000000000000), "R(3) at d = 1 (1e-16 read 0.159, 1e-15 4.1e13)");
+assert(f64_eq(pbr_sss_profile_burley(F64_ONE, f64_from(0)), pbr_sss_profile_burley(F64_ONE, f64_from(0))) == 0,
+  "d = 0: NaN");
+assert(f64_eq(pbr_sss_profile_burley(F64_ONE, f64_neg(F64_ONE)),
+    pbr_sss_profile_burley(F64_ONE, f64_neg(F64_ONE))) == 0,
+  "d < 0: NaN (was a negative profile)");
+assert(f64_eq(pbr_sss_profile_burley(f64_neg(F64_ONE), F64_ONE),
+    pbr_sss_profile_burley(f64_neg(F64_ONE), F64_ONE)) == 0, "r < 0: NaN");
+
+# ── 2.15.1: Burley's subsurface lobe (Disney 2012) at l.h = 1: F_ss90 = roughness, not roughness^2 ────────
+test_group("2.15.1 subsurface diffuse");
+_assert_near(pbr_subsurface_diffuse(0x3FF0000000000000, 0x3FF0000000000000, 0x3FE0000000000000), 0x3FC976FC893C3AA3,
+  0x3CB0000000000000, "subsurface(1.0, 1.0, 0.5) = 0.198944");
+_assert_near(pbr_subsurface_diffuse(0x3FC999999999999A, 0x3FC999999999999A, 0x3FE0000000000000), 0x3FE82B9595626D3C,
+  0x3CB0000000000000, "subsurface(0.2, 0.2, 0.5) = 0.755320");
+_assert_near(pbr_subsurface_diffuse(0x3FE6666666666666, 0x3FD3333333333333, 0x3FD0000000000000), 0x3FD7D6ED75B465AA,
+  0x3CB0000000000000, "subsurface(0.7, 0.3, 0.25) = 0.372493");
+_assert_near(pbr_subsurface_diffuse(0x3FA999999999999A, 0x3FECCCCCCCCCCCCD, 0x3FE999999999999A), 0x3FD8A08F858C08FC,
+  0x3CB0000000000000, "subsurface(0.05, 0.9, 0.8) = 0.384800");
+assert_eq(pbr_subsurface_diffuse(f64_from(0), f64_from(0), F64_HALF), f64_from(0), "n.l = n.v = 0: 0 (was 2.5e13)");
+assert_eq(pbr_subsurface_diffuse(f64_neg(F64_HALF), F64_HALF, F64_HALF), f64_from(0), "light below the horizon: 0");
+
+# ── 2.15.1: domains ────────
+test_group("2.15.1 pbr domains");
+assert_eq(pbr_distribution_ggx(f64_neg(F64_HALF), F64_HALF), f64_from(0),
+  "GGX: a back-facing half vector has D = 0 (was a^2/pi)");
+assert(f64_gt(pbr_distribution_ggx(f64_from(0), F64_HALF), f64_from(0)) == 1,
+  "GGX: n.h = 0 itself is still the limit a^2/pi");
+assert_eq(pbr_distribution_ggx_aniso(f64_neg(F64_HALF), _fd(866, 1000), f64_from(0), F64_HALF, F64_HALF), f64_from(0),
+  "aniso GGX: back-facing half vector, D = 0");
+var _hg2 = pbr_henyey_greenstein(f64_from(0), F64_TWO);
+assert(f64_eq(_hg2, _hg2) == 0, "HG with g = 2: NaN (was -0.021)");
+var _hg1 = pbr_henyey_greenstein(F64_ONE, F64_ONE);
+assert(f64_eq(_hg1, _hg1) == 0, "HG with g = 1: NaN (a delta, not a density)");
+# g = 1 - 2^-25 forward: (1 + g)/(4 pi (1 - g)^2) = 1.79e14. The 1e-15 floor returned 0.
+var _gq = 0x3FEFFFFFF0000000;
+_assert_near(pbr_henyey_greenstein(F64_ONE, _gq), 0x42E45F3068B1FC67, f64_mul(0x42E45F3068B1FC67, 0x3CF0000000000000),
+  "HG forward peak at g = 1 - 2^-25: 1.79e14 (was 0)");
+var _f0 = pbr_ior_to_f0(f64_neg(F64_ONE));
+assert(f64_eq(_f0, _f0) == 0, "F0 of ior -1: NaN (was +inf)");
+var _st = pbr_sss_transmittance(F64_ONE, f64_neg(F64_ONE));
+assert(f64_eq(_st, _st) == 0, "transmittance with negative extinction: NaN (was e = 2.72)");
+
 var r = assert_summary();

@@ -117,6 +117,8 @@ struct Prescription { name; surfaces; n_initial; }
 # Empty Prescription called `name`, n_initial = 1 (air/vacuum); 0 on allocation failure.
 #must_use
 fn prescription_new(name) {
+    # 2.15.1: a null name was accepted and prescription_to_json read it off address 0.
+    if (name == 0) { return 0; }
     var p = alloc(sizeof(Prescription));
     if (p == 0) { return 0; }
     Prescription_set_name(p, name);
@@ -234,7 +236,17 @@ struct SystemProperties { focal_length; bfd; ffd; power; entrance_pupil; exit_pu
 
 # Find the cardinal points from a prescription by tracing marginal paraxial rays
 # forward (EFL, BFD) and reverse (FFD). Returns 0 and writes an error code if the
-# system is empty or afocal (zero power).
+# system is empty or afocal (zero power), or PK_ERR_INVALID_PARAMETER for a surface whose radius
+# is 0 or NaN (no curvature to give it).
+#   focal_length  the effective focal length 1/power
+#   bfd           last vertex to the rear focal point, n' f_E: -n' y_k/(n'u'_k)
+#   ffd           signed z of the front focal point from the first vertex, -n f_E for a thin
+#                 system: the reverse trace's back focal distance, times the object index
+#   entrance_pupil, exit_pupil  NaN: a prescription has no aperture stop, so it has no pupils
+# ⛔ 2.15.1: bfd and ffd were the reduced distances, f_E for a single surface into glass where
+# the rear focus is n' f_E (a real trace crosses the axis at 30, not 20), and the object index
+# never entered ffd. entrance_pupil was a hard-coded 0 and exit_pupil was bfd - efl, the rear
+# principal plane when n' = 1: neither is a pupil.
 #must_use
 fn find_system_properties(prescription, err_out) {
     _prk_trace("find_system_properties");
@@ -246,6 +258,15 @@ fn find_system_properties(prescription, err_out) {
     if (prescription_is_empty(prescription) == 1) {
         store64(err_out, PK_ERR_INVALID_PARAMETER);
         return 0;
+    }
+    var sv = Prescription_surfaces(prescription);
+    var nsv = vec_len(sv);
+    for (var j = 0; j < nsv; j = j + 1) {
+        var rj = PrescriptionSurface_radius(vec_get(sv, j));
+        if (((rj & 0x7FFFFFFFFFFFFFFF) == 0) | ((rj & 0x7FFFFFFFFFFFFFFF) > 0x7FF0000000000000)) {
+            store64(err_out, PK_ERR_INVALID_PARAMETER);
+            return 0;
+        }
     }
 
     var paraxial_surfaces = prescription_to_paraxial_surfaces(prescription);
@@ -263,7 +284,8 @@ fn find_system_properties(prescription, err_out) {
 
     var efl = f64_div(f64_neg(ParaxialRay_y(marginal)), ParaxialRay_nu(final_ray));
     var power = f64_div(F64_ONE, efl);
-    var bfd = f64_div(f64_neg(ParaxialRay_y(final_ray)), ParaxialRay_nu(final_ray));
+    var n_image = PrescriptionSurface_n_after(vec_get(sv, nsv - 1));
+    var bfd = f64_div(f64_neg(f64_mul(n_image, ParaxialRay_y(final_ray))), ParaxialRay_nu(final_ray));
 
     # Reverse marginal ray for FFD: reverse surface order, negate radii, swap media.
     var ps_vec = Prescription_surfaces(prescription);
@@ -308,7 +330,8 @@ fn find_system_properties(prescription, err_out) {
     }
     var ffd = _sys_inf();
     if (f64_gt(f64_abs(ParaxialRay_nu(reverse_final)), _sys_eps15()) == 1) {
-        ffd = f64_div(ParaxialRay_y(reverse_final), ParaxialRay_nu(reverse_final));
+        ffd = f64_div(f64_mul(Prescription_n_initial(prescription), ParaxialRay_y(reverse_final)),
+          ParaxialRay_nu(reverse_final));
     }
 
     var props = alloc(sizeof(SystemProperties));
@@ -320,8 +343,8 @@ fn find_system_properties(prescription, err_out) {
     SystemProperties_set_bfd(props, bfd);
     SystemProperties_set_ffd(props, ffd);
     SystemProperties_set_power(props, power);
-    SystemProperties_set_entrance_pupil(props, f64_from(0));
-    SystemProperties_set_exit_pupil(props, f64_sub(bfd, efl));
+    SystemProperties_set_entrance_pupil(props, _PRK_NAN);
+    SystemProperties_set_exit_pupil(props, _PRK_NAN);
     return props;
 }
 
@@ -347,9 +370,13 @@ fn prescription_planoconvex(focal_length, n, aperture, thickness) {
     return p;
 }
 
-# Cemented achromatic doublet. Achromatic condition phi1/v1 + phi2/v2 = 0.
+# Cemented achromatic doublet. Achromatic condition phi1/v1 + phi2/v2 = 0. 0 if v1 == v2 (or
+# either is NaN): two glasses of one Abbe number cannot be achromatised, and phi1 = phi v1/(v1 - v2)
+# was infinite (2.15.1: built and returned anyway).
 #must_use
 fn prescription_doublet(focal_length, n1, v1, n2, v2, aperture, t1, t2) {
+    if (f64_eq(v1, v2) == 1) { return 0; }
+    if (f64_eq(f64_sub(v1, v2), f64_sub(v1, v2)) == 0) { return 0; }
     var phi = f64_div(F64_ONE, focal_length);
     var phi1 = f64_div(f64_mul(phi, v1), f64_sub(v1, v2));
     var phi2 = f64_sub(phi, phi1);

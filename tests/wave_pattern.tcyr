@@ -435,4 +435,77 @@ var _sc_small = diffraction_pattern_circular(4, f64_from(1));
 assert(_sc_small != 0, "smaller call reuses the grown cache");
 assert_eq(pattern2d_get(_sc_base, 0, 0), _sc_b00, "baseline still intact after the small call");
 
+# ── 2.15.1: a single source is a one-element array; domain refusals; the strip scratch ────────
+test_group("2.15.1 point source header");
+var _ps = point_source_new(F64_ONE, F64_TWO, F64_ONE, f64_from(0));
+assert_eq(point_source_set(_ps, 1, F64_ONE, F64_ONE, F64_ONE, f64_from(0)), PK_ERR_INVALID_PARAMETER,
+  "point_source_new: index 1 refused (it read the heap word before it as the length and wrote past)");
+assert_eq(point_source_set(_ps, 0, F64_ONE, F64_TWO, F64_ONE, f64_from(0)), PK_ERR_NONE, "index 0 is the source");
+assert(point_source_at(_ps, 0) == _ps, "point_source_at(0) is the source itself");
+assert(point_source_at(_ps, 1) == 0, "point_source_at(1) is out of range");
+var _ip = interference_pattern(_ps, 1, _fd(55, 100000000), F64_ONE, f64_from(0), _fd(1, 1000),
+  f64_from(0), _fd(1, 1000), 4, 4);
+assert(_ip != 0, "a single source is an interference_pattern input");
+
+test_group("2.15.1 pattern domain");
+var _pa = point_source_array_new(2);
+assert(interference_pattern(_pa, 2, f64_from(0), F64_ONE, f64_from(0), F64_ONE, f64_from(0), F64_ONE, 4, 4) == 0,
+  "interference at lambda = 0 refused (was a NaN grid)");
+assert(interference_pattern(_pa, 2, f64_neg(F64_ONE), F64_ONE, f64_from(0), F64_ONE, f64_from(0), F64_ONE, 4, 4) == 0,
+  "interference at lambda < 0 refused");
+assert(interference_pattern(_pa, 2, 0x7FF8000000000000, F64_ONE, f64_from(0), F64_ONE, f64_from(0), F64_ONE, 4, 4) == 0,
+  "interference at lambda = NaN refused");
+var _pp = alloc(16 * 8);
+var _pw = alloc(16 * 8);
+if ((_pp == 0) | (_pw == 0)) { syscall(60, 1); }
+for (var k = 0; k < 16; k = k + 1) {
+    store64(_pp + k * 8, F64_ONE);
+    store64(_pw + k * 8, f64_from(0));
+}
+assert(psf_from_wavefront(_pp, _pw, 4, 4, f64_from(0)) == 0, "PSF at lambda = 0 refused (k was infinite)");
+assert(psf_from_wavefront(_pp, _pw, 4, 4, f64_neg(F64_ONE)) == 0, "PSF at lambda < 0 refused");
+assert(diffraction_pattern_circular(16, 0x7FF8000000000000) == 0, "circular aperture of NaN radius refused (was dark)");
+assert(diffraction_pattern_circular(16, f64_neg(F64_TWO)) == 0, "negative radius refused (was |r|)");
+assert(spectrum_strip_range(0x7FF8000000000000, f64_from(700), 5) == 0, "strip with a NaN start refused (was red)");
+assert(spectrum_strip_range(f64_from(400), 0x7FF8000000000000, 5) == 0, "strip with a NaN end refused");
+var _rgb[24];
+_pat_wl_to_rgb(0x7FF8000000000000, &_rgb);
+assert((load64(&_rgb) | load64(&_rgb + 8) | load64(&_rgb + 16)) == 0, "NaN nm is black, not red");
+var _su0 = alloc_used();
+var _sst = spectrum_strip(10);
+assert_eq(alloc_used() - _su0, 10 * sizeof(StripColor),
+  "spectrum_strip allocates its result only (24 B scratch leaked)");
+var _su1 = alloc_used();
+var _ssr = spectrum_strip_range(f64_from(400), f64_from(700), 10);
+assert_eq(alloc_used() - _su1, 10 * sizeof(StripColor), "spectrum_strip_range allocates its result only");
+
+# The diffraction-limited PSF is |FFT(aperture)|^2, unnormalised. Its centre (DC) is the number
+# N of open pixels, squared, and Parseval fixes the total at n^2 N. N is counted here directly,
+# independently of the FFT: lattice points (c - n/2)^2 + (r - n/2)^2 <= R^2.
+test_group("2.15.1 PSF values");
+var _pn = 32;
+var _prr = f64_from(5);
+var _pcount = 0;
+for (var row = 0; row < _pn; row = row + 1) {
+    for (var col = 0; col < _pn; col = col + 1) {
+        var dx = col - _pn / 2;
+        var dy = row - _pn / 2;
+        if (dx * dx + dy * dy <= 25) { _pcount = _pcount + 1; }
+    }
+}
+var _psf = psf_diffraction_limited(_pn, _prr);
+var _pc2 = f64_mul(f64_from(_pcount), f64_from(_pcount));
+assert(f64_le(f64_abs(f64_sub(pattern2d_get(_psf, _pn / 2, _pn / 2), _pc2)), f64_mul(_fd(1, 1000000000000), _pc2)) == 1,
+  "PSF centre = N^2 (N open pixels)");
+assert(f64_le(f64_abs(f64_sub(pattern2d_max_intensity(_psf), _pc2)), f64_mul(_fd(1, 1000000000000), _pc2)) == 1,
+  "the centre is the maximum");
+var _ptot = f64_from(0);
+for (var row = 0; row < _pn; row = row + 1) {
+    for (var col = 0; col < _pn; col = col + 1) {
+        _ptot = f64_add(_ptot, pattern2d_get(_psf, col, row));
+    }
+}
+var _ppar = f64_mul(f64_from(_pn * _pn), f64_from(_pcount));
+assert(f64_le(f64_abs(f64_sub(_ptot, _ppar)), f64_mul(_fd(1, 1000000000000), _ppar)) == 1, "Parseval: total = n^2 N");
+
 var r = assert_summary();

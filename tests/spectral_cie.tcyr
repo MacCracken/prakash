@@ -528,4 +528,41 @@ assert_eq(_sff_e, PK_ERR_INVALID_PARAMETER, "n<2 reports INVALID_PARAMETER");
 assert_eq(spd_from_function(&_sff_const_two, f64_from(780), f64_from(380), 81, &_sff_e), 0, "end<=start returns 0");
 assert_eq(_sff_e, PK_ERR_INVALID_PARAMETER, "end<=start reports INVALID_PARAMETER");
 
+# ── 2.15.1: CRI below 1000 K; the colour paths allocate their results only ────────
+test_group("2.15.1 CRI domain, colour scratch");
+# The CCT search converges on its 1000 K edge for a cooler source; CIE 13.3's own whiteness limit,
+# DC <= 5.4e-3 from the locus, is what refuses it. 800 K sits 0.052 from the locus at 1000 K, 950 K
+# 0.012; 990 K (0.0024) and the shipped illuminants (E the farthest, 0.0044) pass.
+var _c800 = color_rendering_index(spd_blackbody(f64_from(800)));
+assert(f64_eq(_c800, _c800) == 0, "Ra of an 800 K blackbody: NaN, outside CIE 13.3 (was 82.9 against itself)");
+var _c950 = color_rendering_index(spd_blackbody(f64_from(950)));
+assert(f64_eq(_c950, _c950) == 0, "Ra of a 950 K blackbody: NaN (DC = 0.012)");
+var _c990 = color_rendering_index(spd_blackbody(f64_from(990)));
+assert(f64_eq(_c990, _c990) == 1, "990 K is within DC 5.4e-3 of the locus: a number");
+var _r800 = cri_special(spd_blackbody(f64_from(800)), 1);
+assert(f64_eq(_r800, _r800) == 0, "R1 of an 800 K blackbody: NaN");
+_assert_near(color_rendering_index(spd_blackbody(f64_from(2856))), f64_from(100), _fd(1, 1000),
+  "2856 K still scores 100");
+var _w = xyz_d65_white();
+var _f2 = illuminant_f2();
+var _d65 = illuminant_d65();
+var _warm = xyz_to_srgb(_w);
+var _warm2 = spd_to_srgb(_d65);
+var _warm3 = spectral_band_similarity(_f2);
+var _cu0 = alloc_used();
+var _x1 = xyz_to_srgb(_w);
+assert_eq(alloc_used() - _cu0, sizeof(Rgb), "xyz_to_srgb allocates its Rgb only (48 B leaked)");
+var _cu1 = alloc_used();
+var _x2 = spd_to_srgb(_d65);
+assert_eq(alloc_used() - _cu1, sizeof(Rgb), "spd_to_srgb allocates its Rgb only (96 B leaked)");
+var _cu2 = alloc_used();
+var _x3 = spectral_band_similarity(_f2);
+assert_eq(alloc_used() - _cu2, 0, "spectral_band_similarity allocates nothing (784 B leaked)");
+assert_eq(_x3, _warm3, "... and answers as before, bit for bit");
+var _cu3 = alloc_used();
+var _x4 = spectral_band_similarity(illuminant_a());
+assert(alloc_used() - _cu3 <= sizeof(Spd) + 648,
+  "a warm source's band similarity: the Planckian reference is on the stack");
+assert_eq(Rgb_r(_x1), Rgb_r(_warm), "xyz_to_srgb: same value as the first call");
+assert_eq(Rgb_g(_x2), Rgb_g(_warm2), "spd_to_srgb: same value as the first call");
 var r = assert_summary();

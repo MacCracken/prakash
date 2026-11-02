@@ -196,4 +196,20 @@ var tr0 = vec_get(res_tr, 0);
 assert(_in01(PolarizedTraceHit_transmittance_s(tr0)), "Ts in [0,1]");
 assert(_in01(PolarizedTraceHit_transmittance_p(tr0)), "Tp in [0,1]");
 
+# ── 2.15.1: R_p/R_s, which nothing read ────────
+# At 45 degrees from air into 1.5, 60 digits: R_s = 0.092019, R_p = 0.0084672, R_p/R_s = 0.092013.
+test_group("2.15.1 rp_over_rs");
+_assert_near(PolarizedTraceHit_rp_over_rs(ob0), 0x3FB78E3011135418, _fd(1, 10000000000000), "R_p/R_s at 45 degrees");
+_assert_near(PolarizedTraceHit_transmittance_s(ob0), 0x3FED0E39FDDD957C, _fd(1, 10000000000000), "T_s at 45 degrees");
+_assert_near(PolarizedTraceHit_transmittance_p(ob0), 0x3FEFBAA48C7251E1, _fd(1, 10000000000000), "T_p at 45 degrees");
+# At Brewster's angle R_p vanishes, and so does the ratio.
+var _thb = ganita_f64_atan2(_fd(15, 10), F64_ONE);
+var _rbw = trace_ray_new(ray_vec3(f64_neg(f64_from(5)), Z, Z), ray_vec3(_prk_sin(_thb), Z, _prk_cos(_thb)), F64_ONE);
+var _sbw = vec_new();
+vec_push(_sbw, surface_plane(f64_from(5), N15, f64_from(20)));
+var _ebw = 0;
+var _pbw = trace_sequential_polarized(_rbw, _sbw, &_ebw);
+assert(f64_lt(f64_abs(PolarizedTraceHit_rp_over_rs(vec_get(_pbw, 0))), _fd(1, 1000000000000000)),
+  "R_p/R_s = 0 at Brewster's angle");
+
 var r = assert_summary();

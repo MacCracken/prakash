@@ -139,9 +139,13 @@ fn atm_mie_phase_cornette_shanks(cos_theta, g) {
 # ── Air mass & optical depth ────────
 
 # Relative air mass (Kasten & Young 1989):
-# 1 / (cos(z) + 0.50572*(96.07995 - z_deg)^-1.6364), z_deg = to_degrees(z).min(90).
+# 1 / (cos(z) + 0.50572*(96.07995 - z_deg)^-1.6364), z_deg = to_degrees(|z|).min(90). The zenith
+# angle's sign is a side, not a height: -z is z. NaN for NaN or an infinite angle.
+# ⛔ 2.15.1: a NaN angle passed f64_min as the horizon and answered 37.92, and a negative angle
+# entered the degree term as -z, so z = -60 deg gave 1.99948 where +60 gives 1.99429.
 #must_use
 fn atm_air_mass(zenith_angle) {
+    if (f64_lt(f64_abs(zenith_angle), 0x7FF0000000000000) == 0) { return _PRK_NAN; }
     # 2.2.6: the clamp was applied ONLY to the degree value feeding the
     # Kasten-Young correction term, while cos_z used the RAW angle. Past 90 deg
     # cos goes negative, the denominator goes negative, and air mass goes
@@ -150,7 +154,7 @@ fn atm_air_mass(zenith_angle) {
     # now clamped once, up front, and BOTH terms use the clamped value; air mass
     # saturates at the horizon value (~37.92) for any sun at or below the
     # horizon, which is the standard treatment.
-    var z = f64_min(zenith_angle, F64_PI_2);
+    var z = f64_min(f64_abs(zenith_angle), F64_PI_2);
     var zenith_deg = f64_min(_atm_to_degrees(z), f64_from(90));
     var cos_z = _prk_cos(z);
     var correction = f64_mul(_atm_r(50572, 100000),
@@ -204,9 +208,11 @@ fn atm_sky_radiance_single_scatter(wavelength_m, sun_zenith, scattering_angle) {
       atm_mie_phase_cornette_shanks(cos_scatter, _atm_mie_g()));
 }
 
-# Sky color RGB (single-scatter, R/G/B wavelengths) into a 3-f64 out buffer.
+# Sky color RGB (single-scatter, R/G/B wavelengths) into a 3-f64 out buffer. Returns PK_ERR_NONE, or
+# PK_ERR_INVALID_PARAMETER and writes nothing for a null out (2.15.1: it was written through).
 fn atm_sky_color_rgb(sun_zenith, scattering_angle, out) {
     _prk_trace("sky_color_rgb");
+    if (out == 0) { return PK_ERR_INVALID_PARAMETER; }
     # The scattering-angle terms carry no wavelength dependence, so they are
     # evaluated ONCE here rather than three times inside the loop. Through 2.3.0
     # this called atm_sky_radiance_single_scatter per channel, which recomputed
@@ -226,18 +232,22 @@ fn atm_sky_color_rgb(sun_zenith, scattering_angle, out) {
 
 # ── Sunset / sunrise ────────
 
-# Direct-sunlight color (transmittance) after the atmospheric path, into 3-f64.
+# Direct-sunlight color (transmittance) after the atmospheric path, into 3-f64. Returns PK_ERR_NONE, or
+# PK_ERR_INVALID_PARAMETER and writes nothing for a null out (2.15.1: it was written through).
 fn atm_sunlight_color(sun_zenith, out) {
     _prk_trace("sunlight_color");
+    if (out == 0) { return PK_ERR_INVALID_PARAMETER; }
     for (var i = 0; i < 3; i = i + 1) {
         store64(out + i * 8, atm_atmospheric_transmittance(_atm_rgb_wl(i), sun_zenith));
     }
     return 0;
 }
 
-# Sunset/sunrise sky gradient RGB into a 3-f64 out buffer.
+# Sunset/sunrise sky gradient RGB into a 3-f64 out buffer. Returns PK_ERR_NONE, or
+# PK_ERR_INVALID_PARAMETER and writes nothing for a null out (2.15.1: it was written through).
 fn atm_sunset_gradient(sun_zenith, view_elevation, angular_distance_to_sun, out) {
     _prk_trace("sunset_gradient");
+    if (out == 0) { return PK_ERR_INVALID_PARAMETER; }
     var view_zenith = f64_clamp(f64_sub(F64_PI_2, view_elevation), f64_from(0), F64_PI_2);
     var cos_scatter = _prk_cos(angular_distance_to_sun);
     var phase_r = atm_phase_rayleigh(cos_scatter);

@@ -6,17 +6,6 @@
 # plus a length. `_zern_powi` replicates Rust `f64::powi` (square-and-multiply,
 # __powidf2) so integer powers are bit-identical, not naive repeated multiply.
 
-# Integer factorial (exact; Zernike needs only small arguments).
-fn _zern_factorial(n) {
-    var result = 1;
-    var i = 2;
-    while (i <= n) {
-        result = result * i;
-        i = i + 1;
-    }
-    return result;
-}
-
 # Integer power of an f64 base via square-and-multiply (matches Rust powi).
 fn _zern_powi(base, exp) {
     var r = F64_ONE;
@@ -43,34 +32,47 @@ fn _zern_powi(base, exp) {
 fn _zern_eps15() { return 0x3CD203AF9EE75616; }
 fn _zern_is_finite(x) { return f64_lt(f64_abs(x), 0x7FF0000000000000); }
 
-# Radial Zernike polynomial R_n^|m|(rho). Returns 0 when n<|m| or (n-|m|) is odd.
+# Radial Zernike polynomial R_n^|m|(rho). Returns 0 when |m| < 0, n<|m| or (n-|m|) is odd.
+# Through the Jacobi polynomial it is (A&S 22.2.1; Born & Wolf 9.2, eq. 22),
+#   R_n^m(rho) = (-1)^k rho^m P_k^(m,0)(1 - 2 rho^2),   k = (n - m)/2,
+# and P_k comes from the three-term recurrence (A&S 22.7.1) with beta = 0, c = 2j + m:
+#   2j(j + m)(c - 2) P_j = (c - 1)[c(c - 2)x + m^2] P_(j-1) - 2(j + m - 1)(j - 1)c P_(j-2),
+# P_0 = 1, P_1 = (m + 1) - (m + 2) rho^2. Stable on [-1, 1]: within 1.4e-15 of exact rational
+# arithmetic at 84 samples through n = 60, and R_n^m(1) = 1 exactly through n = 200.
+# ⛔ 2.15.1: this summed the explicit series with i64 factorials. (n - s)! passes 2^63 at
+# n = 21, so from there every value was garbage (R_22^0(1) = -1.2e3), and below it the alternating
+# terms cancelled: R_20^0 lost 6 of its digits near rho = 1.
 #must_use
 fn zernike_radial(n, m_abs, rho) {
+    if (m_abs < 0) { return f64_from(0); }
     if (n < m_abs) {
         return f64_from(0);
     }
     if ((n - m_abs) % 2 == 1) {
         return f64_from(0);
     }
-    var half = (n - m_abs) / 2;
-    var sum = f64_from(0);
-    for (var s = 0; s <= half; s = s + 1) {
-        var sign = F64_ONE;
-        if (s % 2 == 1) {
-            sign = f64_neg(F64_ONE);
+    var k = (n - m_abs) / 2;
+    var a = m_abs;
+    var r2 = f64_mul(rho, rho);
+    var p = F64_ONE;
+    if (k >= 1) {
+        var x = f64_sub(F64_ONE, f64_mul(F64_TWO, r2));
+        var pm2 = F64_ONE;
+        var pm1 = f64_sub(f64_from(a + 1), f64_mul(f64_from(a + 2), r2));
+        for (var j = 2; j <= k; j = j + 1) {
+            var c = 2 * j + a;
+            var inner = f64_add(f64_mul(f64_from(c * (c - 2)), x), f64_from(a * a));
+            var t1 = f64_mul(f64_mul(f64_from(c - 1), inner), pm1);
+            var t2 = f64_mul(f64_from(2 * (j + a - 1) * (j - 1) * c), pm2);
+            var pj = f64_div(f64_sub(t1, t2), f64_from(2 * j * (j + a) * (c - 2)));
+            pm2 = pm1;
+            pm1 = pj;
         }
-        var num = _zern_factorial(n - s);
-        var d1 = _zern_factorial(s);
-        var d2 = _zern_factorial((n + m_abs) / 2 - s);
-        var d3 = _zern_factorial(half - s);
-        var denom = d1 * d2 * d3;
-        var powval = _zern_powi(rho, n - 2 * s);
-        var term = f64_mul(
-          f64_div(f64_mul(sign, f64_from(num)), f64_from(denom)),
-          powval);
-        sum = f64_add(sum, term);
+        p = pm1;
     }
-    return sum;
+    var r = f64_mul(_zern_powi(rho, a), p);
+    if (k % 2 == 1) { return f64_neg(r); }
+    return r;
 }
 
 # Single Zernike polynomial Z_n^m(rho, theta). Norm = sqrt(n+1) for m=0,
@@ -103,13 +105,13 @@ fn zernike_poly(n, m, rho, theta) {
     return f64_mul(f64_mul(norm, r), angular);
 }
 
-# Noll sequential index j (1-based) -> (n, m). Writes n to n_out, m to m_out.
+# Noll sequential index j (1-based) -> (n, m). Writes n to n_out, m to m_out and returns
+# PK_ERR_NONE. Returns PK_ERR_INVALID_PARAMETER and writes nothing for a null n_out or m_out,
+# or a j outside [1, 2^31 - 1]. ⛔ 2.15.1: j = 0 used to write piston's (0, 0) and a negative j
+# garbage, both as success, and the outputs were written through when null. The cap keeps the
+# search below, O(sqrt(j)), short and its products in range.
 fn zernike_noll_to_nm(j, n_out, m_out) {
-    if (j == 0) {
-        store64(n_out, 0);
-        store64(m_out, 0);
-        return 0;
-    }
+    if ((n_out == 0) | (m_out == 0) | (j < 1) | (j > 2147483647)) { return PK_ERR_INVALID_PARAMETER; }
     var n = 0;
     while ((n + 1) * (n + 2) / 2 < j) {
         n = n + 1;
@@ -140,13 +142,16 @@ fn zernike_noll_to_nm(j, n_out, m_out) {
     return 0;
 }
 
-# (n, m) -> Noll sequential index j (1-based).
+# (n, m) -> Noll sequential index j (1-based); 0 for a pair that is not a Zernike polynomial:
+# n < 0, |m| > n, or n - |m| odd (2.15.1: those mapped onto real indices, (2, 1) onto j = 5,
+# astigmatism, and (1, 0) onto j = 2, tilt).
 #must_use
 fn zernike_nm_to_noll(n, m) {
     var m_abs = m;
     if (m < 0) {
         m_abs = 0 - m;
     }
+    if ((n < 0) | (m_abs > n) | ((n - m_abs) % 2 == 1)) { return 0; }
     var base = n * (n + 1) / 2 + 1;
     var slot_start = 0;
     if (n % 2 == 0) {
@@ -195,7 +200,9 @@ fn zernike_wf_flat() {
     return zernike_wf_new(0, 0);
 }
 
-# Evaluate the wavefront W(rho,theta) = sum_j c_j Z_j. Returns 0 outside pupil.
+# Evaluate the wavefront W(rho,theta) = sum_j c_j Z_j. Returns 0 outside pupil. Every nonzero
+# coefficient counts: 2.15.1 found terms below 1e-15 dropped, which in metres is a wavefront of
+# 1e-15 m whatever the aberration, and in waves of nothing at all.
 #must_use
 fn zernike_wf_evaluate(wf, rho, theta) {
     if (wf == 0) { return f64_from(0); }
@@ -212,7 +219,7 @@ fn zernike_wf_evaluate(wf, rho, theta) {
     var m = 0;
     for (var idx = 0; idx < len; idx = idx + 1) {
         var coeff = load64(coeffs + idx * 8);
-        if (f64_lt(f64_abs(coeff), _zern_eps15()) == 0) {
+        if ((coeff & 0x7FFFFFFFFFFFFFFF) != 0) {
             zernike_noll_to_nm(idx + 1, &n, &m);
             w = f64_add(w, f64_mul(coeff, zernike_poly(n, m, rho, theta)));
         }
@@ -221,7 +228,8 @@ fn zernike_wf_evaluate(wf, rho, theta) {
 }
 
 # Sample the wavefront on a grid_size x grid_size grid (row-major); points
-# outside the unit disk are 0. Returns a freshly allocated f64 buffer.
+# outside the unit disk are 0. Returns a freshly allocated f64 buffer. A 1 x 1 grid is the pupil
+# centre (2.15.1: its coordinate was 0/0, NaN, and the one cell stayed 0).
 #must_use
 fn zernike_wf_to_grid(wf, grid_size) {
     # `alloc` returns 0 past ALLOC_MAX (2 GiB) and on heap exhaustion; grid_size
@@ -233,6 +241,10 @@ fn zernike_wf_to_grid(wf, grid_size) {
     if (grid == 0) { return 0; }
     for (var z = 0; z < total; z = z + 1) {
         store64(grid + z * 8, f64_from(0));
+    }
+    if (grid_size == 1) {
+        store64(grid, zernike_wf_evaluate(wf, f64_from(0), f64_from(0)));
+        return grid;
     }
     var center = f64_div(f64_sub(f64_from(grid_size), F64_ONE), F64_TWO);
     for (var iy = 0; iy < grid_size; iy = iy + 1) {
@@ -249,7 +261,8 @@ fn zernike_wf_to_grid(wf, grid_size) {
     return grid;
 }
 
-# RMS wavefront error (excludes piston j=1, tilt Y j=2, tilt X j=3):
+# RMS wavefront error (excludes piston j=1, tilt X j=2, tilt Y j=3: Noll's even j is the cosine,
+# so j = 2 is 2 rho cos(theta), x; 2.15.1 corrected the labels, which were swapped):
 # RMS = sqrt(sum_{j>3} c_j^2).
 #must_use
 fn zernike_wf_rms_error(wf) {
@@ -264,9 +277,13 @@ fn zernike_wf_rms_error(wf) {
     return f64_sqrt(sum);
 }
 
-# Peak-to-valley wavefront error, grid-sampled over the unit pupil.
+# Peak-to-valley wavefront error, grid-sampled over the unit pupil; one sample is the centre, so
+# 0. NaN for samples < 1, where nothing is sampled (2.15.1: 0, a perfect wavefront, was
+# reported for no measurement at all, and samples = 1 sampled 0/0).
 #must_use
 fn zernike_wf_peak_to_valley(wf, samples) {
+    if (samples < 1) { return _PRK_NAN; }
+    if (samples == 1) { return f64_from(0); }
     var minv = 0x7FF0000000000000;
     var maxv = 0xFFF0000000000000;
     var center = f64_div(f64_sub(f64_from(samples), F64_ONE), F64_TWO);
@@ -294,10 +311,12 @@ fn zernike_wf_peak_to_valley(wf, samples) {
     return f64_from(0);
 }
 
-# Strehl ratio (Marechal): S = exp(-(2*pi*sigma)^2), sigma = RMS/wavelength.
+# Strehl ratio (Marechal): S = exp(-(2*pi*sigma)^2), sigma = RMS/wavelength. NaN unless the
+# wavelength is finite and > 0 (2.15.1: lambda = 0 answered 0 and a negative one a number).
 #must_use
 fn zernike_wf_strehl_ratio(wf, wavelength) {
     if (wf == 0) { return f64_from(0); }
+    if ((f64_gt(wavelength, f64_from(0)) & f64_lt(wavelength, 0x7FF0000000000000)) == 0) { return _PRK_NAN; }
     var sigma = f64_div(zernike_wf_rms_error(wf), wavelength);
     var x = f64_mul(f64_mul(F64_TWO, F64_PI), sigma);
     return _prk_exp(f64_neg(f64_mul(x, x)));

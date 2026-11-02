@@ -11,7 +11,11 @@
 # diffractive Abbe number and hybrid achromats; Kogelnik, "Coupled wave theory for
 # thick hologram gratings", Bell Syst. Tech. J. 48, 2909 (1969).
 #
-# CONVENTIONS. Lengths in any ONE unit; `wavelength` is the VACUUM wavelength.
+# CONVENTIONS. Time dependence e^(-i w t) (Goodman's, as ray_fresnel, ray_prt and wave_focus), so a
+# converging lens SUBTRACTS phase: doe_lens_phase(r, f > 0) = -k r^2/(2f) paraxially. wave_beam
+# follows Siegman's e^(+i w t), where the same lens adds +k r^2/(2f): conjugate one phase before
+# comparing it with the other. (2.15.1: no convention was stated here, and the two signs read as
+# a contradiction.) Lengths in any ONE unit; `wavelength` is the VACUUM wavelength.
 # Angles in radians from the surface normal, positive toward +x. A phase depth is
 # in WAVES (1 = a 2*pi step). The efficiency functions are SCALAR and THIN-element
 # results: the fraction of transmitted power in each order of a periodic phase (or

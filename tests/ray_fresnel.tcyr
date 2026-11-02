@@ -158,7 +158,9 @@ _assert_near(
   fresnel_normal(F64_ONE, _fd(152, 100)), TOL_001, "complex dielectric ~ real");
 
 # gold ~0.82
-_assert_near(fresnel_normal_complex(F64_ONE, complex_gold_550nm()), _fd(82, 100), TOL_05, "gold ~0.82");
+# 2.15.1: was "~0.82" within 0.05. ((n-1)^2 + k^2)/((n+1)^2 + k^2) at n = 0.43, k = 2.46, 60 digits.
+_assert_near(fresnel_normal_complex(F64_ONE, complex_gold_550nm()), 0x3FE933B6542318BE, _fd(1, 1000000000000000),
+  "gold at 550 nm: R = 0.787563");
 # silver & aluminum highly reflective
 assert(f64_gt(fresnel_normal_complex(F64_ONE, complex_silver_550nm()), _fd(9, 10)), "silver > 0.9");
 assert(f64_gt(fresnel_normal_complex(F64_ONE, complex_aluminum_550nm()), _fd(9, 10)), "aluminum > 0.9");
@@ -305,5 +307,27 @@ assert_eq(fresnel_amplitudes(0x3FF0000000000000, 0x3FF8000000000000, 0, 0x20A000
   "n1 cos_i under 2^-500");
 assert_eq(fresnel_amplitudes(0x39B0000000000000, F64_ONE, 0, 0x0000000000000001, &_uo), PK_ERR_INVALID_ANGLE,
   "n1 cos_i underflowing to 0");
+
+# ── 2.15.1: the back of a surface, indices, the critical angle ────────
+test_group("2.15.1 fresnel domain");
+var _fe = 0;
+var _fb = fresnel_unpolarized(F64_ONE, _fd(15, 10), F64_TWO, &_fe);
+assert_eq(_fe, PK_ERR_INVALID_ANGLE, "fresnel_unpolarized past 90 degrees refused");
+var _fz = fresnel_unpolarized(F64_ONE, f64_from(0), f64_from(0), &_fe);
+assert_eq(_fe, PK_ERR_INVALID_INDEX, "fresnel_unpolarized: n2 = 0 refused (was NaN, no error)");
+var _fg = 1;
+for (var k = 1001; k < 3000; k = k + 7) {
+    var n1 = _fd(k, 1000);
+    var ce = 0;
+    var ca = ray_critical_angle(n1, F64_ONE, &ce);
+    var rr = fresnel_unpolarized(n1, F64_ONE, ca, &_fe);
+    if (_fe != PK_ERR_NONE) { _fg = 0; }
+    if (f64_lt(rr, _fd(999999, 1000000)) == 1) { _fg = 0; }
+}
+assert_eq(_fg, 1, "R -> 1 at the critical angle for 286 indices, not TIR");
+var _rl = 0;
+var _sb = ray_snell_3d(_n3(f64_from(0), _fd(3, 5), _fd(4, 5)), _n3(f64_from(0), f64_from(0), F64_ONE),
+  F64_ONE, _fd(15, 10), &_rl, &_fe);
+assert_eq(_fe, PK_ERR_INVALID_ANGLE, "ray_snell_3d: back-side incidence refused (R = 25 came back)");
 
 var r = assert_summary();

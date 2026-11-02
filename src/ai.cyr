@@ -30,9 +30,30 @@ struct DaimonClient { config; }
 
 # ── DaimonConfig ────────
 
-# DaimonConfig for a daimon server at `endpoint` with `api_key` (0 = none); 0 on allocation failure.
+# 1 if s is a usable endpoint or key: non-null, non-empty, and free of control bytes (< 0x20, 0x7F).
+# An endpoint is spliced into the request URL, so a CR or LF in one is a request-splitting vector.
+#must_use
+fn _ai_str_ok(s) {
+    if (s == 0) { return 0; }
+    if (load8(s) == 0) { return 0; }
+    var i = 0;
+    while (load8(s + i) != 0) {
+        var b = load8(s + i);
+        if ((b < 32) | (b == 127)) { return 0; }
+        i = i + 1;
+    }
+    return 1;
+}
+
+# DaimonConfig for a daimon server at `endpoint` with `api_key` (0 = none); 0 on allocation failure,
+# or for an endpoint or key that is null (endpoint only), empty or holds a control byte (2.15.1: a
+# null endpoint was accepted and ai_daimon_config_to_json read it off address 0).
 #must_use
 fn ai_daimon_config_new(endpoint, api_key) {
+    if (_ai_str_ok(endpoint) == 0) { return 0; }
+    if (api_key != 0) {
+        if (_ai_str_ok(api_key) == 0) { return 0; }
+    }
     var c = alloc(sizeof(DaimonConfig));
     if (c == 0) { return 0; }
     DaimonConfig_set_endpoint(c, endpoint);
@@ -77,9 +98,11 @@ fn ai_daimon_config_default() {
 
 # ── HooshConfig ────────
 
-# HooshConfig for a hoosh server at `endpoint`; 0 on allocation failure.
+# HooshConfig for a hoosh server at `endpoint`; 0 on allocation failure, or for an endpoint that is
+# null, empty or holds a control byte, as ai_daimon_config_new (2.15.1).
 #must_use
 fn ai_hoosh_config_new(endpoint) {
+    if (_ai_str_ok(endpoint) == 0) { return 0; }
     var c = alloc(sizeof(HooshConfig));
     if (c == 0) { return 0; }
     HooshConfig_set_endpoint(c, endpoint);
@@ -129,7 +152,9 @@ fn ai_daimon_config_to_json(config) {
 
 # JSON (data ptr + byte length) -> DaimonConfig (api_key = 0 when null/absent).
 # Sets err_out and returns 0 if the input does not parse, or has no string
-# "endpoint". `api_key` is genuinely optional and never sets err_out.
+# "endpoint". `api_key` is optional: absent or null is none; any other non-string type, or an
+# endpoint or key that is empty or holds a control byte, is PK_ERR_INVALID_PARAMETER (2.15.1: a
+# numeric api_key was dropped without a word, and "\r\n" in an endpoint was accepted).
 #must_use
 fn ai_daimon_config_from_json(json, len, err_out) {
     store64(err_out, PK_ERR_NONE);
@@ -144,6 +169,19 @@ fn ai_daimon_config_from_json(json, len, err_out) {
     var api_key = 0;
     if (bayan_json_v_is_str(ak_v) == 1) {
         api_key = str_data(bayan_json_v_str(ak_v));
+    } elif ((ak_v != 0) & (bayan_json_v_is_null(ak_v) == 0)) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
+    if (_ai_str_ok(endpoint) == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
+    if (api_key != 0) {
+        if (_ai_str_ok(api_key) == 0) {
+            store64(err_out, PK_ERR_INVALID_PARAMETER);
+            return 0;
+        }
     }
     var c = ai_daimon_config_new(endpoint, api_key);
     if (c == 0) { store64(err_out, PK_ERR_ALLOCATION); }
@@ -161,7 +199,8 @@ fn ai_hoosh_config_to_json(config) {
 }
 
 # JSON (data ptr + byte length) -> HooshConfig. Sets err_out and returns 0 if
-# the input does not parse, or has no string "endpoint".
+# the input does not parse, or has no string "endpoint", or PK_ERR_INVALID_PARAMETER for an
+# endpoint that is empty or holds a control byte (2.15.1).
 #must_use
 fn ai_hoosh_config_from_json(json, len, err_out) {
     store64(err_out, PK_ERR_NONE);
@@ -172,6 +211,10 @@ fn ai_hoosh_config_from_json(json, len, err_out) {
     var v = bayan_json_v_parse_buf(json, len);
     var endpoint = _ai_json_str_field(v, "endpoint", err_out);
     if (prakash_is_err(load64(err_out)) == 1) { return 0; }
+    if (_ai_str_ok(endpoint) == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
     var c = ai_hoosh_config_new(endpoint);
     if (c == 0) { store64(err_out, PK_ERR_ALLOCATION); }
     return c;

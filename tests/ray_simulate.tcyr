@@ -83,11 +83,16 @@ assert(f64_le(total_energy, f64_add(F64_ONE, TOL6)), "energy conserved (<= 1.0)"
 # Energy was "conserved" in both, because each split conserves it — which is
 # exactly why the old assertions could not tell the two trees apart. These pin
 # the tree SHAPE so the phantom cascade cannot come back.
+# ⛔ 2.15.1 MOVED THESE PINS: 8 / 3 / depth 3 was itself wrong. The internal reflection off the
+# back face reached the front face travelling toward -z and was handed the front face's n_after,
+# glass, so it crossed glass-to-glass with R = 0 and escaped at n = 1.5. Into the air it belongs
+# in, it splits again: 3.7% leaves through the front, 0.15% (above the default 0.001 floor) goes
+# back to the back face and out. One more interaction, three more segments, one level deeper.
 var _ph = trace_recursive(off_axis_ray(f64_from(10), f64_neg(f64_from(50))),
   biconvex_lens(), trace_config_default());
-assert_eq(vec_len(TraceTree_segments(_ph)), 8,
-  "off-axis biconvex tree is 8 segments (was 17 with phantom back-cap hits)");
-assert_eq(TraceTree_interactions(_ph), 3, "off-axis biconvex has 3 real interactions (was 8)");
+assert_eq(vec_len(TraceTree_segments(_ph)), 11,
+  "off-axis biconvex tree is 11 segments (17 with phantom back-cap hits, 8 with the glass-side exit)");
+assert_eq(TraceTree_interactions(_ph), 4, "off-axis biconvex has 4 real interactions");
 var _phd = 0;
 var _phi = 0;
 while (_phi < vec_len(TraceTree_segments(_ph))) {
@@ -95,7 +100,15 @@ while (_phi < vec_len(TraceTree_segments(_ph))) {
     if (_phs > _phd) { _phd = _phs; }
     _phi = _phi + 1;
 }
-assert(_phd <= 3, "no segment recurses past depth 3 (the phantom cascade reached 7)");
+assert(_phd <= 4, "no segment recurses past depth 4 (the phantom cascade reached 7)");
+var _pha = 0;
+for (var _phk = 0; _phk < vec_len(TraceTree_segments(_ph)); _phk = _phk + 1) {
+    var _pse = vec_get(TraceTree_segments(_ph), _phk);
+    if (TraceSegment_event_tag(_pse) == EVENT_ESCAPED) {
+        if (TraceSegment_n(_pse) != F64_ONE) { _pha = _pha + 1; }
+    }
+}
+assert_eq(_pha, 0, "every escaping segment is in air (one escaped at n = 1.5)");
 
 # max_depth respected
 var tree_md = trace_recursive(on_axis_ray(f64_neg(f64_from(50))), biconvex_lens(), trace_config_new(1, f64_from(0)));
@@ -369,5 +382,92 @@ for (var _wi = 0; _wi < vec_len(_wod); _wi = _wi + 1) {
     assert_eq(OpdPoint_opd(vec_get(_wod, _wi)), OpdPoint_opd(vec_get(_wod, 8 - _wi)), "opd_fan is symmetric in h");
 }
 assert_eq(OpdPoint_opd(vec_get(_wod, 4)), Z, "opd_fan chief is exactly 0");
+
+# ── 2.15.1: a glass slab's multiple reflections ────────
+# R = 0.04 at each face of an n = 1.5 slab in air at normal incidence. The incoherent Stokes
+# series sums to T = (1 - R)/(1 + R) = 12/13 transmitted and 2R/(1 + R) = 1/13 reflected (Born
+# & Wolf 1.6.5). Through 2.15.0 the first internal reflection left through the front face
+# glass-to-glass (R = 0) and the series stopped there: T = 0.9216, R = 0.0784.
+test_group("2.15.1 slab multiple reflections");
+var _slab = vec_new();
+vec_push(_slab, surface_plane(Z, N15, f64_from(25)));
+vec_push(_slab, surface_plane(f64_from(10), F64_ONE, f64_from(25)));
+var _st = trace_recursive(on_axis_ray(f64_neg(f64_from(10))), _slab, trace_config_new(40, _fd(1, 100000000000000)));
+var _sfw = Z;
+var _sbw = Z;
+var _sair = 1;
+var _ssg = TraceTree_segments(_st);
+for (var k = 0; k < vec_len(_ssg); k = k + 1) {
+    var sg = vec_get(_ssg, k);
+    if (TraceSegment_event_tag(sg) == EVENT_ESCAPED) {
+        if (TraceSegment_n(sg) != F64_ONE) { _sair = 0; }
+        if (f64_gt(RayVec3_z(TraceSegment_direction(sg)), Z) == 1) {
+            _sfw = f64_add(_sfw, TraceSegment_energy(sg));
+        } else {
+            _sbw = f64_add(_sbw, TraceSegment_energy(sg));
+        }
+    }
+}
+_assert_near(_sfw, 0x3FED89D89D89D89E, _fd(1, 1000000000000), "slab: transmitted sum = 12/13 (was 0.9216)");
+_assert_near(_sbw, 0x3FB3B13B13B13B14, _fd(1, 1000000000000), "slab: reflected sum = 1/13 (was 0.0784)");
+assert_eq(_sair, 1, "slab: every escape is into air");
+assert(trace_recursive(on_axis_ray(Z), _slab, 0) == 0, "null config refused (was a SIGSEGV)");
+
+# ── 2.15.1: the sagittal fan ────────
+# A sagittal fan shares the meridional fan's field (tilted in y-z) and spreads its rays across x.
+# Through 2.15.0 it tilted the field into x-z as well: the meridional fan turned 90 degrees.
+test_group("2.15.1 sagittal fan");
+var _fa = _fd(1, 10);
+var _sf = ray_fan_sagittal(f64_from(5), 5, _fa, f64_neg(f64_from(50)));
+var _mf = ray_fan_meridional(f64_from(5), 5, _fa, f64_neg(f64_from(50)));
+var _sfok = 1;
+for (var k = 0; k < 5; k = k + 1) {
+    var sr = FanRay_ray(vec_get(_sf, k));
+    if (RayVec3_x(TraceRay_dir(sr)) != Z) { _sfok = 0; }
+    if (RayVec3_y(TraceRay_dir(sr)) != _prk_sin(_fa)) { _sfok = 0; }
+    if (RayVec3_y(TraceRay_pos(sr)) != Z) { _sfok = 0; }
+}
+assert_eq(_sfok, 1, "sagittal fan: field in y, rays spread in x");
+var _sc = FanRay_ray(vec_get(_sf, 2));
+var _mc = FanRay_ray(vec_get(_mf, 2));
+assert_eq(RayVec3_y(TraceRay_dir(_sc)), RayVec3_y(TraceRay_dir(_mc)),
+  "sagittal and meridional fans share a chief ray (y)");
+assert_eq(RayVec3_z(TraceRay_dir(_sc)), RayVec3_z(TraceRay_dir(_mc)), "... (z)");
+# Mirror symmetry about the meridional plane, through a real lens: x(-t) = -x(t), y(-t) = y(t).
+fn _fan_hit(fr, z) {
+    var e = 0;
+    var hs = trace_sequential(FanRay_ray(fr), biconvex_lens(), &e);
+    if (e != 0) { return 0; }
+    return TraceHit_ray_after(vec_get(hs, vec_len(hs) - 1));
+}
+var _h0 = _fan_hit(vec_get(_sf, 0), f64_from(100));
+var _h4 = _fan_hit(vec_get(_sf, 4), f64_from(100));
+fn _at_z(r, z) {
+    var t = f64_div(f64_sub(z, RayVec3_z(TraceRay_pos(r))), RayVec3_z(TraceRay_dir(r)));
+    var out = alloc(16);
+    if (out == 0) { return 0; }
+    store64(out, f64_add(RayVec3_x(TraceRay_pos(r)), f64_mul(t, RayVec3_x(TraceRay_dir(r)))));
+    store64(out + 8, f64_add(RayVec3_y(TraceRay_pos(r)), f64_mul(t, RayVec3_y(TraceRay_dir(r)))));
+    return out;
+}
+var _p0 = _at_z(_h0, f64_from(100));
+var _p4 = _at_z(_h4, f64_from(100));
+_assert_near(load64(_p0), f64_neg(load64(_p4)), _fd(1, 1000000000000), "sagittal fan: x is odd in t");
+_assert_near(load64(_p0 + 8), load64(_p4 + 8), _fd(1, 1000000000000), "sagittal fan: y is even in t");
+assert(f64_gt(f64_abs(load64(_p0)), _fd(1, 10)), "sagittal fan: the edge rays land off the meridional plane");
+
+# ── 2.15.1: optical_path_length's final leg is signed ────────
+test_group("2.15.1 OPL final leg");
+var _win = vec_new();
+vec_push(_win, surface_plane(f64_from(10), N15, f64_from(25)));
+var _oe = 0;
+var _o5 = optical_path_length(on_axis_ray(Z), _win, f64_from(5), &_oe);
+assert_eq(_oe, PK_ERR_NONE, "plane behind the last surface: ok");
+_assert_near(_o5, _fd(5, 2), _fd(1, 1000000000000), "plane 5 behind: 10 - 1.5 x 5 = 2.5 (the leg was dropped: 10)");
+var _o20 = optical_path_length(on_axis_ray(Z), _win, f64_from(20), &_oe);
+_assert_near(_o20, f64_from(25), _fd(1, 1000000000000), "plane 10 beyond: 10 + 1.5 x 10 = 25 (unchanged)");
+var _par = trace_ray_new(ray_vec3(Z, Z, Z), ray_vec3(F64_ONE, Z, Z), F64_ONE);
+var _op = optical_path_length(_par, vec_new(), f64_from(5), &_oe);
+assert_eq(_oe, PK_ERR_INVALID_PARAMETER, "a ray parallel to the plane never reaches it: refused");
 
 var r = assert_summary();

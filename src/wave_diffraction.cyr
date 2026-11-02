@@ -10,8 +10,8 @@
 #
 # Aperture slices `&[(pos, amplitude)]` and layer slices `&[(n, thickness)]` are
 # passed as interleaved buffers: element i has field-0 at offset i*16, field-1 at
-# i*16+8, plus a count. Fresnel auxiliary constants are exact ratios of the Rust
-# f64 literals (Boersma 1960 / A&S).
+# i*16+8, plus a count. The Fresnel integrals are Moshier's Cephes rational fits (2.15.1),
+# their coefficients as hex bit patterns.
 
 fn _diff_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
 
@@ -25,9 +25,11 @@ fn fraunhofer_rect(wavelength, width, height, angle_x, angle_y, i0) {
 }
 
 # Fraunhofer diffraction for a 1D aperture (interleaved pos/amplitude buffer):
-# k = TAU*sin(angle)/wl; accumulate E; return |E|^2.
+# k = TAU*sin(angle)/wl; accumulate E; return |E|^2. NaN for a null aperture with pairs > 0
+# (2.15.1: it was read through).
 #must_use
 fn fraunhofer_1d(aperture, pairs, wavelength, angle) {
+    if ((aperture == 0) & (pairs > 0)) { return _PRK_NAN; }
     var k_sin = f64_div(f64_mul(F64_TAU, _prk_sin(angle)), wavelength);
     var real = f64_from(0);
     var imag = f64_from(0);
@@ -49,170 +51,163 @@ fn fresnel_number(wavelength, aperture_radius, distance) {
       f64_mul(wavelength, distance));
 }
 
-# Auxiliary functions f(x), g(x) for the Fresnel integrals (x >= 1).
-# Abramowitz & Stegun 7.3.32/7.3.33, |eps| <= 2e-3:
-#   f(x) = (1 + 0.926x) / (2 + 1.792x + 3.104x^2)
-#   g(x) = 1 / (2 + 4.142x + 3.492x^2 + 6.670x^3)
-# Results written to f_out, g_out.
-#
-# ⚠ 2.2.6 DELIBERATELY DIVERGES FROM THE RUST ORIGINAL HERE. The Rust was
-#   f = (1.0 + 0.926*x2) / (2.0 + 1.792*x2 + 3.104*x4) / x
-#   g = 1.0 / (2.0 + 4.142*x2 + 3.492*x4 + 6.670*x2*x4) / x3
-# (recoverable at `git show 524a7aa^:rust-old/src/wave/diffraction.rs`, lines
-# 122-123) and the port carried it faithfully. TWO errors, compounded: the A&S
-# coefficients are LINEAR in x and were applied to x^2/x^3/x^4, and a spurious
-# trailing /x and /x^3 was added. Measured against published values before the
-# fix — the error grows with x, which is why the suite missed it (it samples
-# only x = 0, 1 and 10, and at 10 both forms converge to the 0.5 asymptote):
-#   x     C(x) before    C(x) after     published
-#   0.5   0.496152       0.492344*      0.492344   (*small-x series, unchanged)
-#   1.0   0.779292       0.779292       0.779893   (see below)
-#   1.5   0.466432       0.445620       0.445261   (was +4.8%)
-#   2.0   0.499751       0.487115       0.488253   (was +2.4%)
-#   3.0   0.511543       0.606989       0.605721   (was -15.5%)
-# The corrected form sits inside A&S's stated 2e-3 bound at every sample.
-# ⛔ 2.4.7 CORRECTED THE x = 1.0 ROW, which read `0.779893` under "after" — the
-# PUBLISHED value, copied into a column that is supposed to report what the code
-# does. Re-measured on the shipped function: C(1.0) = **0.779292**, unchanged by
-# the repair, 6.0e-4 from published and well inside the 2e-3 bound.
-# ⭐ And the reason it is unchanged is the interesting part, which the row as
-# written hid: the defect was coefficients applied to x^2/x^3/x^4 instead of x,
-# and **at x = 1 every power of x is 1**, so the wrong and right forms are
-# arithmetically identical there. x = 1 is not a weak sample of this defect, it is
-# a blind one — which completes the sentence above about the suite sampling only
-# x = 0, 1 and 10: x = 0 and x = 1 could not see it and x = 10 had converged.
-fn _fresnel_fg(x, f_out, g_out) {
-    var x2 = f64_mul(x, x);
-    var x3 = f64_mul(x2, x);
-    # f = (1 + 0.926x) / (2 + 1.792x + 3.104x^2)
-    var fnum = f64_add(F64_ONE, f64_mul(_diff_r(926, 1000), x));
-    var fden = f64_add(
-      f64_add(F64_TWO, f64_mul(_diff_r(1792, 1000), x)),
-      f64_mul(_diff_r(3104, 1000), x2));
-    store64(f_out, f64_div(fnum, fden));
-    # g = 1 / (2 + 4.142x + 3.492x^2 + 6.670x^3)
-    var gden = f64_add(
-      f64_add(
-        f64_add(F64_TWO, f64_mul(_diff_r(4142, 1000), x)),
-        f64_mul(_diff_r(3492, 1000), x2)),
-      f64_mul(_diff_r(6670, 1000), x3));
-    store64(g_out, f64_div(F64_ONE, gden));
-}
-
-# Fresnel cosine integral C(x) = integral_0^x cos(pi*t^2/2) dt.
+# One Horner step, acc*x + c.
 #must_use
-fn fresnel_integral_c(x) {
-    var ax = f64_abs(x);
-    var result = f64_from(0);
-    if (f64_lt(ax, F64_ONE) == 1) {
-        var x2 = f64_mul(ax, ax);
-        var t = f64_mul(F64_PI_2, x2);
-        var t2 = f64_mul(t, t);
-        # ax * (1 - t2/10 + t2*t2/216).
-        # ⚠ 2.2.6 DIVERGES FROM THE RUST ORIGINAL: it had /20 and /1680
-        # (rust-old/src/wave/diffraction.rs:83). Both coefficients are wrong.
-        # C(x) = sum (-1)^n (pi/2)^2n x^(4n+1) / ((2n)! (4n+1)); substituting
-        # t = (pi/2)x^2 gives x(1 - t^2/10 + t^4/216). The /20 form is exactly
-        # half the correct x^5 term. Error grew toward the x = 1 branch point:
-        # C(0.9) was 0.828555 against a true 0.764823 (+8.3%).
-        var inner = f64_add(
-          f64_sub(F64_ONE, f64_div(t2, f64_from(10))),
-          f64_div(f64_mul(t2, t2), f64_from(216)));
-        result = f64_mul(ax, inner);
-    } else {
-        var pi_x2 = f64_mul(f64_mul(F64_PI_2, ax), ax);
-        # Stack locals, not `alloc(16)`: these are hot scalar entry points and
-        # the bump allocator never frees, so a per-call scratch buffer leaked.
-        var f = 0;
-        var g = 0;
-        _fresnel_fg(ax, &f, &g);
-        # 0.5 + f*sin(pi_x2) - g*cos(pi_x2)
-        result = f64_sub(
-          f64_add(F64_HALF, f64_mul(f, _prk_sin(pi_x2))),
-          f64_mul(g, _prk_cos(pi_x2)));
-    }
-    if (f64_lt(x, f64_from(0)) == 1) {
-        return f64_neg(result);
-    }
-    return result;
-}
+fn _fr_h(acc, x, c) { return f64_add(f64_mul(acc, x), c); }
 
-# Fresnel sine integral S(x) = integral_0^x sin(pi*t^2/2) dt.
-#must_use
-fn fresnel_integral_s(x) {
-    var ax = f64_abs(x);
-    var result = f64_from(0);
-    if (f64_lt(ax, F64_ONE) == 1) {
-        var x2 = f64_mul(ax, ax);
-        var t = f64_mul(F64_PI_2, x2);
-        var t2 = f64_mul(t, t);
-        # ax * x2 * (PI_2/3) * (1 - t2/14 + t2*t2/440).
-        # ⚠ 2.2.6 DIVERGES FROM THE RUST ORIGINAL: it had /42 and /3960
-        # (rust-old/src/wave/diffraction.rs). S(x) = sum (-1)^n (pi/2)^(2n+1)
-        # x^(4n+3) / ((2n+1)! (4n+3)) = (pi/2)x^3/3 (1 - t^2/14 + t^4/440);
-        # both Rust coefficients are 3x too large.
-        var inner = f64_add(
-          f64_sub(F64_ONE, f64_div(t2, f64_from(14))),
-          f64_div(f64_mul(t2, t2), f64_from(440)));
-        result = f64_mul(
-          f64_mul(f64_mul(ax, x2), f64_div(F64_PI_2, f64_from(3))),
-          inner);
-    } else {
-        var pi_x2 = f64_mul(f64_mul(F64_PI_2, ax), ax);
-        # Stack locals, not `alloc(16)`: these are hot scalar entry points and
-        # the bump allocator never frees, so a per-call scratch buffer leaked.
-        var f = 0;
-        var g = 0;
-        _fresnel_fg(ax, &f, &g);
-        # 0.5 - f*cos(pi_x2) - g*sin(pi_x2)
-        result = f64_sub(
-          f64_sub(F64_HALF, f64_mul(f, _prk_cos(pi_x2))),
-          f64_mul(g, _prk_sin(pi_x2)));
-    }
-    if (f64_lt(x, f64_from(0)) == 1) {
-        return f64_neg(result);
-    }
-    return result;
-}
-
-# Both Fresnel integrals together, sharing work; writes C(x), S(x) to c_out, s_out.
-fn fresnel_integral_cs(x, c_out, s_out) {
-    var ax = f64_abs(x);
-    var c_val = f64_from(0);
-    var s_val = f64_from(0);
-    if (f64_lt(ax, F64_ONE) == 1) {
-        var x2 = f64_mul(ax, ax);
-        var t = f64_mul(F64_PI_2, x2);
-        var t2 = f64_mul(t, t);
-        var c_inner = f64_add(
-          f64_sub(F64_ONE, f64_div(t2, f64_from(10))),
-          f64_div(f64_mul(t2, t2), f64_from(216)));
-        c_val = f64_mul(ax, c_inner);
-        var s_inner = f64_add(
-          f64_sub(F64_ONE, f64_div(t2, f64_from(14))),
-          f64_div(f64_mul(t2, t2), f64_from(440)));
-        s_val = f64_mul(
-          f64_mul(f64_mul(ax, x2), f64_div(F64_PI_2, f64_from(3))),
-          s_inner);
-    } else {
-        var pi_x2 = f64_mul(f64_mul(F64_PI_2, ax), ax);
-        # Stack locals, not `alloc(16)`: these are hot scalar entry points and
-        # the bump allocator never frees, so a per-call scratch buffer leaked.
-        var f = 0;
-        var g = 0;
-        _fresnel_fg(ax, &f, &g);
-        var sin_px2 = _prk_sin(pi_x2);
-        var cos_px2 = _prk_cos(pi_x2);
-        c_val = f64_sub(f64_add(F64_HALF, f64_mul(f, sin_px2)), f64_mul(g, cos_px2));
-        s_val = f64_sub(f64_sub(F64_HALF, f64_mul(f, cos_px2)), f64_mul(g, sin_px2));
-    }
-    if (f64_lt(x, f64_from(0)) == 1) {
-        store64(c_out, f64_neg(c_val));
-        store64(s_out, f64_neg(s_val));
+# C(x) and S(x) for x >= 0 into out[0], out[1], by Moshier's Cephes `fresnl` (Cephes Math Library
+# 2.1, 1989): rational fits in x^4 below x^2 = 2.5625, and above it the auxiliary functions
+#   C = 1/2 + (f sin(pi x^2/2) - g cos(pi x^2/2))/(pi x),  S = 1/2 - (f cos + g sin)/(pi x),
+# with f and g rational in 1/(pi x^2)^2. Coefficients are the Cephes decimals, correctly rounded
+# to the hex below. The phase is reduced in cycles, x^2/4, from x^2 split exactly into a
+# head and a tail (Dekker), so it does not lose the bits a rounded x^2 drops: past x = 2^53
+# every x^2/4 is a whole number of cycles and the limit is written directly.
+# Measured against a 120-digit reference (the Maclaurin series to x = 6, the asymptotic expansion
+# truncated at its smallest term beyond): within 2.6e-16 absolute and 5.0e-16 relative at 4786
+# points over [0, 40), and at x = 1e2 ... 1e15.
+fn _fresnel_core(x, out) {
+    if ((x & _PRK_ABS) > 0x7FF0000000000000) {
+        store64(out, x);
+        store64(out + 8, x);
         return 0;
     }
-    store64(c_out, c_val);
-    store64(s_out, s_val);
+    if (f64_lt(x, 0x4340000000000000) == 0) {     # 2^53, and +inf
+        store64(out, F64_HALF);
+        store64(out + 8, f64_sub(F64_HALF, f64_div(F64_ONE, f64_mul(F64_PI, x))));
+        return 0;
+    }
+    var x2 = f64_mul(x, x);
+    if (f64_lt(x2, 0x4004800000000000) == 1) {     # x^2 < 2.5625
+        var t = f64_mul(x2, x2);
+        var sn = 0xC0A75FA36D65B5C3;    # -2.99181919401019853726E3
+        sn = _fr_h(sn, t, 0x4125A1D0172C05B6);    # 7.08840045257738576863E5
+        sn = _fr_h(sn, t, 0xC18E074624F6F5ED);    # -6.29741486205862506537E7
+        sn = _fr_h(sn, t, 0x41E2FDA860B77AFE);    # 2.54890880573376359104E9
+        sn = _fr_h(sn, t, 0xC224A0BA347BF087);    # -4.42979518059697779103E10
+        sn = _fr_h(sn, t, 0x425282CFE6E52457);    # 3.18016297876567817986E11
+        var sd = f64_add(t, 0x4071960532871072);    # 2.81376268889994315696E2
+        sd = _fr_h(sd, t, 0x40E64218FE9CDAA9);    # 4.55847810806532581675E4
+        sd = _fr_h(sd, t, 0x4153BC2FB8D017B4);    # 5.17343888770096400730E6
+        sd = _fr_h(sd, t, 0x41B8FE51B5E5EA9E);    # 4.19320245898111231129E8
+        sd = _fr_h(sd, t, 0x4214E664E6B222E9);    # 2.24411795645340920940E10
+        sd = _fr_h(sd, t, 0x4261AD3B73DE42B5);    # 6.07366389490084639049E11
+        var cn = 0xBE6AC80C2CFB62D3;    # -4.98843114573573548651E-8
+        cn = _fr_h(cn, t, 0x3EE3EE9262100F74);    # 9.50428062829859605134E-6
+        cn = _fr_h(cn, t, 0xBF4524420ED68786);    # -6.45191435683965050962E-4
+        cn = _fr_h(cn, t, 0x3F93566A1059CC13);    # 1.88843319396703850064E-2
+        cn = _fr_h(cn, t, 0xBFCA4EAC378A9690);    # -2.05525900955013891793E-1
+        cn = _fr_h(cn, t, 0x3FF0000000000000);    # 9.99999999999999998822E-1
+        var cd = 0x3D9197686A7FC6B3;    # 3.99982968972495980367E-12
+        cd = _fr_h(cd, t, 0x3E0F7449DB0375B9);    # 9.15439215774657478799E-10
+        cd = _fr_h(cd, t, 0x3E80C70802A45191);    # 1.25001862479598821474E-7
+        cd = _fr_h(cd, t, 0x3EE9A3EEFA2A1D32);    # 1.22262789024179030997E-5
+        cd = _fr_h(cd, t, 0x3F4C718F3FDBD99D);    # 8.68029542941784300606E-4
+        cd = _fr_h(cd, t, 0x3FA51A076030FE74);    # 4.12142090722199792936E-2
+        cd = _fr_h(cd, t, 0x3FF0000000000000);    # 1.00000000000000000118E0
+        store64(out, f64_div(f64_mul(x, cn), cd));
+        store64(out + 8, f64_div(f64_mul(f64_mul(x, x2), sn), sd));
+        return 0;
+    }
+    var pt = f64_mul(F64_PI, x2);
+    var u = f64_div(F64_ONE, f64_mul(pt, pt));
+    var fn_ = 0x3FDAFA91D1B02391;    # 4.21543555043677546506E-1
+    fn_ = _fr_h(fn_, u, 0x3FC25B30D2B90E5E);    # 1.43407919780758885261E-1
+    fn_ = _fr_h(fn_, u, 0x3F8798E57B157DAD);    # 1.15220955073585758835E-2
+    fn_ = _fr_h(fn_, u, 0x3F369C70C4950EFC);    # 3.45017939782574027900E-4
+    fn_ = _fr_h(fn_, u, 0x3ED37203C5357795);    # 4.63613749287867322088E-6
+    fn_ = _fr_h(fn_, u, 0x3E6067B5484E87A1);    # 3.05568983790257605827E-8
+    fn_ = _fr_h(fn_, u, 0x3DDC1F0A4998A7BB);    # 1.02304514164907233465E-10
+    fn_ = _fr_h(fn_, u, 0x3D4835571459FDF7);    # 1.72010743268161828879E-13
+    fn_ = _fr_h(fn_, u, 0x3CA35A2DAF8FA9E4);    # 1.34283276233062758925E-16
+    fn_ = _fr_h(fn_, u, 0x3BE636EF0E0B05F6);    # 3.76329711269987889006E-20
+    var fd = f64_add(u, 0x3FE80CFEEB217A65);    # 7.51586398353378947175E-1
+    fd = _fr_h(fd, u, 0x3FBDEC6EC1D46D7D);    # 1.16888925859191382142E-1
+    fd = _fr_h(fd, u, 0x3F7A615EA6ED56F3);    # 6.44051526508858611005E-3
+    fd = _fr_h(fd, u, 0x3F24704A6017BD60);    # 1.55934409164153020873E-4
+    fd = _fr_h(fd, u, 0x3EBEF9B1923264F5);    # 1.84627567348930545870E-6
+    fd = _fr_h(fd, u, 0x3E4833B495525916);    # 1.12699224763999035261E-8
+    fd = _fr_h(fd, u, 0x3DC3CC8533D3A061);    # 3.60140029589371370404E-11
+    fd = _fr_h(fd, u, 0x3D30926C6B9F0790);    # 5.88754533621578410010E-14
+    fd = _fr_h(fd, u, 0x3C8A0E5D2352F48D);    # 4.52001434074129701496E-17
+    fd = _fr_h(fd, u, 0x3BCD9E9412B96141);    # 1.25443237090011264384E-20
+    var gn = 0x3FE02463B420CACA;    # 5.04442073643383265887E-1
+    gn = _fr_h(gn, u, 0x3FC93AAA67F87481);    # 1.97102833525523411709E-1
+    gn = _fr_h(gn, u, 0x3F93371854BA3214);    # 1.87648584092575249293E-2
+    gn = _fr_h(gn, u, 0x3F466A7948D1B33B);    # 6.84079380915393090172E-4
+    gn = _fr_h(gn, u, 0x3EE82577F9FAABF3);    # 1.15138826111884280931E-5
+    gn = _fr_h(gn, u, 0x3E7A621C4DEA6091);    # 9.82852443688422223854E-8
+    gn = _fr_h(gn, u, 0x3DFE9A94F200EB09);    # 4.45344415861750144738E-10
+    gn = _fr_h(gn, u, 0x3D730BF5876689CB);    # 1.08268041139020870318E-12
+    gn = _fr_h(gn, u, 0x3CD8C7A03DF8A964);    # 1.37555460633261799868E-15
+    gn = _fr_h(gn, u, 0x3C2EDB24F17358A6);    # 8.36354435630677421531E-19
+    gn = _fr_h(gn, u, 0x3B6C409D624FBE2B);    # 1.86958710162783235106E-22
+    var gd = f64_add(u, 0x3FF7996D23BC55C1);    # 1.47495759925128324529E0
+    gd = _fr_h(gd, u, 0x3FD59DADEFA1C34F);    # 3.37748989120019970451E-1
+    gd = _fr_h(gd, u, 0x3F99F811E637AA09);    # 2.53603741420338795122E-2
+    gd = _fr_h(gd, u, 0x3F4AB2060FA0AE28);    # 8.14679107184306179049E-4
+    gd = _fr_h(gd, u, 0x3EEABF862C0A067B);    # 1.27545075667729118702E-5
+    gd = _fr_h(gd, u, 0x3E7C0071AB1C7428);    # 1.04314589657571990585E-7
+    gd = _fr_h(gd, u, 0x3DFFA8618E3CF1C6);    # 4.60680728146520428211E-10
+    gd = _fr_h(gd, u, 0x3D7366439C3DEF2B);    # 1.10273215066240270757E-12
+    gd = _fr_h(gd, u, 0x3CD900DC37C81936);    # 1.38796531259578871258E-15
+    gd = _fr_h(gd, u, 0x3C2EF5A184FF8364);    # 8.39158816283118707363E-19
+    gd = _fr_h(gd, u, 0x3B6C409D624FBE2B);    # 1.86958710162783236342E-22
+    var f = f64_sub(F64_ONE, f64_div(f64_mul(u, fn_), fd));
+    var g = f64_div(f64_div(gn, gd), pt);
+    # x^2 = hi + lo exactly: Dekker's split of x into 26-bit halves.
+    var sp = f64_mul(0x41A0000002000000, x);     # 2^27 + 1
+    var xh = f64_sub(sp, f64_sub(sp, x));
+    var xl = f64_sub(x, xh);
+    var hh = f64_sub(f64_mul(xh, xh), x2);
+    var lo = f64_add(f64_add(hh, f64_mul(f64_mul(F64_TWO, xh), xl)), f64_mul(xl, xl));
+    var q = f64_mul(x2, 0x3FD0000000000000);     # x^2/4 cycles, exact
+    var ph = f64_mul(F64_TAU, f64_add(f64_sub(q, f64_floor(q)), f64_mul(lo, 0x3FD0000000000000)));
+    var sn2 = _prk_sin(ph);
+    var cs2 = _prk_cos(ph);
+    var px = f64_mul(F64_PI, x);
+    store64(out, f64_add(F64_HALF, f64_div(f64_sub(f64_mul(f, sn2), f64_mul(g, cs2)), px)));
+    store64(out + 8, f64_sub(F64_HALF, f64_div(f64_add(f64_mul(f, cs2), f64_mul(g, sn2)), px)));
+    return 0;
+}
+
+# ⛔ 2.15.1 replaced Abramowitz & Stegun 7.3.32/7.3.33 (|eps| <= 2e-3) and a three-term series below
+# x = 1. Against the same reference that pair was 2.2e-3 off (S(2.08)) and 6.2e-3 relative (C(1.81)),
+# jumped 1.6e-3 at the x = 1 seam (C was not continuous at its own first maximum), and returned NaN
+# from x = 1e10, where pi x^2/2 passed the sine's range. 2.2.6 and 2.4.7 had already repaired the
+# fit's coefficients, which the Rust applied to x^2 and x^4 instead of x.
+
+# Fresnel cosine integral C(x) = integral_0^x cos(pi*t^2/2) dt; odd in x, 1/2 at +infinity.
+#must_use
+fn fresnel_integral_c(x) {
+    var o[16];
+    _fresnel_core(f64_abs(x), &o);
+    if (f64_lt(x, f64_from(0)) == 1) { return f64_neg(load64(&o)); }
+    return load64(&o);
+}
+
+# Fresnel sine integral S(x) = integral_0^x sin(pi*t^2/2) dt; odd in x, 1/2 at +infinity.
+#must_use
+fn fresnel_integral_s(x) {
+    var o[16];
+    _fresnel_core(f64_abs(x), &o);
+    if (f64_lt(x, f64_from(0)) == 1) { return f64_neg(load64(&o + 8)); }
+    return load64(&o + 8);
+}
+
+# Both Fresnel integrals together, sharing work; writes C(x), S(x) to c_out, s_out. Returns
+# PK_ERR_NONE, or PK_ERR_INVALID_PARAMETER and writes nothing if either is null (2.15.1: they
+# were written through).
+fn fresnel_integral_cs(x, c_out, s_out) {
+    if ((c_out == 0) | (s_out == 0)) { return PK_ERR_INVALID_PARAMETER; }
+    var o[16];
+    _fresnel_core(f64_abs(x), &o);
+    if (f64_lt(x, f64_from(0)) == 1) {
+        store64(c_out, f64_neg(load64(&o)));
+        store64(s_out, f64_neg(load64(&o + 8)));
+        return 0;
+    }
+    store64(c_out, load64(&o));
+    store64(s_out, load64(&o + 8));
     return 0;
 }
 
@@ -235,9 +230,11 @@ fn fresnel_parameter(wavelength, x, distance) {
 }
 
 # Huygens-Fresnel 1D integral: complex field at x_obs from secondary wavelets;
-# returns |E|^2. Aperture is an interleaved pos/amplitude buffer.
+# returns |E|^2. Aperture is an interleaved pos/amplitude buffer. NaN for a null aperture with
+# pairs > 0 (2.15.1: it was read through).
 #must_use
 fn huygens_fresnel_1d(aperture, pairs, wavelength, z, x_obs) {
+    if ((aperture == 0) & (pairs > 0)) { return _PRK_NAN; }
     var k = f64_div(F64_TAU, wavelength);
     var real = f64_from(0);
     var imag = f64_from(0);
@@ -485,11 +482,25 @@ fn _diff_tmm_stack(wavelength, ni, ns, layers, num_layers, cos_i, cos_sub, ni_si
             b_i = f64_div(sh, eta_i2);
             c_i = f64_neg(f64_mul(eta_i2, sh));
         } else {
-            var eta = _diff_eta(n, cos_l, is_p);
-            var sin_d = _prk_sin(delta);
-            a_r = _prk_cos(delta);
-            b_i = f64_div(sin_d, eta);
-            c_i = f64_mul(eta, sin_d);
+            if ((cos_l & _PRK_ABS) == 0) {
+                # EXACTLY at the layer's critical angle delta = 0 and eta is 0 (s) or infinite
+                # (p); the matrix is the limit as cos -> 0 of sin(delta)/eta and eta sin(delta):
+                # s: [[1, i k d], [0, 1]], p: [[1, 0], [i k n^2 d, 1]], k = 2 pi/lambda.
+                # ⛔ 2.15.1: s evaluated 0/0 = NaN and p dropped the layer (identity).
+                var kd = f64_div(f64_mul(F64_TAU, d), wavelength);
+                a_r = F64_ONE;
+                if (is_p == 0) {
+                    b_i = kd;
+                } else {
+                    c_i = f64_mul(kd, f64_mul(n, n));
+                }
+            } else {
+                var eta = _diff_eta(n, cos_l, is_p);
+                var sin_d = _prk_sin(delta);
+                a_r = _prk_cos(delta);
+                b_i = f64_div(sin_d, eta);
+                c_i = f64_mul(eta, sin_d);
+            }
         }
         # 2.2.7 fixed two sign errors in this product; see multilayer_reflectance
         # for the derivation of M' = M*L.
@@ -516,7 +527,9 @@ fn _diff_tmm_stack(wavelength, ni, ns, layers, num_layers, cos_i, cos_sub, ni_si
 }
 
 # Full multilayer TMM at oblique incidence; returns a ThinFilmResult with the
-# s/p reflectances/transmittances and their unpolarized averages.
+# s/p reflectances/transmittances and their unpolarized averages, or 0 for |angle| >= pi/2 or a
+# NaN angle (as multilayer_rta refuses them). ⛔ 2.15.1: past grazing the incident admittance went
+# negative and R_s > 1, T_s < 0 came back as a result.
 #must_use
 fn multilayer_rt(wavelength, angle, n_incident, n_substrate, layers, num_layers) {
     _prk_trace("multilayer_rt");
@@ -524,6 +537,7 @@ fn multilayer_rt(wavelength, angle, n_incident, n_substrate, layers, num_layers)
     # the sentinel, matching diffraction_pattern_2d and psf_from_wavefront.
     if (num_layers < 0) { return 0; }
     if (num_layers > 0) { if (layers == 0) { return 0; } }
+    if (f64_lt(f64_abs(angle), F64_PI_2) == 0) { return 0; }
     var cos_i = _prk_cos(angle);
     var sin_i = _prk_sin(angle);
     var ni_sin_i = f64_mul(n_incident, sin_i);

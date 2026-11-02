@@ -247,4 +247,20 @@ _assert_near(spec_speed_of_light(), f64_from(299800000), f64_from(100000), "c ~ 
 _assert_near(spec_planck_h(), 0x390B85F8C5445F02, 0x38754484932D2E72, "h ~ 6.626e-34");
 _assert_near(spec_boltzmann_k(), 0x3B30B1FCECA05DB0, 0x3ABEF2D0F5DA7DD9, "k ~ 1.381e-23");
 
+# ── 2.15.1: Planck's domain; rgb_to_u8 allocates its result only ────────
+test_group("2.15.1 planck domain, rgb_to_u8 scratch");
+var _pk0 = planck_radiance(f64_from(0), f64_from(5000));
+assert(f64_eq(_pk0, _pk0) == 0, "Planck at lambda = 0: NaN (was 0)");
+var _pkn = planck_radiance(f64_neg(_fd(5, 10000000)), f64_from(5000));
+assert(f64_eq(_pkn, _pkn) == 0, "Planck at lambda < 0: NaN (was a negative radiance)");
+var _pkq = planck_radiance(0x7FF8000000000000, f64_from(5000));
+assert(f64_eq(_pkq, _pkq) == 0, "Planck at lambda = NaN: NaN");
+assert_eq(planck_radiance(_fd(5, 10000000), f64_from(0)), f64_from(0), "T = 0 still emits nothing: 0");
+var _rc = rgb_new(_fd(3, 2), f64_neg(F64_HALF), F64_HALF);
+var _ru0 = alloc_used();
+var _ru = rgb_to_u8(_rc);
+assert_eq(alloc_used() - _ru0, sizeof(RgbU8), "rgb_to_u8 allocates the RgbU8 only (24 B of clamp scratch leaked)");
+assert_eq(RgbU8_r(_ru), 255, "1.5 clamps to 255");
+assert_eq(RgbU8_g(_ru), 0, "-0.5 clamps to 0");
+assert_eq(RgbU8_b(_ru), 128, "0.5 -> 128");
 var r = assert_summary();

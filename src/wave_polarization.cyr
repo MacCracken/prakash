@@ -44,7 +44,9 @@ fn stokes_intensity(s) {
     return StokesVector_s0(s);
 }
 
-# Ellipticity angle chi: 0.5 * atan2(S3, sqrt(S1^2 + S2^2)); 0 for zero vector.
+# Ellipticity angle chi: 0.5 * atan2(S3, sqrt(S1^2 + S2^2)); 0 for a vector with no polarized
+# part. An angle, so the same at every scale: 2.15.1 found a 1e-15 threshold answering 0 for a
+# circular vector of intensity 1e-16.
 #must_use
 fn stokes_ellipticity_angle(s) {
     if (s == 0) { return f64_from(0); }
@@ -52,10 +54,8 @@ fn stokes_ellipticity_angle(s) {
     var s2 = StokesVector_s2(s);
     var s3 = StokesVector_s3(s);
     var linear_part = f64_sqrt(f64_add(f64_mul(s1, s1), f64_mul(s2, s2)));
-    if (f64_lt(linear_part, _wp_eps15()) == 1) {
-        if (f64_lt(f64_abs(s3), _wp_eps15()) == 1) {
-            return f64_from(0);
-        }
+    if (((linear_part | s3) & _PRK_ABS) == 0) {
+        return f64_from(0);
     }
     return f64_mul(F64_HALF, ganita_f64_atan2(s3, linear_part));
 }
@@ -309,9 +309,12 @@ fn biref_quartz() { return _biref_mk(_wp_r(15443, 10000), _wp_r(15534, 10000), "
 # Rutile (positive uniaxial): n_o = 2.616, n_e = 2.903.
 #must_use
 fn biref_rutile() { return _biref_mk(_wp_r(2616, 1000), _wp_r(2903, 1000), "rutile"); }
-# Mica (muscovite, treated as uniaxial): n_o = 1.5601, n_e = 1.5936.
+# Mica (muscovite, biaxial, here the pair a cleaved sheet sees at normal incidence): n_beta =
+# 1.5936 and n_gamma = 1.5977, so delta n = 0.0041 and a quarter wave at 589 nm is 35.9 um, as
+# mica retarders are. ⛔ 2.15.1: n_alpha = 1.5601 and n_beta = 1.5936, which a cleaved sheet
+# never sees: delta n 0.0335, every retardation 8.2x too large (Hecht's muscovite indices).
 #must_use
-fn biref_mica() { return _biref_mk(_wp_r(15601, 10000), _wp_r(15936, 10000), "mica"); }
+fn biref_mica() { return _biref_mk(_wp_r(15936, 10000), _wp_r(15977, 10000), "mica"); }
 
 # Birefringence: delta_n = n_e - n_o.
 #must_use

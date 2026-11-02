@@ -137,4 +137,23 @@ while (pi < 4) {
     pi = pi + 1;
 }
 
+# ── 2.15.1 audit ────────
+test_group("2.15.1 Stokes scale, mica");
+# The degree of polarization and the ellipticity are ratios: they do not depend on the scale of
+# the Stokes vector. The first cut compared S0 and the linear part with 1e-15 and answered 0 for a
+# fully polarized vector of intensity 1e-16.
+_assert_near(stokes_degree_of_polarization(stokes_horizontal(_fd(1, 10000000000000000))), F64_ONE,
+  _fd(1, 1000000000000000),
+  "DOP of a horizontal vector of intensity 1e-16: 1");
+_assert_near(stokes_ellipticity_angle(stokes_circular_right(_fd(1, 10000000000000000))), F64_PI_4,
+  _fd(1, 1000000000000000),
+  "ellipticity of a circular vector of intensity 1e-16: pi/4");
+# A cleaved mica sheet is crossed near its X axis and sees n_gamma - n_beta = 1.5977 - 1.5936
+# = 0.0041 (Hecht's muscovite indices); the first cut used n_beta - n_alpha = 0.0335, 8.2x too
+# much. A quarter-wave plate at 589 nm is then 35.9 um, as mica retarders are.
+var mica = biref_mica();
+_assert_near(biref_birefringence(mica), _fd(41, 10000), _fd(1, 1000000000000000), "mica: delta n = 0.0041");
+_assert_near(biref_quarter_wave_thickness(mica, _fd(589, 1000000000)), f64_div(_fd(589, 1000000000), _fd(164, 10000)),
+  _fd(1, 1000000000000000000), "mica: a quarter wave at 589 nm is 35.9 um");
+
 var r = assert_summary();

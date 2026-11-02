@@ -200,4 +200,33 @@ while (si < 5) {
     si = si + 1;
 }
 
+# ── 2.15.1 audit ────────
+test_group("2.15.1 thin film, polarizer, grating");
+# A film in air reflects two equal beams, one with a pi shift: sin^2(2 pi n d/lambda). The first
+# cut counted the pi twice and returned 1 - that: bright for a vanishing film, black at a quarter
+# wave (Hecht 9.4.1).
+_assert_near(thin_film_reflectance(f64_from(550), Z, _fd(133, 100)), Z, _fd(1, 1000000000000000),
+  "a vanishing film is black");
+var tq = f64_div(f64_from(550), f64_mul(f64_from(4), _fd(133, 100)));
+_assert_near(thin_film_reflectance(f64_from(550), tq, _fd(133, 100)), F64_ONE, _fd(1, 1000000000000000),
+  "a quarter-wave film is at its brightest");
+_assert_near(thin_film_reflectance(f64_from(550), f64_mul(F64_TWO, tq), _fd(133, 100)), Z, _fd(1, 1000000000000000),
+  "a half-wave film is black again");
+# Jones: |e_x cos t + e_y e^(i phi) sin t|^2 = e_x^2 cos^2 t + e_y^2 sin^2 t + 2 e_x e_y sin t cos t cos phi.
+# The first cut used Malus on atan2(e_y, e_x) and ignored phi.
+_assert_near(polarization_through_polarizer(polarization_circular_right(), F64_PI_4), F64_HALF,
+  _fd(1, 1000000000000000),
+  "circular light through any polarizer: half");
+var lin_m45 = polarization_new(F64_FRAC_1_SQRT2, F64_FRAC_1_SQRT2, F64_PI);
+_assert_near(polarization_through_polarizer(lin_m45, F64_PI_4), Z, _fd(1, 1000000000000000),
+  "linear at -45 degrees through +45: nothing");
+_assert_near(polarization_through_polarizer(lin_m45, f64_neg(F64_PI_4)), F64_ONE, _fd(1, 1000000000000000),
+  "linear at -45 degrees through -45: all");
+_assert_near(polarization_through_polarizer(polarization_new(_fd(6, 10), _fd(8, 10), F64_ONE), _fd(3, 10)),
+  0x3FE0FD0D9AE90B58, _fd(1, 1000000000000000), "elliptical (0.6, 0.8, phase 1) at 0.3 rad");
+# A grating's orders stop where |m lambda/d| passes 1, and so does the search: the first cut ran
+# all max_order + 1 of them, so 2^40 orders took hours to return three angles.
+var gm = grating_maxima(_fd(5, 10000000), _fd(1, 1000000), 1099511627776);
+assert(vec_len(gm) == 5, "2^40 orders asked: m = 0, +-1, +-2 exist, and the search stops there");
+
 var r = assert_summary();

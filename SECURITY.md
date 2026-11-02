@@ -1,5 +1,13 @@
 # Security Policy
 
+## Supported Versions
+
+| Version | Supported |
+|---|---|
+| Latest 2.x release (the Cyrius library, `dist/prakash.cyr` / `dist/prakash-ai.cyr`) | ✅ Fixes ship as a patch of the current minor |
+| Earlier 2.x releases | ❌ Upgrade to the latest: `docs/guides/upgrading.md` lists what moves |
+| 1.x (the Rust crate) | ❌ Frozen; it receives no fixes, security or otherwise |
+
 ## Reporting a Vulnerability
 
 If you discover a security vulnerability in prakash, please report it

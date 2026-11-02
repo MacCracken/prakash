@@ -32,9 +32,10 @@
 # reflection at the critical angle has r_s = r_p = 1 and reads pi, a half wave, which is
 # Lam's "polarization inversion". An even number agrees: a Fresnel rhomb reads 2 delta.
 #
-# ⚠ TIME CONVENTION. e^(-i w t), as everywhere else in prakash, so a published matrix in the
-# e^(+i w t) convention is the complex conjugate of this one. Lam's is. Retardance and
-# diattenuation are the same either way.
+# ⚠ TIME CONVENTION. e^(-i w t), as in ray_fresnel, multilayer_rta, wave_focus and wave_doe, so
+# a published matrix in the e^(+i w t) convention is the complex conjugate of this one. Lam's
+# is, and so is wave_beam (Siegman's convention). Retardance and diattenuation are the same
+# either way. (2.15.1: this said "as everywhere else in prakash", which wave_beam is not.)
 #
 # Unit vectors are checked, not assumed: a k or eta off unit length by more than ~1e-12 is
 # refused, because the frames above would silently stop being orthonormal.

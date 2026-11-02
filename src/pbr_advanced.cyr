@@ -31,6 +31,8 @@ fn pbr_distribution_ggx_aniso(n_dot_h, h_dot_x, h_dot_y, roughness_x, roughness_
     var amin = _pbr_alpha_min();
     if (f64_lt(ax, amin) == 1) { ax = amin; }
     if (f64_lt(ay, amin) == 1) { ay = amin; }
+    # chi+(n.h), as pbr_distribution_ggx (2.15.1: a back-facing half vector was clamped to n.h = 0).
+    if (f64_lt(n_dot_h, f64_from(0)) == 1) { return f64_from(0); }
     var ndh = f64_clamp(n_dot_h, f64_from(0), F64_ONE);
     var hx_ax = f64_div(h_dot_x, ax);
     var hy_ay = f64_div(h_dot_y, ay);
@@ -116,7 +118,10 @@ fn pbr_clearcoat_fresnel(cos_theta) {
     return pbr_fresnel_schlick(_pbr_r(4, 100), cos_theta);
 }
 
-# Clearcoat geometry (Kelemen, simplified): 0.25 / (ndv*ndl).
+# Clearcoat visibility with no masking or shadowing (G = 1): the Cook-Torrance denominator alone,
+# 1/(4 n.v n.l), both clamped to >= 1e-3. ⚠ 2.15.1: this said "Kelemen, simplified". It is not:
+# Kelemen's visibility is 1/(4 (l.h)^2), which needs l.h and stays finite at grazing, where this
+# grows to 2.5e5.
 #must_use
 fn pbr_clearcoat_geometry(n_dot_v, n_dot_l) {
     var ndv = f64_clamp(n_dot_v, _pbr_r(1, 1000), F64_ONE);
@@ -145,13 +150,17 @@ fn pbr_clearcoat_blend(base_brdf, coat_brdf, clearcoat, h_dot_v) {
 
 # ── Subsurface Scattering ────────
 
-# Burley normalized diffusion: A*[e^(-r/d) + e^(-r/3d)] / (8*pi*d*r);
-# at r=0 returns the limit 1/(2*pi*d^2).
+# Burley normalized diffusion with unit albedo: [e^(-r/d) + e^(-r/3d)] / (8*pi*d*r), which
+# integrates to 1 over the plane (int R 2 pi r dr = (d + 3d)/(4d)). It diverges as 1/(4 pi d r)
+# toward r = 0: +inf at r = 0. NaN for r < 0 or NaN, or d not finite and > 0.
+# ⛔ 2.15.1: below r = 1e-15 this returned 1/(2 pi d^2) and called it "the limit"; there is none,
+# and the profile jumped from 0.159 at r = 1e-16 to 4.1e13 at 1e-15. d = 0 gave NaN and d < 0 a
+# negative profile.
 #must_use
 fn pbr_sss_profile_burley(r, d) {
-    if (f64_lt(r, _pbr_eps15()) == 1) {
-        return f64_div(F64_ONE, f64_mul(f64_mul(f64_mul(F64_TWO, F64_PI), d), d));
-    }
+    if ((f64_gt(d, f64_from(0)) & f64_lt(d, 0x7FF0000000000000)) == 0) { return _PRK_NAN; }
+    if (f64_ge(r, f64_from(0)) == 0) { return _PRK_NAN; }
+    if ((r & 0x7FFFFFFFFFFFFFFF) == 0) { return 0x7FF0000000000000; }
     var inv_8pd = f64_div(F64_ONE, f64_mul(f64_mul(f64_from(8), F64_PI), d));
     var terms = f64_add(
       _prk_exp(f64_div(f64_neg(r), d)),
@@ -167,38 +176,66 @@ fn pbr_sss_profile_gaussian(r, sigma) {
     return f64_div(num, f64_mul(f64_mul(F64_TWO, F64_PI), s2));
 }
 
-# Subsurface diffuse term (Burley approximation).
+# Burley's subsurface lobe (Disney BRDF, 2012; Hanrahan-Krueger in shape), divided by pi:
+#   F_ss90 = (l.h)^2 r,  F_ss = (1 + (F_ss90 - 1) F_L)(1 + (F_ss90 - 1) F_V),  F = (1 - cos)^5,
+#   ss = 1.25 (F_ss (1/(n.l + n.v) - 1/2) + 1/2),
+# with r the perceptual roughness. This signature has no l.h, so it is taken as 1 (the
+# retro-reflective direction): F_ss90 = r. 0 where n.l <= 0 or n.v <= 0, as Disney's code.
+# ⛔ 2.15.1: F_ss90 was r^2, which is not Burley at any l.h; and n.l = n.v = 0 divided by 1e-15
+# and returned 2.5e13.
 #must_use
 fn pbr_subsurface_diffuse(n_dot_l, n_dot_v, roughness) {
+    if ((f64_gt(n_dot_l, f64_from(0)) & f64_gt(n_dot_v, f64_from(0))) == 0) { return f64_from(0); }
     var ndl = f64_clamp(n_dot_l, f64_from(0), F64_ONE);
     var ndv = f64_clamp(n_dot_v, f64_from(0), F64_ONE);
     var fl = _pbr_pow5(f64_sub(F64_ONE, ndl));
     var fv = _pbr_pow5(f64_sub(F64_ONE, ndv));
-    var f_ss90 = f64_mul(roughness, roughness);
+    var f_ss90 = roughness;
     var f_ss = f64_mul(
       f64_add(F64_ONE, f64_mul(f64_sub(f_ss90, F64_ONE), fl)),
       f64_add(F64_ONE, f64_mul(f64_sub(f_ss90, F64_ONE), fv)));
     var inner = f64_add(
       f64_mul(f_ss, f64_sub(
-          f64_div(F64_ONE, f64_add(f64_add(ndl, ndv), _pbr_eps15())),
+          f64_div(F64_ONE, f64_add(ndl, ndv)),
           F64_HALF)),
       F64_HALF);
     var fss = f64_mul(_pbr_r(125, 100), inner);
     return f64_div(fss, F64_PI);
 }
 
-# Thin-slab diffuse transmittance (Borshukov): e^(-extinction*thickness).
+# Thin-slab diffuse transmittance (Borshukov): e^(-extinction*thickness). NaN for a negative or NaN
+# thickness or extinction (2.15.1: extinction -1 transmitted e = 2.72 of the light).
 #must_use
 fn pbr_sss_transmittance(thickness, extinction) {
+    if ((f64_ge(thickness, f64_from(0)) & f64_ge(extinction, f64_from(0))) == 0) { return _PRK_NAN; }
     return _prk_exp(f64_mul(f64_neg(extinction), thickness));
 }
 
 # ── Iridescence ────────
 
-# Thin-film iridescence Fresnel reflectance at one wavelength (Airy formula).
+# Airy reflectance of one polarization from the SIGNED amplitude coefficients r01, r12 and the
+# round-trip phase Phi: (r01^2 + r12^2 + 2 r01 r12 cos Phi)/(1 + r01^2 r12^2 + 2 r01 r12 cos Phi).
+#must_use
+fn _pbr_airy(r01, r12, cos_phi) {
+    var x = f64_mul(f64_mul(F64_TWO, f64_mul(r01, r12)), cos_phi);
+    var num = f64_add(f64_add(f64_mul(r01, r01), f64_mul(r12, r12)), x);
+    var p = f64_mul(r01, r12);
+    return f64_div(num, f64_add(f64_add(F64_ONE, f64_mul(p, p)), x));
+}
+
+# Thin-film iridescence reflectance at one wavelength: a lossless film of n_film and thickness
+# (the wavelength's unit) between n_outside and n_base, unpolarized (the mean of s and p), by the
+# Airy summation (Born & Wolf 1.6.4) with signed Fresnel amplitudes and round-trip phase
+# Phi = 4 pi n_film d cos(theta_film)/lambda. 1 at grazing incidence, and wherever the film or
+# the base totally reflects (lossless: whatever does not leave through the base comes back).
+# ⛔ 2.15.1: the amplitude product entered as sqrt(R01 R12), its sign lost, and only s was
+# modelled. A soap film (air | 1.33 | air) has r01 = -r12, so a VANISHING film read 0.077, the
+# quarter-wave maximum, and a quarter-wave film read 0: the two swapped. Against a separate
+# characteristic-matrix computation (50 digits, ten films) it now agrees to 6e-17.
 #must_use
 fn pbr_iridescence_fresnel(n_outside, n_film, n_base, thickness, wavelength, cos_theta) {
     var ct = f64_clamp(cos_theta, f64_from(0), F64_ONE);
+    if ((ct & 0x7FFFFFFFFFFFFFFF) == 0) { return F64_ONE; }
     var sin2_theta = f64_sub(F64_ONE, f64_mul(ct, ct));
     var of = f64_div(n_outside, n_film);
     var sin2_film = f64_mul(f64_mul(sin2_theta, of), of);
@@ -206,41 +243,36 @@ fn pbr_iridescence_fresnel(n_outside, n_film, n_base, thickness, wavelength, cos
         return F64_ONE;
     }
     var cos_film = f64_sqrt(f64_sub(F64_ONE, sin2_film));
-    # r01 = ((n_out*ct - n_film*cos_film) / (sum))^2
-    var a01 = f64_mul(n_outside, ct);
-    var b01 = f64_mul(n_film, cos_film);
-    var q01 = f64_div(f64_sub(a01, b01), f64_add(a01, b01));
-    var r01 = f64_mul(q01, q01);
-    # cos_base via Snell (0 on TIR)
     var ob = f64_div(n_outside, n_base);
     var sin2_base = f64_mul(f64_mul(sin2_theta, ob), ob);
-    var cos_base = f64_from(0);
-    if (f64_lt(sin2_base, F64_ONE) == 1) {
-        cos_base = f64_sqrt(f64_sub(F64_ONE, sin2_base));
+    if (f64_ge(sin2_base, F64_ONE) == 1) {
+        return F64_ONE;
     }
-    # r12 = ((n_film*cos_film - n_base*cos_base) / (sum + 1e-15))^2
-    var a12 = f64_mul(n_film, cos_film);
-    var b12 = f64_mul(n_base, cos_base);
-    var q12 = f64_div(f64_sub(a12, b12), f64_add(f64_add(a12, b12), _pbr_eps15()));
-    var r12 = f64_mul(q12, q12);
-    # phase delta = TAU*n_film*thickness*cos_film / wavelength
-    var delta = f64_div(
-      f64_mul(f64_mul(f64_mul(F64_TAU, n_film), thickness), cos_film),
-      wavelength);
-    var cos_d = _prk_cos(delta);
-    var sqrt_rr = f64_sqrt(f64_mul(r01, r12));
-    var cos_2d = f64_sub(f64_mul(f64_mul(F64_TWO, cos_d), cos_d), F64_ONE);
-    var mix = f64_mul(f64_mul(F64_TWO, sqrt_rr), cos_2d);
-    var num = f64_add(f64_add(r01, r12), mix);
-    var den = f64_add(f64_add(F64_ONE, f64_mul(r01, r12)), mix);
-    if (f64_lt(den, _pbr_eps15()) == 1) {
-        return f64_from(0);
-    }
-    return f64_clamp(f64_div(num, den), f64_from(0), F64_ONE);
+    var cos_base = f64_sqrt(f64_sub(F64_ONE, sin2_base));
+    # s: (n_i cos_i - n_t cos_t)/(n_i cos_i + n_t cos_t); p: (n_t cos_i - n_i cos_t)/(n_t cos_i +
+    # n_i cos_t). Each polarization keeps one convention at both interfaces, which is all the
+    # Airy sum needs.
+    var a0 = f64_mul(n_outside, ct);
+    var a1 = f64_mul(n_film, cos_film);
+    var a2 = f64_mul(n_base, cos_base);
+    var s01 = f64_div(f64_sub(a0, a1), f64_add(a0, a1));
+    var s12 = f64_div(f64_sub(a1, a2), f64_add(a1, a2));
+    var b0 = f64_mul(n_film, ct);
+    var b1 = f64_mul(n_outside, cos_film);
+    var p01 = f64_div(f64_sub(b0, b1), f64_add(b0, b1));
+    var c1 = f64_mul(n_base, cos_film);
+    var c2 = f64_mul(n_film, cos_base);
+    var p12 = f64_div(f64_sub(c1, c2), f64_add(c1, c2));
+    var phi = f64_div(f64_mul(f64_mul(f64_mul(f64_mul(F64_TWO, F64_TAU), n_film), thickness), cos_film), wavelength);
+    var cos_phi = _prk_cos(phi);
+    var r = f64_mul(F64_HALF, f64_add(_pbr_airy(s01, s12, cos_phi), _pbr_airy(p01, p12, cos_phi)));
+    return f64_clamp(r, f64_from(0), F64_ONE);
 }
 
-# Iridescence as RGB (R=650nm, G=550nm, B=450nm) into a 3-f64 out buffer.
+# Iridescence as RGB (R=650nm, G=550nm, B=450nm) into a 3-f64 out buffer. Returns PK_ERR_NONE, or
+# PK_ERR_INVALID_PARAMETER and writes nothing for a null out (2.15.1: it was written through).
 fn pbr_iridescence_rgb(n_outside, n_film, n_base, thickness_nm, cos_theta, out) {
+    if (out == 0) { return PK_ERR_INVALID_PARAMETER; }
     store64(out,
       pbr_iridescence_fresnel(n_outside, n_film, n_base, thickness_nm, f64_from(650), cos_theta));
     store64(out + 8,
@@ -252,15 +284,16 @@ fn pbr_iridescence_rgb(n_outside, n_film, n_base, thickness_nm, cos_theta, out) 
 
 # ── Volumetric Scattering ────────
 
-# Henyey-Greenstein phase: (1 - g^2) / (4*pi * (1 + g^2 - 2*g*cos)^1.5).
+# Henyey-Greenstein phase: (1 - g^2) / (4*pi * (1 + g^2 - 2*g*cos)^1.5). NaN unless |g| < 1: past 1
+# it is negative, and at 1 it is a delta, not a density.
+# ⛔ 2.15.1: g = 2 returned -0.021 as a phase function, and a 1e-15 floor on the denominator
+# returned 0 for the forward peak of any g within ~1e-8 of 1, where the true value is ~1e15.
 #must_use
 fn pbr_henyey_greenstein(cos_theta, g) {
+    if (f64_lt(f64_abs(g), F64_ONE) == 0) { return _PRK_NAN; }
     var g2 = f64_mul(g, g);
     var denom = f64_sub(f64_add(F64_ONE, g2), f64_mul(f64_mul(F64_TWO, g), cos_theta));
     var denom_full = f64_mul(denom, f64_sqrt(denom));
-    if (f64_lt(denom_full, _pbr_eps15()) == 1) {
-        return f64_from(0);
-    }
     return f64_div(f64_sub(F64_ONE, g2), f64_mul(f64_mul(f64_from(4), F64_PI), denom_full));
 }
 
@@ -310,8 +343,10 @@ fn pbr_single_scatter_inscattering(scattering, cos_theta, g, sigma_t, distance, 
 
 # ── Importance Sampling ────────
 
-# GGX importance-sampled half-vector (tangent space) into a 3-f64 out buffer.
+# GGX importance-sampled half-vector (tangent space) into a 3-f64 out buffer. Returns PK_ERR_NONE, or
+# PK_ERR_INVALID_PARAMETER and writes nothing for a null out (2.15.1: it was written through).
 fn pbr_sample_ggx(roughness, xi1, xi2, out) {
+    if (out == 0) { return PK_ERR_INVALID_PARAMETER; }
     var a = f64_mul(roughness, roughness);
     var a2 = f64_mul(a, a);
     var cos_theta = f64_sqrt(f64_div(
@@ -336,8 +371,10 @@ fn pbr_sample_ggx_pdf(n_dot_h, h_dot_v, roughness) {
     return f64_div(f64_mul(d, ndh), f64_mul(f64_from(4), hdv));
 }
 
-# Cosine-weighted hemisphere sample (Malley's method) into a 3-f64 out buffer.
+# Cosine-weighted hemisphere sample (Malley's method) into a 3-f64 out buffer. Returns PK_ERR_NONE, or
+# PK_ERR_INVALID_PARAMETER and writes nothing for a null out (2.15.1: it was written through).
 fn pbr_sample_cosine_hemisphere(xi1, xi2, out) {
+    if (out == 0) { return PK_ERR_INVALID_PARAMETER; }
     var r = f64_sqrt(xi1);
     var phi = f64_mul(F64_TAU, xi2);
     var sin_phi = _prk_sin(phi);
@@ -396,7 +433,10 @@ fn pbr_sample_cosine_pdf(n_dot_l) {
 # ⚠ Karis is a published MOBILE approximation. It is not a replacement for
 # pbr_integrate_brdf_lut — callers wanting accuracy should integrate. What it is
 # not, any more, is a constant and a zero.
+# Writes (scale, bias) to out+0/+8. Returns PK_ERR_NONE, or
+# PK_ERR_INVALID_PARAMETER and writes nothing for a null out (2.15.1: it was written through).
 fn pbr_split_sum_scale_bias(n_dot_v, roughness, out) {
+    if (out == 0) { return PK_ERR_INVALID_PARAMETER; }
     var ndv = f64_clamp(n_dot_v, f64_from(0), F64_ONE);
     var m = f64_clamp(roughness, f64_from(0), F64_ONE);
     var rx = f64_sub(F64_ONE, m);

@@ -62,4 +62,18 @@ assert(f64_gt(ext, Z), "extinction > 0");
 assert(f64_lt(ext, _fd(1, 1000)), "extinction < 0.001");
 assert_eq(br_visibility_to_extinction(Z), 0, "visibility 0 -> 0");
 
+# ── 2.15.1: an unknown spectral class is not G; B-V outside the formula's domain ────────
+test_group("2.15.1 stellar domain");
+assert_eq(br_spectral_class_to_temperature(71), f64_from(5500), "G = 5500 K exactly");
+assert_eq(br_spectral_class_to_temperature(103), f64_from(5500), "g = 5500 K (lower case)");
+var _sq = br_spectral_class_to_temperature(81);
+assert(f64_eq(_sq, _sq) == 0, "class 'Q' is unknown: NaN (was G's 5500 K)");
+var _s0 = br_spectral_class_to_temperature(48);
+assert(f64_eq(_s0, _s0) == 0, "class '0': NaN");
+var _bvn = br_color_index_to_temperature(f64_neg(F64_ONE));
+assert(f64_eq(_bvn, _bvn) == 0, "B-V = -1: NaN (was -9436 K)");
+var _bve = br_color_index_to_temperature(_fd(0 - 674, 1000));
+assert(f64_eq(_bve, _bve) == 0, "B-V = -0.674, past the pole: NaN");
+_assert_near(br_color_index_to_temperature(_fd(65, 100)), 0x40B6926C79A39FAA, _fd(1, 1000000000),
+  "the Sun, B-V = 0.65: 5778.42 K (Ballesteros)");
 var r = assert_summary();

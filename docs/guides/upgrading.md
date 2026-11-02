@@ -28,6 +28,85 @@ details of each change are in `CHANGELOG.md`.
   `./scripts/check-consumer-link.sh --root ~/Repos/ranga ~/.cyrius/versions/<pin>/bin/cycc`.
   ⚠ From 2.10.1 that passes in full only at cyrius ≥ 6.6.13; see below.
 
+## 2.15.1: an audit, and what it moves
+
+A repair release: results that were wrong change value, and inputs that used to come back as a
+plausible number are refused. Nothing is renamed or removed, no signature changes, and the cyrius
+pin stays at 6.7.18. `CHANGELOG.md` has the measurement behind each item.
+
+**What ranga calls does not move.** `spd_to_xyz`, `spd_blackbody`, `cct_from_xy`, `cie_cmf_at`,
+`xyz_new` and the illuminant tables give the same bits; `spd_to_xyz` and `spd_blackbody` were
+refactored onto shared stack-buffer cores with the same arithmetic. If you call
+`color_rendering_index` or `cri_special`, they now follow CIE 13.3's whiteness limit: NaN for a
+source more than DC = 5.4e-3 from the Planckian locus at its CCT, or below 1000 K. Every
+illuminant prakash ships passes.
+
+**Values that change, because the old one was wrong:**
+- `thin_film_reflectance` is sin²(2πnd/λ). It was cos², so a vanishing film read 1.
+- `polarization_through_polarizer` uses the Jones phase: circular light at 45° passes 1/2, not 1.
+- `biref_mica` is n = 1.5936 / 1.5977 (Δn 0.0041). Every mica retardation was 8.2× too large.
+- `airy_first_zero` is j₁,₁/π λ/D, 5e-7 relative above the old constant.
+- `fresnel_integral_c`, `_s`, `_cs` and `fresnel_edge_intensity` are accurate to 3e-16. They
+  were off by up to 2.2e-3.
+- `multilayer_rt` with a layer at exactly its critical angle gives a number. s was NaN, and p
+  dropped the layer.
+- `trace_recursive` sends a ray crossing a surface toward −z into the medium in front of it.
+  Trees with internal reflections gain the bounces they were missing.
+- `ray_fan_sagittal` keeps the field in y and spreads its rays in x. It was the meridional fan,
+  rotated.
+- `find_system_properties`: `bfd` and `ffd` are true distances in the image and object media, a
+  factor n′ and n from before. `entrance_pupil` and `exit_pupil` are NaN; a prescription has no
+  stop.
+- `optical_path_length` subtracts the leg back to an image plane behind the last surface. It
+  used to drop that leg.
+- `lens_mtf_through_focus` is the defocused pupil's OTF. It reads lower at every defocus than
+  the sinc model did: at f/2.8, 200 c/mm and 10 µm, 0.452 rather than 0.606.
+- `lens_mtf_diffraction_limited` is even in frequency. A negative ν read 1.
+- `zernike_radial` is correct from n = 21 up, and a Zernike coefficient below 1e-15 counts.
+- `pbr_iridescence_fresnel` / `_rgb` use signed amplitudes and average s and p. A thin soap film
+  no longer reads at its quarter-wave maximum.
+- `pbr_subsurface_diffuse` uses F_ss90 = roughness, Burley's value at l·h = 1. It was
+  roughness², so values move wherever n·l or n·v < 1.
+- A back-facing GGX half vector has D = 0.
+- `beam_second_moment_radius` forms its moments in sample units, so values can differ in the
+  last bit.
+
+**Refused now, where a number came back before.**
+
+Out-of-domain inputs:
+- a wavelength ≤ 0 or NaN in the dispersion formulas, Planck, Strehl, interference and the PSF;
+- a reflectance outside [0, 1) in Fabry-Pérot;
+- a radius of 0 in the lens and system functions;
+- |g| ≥ 1 in Henyey-Greenstein;
+- an index that is ≤ 0, NaN or infinite;
+- incidence on the back of a surface;
+- |θ| ≥ π/2 in `multilayer_rt`;
+- an unknown spectral class, or B − V ≤ −0.674, in `bridge`.
+
+Results beyond the double range in `wave_beam`.
+
+Malformed or unsafe input:
+- JSON number literals past the double range;
+- an SPD whose step is ≤ 0;
+- a null name or endpoint;
+- an endpoint or key containing a control byte, which closes a CR-LF injection.
+
+Each refusal uses the function's existing channel: NaN from a scalar, 0 from a constructor, and
+a `PK_ERR_*` code through `err_out`.
+
+**Behaviour you may have relied on:**
+- `sellmeier_n_at` no longer clamps n² < 1 to 1. Below 0 it is NaN, and between 0 and 1 you get
+  the model's value.
+- `ray_snell` and `fresnel_unpolarized` at the exact critical angle answer grazing (R = 1), not
+  TIR.
+- `lens_type_to_json` returns 0 for a value that is not one of the two lens types.
+- `point_source_new` returns a one-element array with a length header, so it can be passed to
+  `interference_pattern`.
+
+**A hand-assembled build** that includes `src/lens.cyr` without `src/wave_zernike.cyr` now
+fails to link `lens_mtf_through_focus`, as it already did for the `lens_otf_*` family. The
+bundles carry both files.
+
 ## 2.15.0: fluorescence
 
 New API only: nothing existing changes value or signature, and the cyrius pin stays at

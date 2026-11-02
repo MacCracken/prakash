@@ -60,7 +60,7 @@ modules = ["dist/hisab.cyr"]
 
 [deps.prakash]
 git     = "https://github.com/MacCracken/prakash.git"
-tag     = "2.15.0"
+tag     = "2.15.1"
 modules = ["dist/prakash.cyr"]        # math-only core (no TLS)
 # For the AI client instead, pull the ai bundle (adds the sandhi HTTP/TLS stack):
 # modules = ["dist/prakash-ai.cyr"]
@@ -92,6 +92,8 @@ var transmitted = malus_law(F64_ONE, F64_PI_4);
 
 `f64` values are IEEE-754 bit patterns in `i64`; do arithmetic through `f64_add`/`f64_mul`/`f64_sqrt`/… and compare with `f64_lt`/`f64_gt` (which return `1`/`0`). `Result<T>` becomes an `err_out` pointer (check `prakash_is_ok(load64(err))`); `Option<T>` returns `1`/`0` plus an out-pointer; tuples and `[f64; N]` return through caller-supplied buffers.
 
+**Errors are reported, not guessed.** A function that cannot answer writes a `PK_ERR_*` code through `err_out` and returns 0, or returns NaN if it is a scalar function. It never returns a plausible-looking number. `err_out` must point to 8 writable bytes: every function writes it first. A null handle, null output buffer or null input buffer is refused rather than dereferenced.
+
 ## Two Bundles
 
 `cyrius distlib` emits two self-contained bundles — a consumer links **one**:
@@ -116,10 +118,10 @@ prakash (Cyrius)
 
 ```sh
 cyrius deps                 # resolve the hisab git dep
-for f in tests/*.tcyr; do cyrius test "$f"; done   # 13681 assertions, 39 suites
+for f in tests/*.tcyr; do cyrius test "$f"; done   # 14187 assertions, 39 suites
 cyrius distlib              # regenerate dist/prakash.cyr
 cyrius distlib ai           # regenerate dist/prakash-ai.cyr
-cyrius bench tests/prakash.bcyr                     # 184 benchmarks
+cyrius bench tests/prakash.bcyr                     # 185 benchmarks
 ./scripts/bench-history.sh  # append to the CSV history + benchmarks.md
 ```
 

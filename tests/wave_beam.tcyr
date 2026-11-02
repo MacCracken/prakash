@@ -2928,4 +2928,34 @@ _t = hg_mode_field(bq308p, 0, 0, 0x5FD00C2D65A5960C, 0, &fr62, &fi62);
 assert_eq(fr62, 0x1FD01383053B9D14, "HG_00 at q = 1e308 + 1e307 i, off axis: Re (2.6.0 bits)");
 assert_eq(fi62, 0x1FE09685A71F2C05, "HG_00 at q = 1e308 + 1e307 i, off axis: Im (2.6.0 bits)");
 
+# ── 2.15.1: results beyond the double range are refused, not returned as success ────────
+test_group("2.15.1 beam overflow");
+var _be = 0;
+var _bsm = alloc(24);
+if (_bsm == 0) { syscall(60, 1); }
+store64(_bsm, F64_ONE);
+store64(_bsm + 8, 0);
+store64(_bsm + 16, F64_ONE);
+# Samples 1, 0, 1: variance 1 sample^2, so W = 2 dx exactly. dx = 1e200 squared the offsets in
+# metres to infinity; in samples it is 2e200, as it should be.
+var _bw = beam_second_moment_radius(_bsm, 3, 0, 0x6974E718D7D7625A, &_be);
+assert_eq(_be, PK_ERR_NONE, "D4sigma at dx = 1e200: ok");
+assert_eq(_bw, f64_mul(F64_TWO, 0x6974E718D7D7625A), "D4sigma at dx = 1e200: W = 2e200 (was +inf)");
+var _bw2 = beam_second_moment_radius(_bsm, 3, 0, 0x7FE0000000000000, &_be);
+assert_eq(_be, PK_ERR_INVALID_PARAMETER, "D4sigma whose W overflows: refused");
+var _bm = beam_m2(0x6974E718D7D7625A, 0x6974E718D7D7625A, F64_ONE, &_be);
+assert_eq(_be, PK_ERR_INVALID_PARAMETER, "beam_m2 overflowing to inf: refused (was inf, no error)");
+assert_eq(_bm, 0, "... and returns 0");
+var _bb = beam_parameter_product(0x7FE0000000000000, 0x7FE0000000000000, &_be);
+assert_eq(_be, PK_ERR_INVALID_PARAMETER, "BPP overflowing: refused");
+var _bo = oam_flux(0x7FFFFFFFFFFFFFFF, 0x7FE0000000000000, 0x7FE0000000000000, &_be);
+assert_eq(_be, PK_ERR_INVALID_PARAMETER, "oam_flux overflowing: refused");
+var _bs = spiral_phase_plate_step(0x7FFFFFFFFFFFFFFF, 0x7FE0000000000000, 0x3FF0000000000001, &_be);
+assert_eq(_be, PK_ERR_INVALID_PARAMETER, "spiral step overflowing: refused");
+var _bd = gaussian_divergence(0x7FE0000000000000, 1, &_be);
+assert_eq(_be, PK_ERR_INVALID_PARAMETER, "divergence underflowing to 0: refused (was 0 as success)");
+var _bok = beam_m2(_fd(1, 1000), _fd(1, 1000), _fd(1, 1000000), &_be);
+assert_eq(_be, PK_ERR_NONE, "an ordinary M^2 is still computed");
+_assert_rel(_bok, f64_mul(F64_PI, F64_ONE), _fd(1, 1000000000000000), "pi w0 theta/lambda = pi");
+
 var r = assert_summary();

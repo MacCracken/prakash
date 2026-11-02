@@ -53,6 +53,15 @@ fn _bm_check(w0, wavelength, err_out) {
     return 1;
 }
 
+# A result is returned only if it is finite: otherwise writes PK_ERR_INVALID_PARAMETER and
+# returns 0. 2.15.1 found beam_m2, beam_parameter_product, oam_flux and spiral_phase_plate_step
+# overflowing to +inf from finite inputs and returning it with PK_ERR_NONE.
+fn _bm_out(v, err_out) {
+    if (_bm_finite(v) == 1) { return v; }
+    store64(err_out, PK_ERR_INVALID_PARAMETER);
+    return 0;
+}
+
 # 1 if x is finite and >= 0 (-0.0 included). f64_ge is false for NaN.
 fn _bm_nonneg(x) {
     if (f64_ge(x, 0) == 0) { return 0; }
@@ -320,12 +329,18 @@ fn gaussian_gouy_phase(w0, wavelength, z, err_out) {
 # Far-field half-angle divergence theta = lambda/(pi*w0) (radians), the
 # asymptote of w(z)/z. Writes PK_ERR_INVALID_PARAMETER (returns 0) unless w0 and
 # wavelength are finite and positive. It does not form z_R, so it does not refuse
-# where z_R under- or overflows.
+# where z_R under- or overflows; it does refuse a theta that underflows to 0 or overflows,
+# which is not the angle of any beam (2.15.1: 0 came back as success).
 #must_use
 fn gaussian_divergence(w0, wavelength, err_out) {
     store64(err_out, PK_ERR_NONE);
     if (_bm_check(w0, wavelength, err_out) == 0) { return 0; }
-    return f64_div(wavelength, f64_mul(F64_PI, w0));
+    var th = f64_div(wavelength, f64_mul(F64_PI, w0));
+    if (_bm_pos(th) == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
+    return th;
 }
 
 # Intensity of a TEM00 beam of total power P at radius r and distance z:
@@ -2150,7 +2165,7 @@ fn beam_m2(w0, theta, wavelength, err_out) {
         store64(err_out, PK_ERR_INVALID_PARAMETER);
         return 0;
     }
-    return f64_div(f64_mul(F64_PI, f64_mul(w0, theta)), wavelength);
+    return _bm_out(f64_div(f64_mul(F64_PI, f64_mul(w0, theta)), wavelength), err_out);
 }
 
 # Beam parameter product W0*theta = M^2*lambda/pi, invariant through any
@@ -2171,7 +2186,7 @@ fn beam_parameter_product(m2, wavelength, err_out) {
         store64(err_out, PK_ERR_INVALID_PARAMETER);
         return 0;
     }
-    return f64_div(f64_mul(m2, wavelength), F64_PI);
+    return _bm_out(f64_div(f64_mul(m2, wavelength), F64_PI), err_out);
 }
 
 # Second-moment ("D4-sigma") beam radius W = 2*sigma of a sampled 1D intensity
@@ -2181,7 +2196,10 @@ fn beam_parameter_product(m2, wavelength, err_out) {
 # (the profile summed across the other axis). Samples may be negative after
 # background subtraction, but must be finite. Writes PK_ERR_INVALID_PARAMETER
 # (returns 0) for a null buffer, count < 3, dx not finite and positive, x0 not
-# finite, a non-finite sample, or a total or variance that is not positive.
+# finite, a non-finite sample, a total or variance that is not positive, or a W beyond the double
+# range. The moments are taken in units of the sample spacing and W scaled by dx once at the end
+# (2.15.1: in metres, dx = 1e200 squared the offsets past the double range and returned W = inf
+# with PK_ERR_NONE).
 #must_use
 fn beam_second_moment_radius(samples, count, x0, dx, err_out) {
     store64(err_out, PK_ERR_NONE);
@@ -2206,17 +2224,17 @@ fn beam_second_moment_radius(samples, count, x0, dx, err_out) {
             return 0;
         }
         s0 = f64_add(s0, v);
-        s1 = f64_add(s1, f64_mul(v, f64_mul(dx, f64_from(i))));
+        s1 = f64_add(s1, f64_mul(v, f64_from(i)));
     }
     if (f64_gt(s0, 0) == 0) {
         store64(err_out, PK_ERR_INVALID_PARAMETER);
         return 0;
     }
-    # Offsets are measured from x0, so x0 cancels out of the variance exactly.
+    # Offsets are measured from x0, in samples, so x0 cancels out of the variance exactly.
     var mean = f64_div(s1, s0);
     var s2 = 0;
     for (var j = 0; j < count; j = j + 1) {
-        var d = f64_sub(f64_mul(dx, f64_from(j)), mean);
+        var d = f64_sub(f64_from(j), mean);
         s2 = f64_add(s2, f64_mul(load64(samples + j * 8), f64_mul(d, d)));
     }
     var var_ = f64_div(s2, s0);
@@ -2224,7 +2242,7 @@ fn beam_second_moment_radius(samples, count, x0, dx, err_out) {
         store64(err_out, PK_ERR_INVALID_PARAMETER);
         return 0;
     }
-    return f64_mul(F64_TWO, f64_sqrt(var_));
+    return _bm_out(f64_mul(f64_mul(F64_TWO, dx), f64_sqrt(var_)), err_out);
 }
 
 # ── Orbital angular momentum ────────
@@ -2251,7 +2269,7 @@ fn oam_flux(l, power, vacuum_wavelength, err_out) {
         return 0;
     }
     var omega_inv = f64_div(vacuum_wavelength, f64_mul(F64_TWO, f64_mul(F64_PI, _bm_c())));
-    return f64_mul(f64_mul(f64_from(l), power), omega_inv);
+    return _bm_out(f64_mul(f64_mul(f64_from(l), power), omega_inv), err_out);
 }
 
 # Total step height of a spiral phase plate that gives a TEM00 beam topological
@@ -2276,5 +2294,5 @@ fn spiral_phase_plate_step(l, wavelength, n_rel, err_out) {
         store64(err_out, PK_ERR_INVALID_PARAMETER);
         return 0;
     }
-    return f64_div(f64_mul(f64_from(l), wavelength), f64_sub(n_rel, F64_ONE));
+    return _bm_out(f64_div(f64_mul(f64_from(l), wavelength), f64_sub(n_rel, F64_ONE)), err_out);
 }

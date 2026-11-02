@@ -187,4 +187,199 @@ var v1 = zernike_wf_evaluate(wcoma, _fd(7, 10), F64_PI_4);
 var v2 = zernike_wf_evaluate(wcoma, _fd(7, 10), f64_neg(F64_PI_4));
 assert(f64_lt(f64_abs(f64_sub(v1, v2)), EPS), "coma X x-axis symmetric");
 
+# ── 2.15.1: the radial polynomial past n = 20, Noll past j = 11, the named aberrations ────────
+# R_n^m against the explicit series in EXACT rational arithmetic (Python fractions, rho the double
+# itself), correctly rounded. Through 2.15.0 (n - s)! overflowed i64 from n = 21 and every value
+# there was garbage; the tolerance is 2e-15 absolute (|R| <= 1 on the disk), the measured worst
+# 1.34e-15 (R_22^0 at rho = 0.1).
+test_group("2.15.1 radial polynomial");
+fn _zr_pin(n, m, rho, ref, name) {
+    assert(f64_le(f64_abs(f64_sub(zernike_radial(n, m, rho), ref)), 0x3CE203AF9EE75616), name);
+    return 0;
+}
+var _zr0 = _zr_pin(4, 0, 0x3FB999999999999A, 0x3FEE19652BD3C361, "R_4^0(0.1)");
+var _zr1 = _zr_pin(4, 0, 0x3FD6666666666666, 0x3FD6B8EF34D6A163, "R_4^0(0.35)");
+var _zr2 = _zr_pin(4, 0, 0x3FE0000000000000, 0xBFC0000000000000, "R_4^0(0.5)");
+var _zr3 = _zr_pin(4, 0, 0x3FE6A09E667F3BCD, 0xBFE0000000000000, "R_4^0(0.7071067811865476)");
+var _zr4 = _zr_pin(4, 0, 0x3FECCCCCCCCCCCCD, 0x3FB39C0EBEDFA44B, "R_4^0(0.9)");
+var _zr5 = _zr_pin(4, 0, 0x3FEFAE147AE147AE, 0x3FEC4157029B3AD9, "R_4^0(0.99)");
+var _zr6 = _zr_pin(4, 0, 0x3FF0000000000000, 0x3FF0000000000000, "R_4^0(1.0)");
+var _zr7 = _zr_pin(6, 2, 0x3FB999999999999A, 0x3FADB4245F5AD96B, "R_6^2(0.1)");
+var _zr8 = _zr_pin(6, 2, 0x3FD6666666666666, 0x3FDD98C39FFD60E9, "R_6^2(0.35)");
+var _zr9 = _zr_pin(6, 2, 0x3FE0000000000000, 0x3FDF000000000000, "R_6^2(0.5)");
+var _zr10 = _zr_pin(6, 2, 0x3FE6A09E667F3BCD, 0xBFC0000000000007, "R_6^2(0.7071067811865476)");
+var _zr11 = _zr_pin(6, 2, 0x3FECCCCCCCCCCCCD, 0xBFD295AAF78FEEF4, "R_6^2(0.9)");
+var _zr12 = _zr_pin(6, 2, 0x3FEFAE147AE147AE, 0x3FE94EE7DAA4E6A5, "R_6^2(0.99)");
+var _zr13 = _zr_pin(6, 2, 0x3FF0000000000000, 0x3FF0000000000000, "R_6^2(1.0)");
+var _zr14 = _zr_pin(8, 4, 0x3FB999999999999A, 0x3F57E4783A236765, "R_8^4(0.1)");
+var _zr15 = _zr_pin(8, 4, 0x3FD6666666666666, 0x3FC3BC8EF174F7CE, "R_8^4(0.35)");
+var _zr16 = _zr_pin(8, 4, 0x3FE0000000000000, 0x3FD9000000000000, "R_8^4(0.5)");
+var _zr17 = _zr_pin(8, 4, 0x3FE6A09E667F3BCD, 0x3FCFFFFFFFFFFFFA, "R_8^4(0.7071067811865476)");
+var _zr18 = _zr_pin(8, 4, 0x3FECCCCCCCCCCCCD, 0xBFDB429A595D1381, "R_8^4(0.9)");
+var _zr19 = _zr_pin(8, 4, 0x3FEFAE147AE147AE, 0x3FE684193ECAF892, "R_8^4(0.99)");
+var _zr20 = _zr_pin(8, 4, 0x3FF0000000000000, 0x3FF0000000000000, "R_8^4(1.0)");
+var _zr21 = _zr_pin(10, 0, 0x3FB999999999999A, 0xBFE70DE55899501C, "R_10^0(0.1)");
+var _zr22 = _zr_pin(10, 0, 0x3FD6666666666666, 0x3FDAC3C86BF36063, "R_10^0(0.35)");
+var _zr23 = _zr_pin(10, 0, 0x3FE0000000000000, 0xBFB7000000000000, "R_10^0(0.5)");
+var _zr24 = _zr_pin(10, 0, 0x3FE6A09E667F3BCD, 0x3CB278B0C3684006, "R_10^0(0.7071067811865476)");
+var _zr25 = _zr_pin(10, 0, 0x3FECCCCCCCCCCCCD, 0xBFC9C7FACAC9D8D2, "R_10^0(0.9)");
+var _zr26 = _zr_pin(10, 0, 0x3FEFAE147AE147AE, 0x3FDED694B42D063C, "R_10^0(0.99)");
+var _zr27 = _zr_pin(10, 0, 0x3FF0000000000000, 0x3FF0000000000000, "R_10^0(1.0)");
+var _zr28 = _zr_pin(12, 6, 0x3FB999999999999A, 0xBF1516DC1B398E63, "R_12^6(0.1)");
+var _zr29 = _zr_pin(12, 6, 0x3FD6666666666666, 0xBFB615041B375141, "R_12^6(0.35)");
+var _zr30 = _zr_pin(12, 6, 0x3FE0000000000000, 0xBFD5800000000000, "R_12^6(0.5)");
+var _zr31 = _zr_pin(12, 6, 0x3FE6A09E667F3BCD, 0xBF9FFFFFFFFFFFBA, "R_12^6(0.7071067811865476)");
+var _zr32 = _zr_pin(12, 6, 0x3FECCCCCCCCCCCCD, 0xBFC12CC085453EA0, "R_12^6(0.9)");
+var _zr33 = _zr_pin(12, 6, 0x3FEFAE147AE147AE, 0x3FDC1D8686265002, "R_12^6(0.99)");
+var _zr34 = _zr_pin(12, 6, 0x3FF0000000000000, 0x3FF0000000000000, "R_12^6(1.0)");
+var _zr35 = _zr_pin(20, 0, 0x3FB999999999999A, 0x3FC515278ACDB9EC, "R_20^0(0.1)");
+var _zr36 = _zr_pin(20, 0, 0x3FD6666666666666, 0x3FD1B12888A407F8, "R_20^0(0.35)");
+var _zr37 = _zr_pin(20, 0, 0x3FE0000000000000, 0xBFC817E000000000, "R_20^0(0.5)");
+var _zr38 = _zr_pin(20, 0, 0x3FE6A09E667F3BCD, 0xBFCF800000000000, "R_20^0(0.7071067811865476)");
+var _zr39 = _zr_pin(20, 0, 0x3FECCCCCCCCCCCCD, 0xBFCA0FA04057293D, "R_20^0(0.9)");
+var _zr40 = _zr_pin(20, 0, 0x3FEFAE147AE147AE, 0xBFD02AB4C9F4A76B, "R_20^0(0.99)");
+var _zr41 = _zr_pin(20, 0, 0x3FF0000000000000, 0x3FF0000000000000, "R_20^0(1.0)");
+var _zr42 = _zr_pin(21, 1, 0x3FB999999999999A, 0x3FE1D564677CBF45, "R_21^1(0.1)");
+var _zr43 = _zr_pin(21, 1, 0x3FD6666666666666, 0x3FCC89A2AFDABC5E, "R_21^1(0.35)");
+var _zr44 = _zr_pin(21, 1, 0x3FE0000000000000, 0xBFD0226800000000, "R_21^1(0.5)");
+var _zr45 = _zr_pin(21, 1, 0x3FE6A09E667F3BCD, 0xBFC6461BECE53EE6, "R_21^1(0.7071067811865476)");
+var _zr46 = _zr_pin(21, 1, 0x3FECCCCCCCCCCCCD, 0xBFD0903B3DF3E723, "R_21^1(0.9)");
+var _zr47 = _zr_pin(21, 1, 0x3FEFAE147AE147AE, 0xBFD30B09E8136970, "R_21^1(0.99)");
+var _zr48 = _zr_pin(21, 1, 0x3FF0000000000000, 0x3FF0000000000000, "R_21^1(1.0)");
+var _zr49 = _zr_pin(22, 0, 0x3FB999999999999A, 0xBFAB435CE00E1D36, "R_22^0(0.1)");
+var _zr50 = _zr_pin(22, 0, 0x3FD6666666666666, 0xBFBED0BE5F91182B, "R_22^0(0.35)");
+var _zr51 = _zr_pin(22, 0, 0x3FE0000000000000, 0xBFB059E000000000, "R_22^0(0.5)");
+var _zr52 = _zr_pin(22, 0, 0x3FE6A09E667F3BCD, 0xBCBAAB0C0084E93C, "R_22^0(0.7071067811865476)");
+var _zr53 = _zr_pin(22, 0, 0x3FECCCCCCCCCCCCD, 0xBFD0C89A828B71D4, "R_22^0(0.9)");
+var _zr54 = _zr_pin(22, 0, 0x3FEFAE147AE147AE, 0xBFD589DED3797627, "R_22^0(0.99)");
+var _zr55 = _zr_pin(22, 0, 0x3FF0000000000000, 0x3FF0000000000000, "R_22^0(1.0)");
+var _zr56 = _zr_pin(25, 3, 0x3FB999999999999A, 0xBFCE33122E2E92CE, "R_25^3(0.1)");
+var _zr57 = _zr_pin(25, 3, 0x3FD6666666666666, 0x3FBFDD3B320DCF96, "R_25^3(0.35)");
+var _zr58 = _zr_pin(25, 3, 0x3FE0000000000000, 0x3FC04D4600000000, "R_25^3(0.5)");
+var _zr59 = _zr_pin(25, 3, 0x3FE6A09E667F3BCD, 0x3FC755A359B335B3, "R_25^3(0.7071067811865476)");
+var _zr60 = _zr_pin(25, 3, 0x3FECCCCCCCCCCCCD, 0xBFA2AA1513E4A294, "R_25^3(0.9)");
+var _zr61 = _zr_pin(25, 3, 0x3FEFAE147AE147AE, 0xBFD98BCC03CA6002, "R_25^3(0.99)");
+var _zr62 = _zr_pin(25, 3, 0x3FF0000000000000, 0x3FF0000000000000, "R_25^3(1.0)");
+var _zr63 = _zr_pin(30, 10, 0x3FB999999999999A, 0x3EEFEE74067A798A, "R_30^10(0.1)");
+var _zr64 = _zr_pin(30, 10, 0x3FD6666666666666, 0x3FD252647EE9C55A, "R_30^10(0.35)");
+var _zr65 = _zr_pin(30, 10, 0x3FE0000000000000, 0xBFCC8045B2000000, "R_30^10(0.5)");
+var _zr66 = _zr_pin(30, 10, 0x3FE6A09E667F3BCD, 0xBFCB58FFFFFFFFFE, "R_30^10(0.7071067811865476)");
+var _zr67 = _zr_pin(30, 10, 0x3FECCCCCCCCCCCCD, 0x3FCDCDA5C02A0ED9, "R_30^10(0.9)");
+var _zr68 = _zr_pin(30, 10, 0x3FEFAE147AE147AE, 0xBFD8AB8756076158, "R_30^10(0.99)");
+var _zr69 = _zr_pin(30, 10, 0x3FF0000000000000, 0x3FF0000000000000, "R_30^10(1.0)");
+var _zr70 = _zr_pin(40, 0, 0x3FB999999999999A, 0xBFD8E8D1F44E9D5B, "R_40^0(0.1)");
+var _zr71 = _zr_pin(40, 0, 0x3FD6666666666666, 0x3FAD9E4D545DD55F, "R_40^0(0.35)");
+var _zr72 = _zr_pin(40, 0, 0x3FE0000000000000, 0xBFA8C26E02580000, "R_40^0(0.5)");
+var _zr73 = _zr_pin(40, 0, 0x3FE6A09E667F3BCD, 0x3FC68DA000000000, "R_40^0(0.7071067811865476)");
+var _zr74 = _zr_pin(40, 0, 0x3FECCCCCCCCCCCCD, 0x3FB4E8757BA15355, "R_40^0(0.9)");
+var _zr75 = _zr_pin(40, 0, 0x3FEFAE147AE147AE, 0x3FB7EDFB917650A8, "R_40^0(0.99)");
+var _zr76 = _zr_pin(40, 0, 0x3FF0000000000000, 0x3FF0000000000000, "R_40^0(1.0)");
+var _zr77 = _zr_pin(60, 2, 0x3FB999999999999A, 0x3FD0DFA52697E905, "R_60^2(0.1)");
+var _zr78 = _zr_pin(60, 2, 0x3FD6666666666666, 0xBFBD19C6BF11D060, "R_60^2(0.35)");
+var _zr79 = _zr_pin(60, 2, 0x3FE0000000000000, 0x3FC3771077CCEB7C, "R_60^2(0.5)");
+var _zr80 = _zr_pin(60, 2, 0x3FE6A09E667F3BCD, 0xBFC27DCF9FFFFFFF, "R_60^2(0.7071067811865476)");
+var _zr81 = _zr_pin(60, 2, 0x3FECCCCCCCCCCCCD, 0xBF487E3D6512EE8E, "R_60^2(0.9)");
+var _zr82 = _zr_pin(60, 2, 0x3FEFAE147AE147AE, 0x3F7B03D4B6021CD0, "R_60^2(0.99)");
+var _zr83 = _zr_pin(60, 2, 0x3FF0000000000000, 0x3FF0000000000000, "R_60^2(1.0)");
+# R_n^m(1) = 1 for every valid (n, m) through n = 200, and R_n^m(0) = (-1)^(n/2) for m = 0.
+var _zr1 = 1;
+var _zr0 = 1;
+for (var n = 0; n <= 200; n = n + 1) {
+    for (var mm = n % 2; mm <= n; mm = mm + 2) {
+        if (zernike_radial(n, mm, F64_ONE) != F64_ONE) { _zr1 = 0; }
+    }
+    if (n % 2 == 0) {
+        var want = F64_ONE;
+        if ((n / 2) % 2 == 1) { want = f64_neg(F64_ONE); }
+        if (zernike_radial(n, 0, f64_from(0)) != want) { _zr0 = 0; }
+    }
+}
+assert_eq(_zr1, 1, "R_n^m(1) = 1 exactly through n = 200 (R_22^0(1) was -1.2e3)");
+assert_eq(_zr0, 1, "R_n^0(0) = (-1)^(n/2) exactly through n = 200");
+assert_eq(zernike_radial(4, 0 - 2, F64_HALF), f64_from(0), "negative |m| is not a radial order: 0");
+
+# Noll's table (Noll 1976, Table 1) through j = 28: even j is the cosine (m > 0), odd the sine.
+test_group("2.15.1 Noll table");
+fn _noll_pin(j, n, m) {
+    var gn = 0 - 1;
+    var gm = 0 - 99;
+    var e = zernike_noll_to_nm(j, &gn, &gm);
+    return (e == 0) & (gn == n) & (gm == m) & (zernike_nm_to_noll(n, m) == j);
+}
+var _nok = 1;
+if (_noll_pin(1, 0, 0) == 0) { _nok = 0; }
+if (_noll_pin(2, 1, 1) == 0) { _nok = 0; }
+if (_noll_pin(3, 1, -1) == 0) { _nok = 0; }
+if (_noll_pin(4, 2, 0) == 0) { _nok = 0; }
+if (_noll_pin(5, 2, -2) == 0) { _nok = 0; }
+if (_noll_pin(6, 2, 2) == 0) { _nok = 0; }
+if (_noll_pin(7, 3, -1) == 0) { _nok = 0; }
+if (_noll_pin(8, 3, 1) == 0) { _nok = 0; }
+if (_noll_pin(9, 3, -3) == 0) { _nok = 0; }
+if (_noll_pin(10, 3, 3) == 0) { _nok = 0; }
+if (_noll_pin(11, 4, 0) == 0) { _nok = 0; }
+if (_noll_pin(12, 4, 2) == 0) { _nok = 0; }
+if (_noll_pin(13, 4, -2) == 0) { _nok = 0; }
+if (_noll_pin(14, 4, 4) == 0) { _nok = 0; }
+if (_noll_pin(15, 4, -4) == 0) { _nok = 0; }
+if (_noll_pin(16, 5, 1) == 0) { _nok = 0; }
+if (_noll_pin(17, 5, -1) == 0) { _nok = 0; }
+if (_noll_pin(18, 5, 3) == 0) { _nok = 0; }
+if (_noll_pin(19, 5, -3) == 0) { _nok = 0; }
+if (_noll_pin(20, 5, 5) == 0) { _nok = 0; }
+if (_noll_pin(21, 5, -5) == 0) { _nok = 0; }
+if (_noll_pin(22, 6, 0) == 0) { _nok = 0; }
+if (_noll_pin(23, 6, -2) == 0) { _nok = 0; }
+if (_noll_pin(24, 6, 2) == 0) { _nok = 0; }
+if (_noll_pin(25, 6, -4) == 0) { _nok = 0; }
+if (_noll_pin(26, 6, 4) == 0) { _nok = 0; }
+if (_noll_pin(27, 6, -6) == 0) { _nok = 0; }
+if (_noll_pin(28, 6, 6) == 0) { _nok = 0; }
+assert_eq(_nok, 1, "Noll j = 1..28 both ways, against the published table");
+var _nrt = 1;
+for (var j = 1; j <= 5000; j = j + 1) {
+    var rn = 0;
+    var rm = 0;
+    var _e = zernike_noll_to_nm(j, &rn, &rm);
+    if (zernike_nm_to_noll(rn, rm) != j) { _nrt = 0; }
+}
+assert_eq(_nrt, 1, "Noll round trip j -> (n, m) -> j for j = 1..5000");
+assert_eq(zernike_nm_to_noll(2, 1), 0, "(2, 1) is not a Zernike: 0 (was 5, astigmatism)");
+assert_eq(zernike_nm_to_noll(1, 0), 0, "(1, 0) is not a Zernike: 0 (was 2, tilt)");
+assert_eq(zernike_nm_to_noll(2, 4), 0, "|m| > n: 0");
+assert_eq(zernike_nm_to_noll(0 - 2, 0), 0, "n < 0: 0");
+
+# The named constructors against the textbook polynomials at rho = 0.6, theta = 0.7, c = 1/4
+# (Noll 1976; Mahajan): defocus sqrt3(2r^2 - 1), spherical sqrt5(6r^4 - 6r^2 + 1), coma
+# sqrt8(3r^3 - 2r) cos/sin, astigmatism sqrt6 r^2 cos/sin 2 theta. 50-digit references.
+test_group("2.15.1 named aberrations");
+var _nr = _fd(6, 10);
+var _nt = _fd(7, 10);
+_assert_near(zernike_wf_evaluate(zernike_defocus(_fd(1, 4)), _nr, _nt), 0xBFBF09D156257498, 0x3CD203AF9EE75616,
+  "zernike_defocus at (0.6, 0.7)");
+_assert_near(zernike_wf_evaluate(zernike_spherical(_fd(1, 4)), _nr, _nt), 0xBFCB5CC0C8500F69, 0x3CD203AF9EE75616,
+  "zernike_spherical at (0.6, 0.7)");
+_assert_near(zernike_wf_evaluate(zernike_coma_x(_fd(1, 4)), _nr, _nt), 0xBFD31B34728400B6, 0x3CD203AF9EE75616,
+  "zernike_coma_x at (0.6, 0.7)");
+_assert_near(zernike_wf_evaluate(zernike_coma_y(_fd(1, 4)), _nr, _nt), 0xBFD017CE1679F0D3, 0x3CD203AF9EE75616,
+  "zernike_coma_y at (0.6, 0.7)");
+_assert_near(zernike_wf_evaluate(zernike_astigmatism_0(_fd(1, 4)), _nr, _nt), 0x3FA32F42E0155998, 0x3CD203AF9EE75616,
+  "zernike_astigmatism_0 at (0.6, 0.7)");
+_assert_near(zernike_wf_evaluate(zernike_astigmatism_45(_fd(1, 4)), _nr, _nt), 0x3FCBCEBAFA269D2E, 0x3CD203AF9EE75616,
+  "zernike_astigmatism_45 at (0.6, 0.7)");
+# Grid of one: the pupil centre, Z4(0) = -sqrt 3 (2.15.1: 0/0 left the cell at 0).
+var _g1 = zernike_wf_to_grid(zernike_defocus(F64_ONE), 1);
+_assert_near(load64(_g1), 0xBFFBB67AE8584CAA, 0x3CD203AF9EE75616, "1 x 1 grid is the centre: -sqrt 3");
+assert(f64_eq(zernike_wf_peak_to_valley(zernike_defocus(F64_ONE), 0),
+    zernike_wf_peak_to_valley(zernike_defocus(F64_ONE), 0)) == 0,
+  "PV of no samples is NaN (was 0, a perfect wavefront)");
+assert_eq(zernike_wf_peak_to_valley(zernike_defocus(F64_ONE), 1), f64_from(0), "PV of one sample is 0");
+var _ts = zernike_spherical(_fd(1, 10000000000000000));
+assert(f64_eq(zernike_wf_evaluate(_ts, F64_ONE, f64_from(0)), f64_from(0)) == 0,
+  "a 1e-16 coefficient still counts (was dropped below 1e-15)");
+var _sr = zernike_wf_strehl_ratio(zernike_spherical(_fd(1, 10)), f64_from(0));
+assert(f64_eq(_sr, _sr) == 0, "Strehl at lambda = 0 is NaN (was 0)");
+var _sn = zernike_wf_strehl_ratio(zernike_spherical(_fd(1, 10)), f64_neg(F64_ONE));
+assert(f64_eq(_sn, _sn) == 0, "Strehl at lambda < 0 is NaN (was a number)");
+
 var r = assert_summary();

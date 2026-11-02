@@ -417,7 +417,10 @@ fn trace_sequential_polarized(initial_ray, surfaces, err_out) {
             rp_over_rs = f64_div(rp, rs);
         }
         var pth = alloc(sizeof(PolarizedTraceHit));
-        if (pth == 0) { return 0; }
+        if (pth == 0) {
+            store64(err_out, PK_ERR_ALLOCATION);
+            return 0;
+        }
         PolarizedTraceHit_set_hit(pth, hit);
         PolarizedTraceHit_set_rp_over_rs(pth, rp_over_rs);
         PolarizedTraceHit_set_transmittance_s(pth, cum_ts);

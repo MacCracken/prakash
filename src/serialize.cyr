@@ -79,14 +79,24 @@ fn _ser_obj(json, len, err_out) {
     return v;
 }
 
+# A decoded number, or PK_ERR_INVALID_PARAMETER and 0.0 if it is not finite: a literal past the
+# double range (1e400) parses to +-inf, and JSON has no infinities, so it is not a value the
+# encoder can have written (2.15.1: 1e400 decoded as +inf, as success).
+fn _ser_fin(x, err_out) {
+    if ((x & 0x7FFFFFFFFFFFFFFF) < 0x7FF0000000000000) { return x; }
+    store64(err_out, PK_ERR_INVALID_PARAMETER);
+    return f64_from(0);
+}
+
 # Read a required numeric field. JSON integers are accepted as well as floats
 # (bayan tags `1` as JTAG_INT and `1.0` as JTAG_FLOAT; both are valid f64 input).
-# A missing or wrong-typed field writes PK_ERR_INVALID_PARAMETER and returns 0.0.
+# A missing or wrong-typed field, or one past the double range, writes PK_ERR_INVALID_PARAMETER
+# and returns 0.0.
 #must_use
 fn _ser_num(v, key, err_out) {
     var node = bayan_json_v_obj_get_by_cstr(v, key);
-    if (bayan_json_v_is_float(node) == 1) { return bayan_json_v_float(node); }
-    if (bayan_json_v_is_int(node) == 1) { return bayan_json_v_float(node); }
+    if (bayan_json_v_is_float(node) == 1) { return _ser_fin(bayan_json_v_float(node), err_out); }
+    if (bayan_json_v_is_int(node) == 1) { return _ser_fin(bayan_json_v_float(node), err_out); }
     store64(err_out, PK_ERR_INVALID_PARAMETER);
     return f64_from(0);
 }
@@ -96,13 +106,16 @@ fn _ser_num(v, key, err_out) {
 # +inf for it. Used for an optical surface radius, where `null` means a FLAT
 # surface (radius = infinity, i.e. zero curvature). Without this, a plano
 # surface decoded as 0.0 — a zero radius, i.e. INFINITE curvature, the exact
-# physical inverse.
+# physical inverse. Also an aperture radius, where null is an unbounded aperture (2.15.1: the
+# encoder wrote +inf as null and this decoder refused it back). The encoder writes -inf as null
+# too: a radius of -inf is the same plane as +inf, and a negative aperture is no aperture.
+# Only null is an infinity: a number literal past the double range is refused.
 #must_use
 fn _ser_num_or_inf(v, key, err_out) {
     var node = bayan_json_v_obj_get_by_cstr(v, key);
     if (bayan_json_v_is_null(node) == 1) { return 0x7FF0000000000000; }
-    if (bayan_json_v_is_float(node) == 1) { return bayan_json_v_float(node); }
-    if (bayan_json_v_is_int(node) == 1) { return bayan_json_v_float(node); }
+    if (bayan_json_v_is_float(node) == 1) { return _ser_fin(bayan_json_v_float(node), err_out); }
+    if (bayan_json_v_is_int(node) == 1) { return _ser_fin(bayan_json_v_float(node), err_out); }
     store64(err_out, PK_ERR_INVALID_PARAMETER);
     return f64_from(0);
 }
@@ -203,7 +216,8 @@ fn rgb_from_json(json, len, err_out) {
 
 # ── Medium (ray) ────────
 
-# Medium -> JSON Str: {"n":..,"name":".."}.
+# Medium -> JSON Str: {"n":..,"name":".."}. 0 for a null handle or a null name (2.15.1: a null
+# name was read straight off address 0).
 #must_use
 fn medium_to_json(m) {
     # 2.2.7: a null handle read straight off address 0. The DECODE side was
@@ -212,6 +226,7 @@ fn medium_to_json(m) {
     # `cyrius coverage` could not see it because these are all exercised with
     # valid handles. Returning 0 matches the decoders' sentinel.
     if (m == 0) { return 0; }
+    if (Medium_name(m) == 0) { return 0; }
     # 2.3.5: emitted straight into a str_builder instead of through a bayan value
     # tree. See _ser_sb_f64 and the [2.3.5] CHANGELOG entry for why; output is
     # byte-identical and pinned in tests/serialize.tcyr.
@@ -300,7 +315,9 @@ fn sellmeier_from_json(json, len, err_out) {
 
 # ── LensType (lens) ────────
 
-# LensType -> JSON Str: bare "Converging" / "Diverging" (serde unit-variant).
+# LensType -> JSON Str: bare "Converging" / "Diverging" (serde unit-variant); 0 for any other
+# value (2.15.1: LENS_TYPE_INVALID and every unknown code were laundered into "Diverging", which
+# decodes back as a valid lens type).
 #must_use
 fn lens_type_to_json(lt) {
     # 2.3.5: both variants are fixed ASCII with nothing JSON-escapable, so the
@@ -309,7 +326,10 @@ fn lens_type_to_json(lt) {
     if (lt == LENS_CONVERGING) {
         return str_from("\"Converging\"");
     }
-    return str_from("\"Diverging\"");
+    if (lt == LENS_DIVERGING) {
+        return str_from("\"Diverging\"");
+    }
+    return 0;
 }
 
 # JSON -> LensType. Returns LENS_TYPE_INVALID (and sets err_out) for anything
@@ -400,6 +420,8 @@ fn prescription_to_json(p) {
     # `cyrius coverage` could not see it because these are all exercised with
     # valid handles. Returning 0 matches the decoders' sentinel.
     if (p == 0) { return 0; }
+    # 2.15.1: a null name was read straight off address 0.
+    if (Prescription_name(p) == 0) { return 0; }
     # ⛔ 2.4.9: REFUSE A NaN RATHER THAN LAUNDER IT INTO A VALID LENS. JSON has no
     # NaN, so bayan writes every non-finite f64 as `null` — and the decoder reads a
     # null RADIUS as +inf, a flat surface (_ser_num_or_inf, which exists because a
@@ -477,7 +499,7 @@ fn prescription_from_json(json, len, err_out) {
         var radius = _ser_num_or_inf(so, "radius", err_out);
         var thickness = _ser_num(so, "thickness", err_out);
         var n_after = _ser_num(so, "n_after", err_out);
-        var aperture_radius = _ser_num(so, "aperture_radius", err_out);
+        var aperture_radius = _ser_num_or_inf(so, "aperture_radius", err_out);
         if (prakash_is_err(load64(err_out)) == 1) { return 0; }
         # A dropped surface would return a Prescription with FEWER elements
         # than the document and PK_ERR_NONE — a silently different lens.
@@ -557,6 +579,12 @@ fn spd_from_json(json, len, err_out) {
     var start_nm = _ser_num(v, "start_nm", err_out);
     var step_nm = _ser_num(v, "step_nm", err_out);
     if (prakash_is_err(load64(err_out)) == 1) { return 0; }
+    # A grid steps forward (2.15.1: step 0 decoded, and every spd_at on it was NaN; a negative step
+    # decoded a grid that runs backward, which nothing reads correctly).
+    if (f64_gt(step_nm, f64_from(0)) == 0) {
+        store64(err_out, PK_ERR_INVALID_PARAMETER);
+        return 0;
+    }
     var vals_v = bayan_json_v_obj_get_by_cstr(v, "values");
     if (bayan_json_v_is_arr(vals_v) == 0) {
         store64(err_out, PK_ERR_INVALID_PARAMETER);
@@ -582,8 +610,9 @@ fn spd_from_json(json, len, err_out) {
                 return 0;
             }
         }
-        store64(data + i * 8, bayan_json_v_float(e));
+        store64(data + i * 8, _ser_fin(bayan_json_v_float(e), err_out));
     }
+    if (prakash_is_err(load64(err_out)) == 1) { return 0; }
     var built = spd_new(start_nm, step_nm, data, n);
     if (built == 0) { store64(err_out, PK_ERR_ALLOCATION); }
     return built;

@@ -125,7 +125,10 @@ fn pbr_distribution_ggx(n_dot_h, roughness) {
     if (f64_lt(a, amin) == 1) { a = amin; }
     var a2 = f64_mul(a, a);
     var ndh = n_dot_h;
-    if (f64_lt(ndh, 0) == 1) { ndh = 0; }
+    # A microfacet facing away from the macro-normal has no density: chi+(n.h) (Walter et al.
+    # 2007, eq. 33). 2.15.1: n.h < 0 was clamped to 0 and answered D(0) = a^2/pi, the density of
+    # a facet standing on edge, for every back-facing half vector.
+    if (f64_lt(ndh, 0) == 1) { return f64_from(0); }
     if (f64_gt(ndh, F64_ONE) == 1) { ndh = F64_ONE; }
     # ⛔ 2.4.9: `ndh^2 * (a2 - 1) + 1` CANCELS CATASTROPHICALLY AT THE ALPHA FLOOR.
     # The floor above puts a2 at 1e-16, and `1e-16 - 1` is not representable — it
@@ -256,9 +259,10 @@ fn pbr_lambert_diffuse_rgb(albedo, out) {
 }
 
 # Index of refraction -> F0 (reflectance at normal incidence, air n1=1):
-# F0 = ((1-ior)/(1+ior))^2.
+# F0 = ((1-ior)/(1+ior))^2. NaN unless ior is finite and > 0 (2.15.1: ior = -1 answered +inf).
 #must_use
 fn pbr_ior_to_f0(ior) {
+    if ((f64_gt(ior, f64_from(0)) & f64_lt(ior, 0x7FF0000000000000)) == 0) { return _PRK_NAN; }
     var r = f64_div(f64_sub(F64_ONE, ior), f64_add(F64_ONE, ior));
     return f64_mul(r, r);
 }

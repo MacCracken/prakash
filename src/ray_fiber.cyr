@@ -7,14 +7,27 @@
 
 fn _fib_r(num, den) { return f64_div(f64_from(num), f64_from(den)); }
 
+# 1 if n is a usable refractive index: finite and > 0 (ray_core's test, kept local so this
+# module still needs only error.cyr and ray_dispersion.cyr).
+#must_use
+fn _fib_index_ok(n) {
+    if (f64_gt(n, f64_from(0)) == 0) { return 0; }
+    return f64_lt(n, 0x7FF0000000000000);
+}
+
 # Single-mode cutoff V-number (first zero of the J0 Bessel function).
 fn _fib_cutoff() { return _fib_r(2405, 1000); }   # 2.405
 
 # Numerical aperture: NA = sqrt(n_core^2 - n_clad^2). Writes
-# PK_ERR_INVALID_PARAMETER (returns 0) if n_core < n_clad.
+# PK_ERR_INVALID_PARAMETER (returns 0) if n_core < n_clad, PK_ERR_INVALID_INDEX unless both are
+# finite and > 0 (2.15.1: (-1.5, -1.4) answered NA = 0.54, the squares hiding the signs).
 #must_use
 fn fiber_na(n_core, n_clad, err_out) {
     store64(err_out, PK_ERR_NONE);
+    if ((_fib_index_ok(n_core) & _fib_index_ok(n_clad)) == 0) {
+        store64(err_out, PK_ERR_INVALID_INDEX);
+        return 0;
+    }
     var na2 = f64_sub(f64_mul(n_core, n_core), f64_mul(n_clad, n_clad));
     if (f64_lt(na2, f64_from(0)) == 1) {
         store64(err_out, PK_ERR_INVALID_PARAMETER);
@@ -50,8 +63,8 @@ fn is_single_mode(v) {
     return f64_lt(v, _fib_cutoff());
 }
 
-# Mode field diameter (Marcuse): MFD ~ 2a*(0.65 + 1.619*V^-1.5 + 2.879*V^-6).
-# Valid for 0.8 < V < 2.5.
+# Mode field diameter (Marcuse 1977): MFD ~ 2a*(0.65 + 1.619*V^-1.5 + 2.879*V^-6), within about 1%
+# of the exact LP01 Gaussian fit for 1.2 <= V <= 2.4 (2.15.1: this said 0.8 < V < 2.5).
 #must_use
 fn mode_field_diameter(core_radius, v) {
     # V^-6 as an exact integer power: 1 / (V^2 * (V^2 * V^2)), matching powi.

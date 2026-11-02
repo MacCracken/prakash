@@ -61,6 +61,8 @@ test_group("mfd");
 var v_mfd = v_number(_fd(41, 10000000), _fd(12, 100), _fd(155, 100000000));
 var mfd = mode_field_diameter(_fd(41, 10000000), v_mfd);
 _assert_near(f64_mul(mfd, f64_from(1000000)), _fd(104, 10), TOL2, "MFD ~ 10.4um");
+# 2.15.1: the line above is +-2 um around 10.4. Marcuse at this V (1.99440), 60 digits: 10.41860 um.
+_assert_near(mfd, 0x3EE5D970D82DB8EA, _fd(1, 100000000000000000), "MFD = 10.418595 um (Marcuse, to 1e-17 m)");
 
 # ── coupling efficiency ────────
 test_group("coupling");
@@ -74,6 +76,7 @@ _assert_near(
 var eta_mm = coupling_efficiency_gaussian(_fd(5, 1000000), _fd(10, 1000000));
 assert(f64_lt(eta_mm, F64_ONE), "mismatch < 1");
 assert(f64_gt(eta_mm, HALF), "mismatch > 0.5");
+_assert_near(eta_mm, 0x3FE47AE147AE147B, _fd(1, 1000000000000000), "5 um into 10 um: (2*5*10/125)^2 = 16/25 (2.15.1)");
 
 # symmetric in its arguments
 _assert_near(
@@ -412,5 +415,13 @@ assert_eq(ed, PK_ERR_NONE, "vacuum accepted");
 # l^2 underflowing to 0 is refused (every term 0, chi a true +0).
 var _lu = fiber_dispersion(fsf, Z, F64_ONE, 0x1CA3529BA7D19EAF, &ed);
 assert_eq(ed, PK_ERR_INVALID_PARAMETER, "1e-170 um refused");
+
+# ── 2.15.1: indices ────────
+test_group("2.15.1 fiber_na domain");
+var _ne = 0;
+var _nn = fiber_na(_fd(0 - 15, 10), _fd(0 - 14, 10), &_ne);
+assert_eq(_ne, PK_ERR_INVALID_INDEX, "fiber_na(-1.5, -1.4) refused (was NA = 0.54)");
+var _nq = fiber_na(0x7FF8000000000000, _fd(14, 10), &_ne);
+assert_eq(_ne, PK_ERR_INVALID_INDEX, "fiber_na with a NaN core refused");
 
 var r = assert_summary();

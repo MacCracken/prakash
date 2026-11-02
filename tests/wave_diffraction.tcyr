@@ -90,9 +90,9 @@ _assert_near(fresnel_integral_s(F64_ONE), _fd(4383, 10000), _fd(1, 100), "S(1) ~
 # forms happen to agree to 0.08%. The error lived at 0.5 < x < 5 and peaked at
 # 15.5% (C(3)) — untested. These pin both branches against values computed by
 # Simpson quadrature on the defining integrals, cross-checked with published
-# Fresnel tables. Tolerance 2e-3 is Abramowitz & Stegun's stated bound for the
-# 7.3.32/7.3.33 rational approximation; the series branch is far tighter.
-var _FR_TOL = _fd(2, 1000);
+# Fresnel tables. Tolerance 1e-6 is those six-digit values' own rounding (2.15.1: it was
+# A&S 7.3.32's 2e-3 bound, which the code then used; the dense table at the end pins 4e-16).
+var _FR_TOL = _fd(1, 1000000);
 _assert_near(fresnel_integral_c(_fd(2, 10)), _fd(199921, 1000000), _FR_TOL, "C(0.2) = 0.199921 (series branch)");
 _assert_near(fresnel_integral_c(_fd(5, 10)), _fd(492344, 1000000), _FR_TOL, "C(0.5) = 0.492344 (series branch)");
 _assert_near(fresnel_integral_c(_fd(9, 10)), _fd(764823, 1000000), _FR_TOL, "C(0.9) = 0.764823 (series, was +8.3%)");
@@ -899,5 +899,227 @@ assert_eq(_rta(W550, Z, F64_ONE, N152, Z, ld, 801), PK_ERR_NONE, "gold behind mi
 _assert_rel(AbsorbingFilmResult_a_s(AF), 0x1AFBA41B169C3637, _fd(5, 10000000000000),
   "gold behind a 400-pair mirror: A = 1.07e-178");
 _assert_rel(AbsorbingFilmResult_t_s(AF), 0x1B12C263A6D925CE, _fd(5, 10000000000000), "... T = 1.29e-177");
+
+# ── 2.15.1: Fresnel integrals to double precision ────────
+# The A&S 7.3.32 fit these used was 2.2e-3 off, jumped 1.6e-3 at its x = 1 seam and went NaN
+# from x = 1e10. The references below are a 120-digit evaluation (the Maclaurin series to
+# x = 6, the asymptotic expansion truncated at its smallest term beyond, the two agreeing to
+# 1e-26 at x = 6), correctly rounded. Every eighth from 0 to 12, both functions, 4e-16
+# absolute and 1e-15 relative: the old fit fails all but a handful.
+test_group("2.15.1 Fresnel integrals to double precision");
+fn _fr_pin(x, c_ref, s_ref, name) {
+    var c = fresnel_integral_c(x);
+    var s = fresnel_integral_s(x);
+    var ok_c = f64_le(f64_abs(f64_sub(c, c_ref)), 0x3CBCD2B297D889BC);     # 4e-16
+    var ok_s = f64_le(f64_abs(f64_sub(s, s_ref)), 0x3CBCD2B297D889BC);
+    var rel_c = f64_le(f64_abs(f64_sub(c, c_ref)), f64_mul(0x3CD203AF9EE75616, f64_abs(c_ref)));     # 1e-15
+    var rel_s = f64_le(f64_abs(f64_sub(s, s_ref)), f64_mul(0x3CD203AF9EE75616, f64_abs(s_ref)));
+    assert((ok_c & ok_s & rel_c & rel_s) == 1, name);
+    return 0;
+}
+var _fp1 = _fr_pin(f64_div(f64_from(1), f64_from(8)), 0x3FBFFF81AC2EA61A, 0x3F50C122F9022C50, "C, S at 1/8");
+var _fp2 = _fr_pin(f64_div(f64_from(2), f64_from(8)), 0x3FCFF81B9B543C9D, 0x3F80BE5E7D1A496C, "C, S at 2/8");
+var _fp3 = _fr_pin(f64_div(f64_from(3), f64_from(8)), 0x3FD7E216B67C575D, 0x3F9C2D0A994A0A7E, "C, S at 3/8");
+var _fp4 = _fr_pin(f64_div(f64_from(4), f64_from(8)), 0x3FDF82915B1F81D5, 0x3FB0924E021FCC66, "C, S at 4/8");
+var _fp5 = _fr_pin(f64_div(f64_from(5), f64_from(8)), 0x3FE34290B239A88A, 0x3FBFDAF79CBD34EA, "C, S at 5/8");
+var _fp6 = _fr_pin(f64_div(f64_from(6), f64_from(8)), 0x3FE6315D6B2B6A77, 0x3FCABC7C34D0AEDF, "C, S at 6/8");
+var _fp7 = _fr_pin(f64_div(f64_from(7), f64_from(8)), 0x3FE836688E5D2950, 0x3FD43BF001B3D5CD, "C, S at 7/8");
+var _fp8 = _fr_pin(f64_div(f64_from(8), f64_from(8)), 0x3FE8F4E3011F8291, 0x3FDC0C70184DB904, "C, S at 8/8");
+var _fp9 = _fr_pin(f64_div(f64_from(9), f64_from(8)), 0x3FE8266C08D0CC2F, 0x3FE1E99E5DB368A8, "C, S at 9/8");
+var _fp10 = _fr_pin(f64_div(f64_from(10), f64_from(8)), 0x3FE5C34DA8676850, 0x3FE513B4B939E8EF, "C, S at 10/8");
+var _fp11 = _fr_pin(f64_div(f64_from(11), f64_from(8)), 0x3FE22C540CDD9909, 0x3FE6BD34469029D6, "C, S at 11/8");
+var _fp12 = _fr_pin(f64_div(f64_from(12), f64_from(8)), 0x3FDC7F28BB514004, 0x3FE651F5EC0B3646, "C, S at 12/8");
+var _fp13 = _fr_pin(f64_div(f64_from(13), f64_from(8)), 0x3FD6733C92C717BF, 0x3FE3CC270F2D3CC7, "C, S at 13/8");
+var _fp14 = _fr_pin(f64_div(f64_from(14), f64_from(8)), 0x3FD49A9573A98149, 0x3FDFF5EB235F6529, "C, S at 14/8");
+var _fp15 = _fr_pin(f64_div(f64_from(15), f64_from(8)), 0x3FD80295C821DCD1, 0x3FD8E86DB5EB947B, "C, S at 15/8");
+var _fp16 = _fr_pin(f64_div(f64_from(16), f64_from(8)), 0x3FDF3F8B36D044C0, 0x3FD5FA85C0E05E06, "C, S at 16/8");
+var _fp17 = _fr_pin(f64_div(f64_from(17), f64_from(8)), 0x3FE3350B08A930CF, 0x3FD903F5E9BA2ABC, "C, S at 17/8");
+var _fp18 = _fr_pin(f64_div(f64_from(18), f64_from(8)), 0x3FE47BE5C4632531, 0x3FE02B6F9359B83A, "C, S at 18/8");
+var _fp19 = _fr_pin(f64_div(f64_from(19), f64_from(8)), 0x3FE2787C304E6FFB, 0x3FE377B7FD81BF97, "C, S at 19/8");
+var _fp20 = _fr_pin(f64_div(f64_from(20), f64_from(8)), 0x3FDD4641374B4991, 0x3FE3D05641F0CCE0, "C, S at 20/8");
+var _fp21 = _fr_pin(f64_div(f64_from(21), f64_from(8)), 0x3FD8757E5D01ABAB, 0x3FE0D4BAA9AD3576, "C, S at 21/8");
+var _fp22 = _fr_pin(f64_div(f64_from(22), f64_from(8)), 0x3FDB16C108A79FF5, 0x3FDA7ED3B1AB85CE, "C, S at 22/8");
+var _fp23 = _fr_pin(f64_div(f64_from(23), f64_from(8)), 0x3FE14EB64AEF60F8, 0x3FD970F44FC3DFBC, "C, S at 23/8");
+var _fp24 = _fr_pin(f64_div(f64_from(24), f64_from(8)), 0x3FE3621090914EC7, 0x3FDFC39798C9406E, "C, S at 24/8");
+var _fp25 = _fr_pin(f64_div(f64_from(25), f64_from(8)), 0x3FE14460AF4A71BD, 0x3FE2FE7A7F378F47, "C, S at 25/8");
+var _fp26 = _fr_pin(f64_div(f64_from(26), f64_from(8)), 0x3FDB4921EDB41A52, 0x3FE20E199DFB3970, "C, S at 26/8");
+var _fp27 = _fr_pin(f64_div(f64_from(27), f64_from(8)), 0x3FDAFAEEB9ACEAF2, 0x3FDCAB2DA6B0566B, "C, S at 27/8");
+var _fp28 = _fr_pin(f64_div(f64_from(28), f64_from(8)), 0x3FE10AD558E6487D, 0x3FDA936C65C9A404, "C, S at 28/8");
+var _fp29 = _fr_pin(f64_div(f64_from(29), f64_from(8)), 0x3FE2C06E9619A2CF, 0x3FE08C7A877A9043, "C, S at 29/8");
+var _fp30 = _fr_pin(f64_div(f64_from(30), f64_from(8)), 0x3FDF96FC73ABA8F3, 0x3FE2B47EF95532AF, "C, S at 30/8");
+var _fp31 = _fr_pin(f64_div(f64_from(31), f64_from(8)), 0x3FDABFA4187E0D4B, 0x3FDFFB5972F388B7, "C, S at 31/8");
+var _fp32 = _fr_pin(f64_div(f64_from(32), f64_from(8)), 0x3FDFE6364DD7EF6D, 0x3FDAE9BAE8FC5F88, "C, S at 32/8");
+var _fp33 = _fr_pin(f64_div(f64_from(33), f64_from(8)), 0x3FE277963DC94A77, 0x3FE003BC8110A4D8, "C, S at 33/8");
+var _fp34 = _fr_pin(f64_div(f64_from(34), f64_from(8)), 0x3FDF9D418E854F26, 0x3FE26316DE756CEF, "C, S at 34/8");
+var _fp35 = _fr_pin(f64_div(f64_from(35), f64_from(8)), 0x3FDB718D1245C21D, 0x3FDF0E4CB887D6C5, "C, S at 35/8");
+var _fp36 = _fr_pin(f64_div(f64_from(36), f64_from(8)), 0x3FE0D5344CC01C0B, 0x3FDBCB20E057BB49, "C, S at 36/8");
+var _fp37 = _fr_pin(f64_div(f64_from(37), f64_from(8)), 0x3FE1D17810C772A2, 0x3FE13D9794FD0B03, "C, S at 37/8");
+var _fp38 = _fr_pin(f64_div(f64_from(38), f64_from(8)), 0x3FDCB995FE359084, 0x3FE1620616232BE2, "C, S at 38/8");
+var _fp39 = _fr_pin(f64_div(f64_from(39), f64_from(8)), 0x3FDE71DD26C985F8, 0x3FDC1F93DA1B268B, "C, S at 39/8");
+var _fp40 = _fr_pin(f64_div(f64_from(40), f64_from(8)), 0x3FE20944464FA8A6, 0x3FDFF2C068F1DC2A, "C, S at 40/8");
+var _fp41 = _fr_pin(f64_div(f64_from(41), f64_from(8)), 0x3FDE6F0EC037066B, 0x3FE1D370374B225F, "C, S at 41/8");
+var _fp42 = _fr_pin(f64_div(f64_from(42), f64_from(8)), 0x3FDD8136B40BDF9A, 0x3FDD07AF2DEAA564, "C, S at 42/8");
+var _fp43 = _fr_pin(f64_div(f64_from(43), f64_from(8)), 0x3FE1DCE7F3FF7967, 0x3FDF4FAAE74EEC24, "C, S at 43/8");
+var _fp44 = _fr_pin(f64_div(f64_from(44), f64_from(8)), 0x3FDE9E74DAB3DB7F, 0x3FE1B7C7A3BE7951, "C, S at 44/8");
+var _fp45 = _fr_pin(f64_div(f64_from(45), f64_from(8)), 0x3FDE0842F77CD362, 0x3FDCF5EAFFFE2FB8, "C, S at 45/8");
+var _fp46 = _fr_pin(f64_div(f64_from(46), f64_from(8)), 0x3FE1C39CFF6F4B94, 0x3FE0281953C7A6BA, "C, S at 46/8");
+var _fp47 = _fr_pin(f64_div(f64_from(47), f64_from(8)), 0x3FDD82E4A2FBE4F7, 0x3FE134EEC0C2420D, "C, S at 47/8");
+var _fp48 = _fr_pin(f64_div(f64_from(48), f64_from(8)), 0x3FDFF852D570C8BF, 0x3FDC9B014F06E782, "C, S at 48/8");
+var _fp49 = _fr_pin(f64_div(f64_from(49), f64_from(8)), 0x3FE1281BA4A5EDAF, 0x3FE131C76D0E10A0, "C, S at 49/8");
+var _fp50 = _fr_pin(f64_div(f64_from(50), f64_from(8)), 0x3FDCC11643BF0363, 0x3FDFB4FCE5DA2EBD, "C, S at 50/8");
+var _fp51 = _fr_pin(f64_div(f64_from(51), f64_from(8)), 0x3FE157CC6100D346, 0x3FDE4501D3E5CB4B, "C, S at 51/8");
+var _fp52 = _fr_pin(f64_div(f64_from(52), f64_from(8)), 0x3FDED2975177D11D, 0x3FE173B952E8E629, "C, S at 52/8");
+var _fp53 = _fr_pin(f64_div(f64_from(53), f64_from(8)), 0x3FDF73D1D906AE3E, 0x3FDCF97D0C3F0D5C, "C, S at 53/8");
+var _fp54 = _fr_pin(f64_div(f64_from(54), f64_from(8)), 0x3FE0F71F1E8E10AD, 0x3FE128DE0C32B8FB, "C, S at 54/8");
+var _fp55 = _fr_pin(f64_div(f64_from(55), f64_from(8)), 0x3FDD4887D46CB8CE, 0x3FDED14DC6FF6727, "C, S at 55/8");
+var _fp56 = _fr_pin(f64_div(f64_from(56), f64_from(8)), 0x3FE17477677111F2, 0x3FDFFB29CC16DB0C, "C, S at 56/8");
+var _fp57 = _fr_pin(f64_div(f64_from(57), f64_from(8)), 0x3FDD56D238959989, 0x3FE085D683A571E2, "C, S at 57/8");
+var _fp58 = _fr_pin(f64_div(f64_from(58), f64_from(8)), 0x3FE1149DA0D3C469, 0x3FDE3457A82951BF, "C, S at 58/8");
+var _fp59 = _fr_pin(f64_div(f64_from(59), f64_from(8)), 0x3FDE6C3E7C1307F9, 0x3FE1223C85383229, "C, S at 59/8");
+var _fp60 = _fr_pin(f64_div(f64_from(60), f64_from(8)), 0x3FE08338B49163CB, 0x3FDD7C21062EF1EA, "C, S at 60/8");
+var _fp61 = _fr_pin(f64_div(f64_from(61), f64_from(8)), 0x3FDF6DCF1FC81073, 0x3FE14E0CE0B4FF1E, "C, S at 61/8");
+var _fp62 = _fr_pin(f64_div(f64_from(62), f64_from(8)), 0x3FE01F33E029D433, 0x3FDD62050843CE80, "C, S at 62/8");
+var _fp63 = _fr_pin(f64_div(f64_from(63), f64_from(8)), 0x3FDFF3254DCA6E58, 0x3FE14B09F88C9BEE, "C, S at 63/8");
+var _fp64 = _fr_pin(f64_div(f64_from(64), f64_from(8)), 0x3FDFFCC248CC21AA, 0x3FDD742651FE3AA6, "C, S at 64/8");
+var _fp65 = _fr_pin(f64_div(f64_from(65), f64_from(8)), 0x3FDFF3577CD29147, 0x3FE140DA89A6AA1E, "C, S at 65/8");
+var _fp66 = _fr_pin(f64_div(f64_from(66), f64_from(8)), 0x3FE01D82037B4C0C, 0x3FDD8AA6C04D52ED, "C, S at 66/8");
+var _fp67 = _fr_pin(f64_div(f64_from(67), f64_from(8)), 0x3FDF7A5419C658D3, 0x3FE130147EB635D7, "C, S at 67/8");
+var _fp68 = _fr_pin(f64_div(f64_from(68), f64_from(8)), 0x3FE074249448182D, 0x3FDDC826A9769FE1, "C, S at 68/8");
+var _fp69 = _fr_pin(f64_div(f64_from(69), f64_from(8)), 0x3FDEA5F74497A2DB, 0x3FE0F7E94FCF46B4, "C, S at 69/8");
+var _fp70 = _fr_pin(f64_div(f64_from(70), f64_from(8)), 0x3FE0E59156F049E1, 0x3FDE83FE1345A38E, "C, S at 70/8");
+var _fp71 = _fr_pin(f64_div(f64_from(71), f64_from(8)), 0x3FDDDCA12C27E800, 0x3FE06AD82877926F, "C, S at 71/8");
+var _fp72 = _fr_pin(f64_div(f64_from(72), f64_from(8)), 0x3FE121B8251B9364, 0x3FDFFDB92EE186EE, "C, S at 72/8");
+var _fp73 = _fr_pin(f64_div(f64_from(73), f64_from(8)), 0x3FDDF4A4406C53DD, 0x3FDF1A66896E9CC2, "C, S at 73/8");
+var _fp74 = _fr_pin(f64_div(f64_from(74), f64_from(8)), 0x3FE0B3A3D09F26FF, 0x3FE0D93D33A2270E, "C, S at 74/8");
+var _fp75 = _fr_pin(f64_div(f64_from(75), f64_from(8)), 0x3FDF9EEA4E835315, 0x3FDDDC44D8B7A92F, "C, S at 75/8");
+var _fp76 = _fr_pin(f64_div(f64_from(76), f64_from(8)), 0x3FDF2FB733A0E92E, 0x3FE0FDF365492876, "C, S at 76/8");
+var _fp77 = _fr_pin(f64_div(f64_from(77), f64_from(8)), 0x3FE0E4617B3DBDD4, 0x3FDEDC8E41FB512D, "C, S at 77/8");
+var _fp78 = _fr_pin(f64_div(f64_from(78), f64_from(8)), 0x3FDDEB86DDF37E84, 0x3FDFCD5AFA081D25, "C, S at 78/8");
+var _fp79 = _fr_pin(f64_div(f64_from(79), f64_from(8)), 0x3FE0B6B2D51F6D50, 0x3FE0BEA4FC6EA7AE, "C, S at 79/8");
+var _fp80 = _fr_pin(f64_div(f64_from(80), f64_from(8)), 0x3FDFFE5717BB4039, 0x3FDDF67F36BF6E03, "C, S at 80/8");
+var _fp81 = _fr_pin(f64_div(f64_from(81), f64_from(8)), 0x3FDE8C11643B9481, 0x3FE0B228896C3734, "C, S at 81/8");
+var _fp82 = _fr_pin(f64_div(f64_from(82), f64_from(8)), 0x3FE0FD3E37A557A8, 0x3FE0182AFA3393C0, "C, S at 82/8");
+var _fp83 = _fr_pin(f64_div(f64_from(83), f64_from(8)), 0x3FDEF1D3220699AF, 0x3FDE581FEE7995B6, "C, S at 83/8");
+var _fp84 = _fr_pin(f64_div(f64_from(84), f64_from(8)), 0x3FDF4341A6075BC9, 0x3FE0E5B4FF6A30DC, "C, S at 84/8");
+var _fp85 = _fr_pin(f64_div(f64_from(85), f64_from(8)), 0x3FE0F1AEF5E7D477, 0x3FDFAAB92FD55992, "C, S at 85/8");
+var _fp86 = _fr_pin(f64_div(f64_from(86), f64_from(8)), 0x3FDECB355FF17DCB, 0x3FDE89D7B4AEC491, "C, S at 86/8");
+var _fp87 = _fr_pin(f64_div(f64_from(87), f64_from(8)), 0x3FDF3ED8F72EAEB6, 0x3FE0DB77016B5DDC, "C, S at 87/8");
+var _fp88 = _fr_pin(f64_div(f64_from(88), f64_from(8)), 0x3FE0ED0C93FCB09E, 0x3FDFFEC0BED88AB2, "C, S at 88/8");
+var _fp89 = _fr_pin(f64_div(f64_from(89), f64_from(8)), 0x3FDF562AA7FDCC1B, 0x3FDE4B12BD088C74, "C, S at 89/8");
+var _fp90 = _fr_pin(f64_div(f64_from(90), f64_from(8)), 0x3FDE9A666BB6070D, 0x3FE0937DCC0D57ED, "C, S at 90/8");
+var _fp91 = _fr_pin(f64_div(f64_from(91), f64_from(8)), 0x3FE0BBBE6237E4FF, 0x3FE08388C8F723DB, "C, S at 91/8");
+var _fp92 = _fr_pin(f64_div(f64_from(92), f64_from(8)), 0x3FE056444BCDAB35, 0x3FDE5C9D795AC94F, "C, S at 92/8");
+var _fp93 = _fr_pin(f64_div(f64_from(93), f64_from(8)), 0x3FDE4A0ECE215015, 0x3FDF9EBD5CC25277, "C, S at 93/8");
+var _fp94 = _fr_pin(f64_div(f64_from(94), f64_from(8)), 0x3FDFD583B58AA5A4, 0x3FE0DCE6A4A2E162, "C, S at 94/8");
+var _fp95 = _fr_pin(f64_div(f64_from(95), f64_from(8)), 0x3FE0DB8792EB3BAF, 0x3FE004E4B3F8ADE8, "C, S at 95/8");
+var _fp96 = _fr_pin(f64_div(f64_from(96), f64_from(8)), 0x3FDFFF0A15D232B8, 0x3FDE4D6842F469B4, "C, S at 96/8");
+# Either side of the 2.5625 seam between the two fits, and of the old seam at 1.
+var _fb0 = _fr_pin(0x3FF99CCC999FFEFE, 0x3FD75B9629222554, 0x3FE46CD46F8C127B, "C, S at sqrt(2.5625) -2 ulp");
+var _fb1 = _fr_pin(0x3FF99CCC999FFEFF, 0x3FD75B9629222551, 0x3FE46CD46F8C127A, "C, S at sqrt(2.5625) -1 ulp");
+var _fb2 = _fr_pin(0x3FF99CCC999FFF00, 0x3FD75B962922254F, 0x3FE46CD46F8C1278, "C, S at sqrt(2.5625) +0 ulp");
+var _fb3 = _fr_pin(0x3FF99CCC999FFF01, 0x3FD75B962922254C, 0x3FE46CD46F8C1277, "C, S at sqrt(2.5625) +1 ulp");
+var _fb4 = _fr_pin(0x3FF99CCC999FFF02, 0x3FD75B962922254A, 0x3FE46CD46F8C1275, "C, S at sqrt(2.5625) +2 ulp");
+var _fo0 = _fr_pin(0x3FEFFFFFFFFFFFFF, 0x3FE8F4E3011F8291, 0x3FDC0C70184DB902, "C, S at 1 -1 ulp");
+var _fo1 = _fr_pin(0x3FF0000000000001, 0x3FE8F4E3011F8291, 0x3FDC0C70184DB908, "C, S at 1 +1 ulp");
+# Far out: the phase x^2/4 cycles is reduced from an exact x^2, so these keep their digits.
+var _fl0 = _fr_pin(0x4034000000000000, 0x3FDFFFCAE107B4E6, 0x3FDEFB3DB49348A6, "C, S at 20.0 (1e10 and 1e15 were NaN)");
+var _fl1 = _fr_pin(0x4042C00000000000, 0x3FDFCACF03C8AC15, 0x3FE0403FAF363F02, "C, S at 37.5 (1e10 and 1e15 were NaN)");
+var _fl2 = _fr_pin(0x40934A456D5CFAAD, 0x3FE001187E1A47B3, 0x3FE001CE44BA8D14,
+  "C, S at 1234.5678 (1e10 and 1e15 were NaN)");
+var _fl3 = _fr_pin(0x40F86A0000000000, 0x3FDFFFFFFFFFFFFE, 0x3FDFFFF2A62C7280,
+  "C, S at 100000.0 (1e10 and 1e15 were NaN)");
+var _fl4 = _fr_pin(0x417F78A400000000, 0x3FE0000000000000, 0x3FDFFFFFF5A49865,
+  "C, S at 33000000.0 (1e10 and 1e15 were NaN)");
+var _fl5 = _fr_pin(0x4202A05F20000000, 0x3FE0000000000000, 0x3FDFFFFFFFF74018,
+  "C, S at 10000000000.0 (1e10 and 1e15 were NaN)");
+var _fl6 = _fr_pin(0x430C6BF526340000, 0x3FE0000000000000, 0x3FDFFFFFFFFFFFFA,
+  "C, S at 1000000000000000.0 (1e10 and 1e15 were NaN)");
+assert_eq(fresnel_integral_c(0x4340000000000000), F64_HALF, "C(2^53) = 1/2: x^2/4 is whole cycles");
+assert_eq(fresnel_integral_c(0x7FF0000000000000), F64_HALF, "C(+inf) = 1/2");
+assert_eq(fresnel_integral_s(0x7FF0000000000000), F64_HALF, "S(+inf) = 1/2");
+assert_eq(fresnel_integral_s(0xFFF0000000000000), f64_neg(F64_HALF), "S(-inf) = -1/2");
+var _frn = fresnel_integral_c(0x7FF8000000000000);
+assert(f64_eq(_frn, _frn) == 0, "C(NaN) is NaN");
+# The invariants, separately from the values: C' = cos(pi x^2/2) and S' = sin(pi x^2/2), so C
+# rises on [0, 1] and falls on [1, sqrt 3], and S rises on [0, sqrt 2]. Sampled at 1/256.
+var _mono = 1;
+var _prev_c = fresnel_integral_c(0);
+var _prev_s = fresnel_integral_s(0);
+for (var k = 1; k <= 256; k = k + 1) {
+    var xk = f64_div(f64_from(k), f64_from(256));
+    var ck = fresnel_integral_c(xk);
+    var sk = fresnel_integral_s(xk);
+    if (f64_gt(ck, _prev_c) == 0) { _mono = 0; }
+    if (f64_gt(sk, _prev_s) == 0) { _mono = 0; }
+    _prev_c = ck;
+    _prev_s = sk;
+}
+assert_eq(_mono, 1, "C and S rise on (0, 1]");
+for (var k = 257; k <= 443; k = k + 1) {
+    var xk = f64_div(f64_from(k), f64_from(256));
+    var ck = fresnel_integral_c(xk);
+    if (f64_lt(ck, _prev_c) == 0) { _mono = 0; }
+    _prev_c = ck;
+}
+assert_eq(_mono, 1, "C falls on [1, sqrt 3] (443/256 < 1.7321): the old seam at 1 made it jump");
+var _oc = 0;
+var _os = 0;
+var _ocs = fresnel_integral_cs(f64_neg(_fd(13, 8)), &_oc, &_os);
+assert_eq(_oc, f64_neg(fresnel_integral_c(_fd(13, 8))), "C is odd, bit for bit");
+assert_eq(_os, f64_neg(fresnel_integral_s(_fd(13, 8))), "S is odd, bit for bit");
+# The straight-edge intensity ((C + 1/2)^2 + (S + 1/2)^2)/2 at its first extrema, to 1e-15.
+_assert_near(fresnel_edge_intensity(0x3FF3333333333333), 0x3FF5EA1FCEEF6918, 0x3CD203AF9EE75616,
+  "edge intensity at u = 1.2");
+_assert_near(fresnel_edge_intensity(0x4000000000000000), 0x3FEB0206D62AB00B, 0x3CD203AF9EE75616,
+  "edge intensity at u = 2.0");
+_assert_near(fresnel_edge_intensity(0x4008000000000000), 0x3FF1B8D9372EC551, 0x3CD203AF9EE75616,
+  "edge intensity at u = 3.0");
+_assert_near(fresnel_edge_intensity(0x4014000000000000), 0x3FF1099D6317A843, 0x3CD203AF9EE75616,
+  "edge intensity at u = 5.0");
+_assert_near(fresnel_edge_intensity(0xBFF8000000000000), 0x3F95819EC0CB1B55, 0x3CD203AF9EE75616,
+  "edge intensity at u = -1.5");
+
+# ── 2.15.1: multilayer_rt's angle domain and a layer at its critical angle ────────
+test_group("2.15.1 multilayer_rt domain, critical layer");
+# Past grazing cos(theta) < 0 made the incident admittance negative: R_s > 1 and T_s < 0 came back
+# as a result. |angle| >= pi/2 and NaN are refused, as multilayer_rta refuses them.
+assert_eq(multilayer_rt(W550, F64_TWO, F64_ONE, N152, lay_996, 1), 0, "angle 2 rad (past grazing) refused");
+assert_eq(multilayer_rt(W550, f64_neg(F64_TWO), F64_ONE, N152, lay_996, 1), 0, "angle -2 rad refused");
+assert_eq(multilayer_rt(W550, F64_PI_2, F64_ONE, N152, lay_996, 1), 0, "angle pi/2 refused");
+assert_eq(multilayer_rt(W550, 0x7FF8000000000000, F64_ONE, N152, lay_996, 1), 0, "NaN angle refused");
+var _mg = multilayer_rt(W550, 0x3FF921FB54442D17, F64_ONE, N152, lay_996, 1);
+assert(_mg != 0, "one ulp below pi/2 is an incidence");
+assert(f64_le(ThinFilmResult_r_s(_mg), F64_ONE), "near grazing R_s <= 1");
+# A layer at EXACTLY its critical angle: n_layer = n0 sin(theta) to the bit, so cos = 0 in it. s
+# evaluated sin(0)/0 = NaN and p turned the layer into the identity. The limit matrices are pinned
+# against multilayer_rta, whose sinc form has no singularity there, and against the same stack
+# with the layer index moved 1e-12 either side.
+var _cq = _deg(f64_from(40));
+var _cb = f64_mul(_fd(15, 10), _prk_sin(_cq));
+fn _rt_lay(n, d) {
+    var l = alloc(16);
+    if (l == 0) { return 0; }
+    store64(l, n);
+    store64(l + 8, d);
+    return l;
+}
+var _crt = multilayer_rt(W550, _cq, _fd(15, 10), _fd(15, 10), _rt_lay(_cb, f64_from(300)), 1);
+var _cre = _rta(W550, _cq, _fd(15, 10), _fd(15, 10), Z, _lay1(_cb, Z, f64_from(300)), 1);
+assert(f64_eq(ThinFilmResult_r_s(_crt), ThinFilmResult_r_s(_crt)) == 1, "critical layer: R_s is a number");
+_assert_near(ThinFilmResult_r_s(_crt), AbsorbingFilmResult_r_s(AF), _fd(1, 10000000000000),
+  "critical layer: R_s = multilayer_rta's");
+_assert_near(ThinFilmResult_r_p(_crt), AbsorbingFilmResult_r_p(AF), _fd(1, 10000000000000),
+  "critical layer: R_p = multilayer_rta's (not the bare interface)");
+assert(f64_gt(ThinFilmResult_r_p(_crt), _fd(1, 1000)), "critical layer: R_p is not the matched-interface 0");
+var _crs = ThinFilmResult_r_s(_crt);
+var _crp = ThinFilmResult_r_p(_crt);
+var _cup = multilayer_rt(W550, _cq, _fd(15, 10), _fd(15, 10),
+  _rt_lay(f64_mul(_cb, _fd(1000000000001, 1000000000000)), f64_from(300)), 1);
+var _cdn = multilayer_rt(W550, _cq, _fd(15, 10), _fd(15, 10),
+  _rt_lay(f64_mul(_cb, _fd(999999999999, 1000000000000)), f64_from(300)), 1);
+_assert_near(ThinFilmResult_r_s(_cup), _crs, _fd(1, 1000000), "critical layer continuous from above (R_s)");
+_assert_near(ThinFilmResult_r_s(_cdn), _crs, _fd(1, 1000000), "critical layer continuous from below (R_s)");
+_assert_near(ThinFilmResult_r_p(_cup), _crp, _fd(1, 1000000), "critical layer continuous from above (R_p)");
+_assert_near(ThinFilmResult_r_p(_cdn), _crp, _fd(1, 1000000), "critical layer continuous from below (R_p)");
 
 var r = assert_summary();

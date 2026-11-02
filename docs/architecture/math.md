@@ -71,6 +71,11 @@ n(λ) = B + C/λ²
 ### Sellmeier Dispersion
 n²(λ) = 1 + Σ Bᵢλ² / (λ² - Cᵢ)
 
+`sellmeier_n_at` answers NaN for λ not finite and > 0, within 1e-15 µm² of a pole, and where
+n² < 0 (inside an absorption band there is no real index); 0 < n < 1 comes back as computed.
+Through 2.15.0 it clamped n² < 1 to 1, dropped a term at its pole, and read λ ≤ 0 as 1.0 or
+n(|λ|). The Cauchy, Schott and Conrady forms share the wavelength domain.
+
 ### Abbe Number
 V = (n_d - 1) / (n_F - n_C)
 
@@ -81,9 +86,9 @@ V = (n_d - 1) / (n_F - n_C)
 With f = n² = 1 + Σ Bλ²/(λ² − C):
 f′ = Σ −2BCλ/(λ² − C)², f″ = Σ 2BC(3λ² + C)/(λ² − C)³,
 n′ = f′/(2n), n″ = (f″ − 2n′²)/(2n), N_g = n − λn′.
-Analytic, not differenced. NaN at a pole (a term with B ≠ 0 inside the 1e-15 guard)
-and in the n² < 1 region `sellmeier_n_at` clamps to 1. A B = 0 term is skipped, so
-diamond's placeholder (0, 1) is not a pole at 1 µm.
+Analytic, not differenced. NaN at a pole (a term with B ≠ 0 inside the 1e-15 guard), as
+`sellmeier_n_at` is. A B = 0 term is skipped, so diamond's placeholder (0, 1) is not a pole
+at 1 µm.
 
 ## Fiber Chromatic Dispersion (`ray_fiber`, 2.10.0)
 
@@ -238,7 +243,15 @@ I = A₁² + A₂² + 2A₁A₂ cos(δ)
 δ = 2π Δ/λ
 
 ### Thin Film Reflectance
-R = sin²(δ/2) where δ = 2π(2nt)/λ + π
+R = sin²(2πnt/λ), normalised: a film in a lower-index medium (a soap or oil film in air), two
+equal beams, the one from the top face shifted by π (Hecht 9.4.1). 0 for a vanishing film, 1
+at a quarter wave. Through 2.15.0 the π was added to the phase and then halved again with it,
+which gave cos²(2πnt/λ), 1 − R.
+
+### Linear Polarizer (Jones)
+I(θ) = |eₓ cos θ + e_y e^{iφ} sin θ|² = eₓ² cos²θ + e_y² sin²θ + 2eₓe_y sin θ cos θ cos φ for the
+state (eₓ, e_y e^{iφ}) behind a polarizer at θ from x; Malus's law when φ = 0. Through 2.15.0 the
+phase was ignored, so circular light passed whole.
 
 ### Single-Slit Diffraction
 I(θ) = I₀ (sin β / β)² where β = πa sin θ / λ
@@ -254,6 +267,9 @@ d sin θ = mλ
 ### Airy Pattern
 I(θ) = I₀ [2J₁(x)/x]² where x = πD sin θ / λ
 
+The first dark ring is at sin θ = (j₁,₁/π) λ/D = 1.2196698913 λ/D, j₁,₁ = 3.8317059702 (A&S
+Table 9.5). 2.15.1 corrected the constant from 1.2196705.
+
 ### Rayleigh Criterion
 θ_min = 1.22 λ/D
 
@@ -262,6 +278,9 @@ T = 1 / (1 + F sin²(δ/2))
 
 ### Fabry-Perot Finesse
 F = π√R / (1 - R)
+
+The Fabry-Pérot functions answer NaN unless R is finite and in [0, 1): R = 1 has no finite
+finesse, and outside [0, 1] there is no mirror (R = −0.5 gave T = 9).
 
 ### Fabry-Perot Free Spectral Range
 FSR = c / (2nt)
@@ -278,6 +297,23 @@ N_F = a² / (λz)
 ### Fresnel Integrals
 C(x) = ∫₀ˣ cos(πt²/2) dt
 S(x) = ∫₀ˣ sin(πt²/2) dt
+
+Evaluated by Moshier's Cephes `fresnl` (2.15.1): rational fits in x⁴ below x² = 2.5625, and
+above it the auxiliary functions f, g, rational in 1/(πx²)²,
+C = ½ + (f sin(πx²/2) − g cos(πx²/2))/(πx), S = ½ − (f cos + g sin)/(πx).
+The phase is reduced in cycles, x²/4, from x² split exactly (Dekker), so it keeps its digits
+at large x. Against a 120-digit reference (Maclaurin series to x = 6, the asymptotic
+expansion truncated at its smallest term beyond): 2.6e-16 absolute, 5.0e-16 relative at
+4786 points over [0, 40). It replaced A&S 7.3.32/7.3.33, which was 2.2e-3 off, jumped 1.6e-3
+at its x = 1 seam and returned NaN from x = 1e10.
+
+### Zernike Radial Polynomial (2.15.1)
+Rₙᵐ(ρ) = (−1)ᵏ ρᵐ Pₖ^(m,0)(1 − 2ρ²), k = (n − m)/2, with the Jacobi polynomial from its
+three-term recurrence (A&S 22.7.1), β = 0 and c = 2j + m:
+2j(j + m)(c − 2) Pⱼ = (c − 1)[c(c − 2)x + m²] Pⱼ₋₁ − 2(j + m − 1)(j − 1)c Pⱼ₋₂,
+P₀ = 1, P₁ = (m + 1) − (m + 2)ρ². Within 1.4e-15 of exact rational arithmetic through n = 60,
+and Rₙᵐ(1) = 1 exactly through n = 200. The explicit factorial series it replaced overflowed
+i64 from n = 21.
 
 ### Anti-Reflection Ideal Index
 n_coat = √(n₁ n₂)
@@ -439,7 +475,9 @@ Recurrences: H_{k+1} = 2x H_k − 2k H_{k−1} (A&S 22.7.13);
 e^{−ilφ} in this time convention carries +lħ per photon. Angular-momentum flux
 l P / ω = l P λ₀ / (2π c). Spiral phase plate step h = l λ / (n_rel − 1).
 
-### Vectorial Focusing (Richards-Wolf)
+## Vectorial Focusing (`wave_focus`, 2.13.0)
+
+### Richards-Wolf integrals
 An aplanatic lens of focal length f, NA = n₂ sin α, fed a collimated field E₀ g(h) at the
 height h = f sin θ, in e^{−iωt}, z from the geometric focus, e^{ikf} dropped:
 W(θ) = g √cos θ sin θ e^{ikz cos θ},  k = 2π n₂/λ₀,  x = kρ sin θ,
@@ -486,6 +524,25 @@ CCT = 449n³ + 3525n² + 6823.3n + 5520.33 where n = (x - 0.3320)/(0.1858 - y)
 
 ### Luminance (Rec. 709)
 Y = 0.2126R + 0.7152G + 0.0722B
+
+### Photometry (`spectral_photometry`)
+Φ_v = K_m Σ S(λ)V(λ) Δλ with K_m = 683 lm/W; scotopic Φ'_v = K'_m Σ S(λ)V'(λ) Δλ with
+K'_m = 1700 lm/W. Both sum over 380, 385 … 780 nm, with Δλ = 5 nm, reading S through `spd_at`.
+The efficacy is K_m Σ SV/Σ S over the same points.
+
+### Colour Rendering Index (CIE 13.3)
+The reference is a Planckian radiator below 5000 K and CIE daylight at or above it, at the
+test source's CCT. Each test colour sample i = 1–8 is rendered under both, in CIE 1960
+(u, v), with c = (4 − u − 10v)/v and d = (1.708v + 0.404 − 1.481u)/v. The von Kries
+adaptation of the test sample is then
+
+    c′ = (c_r/c_k) c_ki,   d′ = (d_r/d_k) d_ki
+    u′ = (10.872 + 0.404 c′ − 4 d′)/(16.518 + 1.481 c′ − d′),   v′ = 5.520/(16.518 + 1.481 c′ − d′)
+
+In CIE 1964 W*U*V*: W* = 25 Y^(1/3) − 17, with Y scaled so that the source's own Y is 100;
+U* = 13 W*(u − u_r) and V* = 13 W*(v − v_r).
+R_i = 100 − 4.6 ΔE, and Ra is the mean of R₁…R₈. `spectral_band_similarity` is a different
+and much weaker 8-band energy comparison, renamed in 2.2.7 so it stops claiming to be this.
 
 ### Fluorescence (`spectral_fluor`, 2.15.0)
 Spectra are `Spd`s, point samples per nm; an integral over one is Σ samples × step.
@@ -693,6 +750,13 @@ Seidel min(Σ|Wᵢ|·span, 2v·Σ|Wᵢ|·max|∇|) with spans 1, 2, 1, 1, 2 and 
 2, 1; Zernike Σ 2|cⱼ|·√(n+1) (m = 0) or √(2(n+1)). Past 256 nodes (32 waves) it is
 refused. With W = 0 it is (2/π)(acos v − v√(1−v²)).
 
+Through focus (`lens_mtf_through_focus`, 2.15.1): a focus shift Δz is the pupil wavefront
+W₀₂₀ρ² with W₀₂₀ = Δz/(8N²), and the MTF is |OTF| of that pupil by this same
+autocorrelation, with the defocus as W₂₂₀ at the field edge. The defocused OTF reduces to a
+one-dimensional integral, OTF(v) = (4/(πb)) ∫₀^√(1−v²) sin(b(√(1−y²) − v)) dy with
+b = 8πW₀₂₀v/λ, which the suite uses as its reference (1e-12). The in-focus MTF times
+|sinc(πW₀₂₀v)| that it replaced is not the defocused OTF at any defocus.
+
 Polychromatic: OTF(ν) = Σ wᵢ·OTFᵢ(νλᵢN) / Σ wᵢ, summing the COMPLEX OTFs, so bands
 where some wavelengths' contrast reverses cancel. `lens_mtf_polychromatic`'s real
 mean of diffraction-limited MTFs equals it only while every OTF is real and ≥ 0.
@@ -842,11 +906,23 @@ D(h) = (2 + 1/α) sin^(1/α) θ / (2π)
 ### Clearcoat (GGX with fixed F0 = 0.04)
 f_coat = D_coat F_coat G_coat,  where G_coat = 1/(4(n v)(n l))
 
+G_coat is the Cook-Torrance denominator with no masking or shadowing (G = 1). It is not
+Kelemen's visibility 1/(4(l·h)²), which the 2.15.0 doc claimed; that needs l·h.
+
 (the 1/(4(n·v)(n·l)) factor lives inside G_coat — writing it again outside would
 double-count it, which the implementation does not do)
 
 ### Subsurface Scattering (Burley Profile)
 R(r) = (e^(-r/d) + e^(-r/3d)) / (8πdr)
+
+With unit albedo it integrates to 1 over the plane. It has no finite value at r = 0 (it
+diverges as 1/(4πdr)): `pbr_sss_profile_burley` answers +∞ there, and NaN for r < 0 or d ≤ 0.
+Through 2.15.0 it returned 1/(2πd²) below r = 1e-15 and called that the limit.
+
+### Subsurface Diffuse (Burley 2012)
+f_ss = (1.25/π)(F_ss(1/(n·l + n·v) − ½) + ½), F_ss = (1 + (F_ss90 − 1)F_L)(1 + (F_ss90 − 1)F_V),
+F = (1 − cos)⁵, F_ss90 = (l·h)²·roughness. `pbr_subsurface_diffuse` has no l·h argument and
+takes it as 1. 2.15.1 corrected F_ss90 from roughness² and returns 0 for n·l or n·v ≤ 0.
 
 ### SSS Gaussian Profile
 R(r) = (1 / (2πσ²)) exp(-r² / (2σ²))
@@ -855,10 +931,15 @@ R(r) = (1 / (2πσ²)) exp(-r² / (2σ²))
 T = exp(-σ_t d)
 
 ### Iridescence (Thin-Film Interference)
-OPD = 2 n_film d cos θ_film, phase shift per channel
+R = (r₀₁² + r₁₂² + 2r₀₁r₁₂ cos Φ)/(1 + r₀₁²r₁₂² + 2r₀₁r₁₂ cos Φ), Φ = 4πn_film d cos θ_film/λ,
+with SIGNED Fresnel amplitudes, for s and for p, averaged (Born & Wolf 1.6.4). 1 at grazing and
+wherever the film or the base totally reflects. Through 2.15.0 the amplitude product entered as
+√(R₀₁R₁₂) and only s was modelled, so a vanishing soap film read 0.077 and a quarter-wave one 0.
 
 ### Henyey-Greenstein Phase Function
 p(cos θ) = (1 - g²) / (4π(1 + g² - 2g cos θ)^(3/2))
+
+NaN unless |g| < 1: past 1 it is negative, and at 1 it is a delta.
 
 ### Rayleigh Phase Function
 p(cos θ) = 3(1 + cos²θ) / (16π)

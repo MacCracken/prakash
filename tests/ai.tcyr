@@ -191,4 +191,26 @@ assert(ai_hoosh_config_from_json(0, 4, &_ne) == 0,
   "ai_hoosh_config_from_json(null) returns its sentinel, not a SIGSEGV");
 assert(prakash_is_err(_ne) == 1, "ai_hoosh_config_from_json(null) reports through err_out");
 
+# ── 2.15.1: endpoints and keys are checked at the boundary ────────
+test_group("2.15.1 ai config domain");
+var _ae = 0;
+assert(ai_daimon_config_new(0, 0) == 0, "daimon config with a null endpoint refused (to_json read address 0)");
+assert(ai_hoosh_config_new(0) == 0, "hoosh config with a null endpoint refused");
+assert(ai_daimon_config_new("", 0) == 0, "empty endpoint refused");
+assert(ai_daimon_config_new("http://h", "") == 0, "empty api key refused (0 is none)");
+var _ac1 = "{\"endpoint\":\"http://x\",\"api_key\":123}";
+assert(ai_daimon_config_from_json(_ac1, strlen(_ac1), &_ae) == 0, "a numeric api_key is refused (it was dropped)");
+assert_eq(_ae, PK_ERR_INVALID_PARAMETER, "... INVALID_PARAMETER");
+var _ac2 = "{\"endpoint\":\"http://h/\\r\\nX-Evil: 1\"}";
+assert(ai_daimon_config_from_json(_ac2, strlen(_ac2), &_ae) == 0, "CR LF in an endpoint refused (request splitting)");
+assert(ai_hoosh_config_from_json(_ac2, strlen(_ac2), &_ae) == 0, "... for hoosh too");
+var _ac3 = "{\"endpoint\":\"\"}";
+assert(ai_hoosh_config_from_json(_ac3, strlen(_ac3), &_ae) == 0, "empty endpoint from JSON refused");
+var _ac4 = "{\"endpoint\":\"http://x\",\"api_key\":null}";
+var _ak4 = ai_daimon_config_from_json(_ac4, strlen(_ac4), &_ae);
+assert_eq(_ae, PK_ERR_NONE, "api_key null is none: accepted");
+assert(DaimonConfig_api_key(_ak4) == 0, "... api_key 0");
+var _ac5 = "{\"endpoint\":\"http://x\",\"api_key\":\"k\"}";
+var _ak5 = ai_daimon_config_from_json(_ac5, strlen(_ac5), &_ae);
+assert_eq(_ae, PK_ERR_NONE, "a string api_key is accepted");
 var r = assert_summary();

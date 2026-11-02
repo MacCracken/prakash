@@ -305,4 +305,11 @@ var sig_c = atm_rayleigh_cross_section_corrected(WL);
 assert(f64_gt(sig_c, sig_u), "corrected > uncorrected");
 _assert_near(f64_div(sig_c, sig_u), _fd(1048, 1000), _fd(1, 100), "correction ratio ~ 1.048");
 
+# ── 2.15.1: air mass of NaN and of a negative zenith angle ────────
+test_group("2.15.1 air mass domain");
+var _amn = atm_air_mass(0x7FF8000000000000);
+assert(f64_eq(_amn, _amn) == 0, "air mass of NaN: NaN (was the horizon's 37.92)");
+var _z60 = f64_div(F64_PI, f64_from(3));
+assert_eq(atm_air_mass(f64_neg(_z60)), atm_air_mass(_z60), "air mass at -60 deg = at +60 deg (was 1.99948)");
+_assert_near(atm_air_mass(_z60), 0x3FFFE89F9F4427A3, _fd(1, 1000000000000), "Kasten-Young at 60 deg: 1.99429");
 var r = assert_summary();
