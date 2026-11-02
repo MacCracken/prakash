@@ -30,6 +30,8 @@ include "src/wave_zernike.cyr"
 include "src/wave_pattern.cyr"
 # 2.6.0: Gaussian beam optics.
 include "src/wave_beam.cyr"
+# 2.13.0: vectorial focusing.
+include "src/wave_focus.cyr"
 include "src/pbr_core.cyr"
 include "src/pbr_advanced.cyr"
 include "src/lens.cyr"
@@ -60,6 +62,10 @@ var _prt_eta = 0;
 var _prt_ray = 0;
 var _prt_surfs = 0;
 var _prt_hits = 0;
+var _fo_lens = 0;
+var _fo_field = 0;
+var _fo_ib[96];
+var _fo_bj[24];
 var _fa_buf[80];
 var _plane = 0;
 var _out3 = 0;
@@ -301,6 +307,26 @@ fn b_trace_sequential_prt() {
 fn b_prt_retardance() {
     var h = vec_get(_prt_hits, 1);
     var r = prt_retardance(PrtTraceHit_total_p(h), PrtTraceHit_total_q(h), _prt_k);
+    return 0;
+}
+# J0, J1, J2 together at 5.52, from the Chebyshev series.
+fn b_focus_bessel_small() { _focus_bessel012(0x4016147AE147AE14, &_fo_bj); return 0; }
+# The same at 133.7, from Hankel's P and Q.
+fn b_focus_bessel_large() { _focus_bessel012(0x4060B66666666666, &_fo_bj); return 0; }
+# The six Richards-Wolf integrals near the focus of an NA 1.3 oil lens with a Gaussian pupil,
+# (rho, z) = (0.23, -0.17) lambda0: four panels, 64 nodes.
+fn b_focus_integrals_near() {
+    var r = focus_integrals(_fo_lens, 0x3E7E2112F62D1291, 0xBE7644F7C1162F1D, &_fo_ib);
+    return 0;
+}
+# The same lens 10 wavelengths off the axis and 3 along it: 24 panels.
+fn b_focus_integrals_far() {
+    var r = focus_integrals(_fo_lens, 0x3ED477DC2F9645A8, 0x3EB88FD505E786C9, &_fo_ib);
+    return 0;
+}
+# The x-polarized field at the near point: the integrals and the field formulas.
+fn b_focus_linear() {
+    var r = focus_linear(_fo_lens, 0x3E7E2112F62D1291, 0x3FEA8F5C28F5C28F, 0xBE7644F7C1162F1D, _fo_field);
     return 0;
 }
 # Fabry-Perot transmittance of a 1 mm etalon: ~4e3 orders.
@@ -738,6 +764,10 @@ fn main() {
     vec_push(_prt_surfs, surface_sphere(f64_from(0 - 50), f64_from(15), F64_ONE, f64_from(20)));
     var prt_e = 0;
     _prt_hits = trace_sequential_prt(_prt_ray, _prt_surfs, 0, &prt_e);
+    # NA 1.3 into n = 1.518 at 488 nm, f 1.8 mm, a Gaussian pupil of w = 1.3 mm.
+    _fo_lens = focus_new(0x3FF4CCCCCCCCCCCD, F64_ONE, 0x3FF849BA5E353F7D, 0x3EA05FE359450486, 0x3F5D7DBF487FCB92,
+      FOCUS_PUPIL_GAUSSIAN, 0x3F554C985F06F694, &prt_e);
+    _fo_field = prt_field_new(0, 0, 0, 0, 0, 0);
     for (var by = 0; by < 64; by = by + 1) {
         for (var bx = 0; bx < 64; bx = bx + 1) {
             var _sv = pattern2d_set(_bigpat, bx, by, f64_from(bx * 64 + by + 1));
@@ -924,6 +954,11 @@ fn main() {
     bench("prt/refract", &b_prt_refract, 100000);
     bench("prt/trace_singlet", &b_trace_sequential_prt, 20000);
     bench("prt/retardance", &b_prt_retardance, 100000);
+    bench("focus/bessel012_small", &b_focus_bessel_small, 500000);
+    bench("focus/bessel012_large", &b_focus_bessel_large, 500000);
+    bench("focus/integrals_near", &b_focus_integrals_near, 20000);
+    bench("focus/integrals_far", &b_focus_integrals_far, 2000);
+    bench("focus/linear_field", &b_focus_linear, 20000);
     bench("wave/fabry_perot_etalon", &b_fabry_perot_etalon, 200000);
     bench("wave/fabry_perot_long_cavity", &b_fabry_perot_long_cavity, 200000);
     bench("wave/pattern2d_normalized_64x64", &b_pattern_normalized, 20000);

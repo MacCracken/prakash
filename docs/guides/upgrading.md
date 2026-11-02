@@ -28,6 +28,15 @@ details of each change are in `CHANGELOG.md`.
   `./scripts/check-consumer-link.sh --root ~/Repos/ranga ~/.cyrius/versions/<pin>/bin/cycc`.
   ⚠ From 2.10.1 that passes in full only at cyrius ≥ 6.6.13; see below.
 
+## 2.13.0: vectorial focusing
+
+New API only: nothing existing changes value or signature, and the cyrius pin stays at
+6.7.18. `dist/prakash.cyr` gains `wave_focus`, so a name of yours beginning `focus_`,
+`Focus` or `FOCUS_` would now collide. Its fields follow e^(-iωt), like `ray_prt`, and are
+the complex conjugates of fields written in e^(+iωt), which `wave_beam` uses.
+`bessel_j1` in `wave_airy` is unchanged and still a 1e-7 fit; the new module carries its
+own J₀, J₁ and J₂.
+
 ## 2.12.0: polarization ray tracing
 
 New API only: nothing existing changes value or signature, and the cyrius pin stays at

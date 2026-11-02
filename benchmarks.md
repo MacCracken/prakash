@@ -18,178 +18,183 @@ harness-reported avg per iter.
 > column and this table filters on it.
 > **81 row(s) across 3 earlier run(s) are excluded** from the table for that reason — they remain in the CSV.
 
-| Benchmark | Baseline (`7ec51c8`) | Mid (`038c1ec`) | Current (`5c01d86`) | Δ |
+| Benchmark | Baseline (`7ec51c8`) | Mid (`038c1ec`) | Current (`4ca7821`) | Δ |
 |---|---|---|---|---|
-| atmosphere/air_mass | — | 159.0 ns | 456.0 ns | — |
-| atmosphere/atmospheric_transmittance | — | 216.0 ns | 568.0 ns | — |
-| atmosphere/king_factor | — | 19.0 ns | 45.0 ns | — |
-| atmosphere/mie_phase_cornette_shanks | 23.0 ns | 20.0 ns | 44.0 ns | +91.3% |
-| atmosphere/optical_depth_rayleigh | — | 16.0 ns | 37.0 ns | — |
-| atmosphere/rayleigh_cross_section | 9.0 ns | 7.0 ns | 18.0 ns | +100.0% |
-| atmosphere/rayleigh_scattering_coefficient | — | 12.0 ns | 29.0 ns | — |
-| atmosphere/scattering_angle | — | 240.0 ns | 366.0 ns | — |
-| atmosphere/sky_color_rgb | 1.014 µs | 828.0 ns | 2.007 µs | +97.9% |
-| atmosphere/sunlight_color | — | 670.0 ns | 1.733 µs | — |
-| atmosphere/sunset_gradient | — | 635.0 ns | 1.611 µs | — |
-| beam/coupling_efficiency | — | — | 129.0 ns | — |
-| beam/gaussian_beam_radius | — | — | 92.0 ns | — |
-| beam/gaussian_intensity | — | — | 190.0 ns | — |
-| beam/hermite_poly_20 | — | — | 158.0 ns | — |
-| beam/hg_mode_field_3_2 | — | — | 503.0 ns | — |
-| beam/interface | — | — | 117.0 ns | — |
-| beam/laguerre_poly_10 | — | — | 166.0 ns | — |
-| beam/lg_mode_field_2_3 | — | — | 522.0 ns | — |
-| beam/lg_mode_field_60_60 | — | — | 2.123 µs | — |
-| beam/propagate | — | — | 154.0 ns | — |
-| beam/second_moment_256 | — | — | 6.474 µs | — |
-| beam/thin_lens | — | — | 107.0 ns | — |
-| bridge/stellar_temperature_to_rgb | 119.0 ns | 107.0 ns | 173.0 ns | +45.4% |
-| doe/dammann_order | — | — | 203.0 ns | — |
-| doe/kogelnik_efficiency | — | — | 404.0 ns | — |
-| doe/kogelnik_reflection | — | — | 378.0 ns | — |
-| doe/multilevel_efficiency | — | — | 238.0 ns | — |
-| fiber/dispersion_smf | — | — | 7.557 µs | — |
-| fiber/lp01_b | — | — | 9.611 µs | — |
-| fiber/material_dispersion | — | — | 213.0 ns | — |
-| fiber/sellmeier_group_index | — | — | 179.0 ns | — |
-| fiber/zero_dispersion_material | — | — | 2.556 µs | — |
-| film/multilayer_rta_3 | — | — | 2.681 µs | — |
-| film/multilayer_rta_gold | — | — | 1.071 µs | — |
-| grin/index | — | — | 137.0 ns | — |
-| grin/luneburg_ball | — | — | 70.731 µs | — |
-| grin/selfoc_100_steps | — | — | 68.531 µs | — |
-| lens/airy_disk_radius | — | 10.0 ns | 23.0 ns | — |
-| lens/aperture_from_f_number | — | 6.0 ns | 16.0 ns | — |
-| lens/cardinal_points | — | 50.0 ns | 126.0 ns | — |
-| lens/chromatic_aberration | — | 5.0 ns | 16.0 ns | — |
-| lens/combined_focal_length | — | 9.0 ns | 26.0 ns | — |
-| lens/conjugate_factor | — | 8.0 ns | 23.0 ns | — |
-| lens/depth_of_field | — | 18.0 ns | 42.0 ns | — |
-| lens/diffraction_limit | — | 12.0 ns | 26.0 ns | — |
-| lens/f_number | — | 5.0 ns | 16.0 ns | — |
-| lens/field_of_view | — | 64.0 ns | 104.0 ns | — |
-| lens/field_of_view_diagonal | — | 93.0 ns | 162.0 ns | — |
-| lens/lensmaker_focal_length | — | 13.0 ns | 32.0 ns | — |
-| lens/magnification | — | 5.0 ns | 16.0 ns | — |
-| lens/mirror_focal_length | — | 5.0 ns | 15.0 ns | — |
-| lens/mtf_cutoff_frequency | — | 5.0 ns | 17.0 ns | — |
-| lens/mtf_diffraction_limited | 88.0 ns | 91.0 ns | 132.0 ns | +50.0% |
-| lens/na_from_f_number | — | 5.0 ns | 16.0 ns | — |
-| lens/numerical_aperture | — | 49.0 ns | 59.0 ns | — |
-| lens/optical_power | — | 8.0 ns | 21.0 ns | — |
-| lens/otf_seidel_64 | — | — | 1.204 ms | — |
-| lens/petzval_sum | — | 16.0 ns | 41.0 ns | — |
-| lens/seidel_coefficients | 117.0 ns | 58.0 ns | 126.0 ns | +7.7% |
-| lens/shape_factor | — | 8.0 ns | 23.0 ns | — |
-| pbr/clearcoat_blend | — | 31.0 ns | 57.0 ns | — |
-| pbr/clearcoat_brdf | — | 56.0 ns | 139.0 ns | — |
-| pbr/cook_torrance | 101.0 ns | 74.0 ns | 190.0 ns | +88.1% |
-| pbr/distribution_beckmann | — | 58.0 ns | 93.0 ns | — |
-| pbr/distribution_ggx | 22.0 ns | 16.0 ns | 41.0 ns | +86.4% |
-| pbr/fresnel_schlick | 17.0 ns | 12.0 ns | 16.0 ns | -5.9% |
-| pbr/fresnel_schlick_rgb | — | 22.0 ns | 62.0 ns | — |
-| pbr/geometry_ggx_aniso | — | 26.0 ns | 56.0 ns | — |
-| pbr/geometry_schlick_ggx | — | 18.0 ns | 40.0 ns | — |
-| pbr/geometry_smith | — | 39.0 ns | 85.0 ns | — |
-| pbr/henyey_greenstein | 19.0 ns | 16.0 ns | 31.0 ns | +63.2% |
-| pbr/ior_to_f0 | — | 6.0 ns | 17.0 ns | — |
-| pbr/iridescence_fresnel | 144.0 ns | 109.0 ns | 227.0 ns | +57.6% |
-| pbr/iridescence_rgb | — | 317.0 ns | 632.0 ns | — |
-| pbr/lambert_diffuse | — | 7.0 ns | 20.0 ns | — |
-| pbr/lambert_diffuse_rgb | — | 14.0 ns | 45.0 ns | — |
-| pbr/phase_rayleigh | — | 7.0 ns | 18.0 ns | — |
-| pbr/sample_cosine_pdf | — | 9.0 ns | 24.0 ns | — |
-| pbr/sample_ggx | — | 94.0 ns | 225.0 ns | — |
-| pbr/sample_ggx_pdf | — | 31.0 ns | 78.0 ns | — |
-| pbr/sheen_ashikhmin | — | 13.0 ns | 36.0 ns | — |
-| pbr/sheen_charlie | — | 135.0 ns | 443.0 ns | — |
-| pbr/single_scatter_inscattering | — | 52.0 ns | 104.0 ns | — |
-| pbr/split_sum_scale_bias | — | 96.0 ns | 199.0 ns | — |
-| pbr/subsurface_diffuse | — | 41.0 ns | 93.0 ns | — |
-| pbr/volume_transmittance | — | 37.0 ns | 57.0 ns | — |
-| prt/reflect | — | — | 1.157 µs | — |
-| prt/refract | — | — | 1.223 µs | — |
-| prt/retardance | — | — | 1.494 µs | — |
-| prt/trace_singlet | — | — | 7.902 µs | — |
-| ray/abbe_number | — | 110.0 ns | 265.0 ns | — |
-| ray/beer_lambert | — | 40.0 ns | 62.0 ns | — |
-| ray/brewster_angle | — | 53.0 ns | 91.0 ns | — |
-| ray/cauchy_n_at | — | 7.0 ns | 23.0 ns | — |
-| ray/critical_angle | — | 76.0 ns | 111.0 ns | — |
-| ray/fiber_na | 9.0 ns | 9.0 ns | 23.0 ns | +155.6% |
-| ray/find_system_properties | — | 695.0 ns | 1.831 µs | — |
-| ray/fresnel_amplitudes | — | — | 426.0 ns | — |
-| ray/fresnel_normal | — | 7.0 ns | 20.0 ns | — |
-| ray/fresnel_p | — | 12.0 ns | 35.0 ns | — |
-| ray/fresnel_s | — | 12.0 ns | 34.0 ns | — |
-| ray/fresnel_unpolarized | 108.0 ns | 112.0 ns | 190.0 ns | +75.9% |
-| ray/optical_path_difference | — | — | 2.287 µs | — |
-| ray/optical_path_length | — | 561.0 ns | 1.184 µs | — |
-| ray/prism_angular_spread | — | 312.0 ns | 509.0 ns | — |
-| ray/prism_deviation | — | 119.0 ns | 154.0 ns | — |
-| ray/prism_dispersion | — | 146.0 ns | 232.0 ns | — |
-| ray/reflect_2d | — | 23.0 ns | 67.0 ns | — |
-| ray/reflect_3d | — | 28.0 ns | 79.0 ns | — |
-| ray/refract_3d | — | 49.0 ns | 104.0 ns | — |
-| ray/schott_n_at | — | 24.0 ns | 53.0 ns | — |
-| ray/sellmeier_n_at | 51.0 ns | 32.0 ns | 85.0 ns | +66.7% |
-| ray/snell_3d | — | 83.0 ns | 181.0 ns | — |
-| ray/spot_diagram | — | 14.366 µs | 29.433 µs | — |
-| ray/trace_sequential | — | 444.0 ns | 934.0 ns | — |
-| ray/trace_surface | — | 132.0 ns | 295.0 ns | — |
-| ray/v_number | 9.0 ns | 8.0 ns | 21.0 ns | +133.3% |
-| serialize/prescription_to_json | — | 19.627 µs | 46.283 µs | — |
-| serialize/rgb_to_json | 3.443 µs | 2.191 µs | 3.357 µs | -2.5% |
-| serialize/spd_to_json | — | 64.731 µs | 165.666 µs | — |
-| spectral/cct_from_xy | — | 31.0 ns | 64.0 ns | — |
-| spectral/cie_cmf_at | — | 61.0 ns | 155.0 ns | — |
-| spectral/color_rendering_index | — | 271.192 µs | 472.754 µs | — |
-| spectral/cri_special | — | 245.454 µs | 404.562 µs | — |
-| spectral/frequency_to_wavelength | — | 8.0 ns | 17.0 ns | — |
-| spectral/linear_srgb_to_xyz | — | 53.0 ns | 152.0 ns | — |
-| spectral/linear_to_srgb_gamma | — | 118.0 ns | 358.0 ns | — |
-| spectral/luminous_flux | — | 2.453 µs | 6.068 µs | — |
-| spectral/photon_energy | — | 16.0 ns | 37.0 ns | — |
-| spectral/photon_energy_ev | — | 25.0 ns | 47.0 ns | — |
-| spectral/planck_radiance | 80.0 ns | 107.0 ns | 164.0 ns | +105.0% |
-| spectral/rgb_luminance | — | 17.0 ns | 49.0 ns | — |
-| spectral/rgb_to_u8 | — | 68.0 ns | 180.0 ns | — |
-| spectral/spd_at | 43.0 ns | 30.0 ns | 74.0 ns | +72.1% |
-| spectral/spd_blackbody | — | 9.017 µs | 13.859 µs | — |
-| spectral/spd_to_srgb | — | 1.840 µs | 4.994 µs | — |
-| spectral/spd_to_xyz | — | 1.378 µs | 3.629 µs | — |
-| spectral/wavelength_to_frequency | — | 11.0 ns | 28.0 ns | — |
-| spectral/wavelength_to_rgb | 89.0 ns | 41.0 ns | 103.0 ns | +15.7% |
-| spectral/wien_peak | — | 8.0 ns | 22.0 ns | — |
-| spectral/xyz_to_linear_srgb | — | 53.0 ns | 152.0 ns | — |
-| spectral/xyz_to_srgb | — | 436.0 ns | 1.374 µs | — |
-| spectral/xyz_to_xyy | — | 24.0 ns | 73.0 ns | — |
-| wave/airy_pattern | 217.0 ns | 194.0 ns | 375.0 ns | +72.8% |
-| wave/bessel_j1 | 61.0 ns | 47.0 ns | 105.0 ns | +72.1% |
-| wave/coating_reflectance | 103.0 ns | 102.0 ns | 224.0 ns | +117.5% |
-| wave/coherence_length | — | 6.0 ns | 18.0 ns | — |
-| wave/coherence_time | — | 9.0 ns | 24.0 ns | — |
-| wave/diffraction_pattern_2d_8x8 | 15.888 µs | 13.309 µs | 24.974 µs | +57.2% |
-| wave/double_slit_intensity | — | 147.0 ns | 257.0 ns | — |
-| wave/fabry_perot_etalon | — | — | 150.0 ns | — |
-| wave/fabry_perot_long_cavity | — | — | 110.0 ns | — |
-| wave/fraunhofer_rect | — | 226.0 ns | 332.0 ns | — |
-| wave/fresnel_edge_intensity | — | 136.0 ns | 306.0 ns | — |
-| wave/fresnel_integral_c | 157.0 ns | 122.0 ns | 279.0 ns | +77.7% |
-| wave/fresnel_integral_s | — | 116.0 ns | 277.0 ns | — |
-| wave/interference_pattern_16x16 | — | 88.728 µs | 177.523 µs | — |
-| wave/is_constructive | — | 14.0 ns | 32.0 ns | — |
-| wave/is_destructive | — | 15.0 ns | 37.0 ns | — |
-| wave/malus_law | 46.0 ns | 47.0 ns | 68.0 ns | +47.8% |
-| wave/mueller_apply | — | 140.0 ns | 351.0 ns | — |
-| wave/mueller_multiply | — | 825.0 ns | 2.065 µs | — |
-| wave/mueller_polarizer | — | 124.0 ns | 274.0 ns | — |
-| wave/mueller_retarder | — | 126.0 ns | 308.0 ns | — |
-| wave/multilayer_rt | — | 851.0 ns | 1.650 µs | — |
-| wave/path_to_phase | — | 6.0 ns | 18.0 ns | — |
-| wave/pattern2d_normalized_64x64 | — | 11.158 µs | 24.986 µs | — |
-| wave/polarization_intensity | — | 7.0 ns | 24.0 ns | — |
-| wave/polarization_through_polarizer | — | 98.0 ns | 159.0 ns | — |
-| wave/single_slit_intensity | 121.0 ns | 108.0 ns | 165.0 ns | +36.4% |
-| wave/thin_film_reflectance | — | 52.0 ns | 111.0 ns | — |
-| wave/zernike_poly | 110.0 ns | 96.0 ns | 192.0 ns | +74.5% |
+| atmosphere/air_mass | — | 159.0 ns | 266.0 ns | — |
+| atmosphere/atmospheric_transmittance | — | 216.0 ns | 341.0 ns | — |
+| atmosphere/king_factor | — | 19.0 ns | 20.0 ns | — |
+| atmosphere/mie_phase_cornette_shanks | 23.0 ns | 20.0 ns | 22.0 ns | -4.3% |
+| atmosphere/optical_depth_rayleigh | — | 16.0 ns | 21.0 ns | — |
+| atmosphere/rayleigh_cross_section | 9.0 ns | 7.0 ns | 10.0 ns | +11.1% |
+| atmosphere/rayleigh_scattering_coefficient | — | 12.0 ns | 16.0 ns | — |
+| atmosphere/scattering_angle | — | 240.0 ns | 199.0 ns | — |
+| atmosphere/sky_color_rgb | 1.014 µs | 828.0 ns | 1.216 µs | +19.9% |
+| atmosphere/sunlight_color | — | 670.0 ns | 1.042 µs | — |
+| atmosphere/sunset_gradient | — | 635.0 ns | 886.0 ns | — |
+| beam/coupling_efficiency | — | — | 70.0 ns | — |
+| beam/gaussian_beam_radius | — | — | 46.0 ns | — |
+| beam/gaussian_intensity | — | — | 101.0 ns | — |
+| beam/hermite_poly_20 | — | — | 94.0 ns | — |
+| beam/hg_mode_field_3_2 | — | — | 276.0 ns | — |
+| beam/interface | — | — | 49.0 ns | — |
+| beam/laguerre_poly_10 | — | — | 94.0 ns | — |
+| beam/lg_mode_field_2_3 | — | — | 271.0 ns | — |
+| beam/lg_mode_field_60_60 | — | — | 1.319 µs | — |
+| beam/propagate | — | — | 90.0 ns | — |
+| beam/second_moment_256 | — | — | 2.793 µs | — |
+| beam/thin_lens | — | — | 44.0 ns | — |
+| bridge/stellar_temperature_to_rgb | 119.0 ns | 107.0 ns | 105.0 ns | -11.8% |
+| doe/dammann_order | — | — | 160.0 ns | — |
+| doe/kogelnik_efficiency | — | — | 275.0 ns | — |
+| doe/kogelnik_reflection | — | — | 209.0 ns | — |
+| doe/multilevel_efficiency | — | — | 158.0 ns | — |
+| fiber/dispersion_smf | — | — | 5.852 µs | — |
+| fiber/lp01_b | — | — | 6.545 µs | — |
+| fiber/material_dispersion | — | — | 130.0 ns | — |
+| fiber/sellmeier_group_index | — | — | 111.0 ns | — |
+| fiber/zero_dispersion_material | — | — | 2.106 µs | — |
+| film/multilayer_rta_3 | — | — | 1.347 µs | — |
+| film/multilayer_rta_gold | — | — | 596.0 ns | — |
+| focus/bessel012_large | — | — | 415.0 ns | — |
+| focus/bessel012_small | — | — | 232.0 ns | — |
+| focus/integrals_far | — | — | 245.833 µs | — |
+| focus/integrals_near | — | — | 19.852 µs | — |
+| focus/linear_field | — | — | 20.020 µs | — |
+| grin/index | — | — | 69.0 ns | — |
+| grin/luneburg_ball | — | — | 35.601 µs | — |
+| grin/selfoc_100_steps | — | — | 35.411 µs | — |
+| lens/airy_disk_radius | — | 10.0 ns | 9.0 ns | — |
+| lens/aperture_from_f_number | — | 6.0 ns | 7.0 ns | — |
+| lens/cardinal_points | — | 50.0 ns | 62.0 ns | — |
+| lens/chromatic_aberration | — | 5.0 ns | 7.0 ns | — |
+| lens/combined_focal_length | — | 9.0 ns | 10.0 ns | — |
+| lens/conjugate_factor | — | 8.0 ns | 10.0 ns | — |
+| lens/depth_of_field | — | 18.0 ns | 16.0 ns | — |
+| lens/diffraction_limit | — | 12.0 ns | 11.0 ns | — |
+| lens/f_number | — | 5.0 ns | 7.0 ns | — |
+| lens/field_of_view | — | 64.0 ns | 69.0 ns | — |
+| lens/field_of_view_diagonal | — | 93.0 ns | 99.0 ns | — |
+| lens/lensmaker_focal_length | — | 13.0 ns | 14.0 ns | — |
+| lens/magnification | — | 5.0 ns | 7.0 ns | — |
+| lens/mirror_focal_length | — | 5.0 ns | 6.0 ns | — |
+| lens/mtf_cutoff_frequency | — | 5.0 ns | 7.0 ns | — |
+| lens/mtf_diffraction_limited | 88.0 ns | 91.0 ns | 92.0 ns | +4.5% |
+| lens/na_from_f_number | — | 5.0 ns | 7.0 ns | — |
+| lens/numerical_aperture | — | 49.0 ns | 32.0 ns | — |
+| lens/optical_power | — | 8.0 ns | 8.0 ns | — |
+| lens/otf_seidel_64 | — | — | 641.368 µs | — |
+| lens/petzval_sum | — | 16.0 ns | 18.0 ns | — |
+| lens/seidel_coefficients | 117.0 ns | 58.0 ns | 59.0 ns | -49.6% |
+| lens/shape_factor | — | 8.0 ns | 9.0 ns | — |
+| pbr/clearcoat_blend | — | 31.0 ns | 32.0 ns | — |
+| pbr/clearcoat_brdf | — | 56.0 ns | 60.0 ns | — |
+| pbr/cook_torrance | 101.0 ns | 74.0 ns | 79.0 ns | -21.8% |
+| pbr/distribution_beckmann | — | 58.0 ns | 61.0 ns | — |
+| pbr/distribution_ggx | 22.0 ns | 16.0 ns | 17.0 ns | -22.7% |
+| pbr/fresnel_schlick | 17.0 ns | 12.0 ns | 12.0 ns | -29.4% |
+| pbr/fresnel_schlick_rgb | — | 22.0 ns | 25.0 ns | — |
+| pbr/geometry_ggx_aniso | — | 26.0 ns | 30.0 ns | — |
+| pbr/geometry_schlick_ggx | — | 18.0 ns | 20.0 ns | — |
+| pbr/geometry_smith | — | 39.0 ns | 41.0 ns | — |
+| pbr/henyey_greenstein | 19.0 ns | 16.0 ns | 18.0 ns | -5.3% |
+| pbr/ior_to_f0 | — | 6.0 ns | 7.0 ns | — |
+| pbr/iridescence_fresnel | 144.0 ns | 109.0 ns | 118.0 ns | -18.1% |
+| pbr/iridescence_rgb | — | 317.0 ns | 350.0 ns | — |
+| pbr/lambert_diffuse | — | 7.0 ns | 7.0 ns | — |
+| pbr/lambert_diffuse_rgb | — | 14.0 ns | 16.0 ns | — |
+| pbr/phase_rayleigh | — | 7.0 ns | 8.0 ns | — |
+| pbr/sample_cosine_pdf | — | 9.0 ns | 10.0 ns | — |
+| pbr/sample_ggx | — | 94.0 ns | 113.0 ns | — |
+| pbr/sample_ggx_pdf | — | 31.0 ns | 34.0 ns | — |
+| pbr/sheen_ashikhmin | — | 13.0 ns | 14.0 ns | — |
+| pbr/sheen_charlie | — | 135.0 ns | 256.0 ns | — |
+| pbr/single_scatter_inscattering | — | 52.0 ns | 56.0 ns | — |
+| pbr/split_sum_scale_bias | — | 96.0 ns | 102.0 ns | — |
+| pbr/subsurface_diffuse | — | 41.0 ns | 45.0 ns | — |
+| pbr/volume_transmittance | — | 37.0 ns | 40.0 ns | — |
+| prt/reflect | — | — | 542.0 ns | — |
+| prt/refract | — | — | 570.0 ns | — |
+| prt/retardance | — | — | 702.0 ns | — |
+| prt/trace_singlet | — | — | 3.523 µs | — |
+| ray/abbe_number | — | 110.0 ns | 120.0 ns | — |
+| ray/beer_lambert | — | 40.0 ns | 43.0 ns | — |
+| ray/brewster_angle | — | 53.0 ns | 58.0 ns | — |
+| ray/cauchy_n_at | — | 7.0 ns | 8.0 ns | — |
+| ray/critical_angle | — | 76.0 ns | 78.0 ns | — |
+| ray/fiber_na | 9.0 ns | 9.0 ns | 9.0 ns | +0.0% |
+| ray/find_system_properties | — | 695.0 ns | 734.0 ns | — |
+| ray/fresnel_amplitudes | — | — | 202.0 ns | — |
+| ray/fresnel_normal | — | 7.0 ns | 8.0 ns | — |
+| ray/fresnel_p | — | 12.0 ns | 13.0 ns | — |
+| ray/fresnel_s | — | 12.0 ns | 13.0 ns | — |
+| ray/fresnel_unpolarized | 108.0 ns | 112.0 ns | 87.0 ns | -19.4% |
+| ray/optical_path_difference | — | — | 1.164 µs | — |
+| ray/optical_path_length | — | 561.0 ns | 601.0 ns | — |
+| ray/prism_angular_spread | — | 312.0 ns | 297.0 ns | — |
+| ray/prism_deviation | — | 119.0 ns | 106.0 ns | — |
+| ray/prism_dispersion | — | 146.0 ns | 139.0 ns | — |
+| ray/reflect_2d | — | 23.0 ns | 31.0 ns | — |
+| ray/reflect_3d | — | 28.0 ns | 35.0 ns | — |
+| ray/refract_3d | — | 49.0 ns | 56.0 ns | — |
+| ray/schott_n_at | — | 24.0 ns | 31.0 ns | — |
+| ray/sellmeier_n_at | 51.0 ns | 32.0 ns | 35.0 ns | -31.4% |
+| ray/snell_3d | — | 83.0 ns | 90.0 ns | — |
+| ray/spot_diagram | — | 14.366 µs | 14.820 µs | — |
+| ray/trace_sequential | — | 444.0 ns | 477.0 ns | — |
+| ray/trace_surface | — | 132.0 ns | 143.0 ns | — |
+| ray/v_number | 9.0 ns | 8.0 ns | 9.0 ns | +0.0% |
+| serialize/prescription_to_json | — | 19.627 µs | 21.412 µs | — |
+| serialize/rgb_to_json | 3.443 µs | 2.191 µs | 2.362 µs | -31.4% |
+| serialize/spd_to_json | — | 64.731 µs | 70.279 µs | — |
+| spectral/cct_from_xy | — | 31.0 ns | 33.0 ns | — |
+| spectral/cie_cmf_at | — | 61.0 ns | 63.0 ns | — |
+| spectral/color_rendering_index | — | 271.192 µs | 291.493 µs | — |
+| spectral/cri_special | — | 245.454 µs | 262.007 µs | — |
+| spectral/frequency_to_wavelength | — | 8.0 ns | 7.0 ns | — |
+| spectral/linear_srgb_to_xyz | — | 53.0 ns | 59.0 ns | — |
+| spectral/linear_to_srgb_gamma | — | 118.0 ns | 213.0 ns | — |
+| spectral/luminous_flux | — | 2.453 µs | 2.730 µs | — |
+| spectral/photon_energy | — | 16.0 ns | 17.0 ns | — |
+| spectral/photon_energy_ev | — | 25.0 ns | 27.0 ns | — |
+| spectral/planck_radiance | 80.0 ns | 107.0 ns | 114.0 ns | +42.5% |
+| spectral/rgb_luminance | — | 17.0 ns | 18.0 ns | — |
+| spectral/rgb_to_u8 | — | 68.0 ns | 75.0 ns | — |
+| spectral/spd_at | 43.0 ns | 30.0 ns | 33.0 ns | -23.3% |
+| spectral/spd_blackbody | — | 9.017 µs | 9.649 µs | — |
+| spectral/spd_to_srgb | — | 1.840 µs | 2.273 µs | — |
+| spectral/spd_to_xyz | — | 1.378 µs | 1.487 µs | — |
+| spectral/wavelength_to_frequency | — | 11.0 ns | 12.0 ns | — |
+| spectral/wavelength_to_rgb | 89.0 ns | 41.0 ns | 40.0 ns | -55.1% |
+| spectral/wien_peak | — | 8.0 ns | 9.0 ns | — |
+| spectral/xyz_to_linear_srgb | — | 53.0 ns | 59.0 ns | — |
+| spectral/xyz_to_srgb | — | 436.0 ns | 799.0 ns | — |
+| spectral/xyz_to_xyy | — | 24.0 ns | 27.0 ns | — |
+| wave/airy_pattern | 217.0 ns | 194.0 ns | 197.0 ns | -9.2% |
+| wave/bessel_j1 | 61.0 ns | 47.0 ns | 57.0 ns | -6.6% |
+| wave/coating_reflectance | 103.0 ns | 102.0 ns | 111.0 ns | +7.8% |
+| wave/coherence_length | — | 6.0 ns | 7.0 ns | — |
+| wave/coherence_time | — | 9.0 ns | 10.0 ns | — |
+| wave/diffraction_pattern_2d_8x8 | 15.888 µs | 13.309 µs | 14.924 µs | -6.1% |
+| wave/double_slit_intensity | — | 147.0 ns | 140.0 ns | — |
+| wave/fabry_perot_etalon | — | — | 82.0 ns | — |
+| wave/fabry_perot_long_cavity | — | — | 63.0 ns | — |
+| wave/fraunhofer_rect | — | 226.0 ns | 192.0 ns | — |
+| wave/fresnel_edge_intensity | — | 136.0 ns | 151.0 ns | — |
+| wave/fresnel_integral_c | 157.0 ns | 122.0 ns | 139.0 ns | -11.5% |
+| wave/fresnel_integral_s | — | 116.0 ns | 140.0 ns | — |
+| wave/interference_pattern_16x16 | — | 88.728 µs | 98.420 µs | — |
+| wave/is_constructive | — | 14.0 ns | 14.0 ns | — |
+| wave/is_destructive | — | 15.0 ns | 15.0 ns | — |
+| wave/malus_law | 46.0 ns | 47.0 ns | 38.0 ns | -17.4% |
+| wave/mueller_apply | — | 140.0 ns | 139.0 ns | — |
+| wave/mueller_multiply | — | 825.0 ns | 872.0 ns | — |
+| wave/mueller_polarizer | — | 124.0 ns | 133.0 ns | — |
+| wave/mueller_retarder | — | 126.0 ns | 154.0 ns | — |
+| wave/multilayer_rt | — | 851.0 ns | 920.0 ns | — |
+| wave/path_to_phase | — | 6.0 ns | 7.0 ns | — |
+| wave/pattern2d_normalized_64x64 | — | 11.158 µs | 11.730 µs | — |
+| wave/polarization_intensity | — | 7.0 ns | 9.0 ns | — |
+| wave/polarization_through_polarizer | — | 98.0 ns | 94.0 ns | — |
+| wave/single_slit_intensity | 121.0 ns | 108.0 ns | 94.0 ns | -22.3% |
+| wave/thin_film_reflectance | — | 52.0 ns | 58.0 ns | — |
+| wave/zernike_poly | 110.0 ns | 96.0 ns | 105.0 ns | -4.5% |

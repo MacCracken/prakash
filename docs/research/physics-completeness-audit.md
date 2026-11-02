@@ -36,6 +36,9 @@
 >   does.
 >
 > **Formerly open, now all shipped:**
+> - the Richards-Wolf vectorial focusing §14 recommends — **2.13.0**,
+>   `src/wave_focus.cyr`: linear, elliptical, radial and azimuthal input, uniform,
+>   Gaussian, doughnut or `GaussianBeam` pupils, reducing to the Airy pattern at low NA;
 > - the 3×3 polarization ray-tracing matrix §13 recommends — **2.12.0**,
 >   `src/ray_prt.cyr`. Until then what §13 called implemented
 >   (`trace_sequential_polarized`) tracked scalar s/p Fresnel transmittance from the

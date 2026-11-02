@@ -1,0 +1,1091 @@
+# wave_focus test suite — vectorial focusing by an aplanatic lens (Richards-Wolf).
+#
+# References, none of them this code:
+# - The six integrals in 60-digit arithmetic: Bessel functions from their power series, and
+#   tanh-sinh quadrature directly in theta, where the library substitutes theta = theta_top -
+#   psi^2 and uses Gauss-Legendre. Every input is the exact value of the double passed here.
+# - The field formulas, against a brute-force sum over the plane waves leaving the lens, each
+#   field vector turned by the lens ray by ray, with no Bessel function and no closed phi
+#   integral: x, y, radial, azimuthal and a curved pupil agree to 1e-14 (numpy).
+# - Bessel functions: the power series in 50 digits below 50, Hankel's integral above.
+# - Closed forms: I00(0, 0) for a uniform pupil, Fraunhofer's peak A/(lambda f) and its phase
+#   -i, the Airy pattern and the on-axis sinc^2 at low NA, the paraxial Gaussian beam through
+#   the focus (overall phase and Gouy shift included), Parseval's theorem for the power in the
+#   focal plane, and the lens equation for where a curved beam focuses.
+# - Maxwell: div E = 0, by finite differences, which no formula in the header can satisfy by
+#   construction. A wrong sign on E_z, made in the header and the code alike, breaks it.
+# - Literature: Dorn, Quabis & Leuchs, arXiv:physics/0310007 (2003), half-maximum spot areas
+#   at NA 0.9: 0.31 lambda^2 for uniformly lit linear polarization, 0.2 lambda^2 for the axial
+#   field of radial polarization.
+# - wave_airy's airy_pattern, which names the low-NA limit.
+
+include "src/error.cyr"
+include "src/ray_core.cyr"
+include "src/ray_fresnel.cyr"
+include "src/ray_trace.cyr"
+include "src/ray_prt.cyr"
+include "src/ray_dispersion.cyr"
+include "src/ray_fiber.cyr"
+include "src/wave_core.cyr"
+include "src/wave_airy.cyr"
+include "src/wave_zernike.cyr"
+include "src/lens.cyr"
+include "src/wave_beam.cyr"
+include "src/wave_focus.cyr"
+
+fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _near(a, b, tol) { return f64_le(f64_abs(f64_sub(a, b)), tol); }
+fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
+fn _is_nan(x) { return (x & 0x7FFFFFFFFFFFFFFF) > 0x7FF0000000000000; }
+fn _sq(x) { return f64_mul(x, x); }
+
+var Z = f64_from(0);
+var ONE = F64_ONE;
+var TOL15 = _fd(1, 1000000000000000);   # 1e-15
+var TOL14 = _fd(1, 100000000000000);    # 1e-14
+var TOL13 = _fd(1, 10000000000000);     # 1e-13
+var err = 0;
+var IB[96];
+var BJ[24];
+var EF = 0;
+
+alloc_init();
+EF = prt_field_new(0, 0, 0, 0, 0, 0);
+assert(EF != 0, "prt_field_new");
+
+# Every NaN in a buffer: 1 if all n f64 at p are NaN.
+fn _all_nan(p, n) {
+    var bad = 0;
+    for (var i = 0; i < n; i = i + 1) {
+        if (_is_nan(load64(p + i * 8)) == 0) { bad = bad + 1; }
+    }
+    if (bad == 0) { return 1; }
+    return 0;
+}
+
+# ── Bessel functions ────────
+test_group("focus bessel");
+
+# J0, J1, J2 against the 50-digit references, absolute. ~6e-16 is the Chebyshev sums' rounding.
+# 6e-16: the module's stated bound. The first cut's Chebyshev J0 was 1.2e-15 out below 2, at
+# the first four points here; a 2500-point sweep below 8 now peaks at 5.4e-16.
+var TOLB = _fd(6, 10000000000000000);   # 6e-16
+fn _bj(x, j0, j1, j2, msg) {
+    _focus_bessel012(x, &BJ);
+    _assert_near(load64(&BJ), j0, TOLB, msg);
+    _assert_near(load64(&BJ + 8), j1, TOLB, msg);
+    _assert_near(load64(&BJ + 16), j2, TOLB, msg);
+    return 0;
+}
+_bj(0x3FC13B5393250B53, 0x3FEFDAECE6C12949, 0x3FB131572B524F05, 0x3F6287C1C138394B, "x = 0.13462300000000002");
+_bj(0x3FE00A859BE36688, 0x3FEE056478BB56F9, 0x3FCF15C0BD38FEA7, 0x3F9F7F101EDBBF32, "x = 0.5012844128315956");
+_bj(0x3FF0321224DD4A58, 0x3FE8503BDADA352C, 0x3FDC6A82DF4E7790, 0x3FBE1366FC0E8AC7, "x = 1.0122243347183453");
+_bj(0x3FF16FFCD9ABAE04, 0x3FE72E35E3881DCE, 0x3FDDF2728DD17CC9, 0x3FC1310571599FA1, "x = 1.0898407461889983");
+_bj(0x3E2FC862D3E17360, 0x3FF0000000000000, 0x3E1FC862D3E17360, 0x3C3F91264F0E88EC, "x = 3.7e-09");
+_bj(0x3F3ADEA897635E74, 0x3FEFFFFFE97020C7, 0x3F2ADEA88DEA6D47, 0x3E568FDF3760C157, "x = 0.00041");
+_bj(0x3FD7AE147AE147AE, 0x3FEEEA04C479D484, 0x3FC746EEC5D72BE5, 0x3F9152FB058CD9B9, "x = 0.37");
+_bj(0x3FF2147AE147AE14, 0x3FE6925A4DC2F55A, 0x3FDEAFFC615B2106, 0x3FC2576375665279, "x = 1.13");
+_bj(0x3FFFFFFFFFFFFFFF, 0x3FCCA873FB24CEFC, 0x3FE27487958371F0, 0x3FD694D52D747C63, "x = 1.9999999999999998");
+_bj(0x4000000000000000, 0x3FCCA873FB24CEF8, 0x3FE27487958371F0, 0x3FD694D52D747C64, "x = 2.0");
+_bj(0x4000000000000001, 0x3FCCA873FB24CEEF, 0x3FE27487958371F0, 0x3FD694D52D747C66, "x = 2.0000000000000004");
+_bj(0x40033D152E971B40, 0xBC919B7921F03C8E, 0x3FE09CDB36551280, 0x3FDBA1DEEA029494, "x = 2.404825557695773");
+_bj(0x4008E147AE147AE1, 0xBFD2E22A803CEA50, 0x3FD3026B326BB2F0, 0x3FDF1BB21CF56A8E, "x = 3.11");
+_bj(0x4016147AE147AE14, 0xBEFBDE93A4A69C0A, 0xBFD5C6FA3ADE75C6, 0xBFBF8DEF860F8916, "x = 5.52");
+_bj(0x401FFFFFFFFFFFFF, 0x3FC5F8A7557E702D, 0x3FCE08905618617E, 0xBFBCED067FF0AF9A, "x = 7.999999999999999");
+_bj(0x4020000000000000, 0x3FC5F8A7557E7025, 0x3FCE089056186183, 0xBFBCED067FF0AF89, "x = 8.0");
+_bj(0x4020000000000001, 0x3FC5F8A7557E7016, 0x3FCE08905618618C, 0xBFBCED067FF0AF67, "x = 8.000000000000002");
+_bj(0x4023DC28F5C28F5C, 0xBFCF030E4895D710, 0x3FAF32C84376D153, 0x3FD04A9AE0E64622, "x = 9.93");
+_bj(0x402B666666666666, 0x3FCA0323E70327E8, 0x3FB442B343D1EBA7, 0xBFC8888C8A3CB58A, "x = 13.7");
+_bj(0x403819999999999A, 0xBFA4C9FD0316FDCE, 0xBFC440FEC9FEBD04, 0x3F9C21A7F92BA23D, "x = 24.1");
+_bj(0x404CA66666666666, 0x3FBAF72D814CCE6E, 0xBF67C369B6F91FB8, 0xBFBAFDD0307768E1, "x = 57.3");
+_bj(0x4060B66666666666, 0x3FA410DC5DD17063, 0x3FAD27628E0B3E82, 0xBFA3A13790BB405A, "x = 133.7");
+_bj(0x408C79999999999A, 0x3F9596F5E272B278, 0xBF904FFFF9CB6215, 0xBF95A0205D271013, "x = 911.2");
+_bj(0x40B0004CCCCCCCCD, 0x3F7624CAB8BC48EE, 0xBF870120B427CFA5, 0xBF762A8AE54EE355, "x = 4096.3");
+_bj(0x40C770599999999A, 0x3F70E1744B8DFED1, 0xBF7898D8838F4D38, 0xBF70E280F1E3DD25, "x = 12000.7");
+_focus_bessel012(Z, &BJ);
+_assert_near(load64(&BJ), ONE, 0x3CB0000000000000, "J0(0) = 1 to an ulp");
+assert_eq(load64(&BJ + 8), Z, "J1(0) = 0");
+assert_eq(load64(&BJ + 16), Z, "J2(0) = 0");
+# Small arguments keep their RELATIVE accuracy: J1 ~ x/2, J2 ~ x^2/8, to the next term.
+var bs_x = 0x3E2FC862D3E17360;           # 3.7e-9
+_focus_bessel012(bs_x, &BJ);
+_assert_near(f64_div(load64(&BJ + 8), f64_mul(bs_x, F64_HALF)), ONE, TOL15, "J1(3.7e-9) = x/2 relatively");
+_assert_near(f64_div(load64(&BJ + 16), f64_div(_sq(bs_x), f64_from(8))), ONE, TOL15, "J2(3.7e-9) = x^2/8 relatively");
+# J2 = 2 J1/x - J0 cancels at small x, so below 2 it is its own series. Near 0.37 the
+# recurrence leaves up to 1.4e-14 relative even from correctly rounded J0 and J1.
+_focus_bessel012(_fd(37, 100), &BJ);
+_assert_near(f64_div(load64(&BJ + 16), 0x3F9152FB058CD9B9), ONE, f64_mul(f64_from(2), TOL15), "J2(0.37) relatively");
+
+# ── Refusals ────────
+test_group("focus refusals");
+
+var U = FOCUS_PUPIL_UNIFORM;
+var GA = FOCUS_PUPIL_GAUSSIAN;
+var LAM = _fd(55, 100000000);            # 0.55 um
+var FL = _fd(3, 1000);                   # 3 mm
+var NAN = 0x7FF8000000000000;
+var INF = 0x7FF0000000000000;
+fn _refused(na, n1, n2, lambda0, f, pupil, fill, msg) {
+    var l = focus_new(na, n1, n2, lambda0, f, pupil, fill, &err);
+    assert(l == 0, msg);
+    assert_eq(err, PK_ERR_INVALID_PARAMETER, msg);
+    return 0;
+}
+var NA9 = _fd(9, 10);
+var _r = _refused(Z, ONE, ONE, LAM, FL, U, 0, "NA 0");
+_r = _refused(f64_neg(NA9), ONE, ONE, LAM, FL, U, 0, "NA < 0");
+_r = _refused(0x3FF0000000000001, ONE, ONE, LAM, FL, U, 0, "NA one ulp past n2");
+_r = _refused(NAN, ONE, ONE, LAM, FL, U, 0, "NA NaN");
+_r = _refused(NA9, Z, ONE, LAM, FL, U, 0, "n1 0");
+_r = _refused(NA9, ONE, INF, LAM, FL, U, 0, "n2 inf");
+_r = _refused(NA9, ONE, ONE, Z, FL, U, 0, "lambda0 0");
+_r = _refused(NA9, ONE, ONE, LAM, f64_neg(FL), U, 0, "f < 0");
+_r = _refused(NA9, ONE, ONE, LAM, FL, 3, FL, "pupil 3");
+_r = _refused(NA9, ONE, ONE, LAM, FL, 0 - 1, FL, "pupil -1");
+_r = _refused(NA9, ONE, ONE, LAM, FL, GA, 0, "Gaussian of radius 0");
+_r = _refused(NA9, ONE, ONE, LAM, FL, FOCUS_PUPIL_DOUGHNUT, NAN, "doughnut of radius NaN");
+_r = _refused(NA9, ONE, ONE, LAM, FL, GA, 0x0000000000000001, "f/w overflows");
+var E300 = 0x7E37E43C8800759C;          # 1e300
+_r = _refused(0x0000000000000001, ONE, E300, E300, FL, U, 0, "NA/n2 underflows to 0");
+_r = _refused(NA9, ONE, 0x7FEFFFFFFFFFFFFF, 0x0010000000000000, FL, U, 0, "n2/lambda0 overflows");
+# A uniform pupil does not read fill, so nothing there can refuse it.
+var lu = focus_new(NA9, ONE, ONE, LAM, FL, U, NAN, &err);
+assert_eq(err, PK_ERR_NONE, "a uniform pupil ignores fill");
+assert(lu != 0, "and is made");
+assert_eq(FocusLens_fill(lu), Z, "its fill reads 0");
+# NA = n2 is a 90-degree half-angle, and allowed.
+var l90 = focus_new(_fd(133, 100), ONE, _fd(133, 100), LAM, FL, U, 0, &err);
+assert_eq(err, PK_ERR_NONE, "NA = n2");
+assert_eq(FocusLens_s_top(l90), ONE, "sin(alpha) = 1 exactly");
+
+# focus_integrals and the fields: refused points write NaN, never a number.
+assert_eq(focus_integrals(lu, f64_neg(LAM), Z, &IB), PK_ERR_INVALID_PARAMETER, "rho < 0");
+assert(_all_nan(&IB, 12), "and the integrals are NaN");
+assert_eq(focus_integrals(lu, INF, Z, &IB), PK_ERR_INVALID_PARAMETER, "rho inf");
+assert_eq(focus_integrals(lu, NAN, Z, &IB), PK_ERR_INVALID_PARAMETER, "rho NaN");
+assert_eq(focus_integrals(lu, LAM, NAN, &IB), PK_ERR_INVALID_PARAMETER, "z NaN");
+assert_eq(focus_integrals(lu, LAM, f64_neg(INF), &IB), PK_ERR_INVALID_PARAMETER, "z -inf");
+assert_eq(focus_integrals(0, LAM, Z, &IB), PK_ERR_INVALID_PARAMETER, "null lens");
+assert(_all_nan(&IB, 12), "and the integrals are NaN");
+assert_eq(focus_integrals(lu, LAM, Z, 0), PK_ERR_INVALID_PARAMETER, "null out");
+assert_eq(focus_integrals(lu, 0x8000000000000000, Z, &IB), PK_ERR_NONE, "rho = -0 is the axis");
+assert_eq(focus_linear(lu, LAM, NAN, Z, EF), PK_ERR_INVALID_PARAMETER, "phi NaN");
+assert(_all_nan(EF, 6), "and the field is NaN");
+assert_eq(focus_jones(lu, ONE, INF, Z, Z, LAM, Z, Z, EF), PK_ERR_INVALID_PARAMETER, "a Jones component inf");
+assert_eq(focus_radial(lu, f64_neg(LAM), Z, Z, EF), PK_ERR_INVALID_PARAMETER, "radial, rho < 0");
+assert(_all_nan(EF, 6), "and the field is NaN");
+assert_eq(focus_azimuthal(lu, LAM, INF, Z, EF), PK_ERR_INVALID_PARAMETER, "azimuthal, phi inf");
+assert_eq(focus_radial(lu, LAM, Z, Z, 0), PK_ERR_INVALID_PARAMETER, "null field");
+assert(_is_nan(focus_intensity(0)), "the intensity of a null field is NaN");
+
+# The panel cap. At NA 0.9 in air the integrand turns through 2 asin(0.9) k rho, 12 rad a
+# panel and 2048 panels, so the edge is at rho = 1744.8 wavelengths.
+var lc = focus_new(NA9, ONE, ONE, LAM, FL, U, 0, &err);
+assert_eq(focus_integrals(lc, f64_mul(f64_from(1740), LAM), Z, &IB), PK_ERR_NONE, "1740 wavelengths off axis");
+assert_eq(focus_integrals(lc, f64_mul(f64_from(1750), LAM), Z, &IB), PK_ERR_INVALID_PARAMETER, "1750 refused");
+assert(_all_nan(&IB, 12), "and NaN");
+# Along the axis it is 2 asin(0.9) 0.9 k z: 1938.7 wavelengths.
+assert_eq(focus_integrals(lc, Z, f64_mul(f64_from(1930), LAM), &IB), PK_ERR_NONE, "z 1930 wavelengths");
+assert_eq(focus_integrals(lc, Z, f64_mul(f64_from(0 - 1945), LAM), &IB), PK_ERR_INVALID_PARAMETER, "z -1945 refused");
+# Past 2^52 wavelengths a double does not resolve the phase k z. A focal length of 2^54
+# wavelengths and a Gaussian cut to a 1e-8 rad cone need almost no panels there, so this is the
+# guard that refuses it.
+var lt_f = f64_mul(0x4350000000000000, LAM);
+var lt = focus_new(NA9, ONE, ONE, LAM, lt_f, GA, f64_div(lt_f, f64_from(700000000)), &err);
+assert_eq(err, PK_ERR_NONE, "a 1e-8 rad Gaussian cone");
+assert_eq(focus_integrals(lt, Z, f64_mul(0x4320000000000000, LAM), &IB), PK_ERR_NONE, "2^51 wavelengths");
+assert_eq(focus_integrals(lt, Z, f64_mul(0x4340000000000000, LAM), &IB), PK_ERR_INVALID_PARAMETER, "2^53 refused");
+# A point at |z| >= f is at or behind the lens, and one at rho >= f is as far off the axis as
+# the lens is from the focus: no field there is this one. f = 100 wavelengths and a 0.01 rad
+# cone keep the panel count small, so this is that guard and not the cap.
+var ld_f = f64_mul(f64_from(100), LAM);
+var ld = focus_new(NA9, ONE, ONE, LAM, ld_f, GA, f64_div(ld_f, f64_from(700)), &err);
+assert_eq(err, PK_ERR_NONE, "a short lens");
+assert_eq(focus_integrals(ld, Z, f64_mul(_fd(99, 100), ld_f), &IB), PK_ERR_NONE, "z = 0.99 f");
+assert_eq(focus_integrals(ld, Z, f64_mul(_fd(0 - 99, 100), ld_f), &IB), PK_ERR_NONE, "z = -0.99 f");
+assert_eq(focus_integrals(ld, Z, f64_neg(ld_f), &IB), PK_ERR_INVALID_PARAMETER, "z = -f, the lens, refused");
+assert(_all_nan(&IB, 12), "and NaN");
+assert_eq(focus_integrals(ld, Z, f64_mul(_fd(0 - 3, 2), ld_f), &IB), PK_ERR_INVALID_PARAMETER,
+  "behind the lens refused");
+assert_eq(focus_integrals(ld, Z, ld_f, &IB), PK_ERR_INVALID_PARAMETER, "z = f refused");
+assert_eq(focus_integrals(ld, f64_mul(_fd(99, 100), ld_f), Z, &IB), PK_ERR_NONE, "rho = 0.99 f");
+assert_eq(focus_integrals(ld, ld_f, Z, &IB), PK_ERR_INVALID_PARAMETER, "rho = f refused");
+# An azimuth of 2^63 or more has no resolved sine; the field was NaN with PK_ERR_NONE.
+assert_eq(focus_linear(lu, LAM, 0x43D0000000000000, Z, EF), PK_ERR_NONE, "phi = 2^62");
+assert_eq(focus_linear(lu, LAM, 0x43E0000000000000, Z, EF), PK_ERR_INVALID_PARAMETER, "phi = 2^63 refused");
+assert_eq(focus_radial(lu, LAM, f64_neg(0x43E0000000000000), Z, EF), PK_ERR_INVALID_PARAMETER, "radial, phi = -2^63");
+assert(_all_nan(EF, 6), "and NaN, all six, where E_z was a number");
+assert_eq(focus_azimuthal(lu, LAM, 0x43E0000000000000, Z, EF), PK_ERR_INVALID_PARAMETER, "azimuthal, phi = 2^63");
+# The floors. Below 2^-200 the integrands' fifth powers of sin(theta) underflow: NA 1e-200
+# gave a field of exactly 0 where pi f NA^2/lambda was 3e-100.
+_r = _refused(0x3360000000000000, ONE, ONE, LAM, FL, U, 0, "NA/n2 = 2^-201");
+_r = _refused(NA9, ONE, ONE, LAM, FL, GA, f64_mul(FL, 0x32D0000000000000), "a Gaussian cut below 2^-200");
+_r = _refused(NA9, ONE, ONE, LAM, 0x01A56E1FC2F8F359, U, 0, "A = pi f/lambda under 2^-200 (f = 1e-300)");
+var lf_s = 0x3380000000000000;          # NA = 2^-199, just over
+var lfl = focus_new(lf_s, ONE, ONE, LAM, FL, U, 0, &err);
+assert_eq(err, PK_ERR_NONE, "NA = 2^-199");
+assert_eq(focus_linear(lfl, Z, Z, Z, EF), PK_ERR_NONE, "its field");
+_assert_near(f64_div(f64_neg(PrtField_x_im(EF)), f64_mul(FocusLens_pref(lfl), _sq(lf_s))), ONE, TOL14,
+  "is -i A NA^2, every digit there");
+# A field that overflows is refused, not handed back: 2A from an A near 1e308 was inf and NaN.
+var lo = focus_new(NA9, ONE, ONE, ONE, 0x7FD0000000000000, U, 0, &err);       # f = 2^1022
+assert_eq(err, PK_ERR_NONE, "A = 1.4e308 is a double");
+assert_eq(focus_radial(lo, Z, Z, Z, EF), PK_ERR_INVALID_PARAMETER, "but 2A is not");
+assert(_all_nan(EF, 6), "and the field is NaN");
+var DMAX = 0x7FEFFFFFFFFFFFFF;
+assert_eq(focus_jones(lu, DMAX, Z, DMAX, Z, LAM, _fd(3, 10), Z, EF), PK_ERR_INVALID_PARAMETER, "Jones (1e308, 1e308)");
+assert(_all_nan(EF, 6), "and NaN");
+
+# focus_from_beam.
+var bm0 = gaussian_beam_new(_fd(2, 10000), _fd(5, 10000000), &err);
+var lfb = focus_from_beam(0, NA9, ONE, ONE, FL, GA, &err);
+assert(lfb == 0, "null beam");
+assert_eq(err, PK_ERR_INVALID_PARAMETER, "null beam refused");
+lfb = focus_from_beam(bm0, NA9, ONE, ONE, FL, U, &err);
+assert_eq(err, PK_ERR_INVALID_PARAMETER, "a beam is not a uniform pupil");
+lfb = focus_from_beam(bm0, _fd(14, 10), ONE, ONE, FL, GA, &err);
+assert_eq(err, PK_ERR_INVALID_PARAMETER, "focus_new's refusals hold");
+lfb = focus_from_beam(bm0, NA9, _fd(3, 2), ONE, FL, FOCUS_PUPIL_DOUGHNUT, &err);
+assert_eq(err, PK_ERR_NONE, "a beam at its waist");
+assert_eq(FocusLens_fill(lfb), beam_radius(bm0), "w is the beam's radius");
+assert_eq(FocusLens_lambda0(lfb), f64_mul(_fd(5, 10000000), _fd(3, 2)), "lambda0 is n1 times the beam's wavelength");
+assert_eq(FocusLens_qc(lfb), Z, "a waist has a flat wavefront");
+assert_eq(FocusLens_pupil(lfb), FOCUS_PUPIL_DOUGHNUT, "and keeps its pupil");
+# The pupil phase f^2/(2 R lambda_b) cycles, where f^2 alone underflows: f = 1e-170 with
+# lambda_b = 1e-200 and q = (1 + i) 1e-180 is 2.5e39 cycles, and the first cut said 0.
+var bmu = gaussian_beam_from_q(0x1A90991A9BFA58C8, 0x1A90991A9BFA58C8, 0x16687E92154EF7AC, &err);
+assert_eq(err, PK_ERR_NONE, "a beam of 1e-180 m");
+var fu = 0x1CA3529BA7D19EAF;              # 1e-170
+lfb = focus_from_beam(bmu, NA9, ONE, ONE, fu, GA, &err);
+assert_eq(err, PK_ERR_NONE, "focus_from_beam");
+var qu = f64_div(f64_mul(fu, f64_mul(fu, beam_curvature(bmu))), f64_add(0x16687E92154EF7AC, 0x16687E92154EF7AC));
+_assert_near(f64_div(FocusLens_qc(lfb), qu), ONE, TOL14, "qc = f^2/(2 R lambda_b), not 0");
+
+# ── The integrals ────────
+test_group("focus integrals");
+
+# Pins from the 60-digit route, each to TOLI of the lens's |I00(0, 0)|, plus what the input
+# the phase k z = 2 pi n2 z/lambda0 allows: formed in doubles it carries the two roundings of
+# n2/lambda0 and its product with z, up to 1.4e-15 rad per wavelength of z, and that error is
+# common to every node, so nothing averages it away. Measured: 1.25e-15 and 3.8e-16 per
+# wavelength, against the module's stated 1.3e-15 and 4e-16.
+var TOLI = f64_mul(f64_from(2), TOL15);
+var TOLZ = TOL15;                        # per wavelength
+var AT_Z = Z;                            # |n2 z/lambda0| at the last point
+fn _at(l, rho, z) {
+    assert_eq(focus_integrals(l, rho, z, &IB), PK_ERR_NONE, "focus_integrals");
+    AT_Z = f64_abs(f64_mul(FocusLens_cyc(l), z));
+    return 0;
+}
+fn _pin(i, re, im, s, msg) {
+    var t = f64_mul(f64_add(TOLI, f64_mul(TOLZ, AT_Z)), s);
+    _assert_near(load64(&IB + i * 16), re, t, msg);
+    _assert_near(load64(&IB + i * 16 + 8), im, t, msg);
+    return 0;
+}
+var LA = focus_new(0x3FECCCCCCCCCCCCD, 0x3FF0000000000000, 0x3FF0000000000000, 0x3EA53BB5EA8666CF, 0x3F661E4F765FD8AE,
+  FOCUS_PUPIL_UNIFORM,
+  0, &err);    # NA 0.9, n 1.0 -> 1.0, 6.328e-07 m, f 0.0027 m, w None
+assert_eq(err, PK_ERR_NONE, "LA");
+var LB = focus_new(0x3FF4CCCCCCCCCCCD, 0x3FF0000000000000, 0x3FF849BA5E353F7D, 0x3EA05FE359450486, 0x3F5D7DBF487FCB92,
+  FOCUS_PUPIL_GAUSSIAN,
+  0x3F554C985F06F694, &err);    # NA 1.3, n 1.0 -> 1.518, 4.88e-07 m, f 0.0018 m, w 0.0013
+assert_eq(err, PK_ERR_NONE, "LB");
+var LC = focus_new(0x3FF547AE147AE148, 0x3FF0000000000000, 0x3FF547AE147AE148, 0x3EA1D9D85F385AF7, 0x3F69652BD3C36113,
+  FOCUS_PUPIL_DOUGHNUT,
+  0x3F6205BC01A36E2F, &err);    # NA 1.33, n 1.0 -> 1.33, 5.32e-07 m, f 0.0031 m, w 0.0022
+assert_eq(err, PK_ERR_NONE, "LC");
+# w0 0.00037, 8e-07 m, 0.21 m on
+var BLD = gaussian_beam_from_q(0x3FCAE147AE147AE1, 0x3FE1340F7DA5F66B, 0x3EAAD7F29ABCAF48, &err);
+assert_eq(err, PK_ERR_NONE, "LD's beam");
+var LD = focus_from_beam(BLD, 0x3FEE666666666666, 0x3FF0000000000000, 0x3FF0000000000000, 0x3F719CE075F6FD22,
+  FOCUS_PUPIL_GAUSSIAN, &err);
+assert_eq(err, PK_ERR_NONE, "LD");
+var LE = focus_new(0x3FEE666666666666, 0x3FF0000000000000, 0x3FF0000000000000, 0x3EA53BB5EA8666CF, 0x3F60624DD2F1A9FC,
+  FOCUS_PUPIL_GAUSSIAN,
+  0x3F23A92A30553261, &err);    # NA 0.95, n 1.0 -> 1.0, 6.328e-07 m, f 0.002 m, w 0.00015
+assert_eq(err, PK_ERR_NONE, "LE");
+var LF = focus_new(0x3FEFFFFDE7210BE9, 0x3FF0000000000000, 0x3FF0000000000000, 0x3EA53BB5EA8666CF, 0x3F661E4F765FD8AE,
+  FOCUS_PUPIL_UNIFORM,
+  0, &err);    # NA 0.999999, n 1.0 -> 1.0, 6.328e-07 m, f 0.0027 m, w None
+assert_eq(err, PK_ERR_NONE, "LF");
+var LG = focus_new(0x3FA999999999999A, 0x3FF547AE147AE148, 0x3FF0000000000000, 0x3EA53BB5EA8666CF, 0x3F747AE147AE147B,
+  FOCUS_PUPIL_UNIFORM,
+  0, &err);    # NA 0.05, n 1.33 -> 1.0, 6.328e-07 m, f 0.005 m, w None
+assert_eq(err, PK_ERR_NONE, "LG");
+var LI = focus_new(0x3FF0000000000000, 0x3FF0000000000000, 0x3FF0000000000000, 0x3EA0C6F7A0B5ED8D, 0x3F60624DD2F1A9FC,
+  FOCUS_PUPIL_DOUGHNUT,
+  0x3F35D867C3ECE2A5, &err);    # NA 1.0, n 1.0 -> 1.0, 5e-07 m, f 0.002 m, w 0.0003333333333333333
+assert_eq(err, PK_ERR_NONE, "LI");
+var LJ = focus_new(0x3FF849BA5E353F7D, 0x3FF0000000000000, 0x3FF849BA5E353F7D, 0x3EA05FE359450486, 0x3F5D7DBF487FCB92,
+  FOCUS_PUPIL_GAUSSIAN,
+  0x3F3D7DBF487FCB92, &err);    # NA 1.518, n 1.0 -> 1.518, 4.88e-07 m, f 0.0018 m, w 0.00045
+assert_eq(err, PK_ERR_NONE, "LJ");
+# LA: |I00(0, 0)| with no pupil phase = 0.82463461645265224
+var S_LA = 0x3FEA6368229A0961;
+_at(LA, 0x0000000000000000, 0x0000000000000000);    # rho 0 lambda0, z 0 lambda0
+_pin(0, 0x3FEA6368229A0961, 0x0000000000000000, S_LA, "LA I00 (0, 0)");
+_pin(1, 0x0000000000000000, 0x0000000000000000, S_LA, "LA I01 (0, 0)");
+_pin(2, 0x0000000000000000, 0x0000000000000000, S_LA, "LA I02 (0, 0)");
+_pin(3, 0x0000000000000000, 0x0000000000000000, S_LA, "LA Irho (0, 0)");
+_pin(4, 0x3FD2E8EB69C8FC31, 0x0000000000000000, S_LA, "LA Iz (0, 0)");
+_pin(5, 0x0000000000000000, 0x0000000000000000, S_LA, "LA Iphi (0, 0)");
+_at(LA, 0x3E88A16C9F68B4B2, 0x3E76152397BEFA48);    # rho 0.29 lambda0, z 0.13 lambda0
+_pin(0, 0x3FDD26B7C45E1994, 0x3FD5EA417CEC3C1A, S_LA, "LA I00 (0.29, 0.13)");
+_pin(1, 0x3FC0025142D767A7, 0x3FB32EA3A4B27645, S_LA, "LA I01 (0.29, 0.13)");
+_pin(2, 0x3F966D9BA3A1CC11, 0x3F87ECCD8AED9FD8, S_LA, "LA I02 (0.29, 0.13)");
+_pin(3, 0x3FBFD452981E14C2, 0x3FB5A856F0603726, S_LA, "LA Irho (0.29, 0.13)");
+_pin(4, 0x3FC396CA278508D7, 0x3FBA0E4E0A5D84B9, S_LA, "LA Iz (0.29, 0.13)");
+_pin(5, 0x3FC72D410E7B2A62, 0x3FBDC2211BCA85FC, S_LA, "LA Iphi (0.29, 0.13)");
+_at(LA, 0x3EAD16EC6CD1BAEE, 0xBE9E26B585587344);    # rho 1.37 lambda0, z -0.71 lambda0
+_pin(0, 0xBF9CD89BCCCCBE0F, 0xBFB1AA1FE58B59BF, S_LA, "LA I00 (1.37, -0.71)");
+_pin(1, 0x3F99FFB407305A86, 0xBF7CADFA92F487AD, S_LA, "LA I01 (1.37, -0.71)");
+_pin(2, 0x3F92BAA6B0CADACE, 0x3F8EE3848AEF3225, S_LA, "LA I02 (1.37, -0.71)");
+_pin(3, 0x3F983E1A18B208D6, 0x3F8F6C2C7273925F, S_LA, "LA Irho (1.37, -0.71)");
+_pin(4, 0xBF980763DDF2658D, 0xBFA20284104E8321, S_LA, "LA Iz (1.37, -0.71)");
+_pin(5, 0x3FA0EDA353703895, 0x3F8413ACF98FCFAE, S_LA, "LA Iphi (1.37, -0.71)");
+_at(LA, 0x3ED030BAB6067B31, 0x3EB86B11341A8FD4);    # rho 6.1 lambda0, z 2.3 lambda0
+_pin(0, 0x3F7545DD658DE9AB, 0x3F7CAD16E475559F, S_LA, "LA I00 (6.1, 2.3)");
+_pin(1, 0x3F782720F962AD3F, 0xBF45EA48C168DACE, S_LA, "LA I01 (6.1, 2.3)");
+_pin(2, 0xBF50C16D4EEF11B4, 0xBF649D85C8BA331D, S_LA, "LA I02 (6.1, 2.3)");
+_pin(3, 0x3F66B87EA1735047, 0xBF36C344268FCA15, S_LA, "LA Irho (6.1, 2.3)");
+_pin(4, 0x3F650DF8701ABB0D, 0x3F7141F945DE6D77, S_LA, "LA Iz (6.1, 2.3)");
+_pin(5, 0x3F7A0751093145CC, 0xBF3C8B2F1ACAAF50, S_LA, "LA Iphi (6.1, 2.3)");
+_at(LA, 0x3EFB6776C9157649, 0xBEE4D5CA8153E1AE);    # rho 41.3 lambda0, z -15.7 lambda0
+_pin(0, 0xBF30A20691F08219, 0x3F461B23261935C7, S_LA, "LA I00 (41.3, -15.7)");
+_pin(1, 0xBF3E8A8F22661C40, 0xBF31EC0EDC7694AF, S_LA, "LA I01 (41.3, -15.7)");
+_pin(2, 0x3F140A7CBEDE7883, 0xBF31914301C28BE4, S_LA, "LA I02 (41.3, -15.7)");
+_pin(3, 0xBF2E13CA100E5D88, 0xBF21E627BA25069B, S_LA, "LA Irho (41.3, -15.7)");
+_pin(4, 0xBF22A742594B55DA, 0x3F3BD2477CAB0409, S_LA, "LA Iz (41.3, -15.7)");
+_pin(5, 0xBF411792B7E6E077, 0xBF3384F182689661, S_LA, "LA Iphi (41.3, -15.7)");
+# LB: |I00(0, 0)| with no pupil phase = 0.396888288879642
+var S_LB = 0x3FD9669E2339D256;
+_at(LB, 0x0000000000000000, 0x0000000000000000);    # rho 0 lambda0, z 0 lambda0
+_pin(0, 0x3FD9669E2339D256, 0x0000000000000000, S_LB, "LB I00 (0, 0)");
+_pin(1, 0x0000000000000000, 0x0000000000000000, S_LB, "LB I01 (0, 0)");
+_pin(2, 0x0000000000000000, 0x0000000000000000, S_LB, "LB I02 (0, 0)");
+_pin(3, 0x0000000000000000, 0x0000000000000000, S_LB, "LB Irho (0, 0)");
+_pin(4, 0x3FBC322902C0BFC2, 0x0000000000000000, S_LB, "LB Iz (0, 0)");
+_pin(5, 0x0000000000000000, 0x0000000000000000, S_LB, "LB Iphi (0, 0)");
+_at(LB, 0x3E7E2112F62D1291, 0xBE7644F7C1162F1D);    # rho 0.23 lambda0, z -0.17 lambda0
+_pin(0, 0x3FA5BB2E58B041E0, 0xBFD13A687202EB75, S_LB, "LB I00 (0.23, -0.17)");
+_pin(1, 0x3F92D806677CF501, 0xBFA99E83EA0DAABF, S_LB, "LB I01 (0.23, -0.17)");
+_pin(2, 0x3F6DE5DA0F55C723, 0xBF7E212AF32CD6BD, S_LB, "LB I02 (0.23, -0.17)");
+_pin(3, 0x3F930C283455261D, 0xBFB25AE8291FD84E, S_LB, "LB Irho (0.23, -0.17)");
+_pin(4, 0x3F9063B1B902ED31, 0xBFB01D67FEDB78E0, S_LB, "LB Iz (0.23, -0.17)");
+_pin(5, 0x3F9B26B8B607D1D7, 0xBFB6F1D39944E8CC, S_LB, "LB Iphi (0.23, -0.17)");
+_at(LB, 0x3E9EC8BFE544502F, 0x3E910790485C4225);    # rho 0.94 lambda0, z 0.52 lambda0
+_pin(0, 0xBF77B3E1F07496C2, 0x3F9317079812E2D5, S_LB, "LB I00 (0.94, 0.52)");
+_pin(1, 0x3F837B52BFC0C12C, 0x3F6F55EC584D59AB, S_LB, "LB I01 (0.94, 0.52)");
+_pin(2, 0x3F773062F766ACEE, 0xBF605E1237B6B8F7, S_LB, "LB I02 (0.94, 0.52)");
+_pin(3, 0x3F8E0ADDA1101E0F, 0xBF8ACDC4BB85B2E4, S_LB, "LB Irho (0.94, 0.52)");
+_pin(4, 0xBF7FC11ECEAC6150, 0x3F826874287497E3, S_LB, "LB Iz (0.94, 0.52)");
+_pin(5, 0x3F92203CE6ED1E81, 0xBF854766399DF8DE, S_LB, "LB Iphi (0.94, 0.52)");
+_at(LB, 0x3EBE4AFE31F2E1F8, 0xBEAF1C965CCFEEFE);    # rho 3.7 lambda0, z -1.9 lambda0
+_pin(0, 0x3F6D0A39449BF6CA, 0x3F36587A59D3078C, S_LB, "LB I00 (3.7, -1.9)");
+_pin(1, 0xBF21DD1110A82885, 0x3F56DF7535DBAA14, S_LB, "LB I01 (3.7, -1.9)");
+_pin(2, 0xBF509B2043C043FB, 0x3F2659E167FF0624, S_LB, "LB I02 (3.7, -1.9)");
+_pin(3, 0x3F31161510C9212C, 0x3F5873A34533E9FC, S_LB, "LB Irho (3.7, -1.9)");
+_pin(4, 0x3F5F066D449EC1B8, 0xBF09A99571B88F88, S_LB, "LB Iz (3.7, -1.9)");
+_pin(5, 0x3F3338B27BB22E23, 0x3F621303FAA27818, S_LB, "LB Iphi (3.7, -1.9)");
+# LC: |I00(0, 0)| with no pupil phase = 0.34371125336018721
+var S_LC = 0x3FD5FF5D7C1CBF45;
+_at(LC, 0x0000000000000000, 0x0000000000000000);    # rho 0 lambda0, z 0 lambda0
+_pin(0, 0x3FD5FF5D7C1CBF45, 0x0000000000000000, S_LC, "LC I00 (0, 0)");
+_pin(1, 0x0000000000000000, 0x0000000000000000, S_LC, "LC I01 (0, 0)");
+_pin(2, 0x0000000000000000, 0x0000000000000000, S_LC, "LC I02 (0, 0)");
+_pin(3, 0x0000000000000000, 0x0000000000000000, S_LC, "LC Irho (0, 0)");
+_pin(4, 0x3FC237DA302D925E, 0x0000000000000000, S_LC, "LC Iz (0, 0)");
+_pin(5, 0x0000000000000000, 0x0000000000000000, S_LC, "LC Iphi (0, 0)");
+_at(LC, 0x3E86229BA945E170, 0x3E6F6AED74632F75);    # rho 0.31 lambda0, z 0.11 lambda0
+_pin(0, 0x3FB8100065E3B69C, 0x3FB7ECFFE58C1CAB, S_LC, "LC I00 (0.31, 0.11)");
+_pin(1, 0x3FB0489CE3208BC4, 0x3FA3651CB80C2484, S_LC, "LC I01 (0.31, 0.11)");
+_pin(2, 0x3F98E621A6516EF9, 0x3F851B64C6AE0F5A, S_LC, "LC I02 (0.31, 0.11)");
+_pin(3, 0x3FAB846B613AD565, 0x3FA5AD4F641D0F10, S_LC, "LC Irho (0.31, 0.11)");
+_pin(4, 0x3F9AA1043BA7F642, 0x3F99009EA12D38A5, S_LC, "LC Iz (0.31, 0.11)");
+_pin(5, 0x3FB65EF26AF0570A, 0x3FAE26E79AC7B85E, S_LC, "LC Iphi (0.31, 0.11)");
+_at(LC, 0x3EA42BECD1FFAE78, 0xBE9DA1F16ADD8CC3);    # rho 1.13 lambda0, z -0.83 lambda0
+_pin(0, 0xBF9D1CD630260691, 0x3F9C3BEF4A76D3FC, S_LC, "LC I00 (1.13, -0.83)");
+_pin(1, 0xBF8EAA4917A5CF92, 0xBF84FE5DC47636BE, S_LC, "LC I01 (1.13, -0.83)");
+_pin(2, 0x3F60F66E8BBEF995, 0xBF82CFB4A932AAF9, S_LC, "LC I02 (1.13, -0.83)");
+_pin(3, 0xBF836D94834C4D63, 0xBF86EFB734968F48, S_LC, "LC Irho (1.13, -0.83)");
+_pin(4, 0xBF83A8320F57BF10, 0x3F8DAF301875B32B, S_LC, "LC Iz (1.13, -0.83)");
+_pin(5, 0xBF913D3F0DE7FF0E, 0xBF90F77FD373FB6B, S_LC, "LC Iphi (1.13, -0.83)");
+# LD: |I00(0, 0)| with no pupil phase = 0.0085337819096348386
+var S_LD = 0x3F817A28D1B46245;
+_at(LD, 0x0000000000000000, 0x0000000000000000);    # rho 0 lambda0, z 0 lambda0
+_pin(0, 0x3F7E53AC67637A39, 0x3F67B15CCA2CE00D, S_LD, "LD I00 (0, 0)");
+_pin(1, 0x0000000000000000, 0x0000000000000000, S_LD, "LD I01 (0, 0)");
+_pin(2, 0x0000000000000000, 0x0000000000000000, S_LD, "LD I02 (0, 0)");
+_pin(3, 0x0000000000000000, 0x0000000000000000, S_LD, "LD Irho (0, 0)");
+_pin(4, 0x3F317D261C5BB789, 0x3F25EA2747118932, S_LD, "LD Iz (0, 0)");
+_pin(5, 0x0000000000000000, 0x0000000000000000, S_LD, "LD Iphi (0, 0)");
+_at(LD, 0x3E8CFDB417C18A1B, 0x3E93DD3DC46CE81C);    # rho 0.27 lambda0, z 0.37 lambda0
+_pin(0, 0xBF7D2F85F231D155, 0x3F6C90EB624E9D78, S_LD, "LD I00 (0.27, 0.37)");
+_pin(1, 0xBEFC21132F17B362, 0x3EC44D3ADA0A2F33, S_LD, "LD I01 (0.27, 0.37)");
+_pin(2, 0xBE77B4E65BEE5A20, 0xBE5AEC09B59864EC, S_LD, "LD I02 (0.27, 0.37)");
+_pin(3, 0xBF30C6BB2F577668, 0x3F12D95EB31DDBA9, S_LD, "LD Irho (0.27, 0.37)");
+_pin(4, 0xBF33D0179338D97B, 0x3F163550D086EA49, S_LD, "LD Iz (0.27, 0.37)");
+_pin(5, 0xBF30E18DC254711E, 0x3F12CF4E1B5E6BF9, S_LD, "LD Iphi (0.27, 0.37)");
+_at(LD, 0x3EB59BEAFA00D9E7, 0xBEB01B2B29A4692B);    # rho 1.61 lambda0, z -1.2 lambda0
+_pin(0, 0x3F6FC67A3320F980, 0xBF758586708DFC53, S_LD, "LD I00 (1.61, -1.2)");
+_pin(1, 0x3F1D65F0800D7F18, 0xBF115C8386BD3FDD, S_LD, "LD I01 (1.61, -1.2)");
+_pin(2, 0x3EC5AE3E14371A3C, 0xBE96BC9CB65132A7, S_LD, "LD I02 (1.61, -1.2)");
+_pin(3, 0x3F50C86707455586, 0xBF4D28AFD3178FFB, S_LD, "LD Irho (1.61, -1.2)");
+_pin(4, 0x3F25BC0EB370D85E, 0xBF2579E105E1D47A, S_LD, "LD Iz (1.61, -1.2)");
+_pin(5, 0x3F50E558786C5286, 0xBF4D3DFD78A14FF9, S_LD, "LD Iphi (1.61, -1.2)");
+# LE: |I00(0, 0)| with no pupil phase = 0.0056250113153659478
+var S_LE = 0x3F770A407A39DCE8;
+_at(LE, 0x0000000000000000, 0x0000000000000000);    # rho 0 lambda0, z 0 lambda0
+_pin(0, 0x3F770A407A39DCE8, 0x0000000000000000, S_LE, "LE I00 (0, 0)");
+_pin(1, 0x0000000000000000, 0x0000000000000000, S_LE, "LE I01 (0, 0)");
+_pin(2, 0x0000000000000000, 0x0000000000000000, S_LE, "LE I02 (0, 0)");
+_pin(3, 0x0000000000000000, 0x0000000000000000, S_LE, "LE Irho (0, 0)");
+_pin(4, 0x3F288DF6D9E1C486, 0x0000000000000000, S_LE, "LE Iz (0, 0)");
+_pin(5, 0x0000000000000000, 0x0000000000000000, S_LE, "LE Iphi (0, 0)");
+_at(LE, 0x3EA19FA3CA55F40D, 0x3E90FC91886B8573);    # rho 0.83 lambda0, z 0.4 lambda0
+_pin(0, 0xBF71D9C5FCB8A70E, 0x3F6A4FEECBF450A1, S_LE, "LE I00 (0.83, 0.4)");
+_pin(1, 0xBF00B6D12951E848, 0x3EF901AECF160392, S_LE, "LE I01 (0.83, 0.4)");
+_pin(2, 0xBE8F62D11D7B6D3B, 0x3E87D4E66CB7394C, S_LE, "LE I02 (0.83, 0.4)");
+_pin(3, 0xBF38DECFB5967C02, 0x3F3277EB6B1CF68F, S_LE, "LE Irho (0.83, 0.4)");
+_pin(4, 0xBF229C0BA4E06A7E, 0x3F1BA0C9415C630E, S_LE, "LE Iz (0.83, 0.4)");
+_pin(5, 0xBF38F942288DEB9C, 0x3F328BD97429156C, S_LE, "LE Iphi (0.83, 0.4)");
+_at(LE, 0x3EC75B481B93D77E, 0xBED074ACFC282947);    # rho 4.4 lambda0, z -6.2 lambda0
+_pin(0, 0x3F432188B3D26DCF, 0xBF5E32A4EF3971B6, S_LE, "LE I00 (4.4, -6.2)");
+_pin(1, 0x3EFFB67D2A29B534, 0xBF11F03422E3044C, S_LE, "LE I01 (4.4, -6.2)");
+_pin(2, 0x3EB875CDF261E4A2, 0xBEC50EE06B4C231B, S_LE, "LE I02 (4.4, -6.2)");
+_pin(3, 0x3F3E871E7115350E, 0xBF5214EBAF88602D, S_LE, "LE Irho (4.4, -6.2)");
+_pin(4, 0x3ED08BA010BF543E, 0xBEFA0AE142DB5F1D, S_LE, "LE Iz (4.4, -6.2)");
+_pin(5, 0x3F3E99304551DDB8, 0xBF521F0714FBE513, S_LE, "LE Iphi (4.4, -6.2)");
+# LF: |I00(0, 0)| with no pupil phase = 1.066631181289176
+var S_LF = 0x3FF110EBDB887E65;
+_at(LF, 0x0000000000000000, 0x0000000000000000);    # rho 0 lambda0, z 0 lambda0
+_pin(0, 0x3FF110EBDB887E65, 0x0000000000000000, S_LF, "LF I00 (0, 0)");
+_pin(1, 0x0000000000000000, 0x0000000000000000, S_LF, "LF I01 (0, 0)");
+_pin(2, 0x0000000000000000, 0x0000000000000000, S_LF, "LF I02 (0, 0)");
+_pin(3, 0x0000000000000000, 0x0000000000000000, S_LF, "LF Irho (0, 0)");
+_pin(4, 0x3FDEAB8D0A9B56AA, 0x0000000000000000, S_LF, "LF Iz (0, 0)");
+_pin(5, 0x0000000000000000, 0x0000000000000000, S_LF, "LF Iphi (0, 0)");
+_at(LF, 0x3E9169485F07CF2F, 0xBE88A16C9F68B4B2);    # rho 0.41 lambda0, z -0.29 lambda0
+_pin(0, 0x3F6B825672233887, 0xBFD7712756B9023C, S_LF, "LF I00 (0.41, -0.29)");
+_pin(1, 0x3FC0ECC6FB78FD3C, 0xBFC80DDAF573FEDA, S_LF, "LF I01 (0.41, -0.29)");
+_pin(2, 0x3FB2DF8BB812FC5D, 0xBFAFD548C1F9B18A, S_LF, "LF I02 (0.41, -0.29)");
+_pin(3, 0x3FACAA7C56C01AB2, 0xBFC6DD270ADFF087, S_LF, "LF Irho (0.41, -0.29)");
+_pin(4, 0x3F7F53620C7341FE, 0xBFB8746F3BA01031, S_LF, "LF Iz (0.41, -0.29)");
+_pin(5, 0x3FC2A449EB96B343, 0xBFD15354CC11D998, S_LF, "LF Iphi (0.41, -0.29)");
+_at(LF, 0x3EB75B481B93D77E, 0x3EA64B7F030D1F26);    # rho 2.2 lambda0, z 1.05 lambda0
+_pin(0, 0x3F90BD0869A6F531, 0x3FAFB1249DF0A00E, S_LF, "LF I00 (2.2, 1.05)");
+_pin(1, 0x3FA0FC36D8575014, 0xBF703755CE49BA7A, S_LF, "LF I01 (2.2, 1.05)");
+_pin(2, 0x3F3B1C5CD2B7B1FC, 0xBF9DCDCE7DBE5EE2, S_LF, "LF I02 (2.2, 1.05)");
+_pin(3, 0x3F9598FA5C7693FA, 0xBF774BFF53EAE8D2, S_LF, "LF Irho (2.2, 1.05)");
+_pin(4, 0x3F77DE761E932ED5, 0x3FA5798E87F42BB7, S_LF, "LF Iz (2.2, 1.05)");
+_pin(5, 0x3FA5500CCF9280E1, 0xBF771E814FA227D1, S_LF, "LF Iphi (2.2, 1.05)");
+# LG: |I00(0, 0)| with no pupil phase = 0.0025000001630661565
+var S_LG = 0x3F647AE15E1775D8;
+_at(LG, 0x0000000000000000, 0x0000000000000000);    # rho 0 lambda0, z 0 lambda0
+_pin(0, 0x3F647AE15E1775D8, 0x0000000000000000, S_LG, "LG I00 (0, 0)");
+_pin(1, 0x0000000000000000, 0x0000000000000000, S_LG, "LG I01 (0, 0)");
+_pin(2, 0x0000000000000000, 0x0000000000000000, S_LG, "LG I02 (0, 0)");
+_pin(3, 0x0000000000000000, 0x0000000000000000, S_LG, "LG Irho (0, 0)");
+_pin(4, 0x3F05DA813C7E9BB1, 0x0000000000000000, S_LG, "LG Iz (0, 0)");
+_pin(5, 0x0000000000000000, 0x0000000000000000, S_LG, "LG Iphi (0, 0)");
+_at(LG, 0x3EC074ACFC282947, 0x3EFB3481147C33B9);    # rho 3.1 lambda0, z 41.0 lambda0
+_pin(0, 0x3F61DA72533E54C0, 0xBF3636AC6E90518F, S_LG, "LG I00 (3.1, 41.0)");
+_pin(1, 0x3EECBA508E6A97AC, 0xBEC8CF2A2564B4A1, S_LG, "LG I01 (3.1, 41.0)");
+_pin(2, 0x3E6E4CDF2FD2402C, 0xBE4DC02ED38DC397, S_LG, "LG I02 (3.1, 41.0)");
+_pin(3, 0x3F3835C17C4DAA27, 0xBF12AFB2C496D318, S_LG, "LG Irho (3.1, 41.0)");
+_pin(4, 0x3F027982F727B244, 0xBEDC10CEA9C3B824, S_LG, "LG Iz (3.1, 41.0)");
+_pin(5, 0x3F383A505B4843AD, 0xBF12B3EFAD302BFF, S_LG, "LG Iphi (3.1, 41.0)");
+_at(LG, 0x3EE6F55CB261525D, 0xBF10173FDBB9D9E9);    # rho 17.3 lambda0, z -97.0 lambda0
+_pin(0, 0xBF315CA295B76C76, 0xBF2B2B7D07DE6D4C, S_LG, "LG I00 (17.3, -97.0)");
+_pin(1, 0xBEB12585687405E4, 0xBECAC482C566DF75, S_LG, "LG I01 (17.3, -97.0)");
+_pin(2, 0x3E839F400C27E0F8, 0x3E6CDE6E34FDEC3C, S_LG, "LG I02 (17.3, -97.0)");
+_pin(3, 0x3F191109A4D0A26E, 0xBF0D48C399DE9A03, S_LG, "LG Irho (17.3, -97.0)");
+_pin(4, 0xBEDF81460C42B000, 0xBED15FD600BEBB93, S_LG, "LG Iz (17.3, -97.0)");
+_pin(5, 0x3F190C29DC5276B2, 0xBF0D538C5925E782, S_LG, "LG Iphi (17.3, -97.0)");
+# LI: |I00(0, 0)| with no pupil phase = 0.0246198861255227
+var S_LI = 0x3F9935F496F62205;
+_at(LI, 0x0000000000000000, 0x0000000000000000);    # rho 0 lambda0, z 0 lambda0
+_pin(0, 0x3F9935F496F62205, 0x0000000000000000, S_LI, "LI I00 (0, 0)");
+_pin(1, 0x0000000000000000, 0x0000000000000000, S_LI, "LI I01 (0, 0)");
+_pin(2, 0x0000000000000000, 0x0000000000000000, S_LI, "LI I02 (0, 0)");
+_pin(3, 0x0000000000000000, 0x0000000000000000, S_LI, "LI Irho (0, 0)");
+_pin(4, 0x3F633DC90F45DEDC, 0x0000000000000000, S_LI, "LI Iz (0, 0)");
+_pin(5, 0x0000000000000000, 0x0000000000000000, S_LI, "LI Iphi (0, 0)");
+_at(LI, 0x3E7C2F8B88DFB80B, 0x3E5AD7F29ABCAF48);    # rho 0.21 lambda0, z 0.05 lambda0
+_pin(0, 0x3F979840DD98E0C8, 0x3F7DFAEA03D42E7F, S_LI, "LI I00 (0.21, 0.05)");
+_pin(1, 0x3F353AE9DF309F7C, 0x3F1A8B29E40733C2, S_LI, "LI I01 (0.21, 0.05)");
+_pin(2, 0x3ED022109670D372, 0x3EB3D5519D38CD50, S_LI, "LI I02 (0.21, 0.05)");
+_pin(3, 0x3F573D6DF5D4D789, 0x3F3D4D90F24186AD, S_LI, "LI Irho (0.21, 0.05)");
+_pin(4, 0x3F61E8807C050FBC, 0x3F4692ED71DEEE19, S_LI, "LI Iz (0.21, 0.05)");
+_pin(5, 0x3F57EBD1E74B3458, 0x3F3E25C3B23B3873, S_LI, "LI Iphi (0.21, 0.05)");
+_at(LI, 0x3E99D63FE82268B5, 0xBE8421F5F40D8376);    # rho 0.77 lambda0, z -0.3 lambda0
+_pin(0, 0xBF75CBBC1A766DD3, 0xBF92DF3FCADBC9D0, S_LI, "LI I00 (0.77, -0.3)");
+_pin(1, 0xBF30CDE7E7694CDC, 0xBF504C8EAC18E01E, S_LI, "LI I01 (0.77, -0.3)");
+_pin(2, 0xBEE4FDDD32165977, 0xBF0719089C04BA06, S_LI, "LI I02 (0.77, -0.3)");
+_pin(3, 0xBF542CE087B093A1, 0xBF728DB2971F778C, S_LI, "LI Irho (0.77, -0.3)");
+_pin(4, 0xBF3D25C1E1FB4174, 0xBF5A50B1B5C5CB3F, S_LI, "LI Iz (0.77, -0.3)");
+_pin(5, 0xBF54AA6A49328866, 0xBF730E6691E8F571, S_LI, "LI Iphi (0.77, -0.3)");
+# LJ: |I00(0, 0)| with no pupil phase = 0.062519082558590192
+var S_LJ = 0x3FB0014026F70EC1;
+_at(LJ, 0x0000000000000000, 0x0000000000000000);    # rho 0 lambda0, z 0 lambda0
+_pin(0, 0x3FB0014026F70EC1, 0x0000000000000000, S_LJ, "LJ I00 (0, 0)");
+_pin(1, 0x0000000000000000, 0x0000000000000000, S_LJ, "LJ I01 (0, 0)");
+_pin(2, 0x0000000000000000, 0x0000000000000000, S_LJ, "LJ I02 (0, 0)");
+_pin(3, 0x0000000000000000, 0x0000000000000000, S_LJ, "LJ Irho (0, 0)");
+_pin(4, 0x3F7D1A64BF0AA0CE, 0x0000000000000000, S_LJ, "LJ Iz (0, 0)");
+_pin(5, 0x0000000000000000, 0x0000000000000000, S_LJ, "LJ Iphi (0, 0)");
+_at(LJ, 0x3E859D4AD1FEF17E, 0xBE6F706CD45B8DCE);    # rho 0.33 lambda0, z -0.12 lambda0
+_pin(0, 0x3F9833424969F653, 0xBFA896390FB68074, S_LJ, "LJ I00 (0.33, -0.12)");
+_pin(1, 0x3F5533A161806106, 0xBF638DCADA2E71AF, S_LJ, "LJ I01 (0.33, -0.12)");
+_pin(2, 0x3F134A8BCA9D5B9B, 0xBF2017903C0B8778, S_LJ, "LJ I02 (0.33, -0.12)");
+_pin(3, 0x3F71D177350E282D, 0xBF813E6C30149151, S_LJ, "LJ Irho (0.33, -0.12)");
+_pin(4, 0x3F64D458CA12A66C, 0xBF7453464D0E5097, S_LJ, "LJ Iz (0.33, -0.12)");
+_pin(5, 0x3F72BD4BB24083FF, 0xBF820DDB9D285AFB, S_LJ, "LJ Iphi (0.33, -0.12)");
+_at(LJ, 0x3EA18551FBADB05C, 0x3E8ADAB24AB8DE75);    # rho 1.07 lambda0, z 0.41 lambda0
+_pin(0, 0xBF80F20DD64F9ADA, 0xBF832C27A892CADE, S_LJ, "LJ I00 (1.07, 0.41)");
+_pin(1, 0xBF585F539B826998, 0xBF55AD875630BD3F, S_LJ, "LJ I01 (1.07, 0.41)");
+_pin(2, 0xBF31BD937205D07F, 0xBF28363500E79783, S_LJ, "LJ I02 (1.07, 0.41)");
+_pin(3, 0xBF81B35C2076B91A, 0xBF7E675FC022442A, S_LJ, "LJ Irho (1.07, 0.41)");
+_pin(4, 0x3F2A60754EA2D345, 0xBF21CBBDA33D7C3E, S_LJ, "LJ Iz (1.07, 0.41)");
+_pin(5, 0xBF81F28FB2A9C19C, 0xBF7EEDC2984F52A2, S_LJ, "LJ Iphi (1.07, 0.41)");
+# At NA 0.001 the integrals span eight decades, I00 ~ 1e-6 down to I02 ~ 1e-14, and every one
+# is positive at the focal plane inside the first zero of J0. Each is pinned to TOLR of ITSELF:
+# 1 - cos(theta) is 5e-7 here, and formed by subtraction it would cost I02 ten digits.
+var TOLR = f64_mul(f64_from(2), TOL15);
+fn _pinr(i, re, msg) {
+    _assert_near(load64(&IB + i * 16), re, f64_mul(TOLR, re), msg);
+    assert_eq(load64(&IB + i * 16 + 8), Z, msg);
+    return 0;
+}
+var LH = focus_new(0x3F50624DD2F1A9FC, ONE, ONE, 0x3EA53BB5EA8666CF, 0x3F847AE147AE147B, FOCUS_PUPIL_UNIFORM, 0, &err);
+assert_eq(err, PK_ERR_NONE, "LH");
+_at(LH, 0x3F1C6A827475DDFD, Z);    # rho 171.3 lambda0: k rho NA = 1.076
+_pinr(0, 0x3EACECAD85F9B0C6, "LH I00 (171.3, 0)");
+_pinr(1, 0x3DE0C4EA5171A183, "LH I01 (171.3, 0)");
+_pinr(2, 0x3D0942EC2DAA6D6E, "LH I02 (171.3, 0)");
+_pinr(3, 0x3E860E397E650461, "LH Irho (171.3, 0)");
+_pinr(4, 0x3DF3207BE60267F3, "LH Iz (171.3, 0)");
+_pinr(5, 0x3E860E39EB80EBDB, "LH Iphi (171.3, 0)");
+_at(LH, 0x3F29DA66FF40A4FA, Z);    # rho 311.7 lambda0: k rho NA = 1.958
+_pinr(0, 0x3EA3D788A7057DE0, "LH I00 (311.7, 0)");
+_pinr(1, 0x3DE81A04F0EC9817, "LH I01 (311.7, 0)");
+_pinr(2, 0x3D21973654C4DA2C, "LH I02 (311.7, 0)");
+_pinr(3, 0x3E9047AE0094E225, "LH Irho (311.7, 0)");
+_pinr(4, 0x3DE79CAE45F231C1, "LH Iz (311.7, 0)");
+_pinr(5, 0x3E9047AE4D798C77, "LH Iphi (311.7, 0)");
+# The closed form at the focus of a uniform pupil, c = cos(alpha):
+#   I00(0, 0) = int sqrt(c) sin (1 + c) = (2/3)(1 - c^(3/2)) + (2/5)(1 - c^(5/2)).
+var cf_c = f64_sqrt(f64_mul(f64_sub(ONE, NA9), f64_add(ONE, NA9)));
+var cf_h = f64_mul(cf_c, f64_sqrt(cf_c));
+var cf = f64_add(f64_mul(_fd(2, 3), f64_sub(ONE, cf_h)), f64_mul(_fd(2, 5), f64_sub(ONE, f64_mul(cf_h, cf_c))));
+_at(lc, Z, Z);
+_assert_near(load64(&IB), cf, TOL15, "I00(0, 0) = (2/3)(1 - c^1.5) + (2/5)(1 - c^2.5)");
+assert_eq(load64(&IB + 8), Z, "and real");
+# On the axis J1 and J2 vanish, so do the integrals that carry them: exactly.
+var AX = 0x7FFFFFFFFFFFFFFF;            # |x| as bits: -0 is 0 too
+assert_eq((load64(&IB + 16) | load64(&IB + 32) | load64(&IB + 48) | load64(&IB + 80)) & AX, Z,
+  "I01 = I02 = Irho = Iphi = 0 on the axis");
+# A real pupil makes the field symmetric through the focus: I(rho, -z) = conj I(rho, z).
+var sy_r = f64_mul(_fd(83, 100), LAM);
+var sy_z = f64_mul(_fd(61, 100), LAM);
+var SY[96];
+assert_eq(focus_integrals(LB, sy_r, sy_z, &SY), PK_ERR_NONE, "z");
+_at(LB, sy_r, f64_neg(sy_z));
+var sy_bad = 0;
+for (var sy_i = 0; sy_i < 6; sy_i = sy_i + 1) {
+    if (_near(load64(&IB + sy_i * 16), load64(&SY + sy_i * 16), f64_mul(TOL15, S_LB)) == 0) { sy_bad = sy_bad + 1; }
+    if (_near(load64(&IB + sy_i * 16 + 8), f64_neg(load64(&SY + sy_i * 16 + 8)), f64_mul(TOL15, S_LB)) == 0) {
+        sy_bad = sy_bad + 1;
+    }
+}
+assert_eq(sy_bad, 0, "I(rho, -z) = conj I(rho, z)");
+
+# ── The fields ────────
+test_group("focus fields");
+
+# Pins: the 60-digit integrals through the formulas the brute-force sum checked, to TOLF of
+# A |I00(0, 0)|, the size of the field at a focus, plus TOLZ per wavelength of z as above.
+var TOLF = f64_mul(f64_from(2), TOL15);
+fn _fj(l, ar, ai, br, bi, rho, phi, z) {
+    assert_eq(focus_jones(l, ar, ai, br, bi, rho, phi, z, EF), PK_ERR_NONE, "focus_jones");
+    AT_Z = f64_abs(f64_mul(FocusLens_cyc(l), z));
+    return 0;
+}
+fn _fr(l, rho, phi, z) {
+    assert_eq(focus_radial(l, rho, phi, z, EF), PK_ERR_NONE, "focus_radial");
+    AT_Z = f64_abs(f64_mul(FocusLens_cyc(l), z));
+    return 0;
+}
+fn _fa(l, rho, phi, z) {
+    assert_eq(focus_azimuthal(l, rho, phi, z, EF), PK_ERR_NONE, "focus_azimuthal");
+    AT_Z = f64_abs(f64_mul(FocusLens_cyc(l), z));
+    return 0;
+}
+fn _fp(xr, xi, yr, yi, zr, zi, l, s, msg) {
+    var t = f64_mul(f64_mul(f64_add(TOLF, f64_mul(TOLZ, AT_Z)), FocusLens_pref(l)), s);
+    _assert_near(PrtField_x_re(EF), xr, t, msg);
+    _assert_near(PrtField_x_im(EF), xi, t, msg);
+    _assert_near(PrtField_y_re(EF), yr, t, msg);
+    _assert_near(PrtField_y_im(EF), yi, t, msg);
+    _assert_near(PrtField_z_re(EF), zr, t, msg);
+    _assert_near(PrtField_z_im(EF), zi, t, msg);
+    return 0;
+}
+_fj(LB, 0x3FF0000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x3E7E2112F62D1291,
+  0x3FEA8F5C28F5C28F, 0xBE7644F7C1162F1D);
+_fp(0xC0ADF3C3AB0FEDA9, 0xC082CAA1A1D9DFD7, 0xC05A268B9335CD1F, 0xC049F3100B4F5F68, 0xC07629E712FED5E1,
+  0x408E21F7F1BB9C78,
+  LB, S_LB, "LB x (0.23, 0.83, -0.17)");
+_fj(LB, 0x3FE6A09E667F3BCD, 0x0000000000000000, 0x0000000000000000, 0x3FE6A09E667F3BCD, 0x3E7E2112F62D1291,
+  0x3FEA8F5C28F5C28F, 0xBE7644F7C1162F1D);
+_fp(0xC0A4E488304B85A8, 0xC07F32B32085ABBB, 0x40765CDAC880DE7B, 0xC0A591C94D486DF4, 0xC08F22441FF9815D,
+  0x40797A492FBD3875,
+  LB, S_LB, "LB circular (0.23, 0.83, -0.17)");
+_fj(LB, 0x3FE3333333333333, 0x3FC999999999999A, 0xBFD3333333333333, 0x3FE6666666666666, 0x3E7E2112F62D1291,
+  0x3FEA8F5C28F5C28F, 0xBE7644F7C1162F1D);
+_fp(0xC0A080B5090A7DA3, 0xC09284E71CEA24B2, 0x4097EB4D38984944, 0xC0A40B6211C06B81, 0xC0900D53CCEC626B,
+  0xC05406A8D9DD0C77,
+  LB, S_LB, "LB elliptical (0.23, 0.83, -0.17)");
+_fr(LB, 0x3E7E2112F62D1291, 0x3FEA8F5C28F5C28F, 0xBE7644F7C1162F1D);
+_fp(0xC076673815A70711, 0x409596BDDE816638, 0xC0787F13CBE793EA, 0x40979B1F0BD16A0D, 0xC09C15C60E377397,
+  0xC07C90459772AEF8,
+  LB, S_LB, "LB radial (0.23, 0.83, -0.17)");
+_fa(LB, 0x3E7E2112F62D1291, 0x3FEA8F5C28F5C28F, 0xBE7644F7C1162F1D);
+_fp(0x4081758E4A0199B3, 0xC09D8226563BBC50, 0xC07FEF45A90FD2E5, 0x409AFCA76FE4C879, 0x0000000000000000,
+  0x0000000000000000,
+  LB, S_LB, "LB azimuthal (0.23, 0.83, -0.17)");
+_fj(LB, 0x3FF0000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x3E9EC8BFE544502F,
+  0xC0027AE147AE147B, 0x3E910790485C4225);
+_fp(0x4070CCAC78B123EE, 0x405684CF9D91C645, 0xC03C6754025E964D, 0xC0541EEAAC35B829, 0x4066DFBF4F366DDB,
+  0x405265601DAF34D9,
+  LB, S_LB, "LB x (0.94, -2.31, 0.52)");
+_fj(LB, 0x3FE6A09E667F3BCD, 0x0000000000000000, 0x0000000000000000, 0x3FE6A09E667F3BCD, 0x3E9EC8BFE544502F,
+  0xC0027AE147AE147B, 0x3E910790485C4225);
+_fp(0x406EDF31F5DDA471, 0x4045CDDF052918CF, 0xC0524ECF48B1A2C3, 0x40602DD9DF738F3A, 0x405214725075808B,
+  0x40683F07D45158B2,
+  LB, S_LB, "LB circular (0.94, -2.31, 0.52)");
+_fj(LB, 0x3FE3333333333333, 0x3FC999999999999A, 0xBFD3333333333333, 0x3FE6666666666666, 0x3E9EC8BFE544502F,
+  0xC0027AE147AE147B, 0x3E910790485C4225);
+_fp(0x406A03D2B0A2BD61, 0x405C0437D8BE570D, 0xC06093BEC99CCD5D, 0x405AFCE06C241B99, 0xC035A47EACD63BE9,
+  0x4068A171EF81A589,
+  LB, S_LB, "LB elliptical (0.94, -2.31, 0.52)");
+_fr(LB, 0x3E9EC8BFE544502F, 0xC0027AE147AE147B, 0x3E910790485C4225);
+_fp(0x4071A306182DF5AD, 0xC06F78952E381C76, 0x407358B102B77EAC, 0xC07142C6F5ED079D, 0x40700A70EEB375C5,
+  0x406BABBB1CAE4A9F,
+  LB, S_LB, "LB radial (0.94, -2.31, 0.52)");
+_fa(LB, 0x3E9EC8BFE544502F, 0xC0027AE147AE147B, 0x3E910790485C4225);
+_fp(0xC077585A853E1B66, 0x406B67EE177BAE15, 0x40754839AC170560, 0xC068FBEF49B9330F, 0x0000000000000000,
+  0x0000000000000000,
+  LB, S_LB, "LB azimuthal (0.94, -2.31, 0.52)");
+_fj(LC, 0x3FF0000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x3E86229BA945E170,
+  0x3FFE666666666666, 0x3E6F6AED74632F75);
+_fp(0x409C240CDAC589D3, 0xC098A967AEA931DA, 0xC060A4219FFE935A, 0x4073A17A6D25B553, 0x408B223A772253DA,
+  0x408028B9648FE967,
+  LC, S_LC, "LC x (0.31, 1.9, 0.11)");
+_fj(LC, 0x3FE6A09E667F3BCD, 0x0000000000000000, 0x0000000000000000, 0x3FE6A09E667F3BCD, 0x3E86229BA945E170,
+  0x3FFE666666666666, 0x3E6F6AED74632F75);
+_fp(0x40906DA533F9B54B, 0xC092E8CC26A5E2C4, 0x4098F098FD523FC9, 0x409B2BF72E3D1AEA, 0x409A50E5BF22DAC4,
+  0xC0965DFF1679D49A,
+  LC, S_LC, "LC circular (0.31, 1.9, 0.11)");
+_fj(LC, 0x3FE3333333333333, 0x3FC999999999999A, 0xBFD3333333333333, 0x3FE6666666666666, 0x3E86229BA945E170,
+  0x3FFE666666666666, 0x3E6F6AED74632F75);
+_fp(0x4093016849181C0F, 0xC08831CF8674A014, 0x408BB84D951FBE92, 0x40A2993659FAFC31, 0x40A17F06163B26E2,
+  0xC08A48BE25881D9A,
+  LC, S_LC, "LC elliptical (0.31, 1.9, 0.11)");
+_fr(LC, 0x3E86229BA945E170, 0x3FFE666666666666, 0x3E6F6AED74632F75);
+_fp(0x4086ED1DBF63847F, 0x40820F741A24E85C, 0xC0A0C6DE6DB9A078, 0xC09A6EA65016C183, 0x40901BCD65B6BF33,
+  0xC091281449473E48,
+  LC, S_LC, "LC radial (0.31, 1.9, 0.11)");
+_fa(LC, 0x3E86229BA945E170, 0x3FFE666666666666, 0x3E6F6AED74632F75);
+_fp(0x40AB474117B8DAA1, 0x40A2621775786A63, 0x4092A373FEF1C294, 0x40891F11B43E2C07, 0x0000000000000000,
+  0x0000000000000000,
+  LC, S_LC, "LC azimuthal (0.31, 1.9, 0.11)");
+_fj(LD, 0x3FF0000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x3E8CFDB417C18A1B,
+  0x3FD999999999999A, 0x3E93DD3DC46CE81C);
+_fp(0x404D70F9584603AC, 0x405E148ACB24B1BB, 0xBF33E78C2640DB2F, 0x3F5186F84F72AD9C, 0x3FEAB3E00ACE5EED,
+  0xBFB345A783D5AC23,
+  LD, S_LD, "LD x (0.27, 0.4, 0.37)");
+_fj(LD, 0x3FE6A09E667F3BCD, 0x0000000000000000, 0x0000000000000000, 0x3FE6A09E667F3BCD, 0x3E8CFDB417C18A1B,
+  0x3FD999999999999A, 0x3E93DD3DC46CE81C);
+_fp(0x4044D1593DFD292A, 0x4055451782A1294F, 0xC0554506794D7503, 0x4044D1987C6FA189, 0x3FE39A107726B125,
+  0x3FC91E4D29D588F2,
+  LD, S_LD, "LD circular (0.27, 0.4, 0.37)");
+_fj(LD, 0x3FE3333333333333, 0x3FC999999999999A, 0xBFD3333333333333, 0x3FE6666666666666, 0x3E8CFDB417C18A1B,
+  0x3FD999999999999A, 0x3E93DD3DC46CE81C);
+_fp(0x402687888C52E013, 0x4054FDFD11B39947, 0xC05978DE8429B700, 0x40147E1BBBF90B29, 0x3FDBA8ABD05E7029,
+  0x3FD834F8CF40AC87,
+  LD, S_LD, "LD elliptical (0.27, 0.4, 0.37)");
+_fr(LD, 0x3E8CFDB417C18A1B, 0x3FD999999999999A, 0x3E93DD3DC46CE81C);
+_fp(0x401FD9D9DFAF403A, 0xC001E4A733140C78, 0x400AEEC92F446BCD, 0xBFEE42AD22BEE4C2, 0x4006E388628F2BF8,
+  0x40246B8497D9A03E,
+  LD, S_LD, "LD radial (0.27, 0.4, 0.37)");
+_fa(LD, 0x3E8CFDB417C18A1B, 0x3FD999999999999A, 0x3E93DD3DC46CE81C);
+_fp(0xC00B19D8D265A31F, 0x3FEE3284A8B76007, 0x40200663467E30D3, 0xC001DB19471610A3, 0x0000000000000000,
+  0x0000000000000000,
+  LD, S_LD, "LD azimuthal (0.27, 0.4, 0.37)");
+_fj(LA, 0x3FF0000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x3EFB6776C9157649,
+  0x4004CCCCCCCCCCCD, 0xBEE4D5CA8153E1AE);
+_fp(0x401D7012219882C5, 0x400760070857CFAA, 0x40096524593780A4, 0x3FECF884D08334C9, 0xC025693C11C76E48,
+  0xC01920F4B1974692,
+  LA, S_LA, "LA x (41.3, 2.6, -15.7)");
+_fj(LA, 0x3FE6A09E667F3BCD, 0x0000000000000000, 0x0000000000000000, 0x3FE6A09E667F3BCD, 0x3EFB6776C9157649,
+  0x4004CCCCCCCCCCCD, 0xBEE4D5CA8153E1AE);
+_fp(0x40124145DF7BA3B8, 0x40113E2C8ADB74B5, 0xBFE003B2BCCA565E, 0x4020731E7A5252E6, 0xC0247C15E4C55483,
+  0x3FBCA493618AE83B,
+  LA, S_LA, "LA circular (41.3, 2.6, -15.7)");
+_fj(LA, 0x3FE3333333333333, 0x3FC999999999999A, 0xBFD3333333333333, 0x3FE6666666666666, 0x3EFB6776C9157649,
+  0x4004CCCCCCCCCCCD, 0xBEE4D5CA8153E1AE);
+_fp(0x4001F63F00FDD6C3, 0x4014B3B3E0A0F37F, 0xC010D8EA57065C40, 0x401E16684DC368BF, 0xC0237D355AEE6886,
+  0xC00449954E6999FA,
+  LA, S_LA, "LA elliptical (41.3, 2.6, -15.7)");
+_fr(LA, 0x3EFB6776C9157649, 0x4004CCCCCCCCCCCD, 0xBEE4D5CA8153E1AE);
+_fp(0xC01515F8766E262F, 0xC00918ADEB6AB773, 0x40095ECD36466C94, 0x3FFE322175B7C474, 0x4026C30424A08BEE,
+  0x400E85A765D47296,
+  LA, S_LA, "LA radial (41.3, 2.6, -15.7)");
+_fa(LA, 0x3EFB6776C9157649, 0x4004CCCCCCCCCCCD, 0xBEE4D5CA8153E1AE);
+_fp(0xC01CD5A00C13CCB3, 0xC01076F0D77BE061, 0xC027F7076452B850, 0xC01B5E41EC20F8E5, 0x0000000000000000,
+  0x0000000000000000,
+  LA, S_LA, "LA azimuthal (41.3, 2.6, -15.7)");
+# focus_linear is the x-polarized Jones vector.
+var fl_r = f64_mul(_fd(47, 100), LAM);
+var fl_p = _fd(0 - 113, 100);
+var fl_z = f64_mul(_fd(19, 100), LAM);
+var FX = prt_field_new(0, 0, 0, 0, 0, 0);
+assert_eq(focus_linear(LB, fl_r, fl_p, fl_z, FX), PK_ERR_NONE, "focus_linear");
+_fj(LB, ONE, Z, Z, Z, fl_r, fl_p, fl_z);
+var fl_bad = 0;
+for (var fl_i = 0; fl_i < 6; fl_i = fl_i + 1) {
+    if (load64(FX + fl_i * 8) != load64(EF + fl_i * 8)) { fl_bad = fl_bad + 1; }
+}
+assert_eq(fl_bad, 0, "focus_linear = focus_jones(1, 0)");
+# y-polarized light is x-polarized light turned 90 degrees: E_y(rho, phi) = R E_x(rho, phi - 90).
+_fj(LB, Z, Z, ONE, Z, fl_r, fl_p, fl_z);
+assert_eq(focus_linear(LB, fl_r, f64_sub(fl_p, F64_PI_2), fl_z, FX), PK_ERR_NONE, "x-polarized, turned");
+var ty = f64_mul(TOL14, f64_mul(FocusLens_pref(LB), S_LB));
+_assert_near(PrtField_x_re(EF), f64_neg(PrtField_y_re(FX)), ty, "y-pol E_x = -(x-pol E_y), turned");
+_assert_near(PrtField_x_im(EF), f64_neg(PrtField_y_im(FX)), ty, "y-pol E_x im");
+_assert_near(PrtField_y_re(EF), PrtField_x_re(FX), ty, "y-pol E_y = x-pol E_x, turned");
+_assert_near(PrtField_y_im(EF), PrtField_x_im(FX), ty, "y-pol E_y im");
+_assert_near(PrtField_z_re(EF), PrtField_z_re(FX), ty, "y-pol E_z = x-pol E_z, turned");
+_assert_near(PrtField_z_im(EF), PrtField_z_im(FX), ty, "y-pol E_z im");
+# Circular light focuses to a spot with no preferred direction: |E|^2 the same at every phi.
+var R2 = 0x3FE6A09E667F3BCD;            # 1/sqrt(2)
+_fj(LB, R2, Z, Z, R2, fl_r, Z, fl_z);
+var ci0 = focus_intensity(EF);
+var ci_bad = 0;
+for (var ci_k = 1; ci_k < 9; ci_k = ci_k + 1) {
+    _fj(LB, R2, Z, Z, R2, fl_r, f64_mul(_fd(7 * ci_k, 10), ONE), fl_z);
+    if (_near(focus_intensity(EF), ci0, f64_mul(TOL14, ci0)) == 0) { ci_bad = ci_bad + 1; }
+}
+assert_eq(ci_bad, 0, "circular: |E|^2 independent of phi");
+# Linear light focuses to a spot longer along its polarization (Richards & Wolf).
+_fj(LA, ONE, Z, Z, Z, f64_mul(_fd(1, 4), FocusLens_lambda0(LA)), Z, Z);
+var el_x = focus_intensity(EF);
+_fj(LA, ONE, Z, Z, Z, f64_mul(_fd(1, 4), FocusLens_lambda0(LA)), F64_PI_2, Z);
+assert(f64_gt(el_x, f64_mul(_fd(6, 5), focus_intensity(EF))), "x-polarized: brighter along x than y at 0.25 lambda");
+# On the axis: x-polarized light has no E_y or E_z; radial has only E_z; azimuthal is dark.
+_fj(LA, ONE, Z, Z, Z, Z, _fd(7, 10), Z);
+assert_eq((PrtField_y_re(EF) | PrtField_y_im(EF) | PrtField_z_re(EF) | PrtField_z_im(EF)) & AX, Z,
+  "x-pol on axis: E_y = E_z = 0");
+_fr(LA, Z, _fd(7, 10), Z);
+assert_eq((PrtField_x_re(EF) | PrtField_x_im(EF) | PrtField_y_re(EF) | PrtField_y_im(EF)) & AX, Z,
+  "radial on axis: only E_z");
+assert(f64_gt(f64_abs(PrtField_z_im(EF)), Z), "and E_z is there");
+_fa(LA, Z, _fd(7, 10), Z);
+assert_eq(focus_intensity(EF), Z, "azimuthal on axis: dark");
+# Off it, radial light has no phi component and azimuthal light only that.
+var rp = _fd(0 - 23, 10);
+_fr(LC, fl_r, rp, fl_z);
+var rp_t = f64_mul(TOL15, f64_mul(FocusLens_pref(LC), S_LC));
+_assert_near(f64_sub(f64_mul(PrtField_x_re(EF), _prk_sin(rp)), f64_mul(PrtField_y_re(EF), _prk_cos(rp))), Z, rp_t,
+  "radial: E . phi-hat = 0");
+_fa(LC, fl_r, rp, fl_z);
+_assert_near(f64_add(f64_mul(PrtField_x_re(EF), _prk_cos(rp)), f64_mul(PrtField_y_re(EF), _prk_sin(rp))), Z, rp_t,
+  "azimuthal: E . rho-hat = 0");
+assert_eq((PrtField_z_re(EF) | PrtField_z_im(EF)) & AX, Z, "azimuthal: E_z = 0");
+
+# ── Limits and closed forms ────────
+test_group("focus limits");
+
+# Low NA: the scalar theory. At NA 0.001 its corrections are O(NA^2), ~2e-7 here. f = 10 m
+# makes the aperture 1 cm and its Fresnel number 18, a lens for which Debye holds; the sinc^2
+# below reaches 2 m from the focus, inside f.
+var LL_F = f64_from(10);
+var LL = focus_new(_fd(1, 1000), ONE, ONE, LAM, LL_F, U, 0, &err);
+assert_eq(err, PK_ERR_NONE, "NA 0.001");
+var ll_k = f64_mul(F64_TAU, f64_div(ONE, LAM));
+var ll_a = f64_mul(LL_F, _fd(1, 1000));                  # a = f NA
+# Fraunhofer, by Kirchhoff in this time convention: E(0) = -i pi a^2/(lambda f) for E0 = 1,
+# with e^(i k f) dropped. The size, and the phase: exactly -i.
+_fj(LL, ONE, Z, Z, Z, Z, Z, Z);
+var ll_0 = focus_intensity(EF);
+var ll_f = f64_div(f64_mul(F64_PI, _sq(ll_a)), f64_mul(LAM, LL_F));
+_assert_near(f64_div(f64_neg(PrtField_x_im(EF)), ll_f), ONE, TOL13, "E_x(0) = -i pi a^2/(lambda f)");
+assert_eq(PrtField_x_re(EF) & AX, Z, "with no real part");
+# Airy: |E(rho)|^2/|E(0)|^2 = (2 J1(v)/v)^2, v = k rho sin(alpha), as airy_pattern gives it for
+# an aperture of diameter 2a at the angle asin(rho/f). bessel_j1 there is good to 1e-7.
+var TOLL = _fd(5, 10000000);            # 5e-7
+var ai_bad = 0;
+for (var ai_k = 1; ai_k < 26; ai_k = ai_k + 1) {
+    var ai_v = f64_mul(_fd(ai_k, 2), _fd(4, 5));                  # v to 10, past the third ring
+    var ai_r = f64_div(ai_v, f64_mul(ll_k, _fd(1, 1000)));
+    _fj(LL, ONE, Z, Z, Z, ai_r, _fd(3, 10), Z);
+    var ai_y = airy_pattern(LAM, f64_add(ll_a, ll_a), ganita_f64_asin(f64_div(ai_r, LL_F)), ONE);
+    if (_near(f64_div(focus_intensity(EF), ll_0), ai_y, TOLL) == 0) { ai_bad = ai_bad + 1; }
+}
+assert_eq(ai_bad, 0, "NA 0.001 is the Airy pattern to 5e-7");
+# The first dark ring, at the first zero of J1, 3.8317059702075123.
+_fj(LL, ONE, Z, Z, Z, f64_div(0x400EA75575AF6F09, f64_mul(ll_k, _fd(1, 1000))), Z, Z);
+assert(f64_lt(f64_div(focus_intensity(EF), ll_0), TOLL), "dark at the first zero of J1");
+# Along the axis: sinc^2(u/4), u = k z sin^2(alpha) (Born & Wolf 8.8).
+var sc_bad = 0;
+for (var sc_k = 1; sc_k < 30; sc_k = sc_k + 1) {
+    var sc_u = f64_mul(f64_from(sc_k), _fd(4, 5));
+    var sc_z = f64_div(sc_u, f64_mul(ll_k, _fd(1, 1000000)));
+    _fj(LL, ONE, Z, Z, Z, Z, Z, sc_z);
+    var sc_q = f64_mul(sc_u, _fd(1, 4));
+    var sc_s = _sq(f64_div(_prk_sin(sc_q), sc_q));
+    if (_near(f64_div(focus_intensity(EF), ll_0), sc_s, TOLL) == 0) { sc_bad = sc_bad + 1; }
+}
+assert_eq(sc_bad, 0, "NA 0.001 on the axis is sinc^2(u/4) to 5e-7");
+
+# The overall phase, through the focus. A Gaussian of w = f NA/3 focused at NA 0.05 is a
+# paraxial Gaussian beam, and on the axis that is closed: the lens leaves E0 e^(i k h^2/(2 q_L)),
+# 1/q_L = -1/f + 2i/(k w^2), and the field at z is E0 q_L/(q_L + f + z) e^(i k z), e^(i k f)
+# dropped. Before the focus it is the converging wave +E0 f/|z|; at it, -i in phase; after it,
+# negated: the Gouy shift. The first cut was the negative of all of it. Debye against Fresnel
+# differs by ~1/(Fresnel number), 5.7e-3 at worst here.
+var gp_f = _fd(1, 10);
+var gp_l = 0x3EA0C6F7A0B5ED8D;          # 500 nm
+var gp_w = 0x3F5B4E81B4E81B50;          # f NA/3
+var GP = focus_new(_fd(5, 100), ONE, ONE, gp_l, gp_f, GA, gp_w, &err);
+assert_eq(err, PK_ERR_NONE, "the paraxial Gaussian lens");
+var gp_k = f64_div(F64_TAU, gp_l);
+var gp_dr = f64_neg(f64_div(ONE, gp_f));                         # 1/q_L
+var gp_di = f64_div(F64_TWO, f64_mul(gp_k, _sq(gp_w)));
+var gp_d2 = f64_add(_sq(gp_dr), _sq(gp_di));
+var gp_qr = f64_div(gp_dr, gp_d2);                               # q_L
+var gp_qi = f64_neg(f64_div(gp_di, gp_d2));
+var gp_bad = 0;
+for (var gp_j = 0; gp_j < 6; gp_j = gp_j + 1) {
+    var gp_z = f64_mul(f64_from(0 - 10), _fd(1, 1000));                       # -10 mm
+    if (gp_j == 1) { gp_z = f64_mul(f64_from(0 - 1), _fd(1, 1000)); }
+    if (gp_j == 2) { gp_z = f64_mul(f64_from(0 - 2), _fd(1, 10000)); }
+    if (gp_j == 3) { gp_z = Z; }
+    if (gp_j == 4) { gp_z = f64_mul(f64_from(3), _fd(1, 10000)); }
+    if (gp_j == 5) { gp_z = f64_mul(f64_from(3), _fd(1, 1000)); }
+    # q_L/(q_L + f + z) e^(i k z)
+    var dr = f64_add(f64_add(gp_qr, gp_f), gp_z);
+    var dd = f64_add(_sq(dr), _sq(gp_qi));
+    var rr = f64_div(f64_add(f64_mul(gp_qr, dr), _sq(gp_qi)), dd);
+    var ri = f64_div(f64_sub(f64_mul(gp_qi, dr), f64_mul(gp_qr, gp_qi)), dd);
+    var ph = _prk_cycles_phase(f64_div(gp_z, gp_l));
+    var er = f64_sub(f64_mul(rr, _prk_cos(ph)), f64_mul(ri, _prk_sin(ph)));
+    var ei = f64_add(f64_mul(rr, _prk_sin(ph)), f64_mul(ri, _prk_cos(ph)));
+    _fj(GP, ONE, Z, Z, Z, Z, Z, gp_z);
+    var dif = f64_sqrt(f64_add(_sq(f64_sub(PrtField_x_re(EF), er)), _sq(f64_sub(PrtField_x_im(EF), ei))));
+    if (f64_lt(dif, f64_mul(_fd(1, 100), f64_sqrt(f64_add(_sq(er), _sq(ei))))) == 0) { gp_bad = gp_bad + 1; }
+}
+assert_eq(gp_bad, 0, "on axis through the focus, the paraxial Gaussian beam to 1%");
+
+# Maxwell: div E = 0 in a homogeneous medium. Fourth-order central differences at k h = 0.009,
+# truncation ~2e-10 of the terms. Nothing here is the header's formulas, so a sign on E_z made
+# in both the formulas and the code would read ~1; the module reads ~1e-9.
+var DQ[16];
+fn _fxyz(l, mode, x, y, z) {
+    var r = f64_sqrt(f64_add(_sq(x), _sq(y)));
+    var p = ganita_f64_atan2(y, x);
+    if (mode == 0) { _fj(l, ONE, Z, Z, Z, r, p, z); }
+    if (mode == 1) { _fj(l, _fd(6, 10), _fd(2, 10), _fd(0 - 3, 10), _fd(7, 10), r, p, z); }
+    if (mode == 2) { _fr(l, r, p, z); }
+    if (mode == 3) { _fa(l, r, p, z); }
+    return 0;
+}
+# d E_ax / d ax, re and im into DQ.
+fn _dq(l, mode, x, y, z, ax, h) {
+    var sr = Z;
+    var si = Z;
+    for (var j = 0; j < 4; j = j + 1) {
+        var o = f64_from(0 - 2);
+        var w = f64_from(1);
+        if (j == 1) { o = f64_from(0 - 1); w = f64_from(0 - 8); }
+        if (j == 2) { o = ONE; w = f64_from(8); }
+        if (j == 3) { o = F64_TWO; w = f64_from(0 - 1); }
+        var d = f64_mul(o, h);
+        if (ax == 0) { _fxyz(l, mode, f64_add(x, d), y, z); }
+        if (ax == 1) { _fxyz(l, mode, x, f64_add(y, d), z); }
+        if (ax == 2) { _fxyz(l, mode, x, y, f64_add(z, d)); }
+        sr = f64_add(sr, f64_mul(w, load64(EF + ax * 16)));
+        si = f64_add(si, f64_mul(w, load64(EF + ax * 16 + 8)));
+    }
+    store64(&DQ, f64_div(sr, f64_mul(f64_from(12), h)));
+    store64(&DQ + 8, f64_div(si, f64_mul(f64_from(12), h)));
+    return 0;
+}
+# |div E| / sum |d E_i/d x_i|.
+fn _div(l, mode, x, y, z) {
+    var h = f64_div(FocusLens_lambda0(l), f64_from(700));
+    var dr = Z;
+    var di = Z;
+    var sc = Z;
+    for (var ax = 0; ax < 3; ax = ax + 1) {
+        _dq(l, mode, x, y, z, ax, h);
+        dr = f64_add(dr, load64(&DQ));
+        di = f64_add(di, load64(&DQ + 8));
+        sc = f64_add(sc, f64_sqrt(f64_add(_sq(load64(&DQ)), _sq(load64(&DQ + 8)))));
+    }
+    return f64_div(f64_sqrt(f64_add(_sq(dr), _sq(di))), sc);
+}
+# _div at (x, y, z) given in hundredths of the lens's lambda0.
+fn _divh(l, mode, x, y, z) {
+    var u = f64_mul(_fd(1, 100), FocusLens_lambda0(l));
+    return _div(l, mode, f64_mul(f64_from(x), u), f64_mul(f64_from(y), u), f64_mul(f64_from(z), u));
+}
+var dv_bad = 0;
+for (var dv_m = 0; dv_m < 4; dv_m = dv_m + 1) {
+    if (f64_lt(_divh(LB, dv_m, 31, 0 - 17, 23), _fd(1, 10000000)) == 0) { dv_bad = dv_bad + 1; }
+    if (f64_lt(_divh(LC, dv_m, 0 - 44, 29, 0 - 37), _fd(1, 10000000)) == 0) { dv_bad = dv_bad + 1; }
+}
+assert_eq(dv_bad, 0, "div E = 0 to 1e-7: x, elliptical, radial, azimuthal; oil and NA = n2");
+
+# Parseval: the plane waves leaving the lens carry the pupil's power, so whatever the
+# polarization, int |E|^2 dA over the focal plane = (n1/n2) 2 pi f^2 int |g|^2 sin dtheta.
+# Smooth pupils only, so that the focal field dies fast: x-polarized with a Gaussian, radial and
+# azimuthal with a doughnut. Both are cut at h = 7w, theta_top = asin(0.6), inside NA 0.95 n2.
+var pv_n2 = _fd(133, 100);
+var pv_f = _fd(2, 1000);
+var pv_w = f64_div(f64_mul(pv_f, _fd(6, 10)), f64_from(7));
+var GX[512];
+var GW[512];
+_lens_gauss(16, &GX, &GW);
+var HX[512];
+var HW[512];
+_lens_gauss(64, &HX, &HW);
+# (n1/n2) 2 pi f^2 int_0^theta_top |g|^2 sin dtheta, by 64-point Gauss-Legendre.
+fn _pv_rhs(l, doughnut) {
+    var th = FocusLens_theta(l);
+    var beta = FocusLens_beta(l);
+    var s = Z;
+    for (var i = 0; i < 64; i = i + 1) {
+        var t = f64_mul(f64_mul(f64_add(load64(&HX + i * 8), ONE), F64_HALF), th);
+        var sn = _prk_sin(t);
+        var u = f64_mul(beta, sn);
+        var g2 = f64_exp(f64_neg(f64_mul(F64_TWO, _sq(u))));
+        if (doughnut == 1) { g2 = f64_mul(g2, _sq(u)); }
+        s = f64_add(s, f64_mul(load64(&HW + i * 8), f64_mul(g2, sn)));
+    }
+    s = f64_mul(s, f64_mul(th, F64_HALF));
+    var r = f64_div(FocusLens_n1(l), FocusLens_n2(l));
+    return f64_mul(f64_mul(r, f64_mul(F64_TAU, _sq(FocusLens_focal(l)))), s);
+}
+# 2 pi A^2 int_0^R rho (sum over the phi-averaged |E|^2) drho, R = 15 lambda0 in 6 panels.
+# x-polarized: |I00|^2 + |I02|^2 + 2|I01|^2; radial 4(|Irho|^2 + |Iz|^2); azimuthal 4|Iphi|^2.
+var PV[24];
+fn _pv_lhs(l) {
+    for (var j = 0; j < 3; j = j + 1) { store64(&PV + j * 8, Z); }
+    var rmax = f64_mul(f64_from(15), FocusLens_lambda0(l));
+    var hp = f64_div(rmax, f64_from(6));
+    for (var p = 0; p < 6; p = p + 1) {
+        for (var i = 0; i < 16; i = i + 1) {
+            var r = f64_mul(hp, f64_add(f64_from(p), f64_mul(f64_add(load64(&GX + i * 8), ONE), F64_HALF)));
+            var w = f64_mul(f64_mul(load64(&GW + i * 8), f64_mul(hp, F64_HALF)), r);
+            _at(l, r, Z);
+            var m2[48];
+            for (var q = 0; q < 6; q = q + 1) {
+                store64(&m2 + q * 8, f64_add(_sq(load64(&IB + q * 16)), _sq(load64(&IB + q * 16 + 8))));
+            }
+            var lin = f64_add(f64_add(load64(&m2), load64(&m2 + 16)), f64_mul(F64_TWO, load64(&m2 + 8)));
+            var rad = f64_mul(f64_from(4), f64_add(load64(&m2 + 24), load64(&m2 + 32)));
+            var azi = f64_mul(f64_from(4), load64(&m2 + 40));
+            store64(&PV, f64_add(load64(&PV), f64_mul(w, lin)));
+            store64(&PV + 8, f64_add(load64(&PV + 8), f64_mul(w, rad)));
+            store64(&PV + 16, f64_add(load64(&PV + 16), f64_mul(w, azi)));
+        }
+    }
+    var a2 = f64_mul(F64_TAU, _sq(FocusLens_pref(l)));
+    for (var k = 0; k < 3; k = k + 1) { store64(&PV + k * 8, f64_mul(a2, load64(&PV + k * 8))); }
+    return 0;
+}
+var PG = focus_new(f64_mul(_fd(95, 100), pv_n2), ONE, pv_n2, LAM, pv_f, GA, pv_w, &err);
+assert_eq(err, PK_ERR_NONE, "Parseval's Gaussian lens");
+_assert_near(FocusLens_s_top(PG), _fd(6, 10), TOL15, "cut at sin = 0.6");
+var _p = _pv_lhs(PG);
+_assert_near(f64_div(load64(&PV), _pv_rhs(PG, 0)), ONE, TOL14, "x-polarized, Gaussian: focal power = pupil power");
+var PD = focus_new(f64_mul(_fd(95, 100), pv_n2), ONE, pv_n2, LAM, pv_f, FOCUS_PUPIL_DOUGHNUT, pv_w, &err);
+assert_eq(err, PK_ERR_NONE, "Parseval's doughnut lens");
+_p = _pv_lhs(PD);
+var pv_d = _pv_rhs(PD, 1);
+_assert_near(f64_div(load64(&PV + 8), pv_d), ONE, TOL14, "radial, doughnut: focal power = pupil power");
+_assert_near(f64_div(load64(&PV + 16), pv_d), ONE, TOL14, "azimuthal, doughnut: focal power = pupil power");
+
+# A curved beam focuses where the lens equation says: past the geometric focus by
+# (n1/n2) f^2/R for a diverging beam, before it for a converging one, at low NA to O(NA^2).
+# Here the parabola through three on-axis points has its vertex within 1% of that. n1 = 1.2,
+# so a lambda0 that was not n1 times the beam's wavelength would put it 20% off.
+fn _shift(zb) {
+    var w0 = _fd(2, 10000);
+    var lb = _fd(5, 10000000);
+    var bm = gaussian_beam_new(w0, lb, &err);
+    assert_eq(beam_propagate(bm, zb), PK_ERR_NONE, "beam_propagate");
+    var l = focus_from_beam(bm, _fd(133, 1000), _fd(6, 5), _fd(133, 100), _fd(1, 100), GA, &err);
+    assert_eq(err, PK_ERR_NONE, "focus_from_beam");
+    var ze = f64_mul(f64_mul(_fd(120, 133), _sq(_fd(1, 100))), beam_curvature(bm));
+    var d = _fd(25, 800000);
+    var iv[24];
+    for (var j = 0; j < 3; j = j + 1) {
+        var z = f64_add(ze, f64_mul(f64_from(j - 1), d));
+        assert_eq(focus_linear(l, Z, Z, z, EF), PK_ERR_NONE, "on axis");
+        store64(&iv + j * 8, focus_intensity(EF));
+    }
+    var im = load64(&iv);
+    var i0 = load64(&iv + 8);
+    var ip = load64(&iv + 16);
+    var off = f64_div(f64_mul(d, f64_sub(im, ip)), f64_mul(F64_TWO, f64_add(f64_sub(im, f64_mul(F64_TWO, i0)), ip)));
+    assert(f64_lt(f64_abs(off), f64_mul(_fd(1, 100), f64_abs(ze))), "the focus moves by (n1/n2) f^2/R");
+    assert(f64_gt(i0, im) & f64_gt(i0, ip), "and is a maximum there");
+    return ze;
+}
+assert(f64_gt(_shift(_fd(1, 2)), Z), "a diverging beam focuses past f");
+assert(f64_lt(_shift(_fd(0 - 1, 2)), Z), "a converging beam before it");
+
+# Dorn, Quabis & Leuchs at NA 0.9, the area inside the half-maximum contour of |E|^2: 0.31
+# lambda^2 for linear polarization and a uniform pupil (here 0.3139), 0.2 lambda^2 for the axial
+# field of radial polarization alone (here 0.2013).
+var dn_l = FocusLens_lambda0(lc);
+fn _dn_lin(r, phi) {
+    _fj(lc, ONE, Z, Z, Z, r, phi, Z);
+    return focus_intensity(EF);
+}
+fn _dn_half(phi, peak, radial) {
+    var lo = Z;
+    var hi = dn_l;
+    for (var i = 0; i < 48; i = i + 1) {
+        var m = f64_mul(f64_add(lo, hi), F64_HALF);
+        var v = Z;
+        if (radial == 1) {
+            _fr(lc, m, Z, Z);
+            v = f64_add(_sq(PrtField_z_re(EF)), _sq(PrtField_z_im(EF)));
+        } else {
+            v = _dn_lin(m, phi);
+        }
+        if (f64_gt(v, f64_mul(peak, F64_HALF)) == 1) { lo = m; } else { hi = m; }
+    }
+    return f64_mul(f64_add(lo, hi), F64_HALF);
+}
+var dn_pk = _dn_lin(Z, Z);
+var dn_a = Z;
+_lens_gauss(12, &GX, &GW);
+for (var dn_i = 0; dn_i < 12; dn_i = dn_i + 1) {
+    var dn_phi = f64_mul(f64_add(load64(&GX + dn_i * 8), ONE), f64_mul(F64_PI, _fd(1, 4)));
+    var dn_r = _dn_half(dn_phi, dn_pk, 0);
+    dn_a = f64_add(dn_a, f64_mul(load64(&GW + dn_i * 8), _sq(dn_r)));
+}
+dn_a = f64_div(f64_mul(dn_a, F64_PI_2), _sq(dn_l));     # 4 quadrants x (pi/4) x r^2/2
+_assert_near(dn_a, _fd(31, 100), _fd(5, 1000), "linear, uniform: 0.31 lambda^2 (Dorn et al.)");
+_fr(lc, Z, Z, Z);
+var dz_r = _dn_half(Z, f64_add(_sq(PrtField_z_re(EF)), _sq(PrtField_z_im(EF))), 1);
+var dz_a = f64_div(f64_mul(F64_PI, _sq(dz_r)), _sq(dn_l));
+_assert_near(dz_a, _fd(2, 10), _fd(5, 1000), "radial, |E_z|^2 alone: 0.2 lambda^2 (Dorn et al.)");
+
+var r = assert_summary();

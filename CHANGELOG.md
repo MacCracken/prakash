@@ -2,6 +2,160 @@
 
 ## [Unreleased]
 
+## [2.13.0] - 2026-11-02 — Vectorial focusing
+
+Closes the 2.13.0 roadmap row and the gap `docs/research/physics-completeness-audit.md` §14
+recorded: all of prakash's diffraction was scalar. Near the focus of a lens of high numerical
+aperture a scalar theory is wrong in kind, not only in size. The lens tilts the field of every
+ray it bends, so a linearly polarized beam focuses to a spot that is longer along its
+polarization and has a field along the axis, and a radially polarized one to a spot whose axial
+field is the strongest part of it. New API only: nothing existing changes value or signature.
+Toolchain unchanged, cyrius 6.7.18.
+
+Suite **10,376 → 12,213 assertions across 37 suites**, 0 failed; `cyrius audit` exits 0;
+`deps --verify` 114/114; `#must_use` 511 → **514**, 0 lost; reference coverage **523/523**.
+Benchmarks 173 → **178**.
+
+### Added — vectorial focusing (`wave_focus`, new module)
+- **`focus_new(na, n1, n2, lambda0, focal, pupil, fill, err_out)`** describes an aplanatic lens
+  and its pupil. The pupil is uniform, Gaussian, or a doughnut, the radial profile that radial
+  and azimuthal beams carry. NA may equal n₂, a 90° half-angle.
+- **`focus_from_beam(beam, na, n1, n2, focal, pupil, err_out)`** takes the pupil from a
+  `GaussianBeam` at the lens:
+  - its radius;
+  - n₁ times its wavelength, as λ₀;
+  - its wavefront curvature, as a phase across the pupil.
+
+  A diverging beam therefore focuses past f, by (n₁/n₂) f²/R at low NA, as the lens equation
+  says.
+- **`focus_integrals(lens, rho, z, out)`** gives the six Richards-Wolf integrals: I₀₀, I₀₁,
+  I₀₂, I_ρ, I_z and I_φ (Novotny & Hecht §3.6; Youngworth & Brown, Opt. Express 7, 77 (2000)).
+- **`focus_jones`, `focus_linear`, `focus_radial`, `focus_azimuthal`** write the field at
+  (ρ, φ, z) into a `ray_prt` `PrtField`. A Jones vector covers linear polarization at any angle,
+  circular and elliptical. **`focus_intensity`** is |E|².
+- **Conventions:**
+  - Time dependence is e^(−iωt), as in `ray_prt`; fields from `wave_beam`, which uses
+    e^(+iωt), are the complex conjugates.
+  - z is positive downstream from the geometric focus, and the common e^(ikf) is dropped.
+  - Fields are in units of the pupil amplitude E₀, with A = (kf/2)√(n₁/n₂) E₀.
+- ⚠ **The overall sign is Kirchhoff's, not a textbook's.** Goodman's kernel e^(ikd)/(iλd) puts
+  −i e^(ikf) πa²E₀/(λf) at a thin lens's focus, so an x-polarized field is −iA(…). Two tests
+  pin it:
+  - Fraunhofer's phase −i at low NA;
+  - the paraxial Gaussian beam through the focus, Gouy shift included.
+- **Its own J₀, J₁ and J₂,** to 5.5e-16 absolute: power series below 2, Chebyshev series to 8,
+  and Hankel's P and Q above, fitted in 50-digit arithmetic. `wave_airy`'s `bessel_j1` is a
+  1e-7 fit and is unchanged.
+- **Numerics:**
+  - θ = θ_top − ψ² keeps √cos θ smooth even at NA = n₂, and each integral is composite
+    16-point Gauss-Legendre in ψ.
+  - Panels follow the phase the integrand turns through, at 12 rad a panel. Against four times
+    as many panels, 24 rad still agreed to 6e-15 and 32 rad lost four digits.
+  - A Gaussian or doughnut pupil adds β·θ_top panels for its own width. Half that many still
+    converge; a quarter lose five digits.
+- **Refusals,** each answering NaN rather than a number:
+  - NA outside (0, n₂];
+  - an input that is not finite and positive;
+  - sin θ_top or A below 2⁻²⁰⁰, where the integrands underflow;
+  - a point at |z| ≥ f or ρ ≥ f, which is at or behind the lens;
+  - a point needing more than 2048 panels (at NA 0.9 in air, 1744 wavelengths off the axis or
+    1938 along it);
+  - |z| past 2⁵² wavelengths;
+  - an azimuth of 2⁶³ or more;
+  - a field that overflows.
+- ⚠ **The Fresnel number is not checked.** Debye's approximation holds where a²/(λf) is large.
+  A 50 µm aperture with a 1 m focal length gets an answer, and it is not that lens's field.
+
+### Validation
+- **60-digit integrals** at 32 generic points over ten lenses: tanh-sinh directly in θ, with
+  power-series Bessel functions, every input the exact value of the double the test passes.
+  - Coverage: NA 0.001 to NA = n₂, oil and water immersion, n₁ ≠ n₂, all three pupils, a
+    Gaussian cut inside the aperture, a curved beam, and points to 41 wavelengths off the axis
+    and 97 along it.
+  - Measured error: within 1.3e-15 of |I₀₀(0, 0)| near the focus, plus 4e-16 of it per
+    wavelength of defocus. That second part comes from forming n₂z/λ₀ in doubles, two
+    roundings, the same at every node.
+- **At NA 0.001 the integrals span eight decades,** and each one is pinned to 2e-15 of itself.
+  1 − cos θ is 5e-7 there, so forming it by subtraction would cost I₀₂ ten digits.
+- **The field formulas,** against a brute-force sum over the plane waves leaving the lens. The
+  sum turns each field vector ray by ray and uses no Bessel function and no closed φ integral.
+  x, y, radial, azimuthal and a curved pupil all agree to 1e-14.
+- **Maxwell:** ∇·E = 0 by fourth-order finite differences, to 4e-10 of the terms, for x,
+  elliptical, radial and azimuthal input. No formula in the module's header enters this check,
+  so a sign error made in the header and the code alike would still read ~1.
+- **Closed forms:**
+  - Uniform I₀₀(0, 0) = (2/3)(1 − cos^{3/2} α) + (2/5)(1 − cos^{5/2} α).
+  - Fraunhofer: −iπa²/(λf), size and phase.
+  - At NA 0.001, the Airy pattern (through `wave_airy`'s `airy_pattern`) and the on-axis
+    sinc²(u/4), both to 5e-7; the deviation scales as NA².
+  - The paraxial Gaussian beam E₀ q_L/(q_L + f + z) e^(ikz) on the axis, from −10 mm to +3 mm,
+    to 1%.
+  - Parseval: the focal plane carries the pupil's power, to 1e-14, for linear, radial and
+    azimuthal light.
+  - The lens equation for a curved beam's focus, to 1%, at n₁ = 1.2 and n₂ = 1.33.
+- **Literature:** Dorn, Quabis & Leuchs (arXiv:physics/0310007) give half-maximum spot areas at
+  NA 0.9. For uniformly lit linear polarization they print 0.31λ², and this gives 0.3139. For the
+  axial field of radial polarization alone they print 0.2λ², and this gives 0.2013.
+- **Relations:**
+  - circular light gives |E|² independent of φ;
+  - y-polarized light is x-polarized light turned 90°;
+  - a real pupil gives I(ρ, −z) = conj I(ρ, z);
+  - a linear spot is longer along its polarization.
+- **Mutation:** 41 mutants of the new code; 40 are killed. The survivor removes the azimuth
+  guard, and the overflow check then refuses the same input with NaN, only after the integrals
+  rather than before, so it is equivalent.
+
+### Fixed during the release's verification (never shipped)
+An independent review; every fix has a test that fails on the first cut.
+- **The overall sign was wrong.** The first cut followed the form +iA e^(−ikf), so every field
+  was the negative of the physical one. Relative phases were right, so the brute-force
+  reference, which copied the same prefactor, could not see it.
+- **The panel rule for a Gaussian or doughnut pupil was too coarse near NA = n₂:** 3e-12 where
+  1.3e-15 was claimed. In ψ the pupil's width scales as 1/(β√θ_top), so the panels it needs scale
+  as β·θ_top, not β sin θ_top/2. No test lens was in that region; two now are.
+- **J₀ was 1.2e-15 out below 2,** where the Chebyshev sum rounds at its end point, against a
+  stated 6e-16. Twenty-one pinned points had missed it. The power series has 1.1e-16 there.
+- **Five refusal gaps:**
+  - an azimuth past 2⁶³ gave NaN with success;
+  - nothing refused a point behind the lens;
+  - NA 1e-200 gave a field of exactly 0;
+  - 2A could overflow after A was accepted;
+  - `focus_from_beam` formed f², which underflowed to a pupil phase of 0 where the true one was
+    2.5e39 cycles.
+
+### Changed
+- **Docs:**
+  - README;
+  - `docs/architecture/overview.md`: wave 3295 → 5132 tests, 30 science modules, and a fourth
+    cross-group dependency;
+  - `math.md`;
+  - the upgrading guide;
+  - the audit's shipped list;
+  - the roadmap: the 2.13.0 row is gone and 2.14.0 leads.
+- **`tests/prakash.bcyr`** gains five rows.
+- **`dist/`:** `prakash.cyr` 18088 → 18810 lines, `prakash-ai.cyr` 18389 → 19111.
+
+### Performance
+No existing path changed. Three trees ran interleaved for five rounds, rotating which went
+first: this one, 2.12.0, and this one with `wave_focus` included last in the bench binary.
+Per-row medians over 173 rows: median **+0.00%**, geomean 1.0017.
+- Three atmosphere rows read 3 ns slower in every round: `rayleigh_cross_section` 8 → 10 ns,
+  `rayleigh_scattering_coefficient` 13 → 16 ns and `optical_depth_rayleigh` 17 → 21 ns.
+- Built with `wave_focus` last, they read 8, 13 and 17 ns again. So the shift comes from code
+  placement, not code, and `lens/optical_power`'s +12% moves the same way.
+- `ray/reflect_2d` reads 3 ns faster in both builds; nothing in its path changed either.
+
+| New row (load 2.5, median) | Time |
+|---|---|
+| `focus/bessel012_small`, x = 5.52 | 234 ns |
+| `focus/bessel012_large`, x = 133.7 | 417 ns |
+| `focus/integrals_near`, NA 1.3 oil, 0.23λ off the axis: 4 panels, 64 nodes | 20.0 µs |
+| `focus/integrals_far`, 10λ off, 3λ along: 24 panels | 247 µs |
+| `focus/linear_field`, the near point | 20.1 µs |
+
+A node costs ~310 ns near the focus, where the Bessel functions are power series, and ~640 ns
+past x = 8, where they are Hankel's.
+
 ## [2.12.0] - 2026-11-01 — 3×3 polarization ray tracing
 
 Closes the 2.12.0 roadmap row and the gap `docs/research/physics-completeness-audit.md` §13

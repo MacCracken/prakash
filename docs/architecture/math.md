@@ -439,6 +439,31 @@ Recurrences: H_{k+1} = 2x H_k − 2k H_{k−1} (A&S 22.7.13);
 e^{−ilφ} in this time convention carries +lħ per photon. Angular-momentum flux
 l P / ω = l P λ₀ / (2π c). Spiral phase plate step h = l λ / (n_rel − 1).
 
+### Vectorial Focusing (Richards-Wolf)
+An aplanatic lens of focal length f, NA = n₂ sin α, fed a collimated field E₀ g(h) at the
+height h = f sin θ, in e^{−iωt}, z from the geometric focus, e^{ikf} dropped:
+W(θ) = g √cos θ sin θ e^{ikz cos θ},  k = 2π n₂/λ₀,  x = kρ sin θ,
+I₀₀ = ∫₀^α W (1 + cos θ) J₀(x) dθ,  I₀₁ = ∫ W sin θ J₁(x),  I₀₂ = ∫ W (1 − cos θ) J₂(x),
+I_ρ = ∫ W cos θ J₁(x),  I_z = ∫ W sin θ J₀(x),  I_φ = ∫ W J₁(x).
+With A = (kf/2) √(n₁/n₂) E₀:
+x-polarized: E = −iA (I₀₀ + I₀₂ cos 2φ, I₀₂ sin 2φ, −2i I₀₁ cos φ);
+y-polarized: E = −iA (I₀₂ sin 2φ, I₀₀ − I₀₂ cos 2φ, −2i I₀₁ sin φ);
+a Jones vector (a, b) is their sum with weights a and b;
+radial (E₀ g ρ̂): E = −2A I_ρ ρ̂ − 2iA I_z ẑ;  azimuthal (E₀ g φ̂): E = −2A I_φ φ̂.
+The overall sign is Kirchhoff's: the kernel e^{ikd}/(iλd) (Goodman) puts −i e^{ikf} πa²E₀/(λf)
+at a thin lens's focus, and the converging wave +E₀ (f/|z|) e^{ik(f+z)} before it.
+Pupils: g = 1, e^{−h²/w²}, or (h/w) e^{−h²/w²}, w the 1/e² intensity radius. A
+Gaussian beam's wavefront curvature 1/R adds the pupil phase k₁ h²/(2R), and moves the
+focus by (n₁/n₂) f²/R at low NA.
+Checks: uniform I₀₀(0, 0) = (2/3)(1 − cos^{3/2} α) + (2/5)(1 − cos^{5/2} α); at low NA
+E_x(0) → −i π a² √(n₁/n₂) n₂/(λ₀ f) (Fraunhofer's A/λf in air), |E(ρ)|² → |E(0)|² (2J₁(v)/v)²
+with v = kρ sin α, and |E(0, z)|² → |E(0)|² sinc²(u/4) with u = kz sin² α; a Gaussian pupil at
+low NA gives the paraxial beam E₀ q_L/(q_L + f + z) e^{ikz} on the axis, 1/q_L = −1/f + 2i/(kw²);
+∇·E = 0; Parseval, ∫|E|² dA over the focal plane = (n₁/n₂) 2π f² ∫ |g|² sin θ dθ for every
+polarization.
+Novotny & Hecht, *Principles of Nano-Optics* §3.6; Youngworth & Brown, Opt. Express 7, 77
+(2000).
+
 ## Spectral
 
 ### Planck's Law
