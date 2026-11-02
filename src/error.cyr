@@ -69,7 +69,7 @@ fn prakash_is_ok(code) {
 # it — all 5485 assertions passed either side of the bump — because the shim
 # masks the builtin at exactly the point the table describes.
 #
-# Re-measured on cyrius 6.7.9 / ganita 1.2.15, x86_64 (raw f64 bits), for 2.11.0;
+# Re-measured on cyrius 6.7.18 / ganita 1.2.15, x86_64 (raw f64 bits), for 2.11.1;
 # every row is as it was at 6.6.6 / 1.2.6 (2.4.9):
 #
 #   expression              Cyrius builtin              Rust    shim
@@ -107,7 +107,7 @@ fn _prk_exp(x) {
 # calculation. A consumer's pin decides which builtin the bundle compiles against.
 #
 # ⛔ 2.10.1: THE GUARD OUTLIVES THAT DEFECT, BECAUSE ITS REASON IS THE ARGUMENT, NOT
-# THE BUILTIN. 6.6.9's software sin/cos do the full reduction: measured at 6.7.9,
+# THE BUILTIN. 6.6.9's software sin/cos do the full reduction: measured at 6.7.18,
 # f64_sin(1e300) = -0.81788 and f64_cos(1e300) = -0.57539, both right, and NaN at
 # the infinities. But beyond 2^63 a double's spacing exceeds 2048 while a period is
 # 2*pi, so the argument no longer identifies a physical phase at all. prakash

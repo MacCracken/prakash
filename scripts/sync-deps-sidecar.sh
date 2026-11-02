@@ -27,8 +27,9 @@
 #     dist/prakash.deps     = bayan
 #     dist/prakash-ai.deps  = sandhi bayan
 #   "compile-verified", and FALSE for a consumer without hisab, which the README
-#   promises works and ranga depends on. Measured at 6.6.20 and 6.7.9: the bundle with
-#   only those leaves is ~800 errors (F64_ONE, ganita_*, sakshi_*), and
+#   promises works and ranga depends on. Measured through 6.7.18: the bundle with only
+#   those leaves is refused, on SK_TRACE and the unresolved ganita_* and sakshi_*
+#   calls (at 6.7.18 bayan's own chain reaches math, so F64_ONE no longer fails), and
 #   scripts/check-consumer-link.sh fails on the generated sidecar and passes on
 #   this script's. With [deps.hisab] deleted from a scratch manifest the same
 #   generator derives `math sakshi ganita string alloc vec fnptr result bayan str`

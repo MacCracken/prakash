@@ -28,6 +28,18 @@ details of each change are in `CHANGELOG.md`.
   `./scripts/check-consumer-link.sh --root ~/Repos/ranga ~/.cyrius/versions/<pin>/bin/cycc`.
   ⚠ From 2.10.1 that passes in full only at cyrius ≥ 6.6.13; see below.
 
+## 2.11.1: cyrius 6.7.18 and stricter JSON
+
+- **No optics result moves.** About 3 million samples are bit-identical between 6.7.9
+  and 6.7.18, and JSON output is byte-identical.
+- ⚠ **`*_from_json` refuses two malformed inputs.** A duplicate key used to take its first
+  value and a leading zero (`01`) used to read as its digits. Both are `PK_ERR_PARSE`
+  now. If a stored document starts failing, fix the producer. prakash's own encoder
+  writes neither.
+- **A hand-vendored `lib/` needs more files.** bayan now reaches `chrono`, `slice`,
+  `hashseed` and `lib/unicode/`. `cyrius deps` vendors them for you.
+- **The cyrius ≥ 6.6.13 floor** for the JSON surface is unchanged.
+
 ## 2.11.0: cyrius 6.7.9 and long optical paths
 
 - **The bump itself moves nothing.** About 3 million samples are bit-identical between

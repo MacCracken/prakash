@@ -2,6 +2,72 @@
 
 ## [Unreleased]
 
+## [2.11.1] - 2026-11-01 — cyrius 6.7.18, hisab 3.4.1, and JSON decoders that refuse what they used to guess
+
+Toolchain **6.7.9 → 6.7.18**, hisab **3.4.0 → 3.4.1**, sakshi **2.5.8 → 2.5.10**, and
+from the 6.7.18 stdlib snapshot bayan **1.5.13 → 1.11.1**, sandhi **1.10.9 → 1.13.7**,
+sigil **3.13.11 → 3.13.15**; ganita stays 1.2.15. Each is the newest tag upstream, read
+from the GitHub API, and hisab 3.4.1 pins 6.7.18 itself, so here "latest" and "pinned"
+are the same set. No formula or API changed. `*_from_json` got stricter, through bayan.
+
+Suite **9634 → 9645 assertions across 35 suites**, 0 failed; `cyrius audit` exits 0;
+`deps --verify` 114/114; `#must_use` 501, 0 lost; reference coverage 498/498.
+Benchmarks 168.
+
+### Changed — what a consumer sees
+- ⚠ **`*_from_json` refuses two malformed inputs it used to decode.** bayan 1.11.1's
+  parser is stricter, and each case now reports `PK_ERR_PARSE`. The AI client's
+  config and response parsing goes through the same parser.
+
+  | Input | Through 2.11.0 | Now |
+  |---|---|---|
+  | Duplicate key, `{"r":1,"r":2,...}` | decoded, first value won | `PK_ERR_PARSE` |
+  | Leading zero, `{"r":01,...}` | decoded as 1 | `PK_ERR_PARSE` |
+  | Leading zero, `{"r":01.5,...}` | decoded as 1.5 | `PK_ERR_PARSE` |
+  | Duplicate key inside a prescription surface | `PK_ERR_INVALID_PARAMETER` | `PK_ERR_PARSE` |
+
+  The other 17 documents in the matrix answer as before, including integers outside
+  i64, which were already refused. `tests/serialize.tcyr` pins these; all five
+  refusal pins fail on 6.7.9.
+- **bayan's include closure grew from 24 to 35 files** (`chrono`, `slice`, `hashseed`, the
+  `unicode` family). The core bundle's stays free of net and TLS. `cyrius deps` vendors
+  them: a real hisab-free project using exactly the README's stdlib list resolved, built
+  with the one promised `num_fft` warning and ran. A hand-vendored `lib/` must carry them.
+- **Binary size:** `src/main.cyr` 3,701,432 → 4,543,536 B (+23%). hisab's bundle went
+  2.64 → 3.66 MB.
+- **cyrius.cyml, lib/, cyrius.lock** — pin `6.7.18`, `[deps.hisab]` tag `3.4.1`. 67 files
+  changed, none new. 113 files byte-match the 6.7.18 snapshot and `lib/hisab.cyr` matches
+  the 3.4.1 tag. The lock holds hisab `d6703c5`, sakshi `569e9f8` and trailer
+  `cyrius 6.7.18`.
+- ⚠ **`cyrius deps` now exits 1 on a moved pin** instead of half-working. Run `lib sync
+  --full --relock` first, then `deps`, delete `cyrius.lock`, and `deps` again.
+- **Sidecars:** the override stays, and its stated reason is corrected. bayan's chain now
+  reaches `math`, so a bundle with the generated leaves no longer fails on `F64_ONE`.
+  It is still refused, on `SK_TRACE` and the unresolved `ganita_*` / `sakshi_*` calls, and
+  `check-consumer-link.sh` still fails on the generated sidecar and passes on the
+  script's. README's note on what a shorter list breaks is corrected to match.
+
+### Not exposed — checked rather than assumed
+- **Optics results** — one program built from the unchanged source under both toolchains,
+  ~3 million samples including FFT-backed patterns to n = 1024: **bit-identical**.
+- **JSON wire format** — every serialized type is byte-identical.
+- **bayan's new refusal of integers outside i64 cannot reach prakash's own output.** A
+  whole double past 2⁶³ is written `100000000000000000000.0`, a float. 2,723 values, covering
+  ±10⁰–10³⁰⁷, every power of two from 2⁻¹⁰⁷³ to 2¹⁰²², and the edge cases, round-trip with
+  0 mismatches. Pinned at 1e20 and 2⁶⁴. ±inf and NaN still encode as `null`, which
+  `rgb_from_json` refuses as a missing number, as before.
+- **hisab 3.4.1** keeps all 703 public names. `num_fft` gains one `n < 0` guard.
+- **sandhi 1.13.7** has no API change for a caller, and sigil's lane change does not
+  reach prakash: `src/` calls no `cbank` or EC arithmetic. The `ai` suites pass.
+- **The cyrius ≥ 6.6.13 floor** for the JSON surface is unchanged: the consumer gate
+  passes at 6.6.13 with that snapshot's own `lib/`.
+- **`cyrius lint` still exits 0 with warnings at 6.7.18** — re-verified.
+
+### Performance
+**No change is claimed.** Both trees interleaved four rounds, alternating which ran first,
+per-row minimum over 168 rows: median **+0.00%**, geomean 1.0050, and no row over 100 ns
+moves past ±8%. Spread between two runs of the same tree: median 1.6%.
+
 ## [2.11.0] - 2026-11-01 — cyrius 6.7.9, hisab 3.4.0, and long optical paths stop paying for full reduction
 
 Toolchain **6.6.20 → 6.7.9**, hisab **3.3.7 → 3.4.0** (its 6.7.9 release; 3.4.1 pins

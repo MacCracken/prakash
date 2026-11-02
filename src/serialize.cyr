@@ -28,7 +28,9 @@
 # entry and one of these on failure, returning 0:
 #
 #   PK_ERR_PARSE              the bytes are not well-formed JSON, or the document
-#                             is not the type the decoder needs (bad bytes)
+#                             is not the type the decoder needs (bad bytes). From
+#                             bayan 1.11.1 that takes in a duplicate key and a
+#                             leading zero, which used to decode (2.11.1)
 #   PK_ERR_INVALID_PARAMETER  parsed fine, but a required field is absent or of
 #                             the wrong type (wrong schema)
 #   PK_ERR_ALLOCATION         a caller-sized buffer could not be allocated

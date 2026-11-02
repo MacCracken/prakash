@@ -72,7 +72,7 @@ densities, and LMS → XYZ. Pinned to the published 2° and 10° tables at age 3
 Each of these rules is a measurement. The CHANGELOG has the story behind each one.
 
 **Performance**
-- **Cost model (cyrius 6.7.9):**
+- **Cost model (cyrius 6.7.18):**
   - `f64_mul` (~2 ns) and `f64_div` (~4.5 ns) are inline; a user-function call adds
     1–3 ns.
   - The expensive calls are transcendentals: ln ~43 ns, atan2 ~53 ns, exp ~20 ns,

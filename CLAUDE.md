@@ -8,7 +8,7 @@
 - **Type**: Cyrius library — `src/` modules bundled by `cyrius distlib` into `dist/prakash.cyr`
   (math-only) and `dist/prakash-ai.cyr` (adds the sandhi HTTP/TLS AI client)
 - **License**: GPL-3.0
-- **Toolchain pin**: cyrius 6.7.9 — single source of truth is `cyrius = "..."` in `cyrius.cyml`
+- **Toolchain pin**: cyrius 6.7.18 — single source of truth is `cyrius = "..."` in `cyrius.cyml`
 - **Version**: SemVer, currently 2.11.x. `VERSION` is the single source; `cyrius.cyml`
   reads it via `${file:VERSION}` and the release workflow fails if the tag disagrees
 
