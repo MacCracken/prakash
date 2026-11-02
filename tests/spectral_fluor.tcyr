@@ -1,0 +1,657 @@
+# spectral_fluor test suite — fluorescence: spectra, Stokes shift, quantum yield, the Donaldson
+# matrix and Forster transfer (2.15.0).
+#
+# References, none of them this code:
+# - 50-digit closed forms: a band Gaussian in wavenumber, its per-nm maximum
+#   nu* = (nu0 + sqrt(nu0^2 + 8 sigma^2))/2 (the maximum of g(nu) nu^2), the Stokes shift between
+#   two such bands, 1 - 10^-A, the comparative quantum yield, Forster's R0 from the exact N_A, and
+#   the overlap integral of two bands Gaussian in wavelength from the moments of their product,
+#   m^4 + 6 m^2 v + 3 v^2.
+# - The literature: CODATA's 8065.544 cm^-1 per eV; Lakowicz's 0.211 Angstrom and IUPAC's
+#   2.108e-2 nm for R0's prefactor.
+# - spectral_core's photon_energy, against the photon conversion.
+# - The 2.15.0 review's cases: an excitation spectrum is not a density, a saturated top or two
+#   equal maxima have no peak, an Spd without a values buffer is refused rather than read, and a
+#   refused Donaldson matrix costs no memory.
+# - Invariants that share no formula with the module: photons conserved column by column
+#   through the Donaldson matrix, its energy yield set by the emission's mean wavelength, rank
+#   one off the diagonal (Kasha and Vavilov), nothing above the diagonal with FLUOR_DOWN, and a
+#   fluorescent sample brighter under D65 than the same surface without the fluorescence.
+
+include "src/error.cyr"
+include "src/spectral_core.cyr"
+include "src/spectral_cie.cyr"
+include "src/spectral_fluor.cyr"
+
+fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _near(a, b, tol) { return f64_le(f64_abs(f64_sub(a, b)), tol); }
+fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
+fn _assert_rel(a, b, rel, msg) { assert(_near(a, b, f64_mul(rel, f64_abs(b))), msg); }
+fn _is_nan(x) { return (x & 0x7FFFFFFFFFFFFFFF) > 0x7FF0000000000000; }
+fn _sq(x) { return f64_mul(x, x); }
+
+var Z = f64_from(0);
+var ONE = F64_ONE;
+var INF = 0x7FF0000000000000;
+var NAN = 0x7FF8000000000000;
+var R15 = _fd(1, 1000000000000000);            # 1e-15
+var R14 = _fd(1, 100000000000000);             # 1e-14
+
+alloc_init();
+var e = 0;
+
+# An Spd of n samples from start every step, all equal to v.
+fn _flat(start, step, n, v) {
+    var b = alloc(n * 8);
+    for (var i = 0; i < n; i = i + 1) { store64(b + i * 8, v); }
+    return spd_new(start, step, b, n);
+}
+
+# An Spd of three samples at 500, 505, 510 nm.
+fn _three(a, b, c) {
+    var v = alloc(24);
+    store64(v, a);
+    store64(v + 8, b);
+    store64(v + 16, c);
+    return spd_new(f64_from(500), f64_from(5), v, 3);
+}
+
+# ── Photons and energy ────────
+test_group("photons");
+# 1 W/nm at 300, 550 and 800 nm is lambda 1e-9/(h c) photons/s/nm.
+var pw = _flat(f64_from(300), f64_from(250), 3, ONE);
+var pp = spd_energy_to_photons(pw, &e);
+assert(e == PK_ERR_NONE, "energy to photons");
+_assert_rel(load64(Spd_values(pp)), 0x43B4F56EB431E338, _fd(4, 10000000000000000),
+  "300 nm: 1.51023e18 photons/s per W");
+_assert_rel(load64(Spd_values(pp) + 8), 0x43C33650252DBAF4, _fd(4, 10000000000000000),
+  "550 nm: 2.76876e18 photons/s per W");
+_assert_rel(load64(Spd_values(pp) + 16), 0x43CBF1E8F042844B, _fd(4, 10000000000000000),
+  "800 nm: 4.02729e18 photons/s per W");
+# Photons times spectral_core's photon energy hc/lambda is the power back.
+_assert_rel(f64_mul(load64(Spd_values(pp) + 8), photon_energy(f64_from(550))), ONE, _fd(4, 10000000000000000),
+  "550 nm: photons x photon_energy = 1 W");
+var pb = spd_photons_to_energy(pp, &e);
+assert(e == PK_ERR_NONE, "photons to energy");
+for (var pk = 0; pk < 3; pk = pk + 1) {
+    _assert_rel(load64(Spd_values(pb) + pk * 8), ONE, _fd(4, 10000000000000000), "round trip");
+}
+assert((Spd_start_nm(pp) == Spd_start_nm(pw)) & (Spd_step_nm(pp) == Spd_step_nm(pw)) & (Spd_len(pp) == 3),
+  "same grid");
+assert(Spd_values(pp) != Spd_values(pw), "a new buffer, not the input's");
+var rf = spd_energy_to_photons(0, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "photons: null");
+rf = spd_energy_to_photons(spd_new(f64_from(500), ONE, Spd_values(pw), 0), &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "photons: no samples");
+rf = spd_energy_to_photons(_flat(Z, ONE, 3, ONE), &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "photons: a wavelength of 0");
+rf = spd_photons_to_energy(_flat(f64_from(500), Z, 3, ONE), &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "energy: step 0");
+rf = spd_photons_to_energy(_flat(f64_from(500), NAN, 3, ONE), &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "energy: step NaN");
+rf = spd_photons_to_energy(_flat(f64_from(0 - 5), ONE, 3, ONE), &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "energy: a negative start");
+# More samples than 2^31 bytes hold is refused before a byte is read: this Spd claims 2^28 + 1
+# over a 3-sample buffer.
+rf = spd_energy_to_photons(spd_new(f64_from(500), ONE, Spd_values(pw), 268435457), &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "photons: more than 2^28 samples");
+# A grid whose last wavelength overflows is refused: the first cut returned infinite photons.
+rf = spd_energy_to_photons(spd_new(0x7FE1CCF385EBC8A0, 0x7FE1CCF385EBC8A0, Spd_values(pw), 3), &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "photons: a grid past 1.8e308");
+
+# ── Bands ────────
+test_group("bands");
+# 490 nm, 2500 cm^-1, on 380 + 5k nm.
+var b490 = fluor_gaussian_band(f64_from(490), f64_from(2500), f64_from(380), f64_from(5), 81, FLUOR_BAND_DENSITY, &e);
+assert(e == PK_ERR_NONE, "band 490");
+# In the tails exp's argument is large, and its rounding grows with it: 1.3e-14 at 6.3 sigma.
+_assert_rel(load64(Spd_values(b490)), 0x3E351C5F6CD1249F, _fd(4, 100000000000000), "band at 380 nm, 3e-7 of its peak");
+_assert_rel(load64(Spd_values(b490) + 160), 0x3F8ED405B1AC2697, R14, "band at 480 nm");
+_assert_rel(load64(Spd_values(b490) + 168), 0x3F900A59E81DD2E2, R14, "band at 485 nm");
+_assert_rel(load64(Spd_values(b490) + 320), 0x3F211EA1A8D4C0EE, R14, "band at 580 nm");
+_assert_rel(load64(Spd_values(b490) + 640), 0x3D2C243E63ECB913, _fd(4, 100000000000000),
+  "band at 780 nm, 3e-12 of its peak");
+var b515 = fluor_gaussian_band(f64_from(515), f64_from(2000), f64_from(380), f64_from(5), 81, FLUOR_BAND_DENSITY, &e);
+var area = Z;
+for (var ak = 0; ak < 81; ak = ak + 1) { area = f64_add(area, load64(Spd_values(b515) + ak * 8)); }
+_assert_near(f64_mul(area, f64_from(5)), ONE, R14, "unit area: sum x step = 1 for a band inside the grid");
+# Per wavenumber the band peaks at its centre, to rounding.
+_assert_rel(fluor_peak_cm1(b490), _fd(10000000, 490), R15, "per cm^-1 the 490 nm band peaks at 1e7/490");
+_assert_rel(fluor_peak_cm1(b515), _fd(10000000, 515), R15, "per cm^-1 the 515 nm band peaks at 1e7/515");
+# Per nm it peaks blue of its centre, at 1e7/nu*: within 3.1e-5 of a step (measured).
+var b350 = fluor_gaussian_band(f64_from(350), f64_from(4000), f64_from(250), f64_from(5), 101, FLUOR_BAND_DENSITY, &e);
+var b450 = fluor_gaussian_band(f64_from(450), f64_from(5000), f64_from(300), f64_from(5), 121, FLUOR_BAND_DENSITY, &e);
+var ptol = _fd(16, 100000);                    # 1.6e-4 nm: 3.2e-5 of a 5 nm step
+_assert_near(fluor_peak_nm(b490), 0x407E76053209FF17, ptol, "490/2500: per-nm peak 487.376 nm");
+_assert_near(fluor_peak_nm(b515), 0x4080085AD31BD937, ptol, "515/2000: per-nm peak 513.044 nm");
+_assert_near(fluor_peak_nm(b350), 0x4075B8F66355B593, ptol, "350/4000: per-nm peak 347.560 nm");
+_assert_near(fluor_peak_nm(b450), 0x407BA12074771FC4, ptol, "450/5000: per-nm peak 442.070 nm");
+assert(f64_lt(fluor_peak_nm(b490), f64_from(490)) == 1, "a band Gaussian in energy peaks blue of its centre per nm");
+# The error shrinks with the step: 1, 2 and 10 nm grids of the 490 nm band.
+var b1 = fluor_gaussian_band(f64_from(490), f64_from(2500), f64_from(380), ONE, 401, FLUOR_BAND_DENSITY, &e);
+var b2 = fluor_gaussian_band(f64_from(490), f64_from(2500), f64_from(380), F64_TWO, 201, FLUOR_BAND_DENSITY, &e);
+var b10 = fluor_gaussian_band(f64_from(490), f64_from(2500), f64_from(380), f64_from(10), 41, FLUOR_BAND_DENSITY, &e);
+_assert_near(fluor_peak_nm(b1), 0x407E76053209FF17, _fd(32, 1000000), "1 nm step: within 3.2e-5 nm");
+_assert_near(fluor_peak_nm(b2), 0x407E76053209FF17, _fd(64, 1000000), "2 nm step: within 6.4e-5 nm");
+_assert_near(fluor_peak_nm(b10), 0x407E76053209FF17, _fd(32, 100000), "10 nm step: within 3.2e-4 nm");
+# Wide bands far in the red, at 10 nm steps, are the worst case: within 4e-4 of a step.
+var b900 = fluor_gaussian_band(f64_from(900), f64_from(5000), f64_from(500), f64_from(10), 101, FLUOR_BAND_DENSITY, &e);
+_assert_near(fluor_peak_nm(b900), 0x408A534864AEF598, _fd(4, 1000), "900/5000 at 10 nm: 842.410 nm, within 0.004 nm");
+var b1200 = fluor_gaussian_band(f64_from(1200), f64_from(6000), f64_from(600), f64_from(10), 101, FLUOR_BAND_DENSITY,
+  &e);
+_assert_near(fluor_peak_nm(b1200), 0x40902639E2BC7B7F, _fd(4, 1000),
+  "1200/6000 at 10 nm: 1033.557 nm, within 0.004 nm");
+rf = fluor_gaussian_band(Z, f64_from(2500), f64_from(380), f64_from(5), 81, FLUOR_BAND_DENSITY, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "band: centre 0");
+rf = fluor_gaussian_band(f64_from(490), f64_neg(ONE), f64_from(380), f64_from(5), 81, FLUOR_BAND_DENSITY, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "band: negative width");
+rf = fluor_gaussian_band(f64_from(490), f64_from(2500), NAN, f64_from(5), 81, FLUOR_BAND_DENSITY, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "band: start NaN");
+rf = fluor_gaussian_band(f64_from(490), f64_from(2500), f64_from(380), INF, 81, FLUOR_BAND_DENSITY, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "band: step inf");
+rf = fluor_gaussian_band(f64_from(490), f64_from(2500), f64_from(380), f64_from(5), 1, FLUOR_BAND_DENSITY, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "band: one sample");
+rf = fluor_gaussian_band(f64_from(490), f64_from(2500), f64_from(380), f64_from(5), 81, 2, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "band: kind 2");
+# Overflow is refused, not sampled: a width of 5e-324 makes the height infinite, and a grid
+# starting at 1e308 runs past the largest double.
+rf = fluor_gaussian_band(f64_from(490), 1, f64_from(380), f64_from(5), 81, FLUOR_BAND_DENSITY, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "band: a width of 5e-324, sigma 0");
+rf = fluor_gaussian_band(f64_from(490), 0x00022840573AF90C, f64_from(380), f64_from(5), 81, FLUOR_BAND_DENSITY, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "band: a width of 3e-309, a height past 1.8e308");
+rf = fluor_gaussian_band(f64_from(490), f64_from(2500), 0x7FE1CCF385EBC8A0, 0x7FE1CCF385EBC8A0, 3, FLUOR_BAND_PROFILE,
+  &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "band: a grid past 1.8e308");
+# An excitation or absorption band is a profile: 1 at its centre, which is its peak on both
+# scales, exactly, since its logarithm is quadratic in wavenumber.
+var p490 = fluor_gaussian_band(f64_from(490), f64_from(2500), f64_from(380), f64_from(5), 81, FLUOR_BAND_PROFILE, &e);
+assert(e == PK_ERR_NONE, "profile 490");
+assert(load64(Spd_values(p490) + 22 * 8) == ONE, "profile: 1 at its centre, 490 nm");
+_assert_rel(fluor_peak_nm(p490), f64_from(490), R15, "profile: the peak is the centre, 490 nm");
+var p350 = fluor_gaussian_band(f64_from(350), f64_from(4000), f64_from(250), f64_from(5), 101, FLUOR_BAND_PROFILE, &e);
+_assert_rel(fluor_peak_nm(p350), f64_from(350), R15, "profile: 350 nm");
+# Converted as though it were a density, the same band would peak 111 cm^-1 off its centre:
+# fluor_peak_cm1 is for emission spectra.
+assert(f64_gt(f64_abs(f64_sub(fluor_peak_cm1(p490), _fd(10000000, 490))), f64_from(100)) == 1,
+  "a profile taken per cm^-1 as a density lands 111 cm^-1 off");
+
+# ── Peaks ────────
+test_group("peaks");
+# A spectrum whose logarithm is quadratic in wavenumber peaks exactly where it says, off-grid.
+fn _logq(l) {
+    var d = f64_sub(f64_div(f64_from(10000000), l), f64_div(f64_from(10000000), _fd(53137, 100)));
+    return _prk_exp(f64_neg(f64_div(_sq(d), f64_from(1620000))));
+}
+var lq = spd_from_function(&_logq, f64_from(380), f64_from(780), 81, &e);
+_assert_rel(fluor_peak_nm(lq), _fd(53137, 100), _fd(1, 10000000000000), "log-quadratic in wavenumber: 531.37 nm");
+# A neighbour of 0 falls back to the parabola through the samples themselves.
+_assert_rel(fluor_peak_nm(_three(Z, ONE, F64_HALF)), 0x407F9C9ADEA793C2, R15,
+  "0, 1, 0.5: the plain parabola, 505.788 nm");
+assert(_is_nan(fluor_peak_nm(_three(ONE, F64_HALF, Z))), "a maximum on the first sample is not located");
+assert(_is_nan(fluor_peak_nm(_three(Z, F64_HALF, ONE))), "a maximum on the last sample is not located");
+assert(_is_nan(fluor_peak_nm(_three(ONE, ONE, ONE))), "a flat spectrum has its maximum on the first sample");
+assert(_is_nan(fluor_peak_nm(_three(f64_neg(ONE), Z, f64_neg(ONE)))), "no positive sample");
+assert(_is_nan(fluor_peak_nm(_three(Z, NAN, Z))), "a NaN sample");
+# Five samples at 500 + 5k nm.
+fn _five(a, b, c, d, f) {
+    var v = alloc(40);
+    store64(v, a);
+    store64(v + 8, b);
+    store64(v + 16, c);
+    store64(v + 24, d);
+    store64(v + 32, f);
+    return spd_new(f64_from(500), f64_from(5), v, 5);
+}
+assert(_is_nan(fluor_peak_nm(_five(NAN, _fd(2, 10), ONE, F64_HALF, Z))), "a NaN away from the maximum still refuses");
+# Two equal maxima, at 505 and 515 nm, have no single peak; nor has a flat top. The first cut
+# returned the first maximum, and the blue end of a saturated plateau.
+assert(_is_nan(fluor_peak_nm(_five(_fd(1, 10), ONE, F64_HALF, ONE, _fd(2, 10)))), "two equal maxima: NaN");
+assert(_is_nan(fluor_peak_cm1(_five(_fd(1, 10), ONE, ONE, F64_HALF, Z))), "per cm^-1: a flat top, NaN");
+# The 490 nm band on a 1 nm grid, clipped at 90% of its top: a 23-sample plateau.
+var clip = fluor_gaussian_band(f64_from(490), f64_from(2500), f64_from(380), ONE, 401, FLUOR_BAND_DENSITY, &e);
+var ctop = Z;
+for (var cj = 0; cj < 401; cj = cj + 1) {
+    if (f64_gt(load64(Spd_values(clip) + cj * 8), ctop) == 1) { ctop = load64(Spd_values(clip) + cj * 8); }
+}
+for (var cj2 = 0; cj2 < 401; cj2 = cj2 + 1) {
+    var cv = load64(Spd_values(clip) + cj2 * 8);
+    if (f64_gt(cv, f64_mul(_fd(9, 10), ctop)) == 1) { store64(Spd_values(clip) + cj2 * 8, f64_mul(_fd(9, 10), ctop)); }
+}
+assert(_is_nan(fluor_peak_nm(clip)), "a saturated band: NaN per nm, not the plateau's blue end");
+assert(_is_nan(fluor_peak_cm1(clip)), "a saturated band: NaN per cm^-1, not its red end");
+assert(_is_nan(fluor_peak_nm(_three(Z, ONE, INF))), "an infinite sample");
+assert(_is_nan(fluor_peak_nm(spd_new(f64_from(500), f64_from(5), Spd_values(pw), 2))), "two samples");
+assert(_is_nan(fluor_peak_nm(0)), "null");
+assert(_is_nan(fluor_peak_cm1(spd_new(f64_from(500), Z, Spd_values(pw), 3))), "per cm^-1: step 0");
+assert(_is_nan(fluor_peak_cm1(_three(ONE, F64_HALF, _fd(1, 10)))), "per cm^-1: a maximum on the first sample");
+assert(_is_nan(fluor_peak_cm1(spd_new(f64_from(500), f64_from(5), 0, 3))), "per cm^-1: no values buffer");
+
+# ── Stokes shift ────────
+test_group("stokes");
+# Excitation 490 nm / 2500 cm^-1 (a profile, as an excitation spectrum is) and emission
+# 515 nm / 2000 cm^-1 (a density), a fluorescein-like pair. The first cut took the excitation
+# per cm^-1 as a density too and read 879.6 cm^-1, 11% low.
+_assert_near(fluor_stokes_shift_cm1(p490, b515), 0x408EF580137A4B2C, _fd(1, 100000000000),
+  "990.688 cm^-1 = 1e7/490 - 1e7/515");
+_assert_near(fluor_stokes_shift_nm(p490, b515), 0x40370B5A637B26E0, _fd(16, 100000),
+  "23.044 nm between the per-nm peaks");
+_assert_rel(fluor_stokes_shift_ev(p490, b515), 0x3FBF71C2BBCD85CF, R14, "0.122830 eV");
+# 1 eV = 8065.543937 cm^-1 (CODATA 2018, from the exact h, c and e).
+_assert_rel(f64_div(fluor_stokes_shift_cm1(p490, b515), fluor_stokes_shift_ev(p490, b515)), _fd(8065543937, 1000000),
+  _fd(1, 1000000000), "8065.544 cm^-1 per eV");
+_assert_rel(fluor_stokes_shift_cm1(p350, b450), 0x40B8CD34D34D34D3, R14, "350 -> 450 nm, quinine-like: 6349.2 cm^-1");
+# The two scales are different points: the emission's per-nm peak, converted, misses its
+# per-wavenumber one.
+var cross = f64_sub(f64_div(f64_from(10000000), fluor_peak_nm(p490)), f64_div(f64_from(10000000), fluor_peak_nm(b515)));
+assert(f64_gt(f64_abs(f64_sub(cross, fluor_stokes_shift_cm1(p490, b515))), f64_from(10)) == 1,
+  "per-nm peaks converted to cm^-1 miss the per-wavenumber shift by more than 10 cm^-1");
+# As photons the emission peaks sigma^2/nu0 red of its power peak per cm^-1: 37 cm^-1 here.
+var b515q = spd_energy_to_photons(b515, &e);
+var dq = f64_sub(fluor_stokes_shift_cm1(p490, b515q), fluor_stokes_shift_cm1(p490, b515));
+assert((f64_gt(dq, f64_from(30)) & f64_lt(dq, f64_from(45))) == 1,
+  "photons widen the shift by about sigma^2/nu0, 37 cm^-1");
+assert(_is_nan(fluor_stokes_shift_nm(0, b515)), "nm: a null excitation");
+assert(_is_nan(fluor_stokes_shift_cm1(p490, _three(ONE, ONE, ONE))), "cm^-1: an emission with no located peak");
+assert(_is_nan(fluor_stokes_shift_ev(0, 0)), "eV: nulls");
+
+# ── Quantum yield ────────
+test_group("quantum yield");
+assert(fluor_quantum_yield_rates(f64_from(100000000), f64_from(300000000)) == _fd(1, 4), "k_r 1e8, k_nr 3e8: 0.25");
+assert(fluor_quantum_yield_rates(ONE, Z) == ONE, "no non-radiative decay: 1");
+assert(fluor_quantum_yield_rates(Z, ONE) == Z, "no radiative decay: 0");
+assert(_is_nan(fluor_quantum_yield_rates(Z, Z)), "rates: no decay at all");
+assert(_is_nan(fluor_quantum_yield_rates(f64_neg(ONE), F64_TWO)), "rates: a negative rate");
+assert(_is_nan(fluor_quantum_yield_rates(NAN, ONE)), "rates: NaN");
+assert(_is_nan(fluor_quantum_yield_rates(INF, ONE)), "rates: inf");
+assert(fluor_absorptance(Z) == Z, "A = 0 absorbs nothing");
+_assert_rel(fluor_absorptance(ONE), _fd(9, 10), R15, "A = 1 absorbs 90%");
+_assert_rel(fluor_absorptance(F64_TWO), _fd(99, 100), R15, "A = 2 absorbs 99%");
+_assert_rel(fluor_absorptance(_fd(1, 10000000000)), 0x3DEFA58045EB3B2C, _fd(2, 10000000000000000),
+  "A = 1e-10: A ln 10, to the last digit");
+_assert_rel(fluor_absorptance(_fd(13, 1000)), 0x3F9E32A298F45126, _fd(2, 10000000000000000), "A = 0.013 (series)");
+_assert_rel(fluor_absorptance(0x3F8BCB7B1526E50D), 0x3F9F8152AEE9450D, _fd(4, 10000000000000000),
+  "A ln 10 = 2^-5, the switch");
+_assert_rel(fluor_absorptance(F64_HALF), 0x3FE5E1764EDBDB79, _fd(4, 10000000000000000), "A = 0.5 (exponential)");
+# Where the first cut, switching at A ln 10 = 2^-5, lost up to 7 ulp, and both sides of the
+# switch now at A ln 10 = 1.
+_assert_rel(fluor_absorptance(_fd(1358, 100000)), 0x3F9F862D60559B30, _fd(3, 10000000000000000), "A = 0.01358");
+_assert_rel(fluor_absorptance(_fd(156, 10000)), 0x3FA21097ED6E6FA4, _fd(3, 10000000000000000), "A = 0.0156");
+_assert_rel(fluor_absorptance(_fd(2, 100)), 0x3FA70B36363B1E57, _fd(3, 10000000000000000), "A = 0.02");
+_assert_rel(fluor_absorptance(_fd(43, 100)), 0x3FE41C6226B6E7A4, _fd(3, 10000000000000000), "A = 0.43, series");
+_assert_rel(fluor_absorptance(_fd(44, 100)), 0x3FE461AA219BBF6E, _fd(3, 10000000000000000), "A = 0.44, exponential");
+assert(_is_nan(fluor_absorptance(f64_neg(_fd(1, 1000)))), "absorptance: negative A");
+assert(_is_nan(fluor_absorptance(INF)), "absorptance: inf");
+# Comparative method: phi_ref 0.546, F 1.2e6 against 1.0e6, A 0.05 against 0.04, n 1.361 / 1.333.
+var qy = fluor_quantum_yield_relative(_fd(546, 1000), f64_from(1200000), f64_from(1000000), _fd(5, 100), _fd(4, 100),
+  _fd(1361, 1000), _fd(1333, 1000));
+_assert_rel(qy, 0x3FE1AF228B6999DE, R14, "comparative yield 0.55263");
+# The usual A_ref/A form is the dilute limit: here it reads 0.54641, 1.1% low, since f = 1 - 10^-A bends.
+var qy_lin = f64_mul(f64_mul(_fd(546, 1000), _fd(12, 10)),
+  f64_mul(_fd(4, 5), _sq(f64_div(_fd(1361, 1000), _fd(1333, 1000)))));
+_assert_rel(qy_lin, 0x3FE17C33F5C66E25, R14, "the linear form");
+assert(f64_gt(qy, qy_lin) == 1, "the absorbed fraction grows slower than A: the linear form reads low");
+var qy_d = fluor_quantum_yield_relative(_fd(546, 1000), f64_from(1200000), f64_from(1000000), _fd(5, 1000000),
+  _fd(4, 1000000), _fd(1361, 1000), _fd(1333, 1000));
+_assert_rel(qy_d, qy_lin, _fd(3, 1000000), "at A = 5e-6 the two agree to 1.2e-6 (ln 10 (A - A_ref)/2)");
+assert(_is_nan(fluor_quantum_yield_relative(Z, ONE, ONE, ONE, ONE, ONE, ONE)), "relative: phi_ref 0");
+assert(_is_nan(fluor_quantum_yield_relative(_fd(11, 10), ONE, ONE, ONE, ONE, ONE, ONE)), "relative: phi_ref 1.1");
+assert(_is_nan(fluor_quantum_yield_relative(ONE, ONE, Z, ONE, ONE, ONE, ONE)), "relative: F_ref 0");
+assert(_is_nan(fluor_quantum_yield_relative(ONE, f64_neg(ONE), ONE, ONE, ONE, ONE, ONE)), "relative: F negative");
+assert(_is_nan(fluor_quantum_yield_relative(ONE, ONE, ONE, Z, ONE, ONE, ONE)), "relative: A 0");
+assert(_is_nan(fluor_quantum_yield_relative(ONE, ONE, ONE, ONE, ONE, Z, ONE)), "relative: n 0");
+assert(_is_nan(fluor_quantum_yield_relative(ONE, ONE, ONE, ONE, NAN, ONE, ONE)), "relative: A_ref NaN");
+assert(fluor_quantum_yield_relative(ONE, Z, ONE, ONE, ONE, ONE, ONE) == Z, "relative: no emission, no yield");
+assert(_is_nan(fluor_quantum_yield_relative(ONE, ONE, ONE, ONE, Z, ONE, ONE)), "relative: A_ref 0");
+assert(_is_nan(fluor_quantum_yield_relative(ONE, ONE, ONE, ONE, ONE, ONE, Z)), "relative: n_ref 0");
+assert(_is_nan(fluor_quantum_yield_relative(ONE, ONE, INF, ONE, ONE, ONE, ONE)), "relative: F_ref inf");
+assert(_is_nan(fluor_quantum_yield_relative(NAN, ONE, ONE, ONE, ONE, ONE, ONE)), "relative: phi_ref NaN");
+# A zero is +0, whatever its sign came in as.
+assert(fluor_quantum_yield_rates(0x8000000000000000, ONE) == 0, "rates: -0 in, +0 out");
+assert(fluor_absorptance(0x8000000000000000) == 0, "absorptance: -0 in, +0 out");
+assert(fluor_quantum_yield_relative(ONE, 0x8000000000000000, ONE, ONE, ONE, ONE, ONE) == 0, "relative: -0 in, +0 out");
+
+# ── The Donaldson matrix ────────
+test_group("donaldson");
+# A surface on 380 + 5k nm: absorptance 0.9 exp(-(nu - 1e7/470)^2/(2 1500^2)), its own reflectance
+# 0.95 - a (so R + a = 0.95), emission 520 nm / 2200 cm^-1, quantum yield 0.9.
+fn _absorb(l) {
+    var d = f64_sub(f64_div(f64_from(10000000), l), f64_div(f64_from(10000000), f64_from(470)));
+    return f64_mul(_fd(9, 10), _prk_exp(f64_neg(f64_div(_sq(d), f64_from(4500000)))));
+}
+fn _refl(l) { return f64_sub(_fd(95, 100), _absorb(l)); }
+var dn = 81;
+var da = spd_from_function(&_absorb, f64_from(380), f64_from(780), dn, &e);
+var dr = spd_from_function(&_refl, f64_from(380), f64_from(780), dn, &e);
+var dem = fluor_gaussian_band(f64_from(520), f64_from(2200), f64_from(380), f64_from(5), dn, FLUOR_BAND_DENSITY, &e);
+var phi = _fd(9, 10);
+var dm = fluor_donaldson(dr, da, dem, phi, f64_from(380), f64_from(5), dn, FLUOR_ALL, &e);
+assert(e == PK_ERR_NONE, "donaldson: built");
+assert((Donaldson_n(dm) == 81) & f64_eq(Donaldson_start_nm(dm), f64_from(380)) & f64_eq(Donaldson_step_nm(dm),
+    f64_from(5)),
+  "donaldson: grid");
+# Photons: every column returns Phi a(lambda_i) photons per photon in.
+var ph_ok = 1;
+var en_ok = 1;
+var sum_e = Z;
+var sum_el = Z;
+for (var ek = 0; ek < dn; ek = ek + 1) {
+    var el = f64_from(380 + 5 * ek);
+    sum_e = f64_add(sum_e, load64(Spd_values(dem) + ek * 8));
+    sum_el = f64_add(sum_el, f64_mul(load64(Spd_values(dem) + ek * 8), el));
+}
+var anti = 0;
+for (var ci = 0; ci < dn; ci = ci + 1) {
+    var li = f64_from(380 + 5 * ci);
+    var ai = load64(Spd_values(da) + ci * 8);
+    var ri = load64(Spd_values(dr) + ci * 8);
+    var phot = Z;
+    var ener = Z;
+    for (var co = 0; co < dn; co = co + 1) {
+        var lum = fluor_donaldson_at(dm, co, ci);
+        if (co == ci) { lum = f64_sub(lum, ri); }
+        phot = f64_add(phot, f64_mul(lum, f64_div(f64_from(380 + 5 * co), li)));
+        ener = f64_add(ener, lum);
+    }
+    var want = f64_mul(phi, ai);
+    # The diagonal holds R + luminescence, so taking R back off costs ~1e-16 absolute.
+    if (_near(phot, want, f64_add(f64_mul(R14, want), _fd(4, 10000000000000000))) == 0) { ph_ok = 0; }
+    # Energy: Phi a lambda_i sum E / sum E lambda, less than Phi a by the Stokes loss.
+    var want_e = f64_div(f64_mul(f64_mul(want, li), sum_e), sum_el);
+    if (_near(ener, want_e, f64_add(f64_mul(R14, want_e), _fd(4, 10000000000000000))) == 0) { en_ok = 0; }
+    if (f64_gt(ai, _fd(1, 1000)) == 1) {
+        if (f64_gt(ener, ai) == 1) { anti = anti + 1; }
+    }
+}
+assert(ph_ok == 1, "every column returns Phi a photons per photon absorbed");
+assert(en_ok == 1, "every column returns Phi a lambda_i/<lambda> of the energy");
+assert(anti > 0, "FLUOR_ALL: excited on the red edge, a column returns more energy than it absorbed (anti-Stokes)");
+# A column has the emission's shape, and its diagonal is the surface's reflectance plus that
+# shape's value in place: M[o][20]/E_o is one constant for o != 20, and (M[20][20] - R)/E_20 too.
+var col_k = f64_div(fluor_donaldson_at(dm, 40, 20), load64(Spd_values(dem) + 320));
+var shape_ok = 1;
+for (var so = 21; so < 81; so = so + 3) {
+    if (_near(f64_div(fluor_donaldson_at(dm, so, 20), load64(Spd_values(dem) + so * 8)), col_k,
+        f64_mul(R14, col_k)) == 0) {
+        shape_ok = 0;
+    }
+}
+assert(shape_ok == 1, "a column is the emission spectrum, scaled");
+_assert_rel(f64_div(f64_sub(fluor_donaldson_at(dm, 20, 20), load64(Spd_values(dr) + 160)),
+    load64(Spd_values(dem) + 160)),
+  col_k, _fd(1, 10000000000000), "diagonal = R + the emission's value there");
+# Rank one off the diagonal: M[o][i] M[p][j] = M[o][j] M[p][i].
+var rk_ok = 1;
+for (var ro = 40; ro < 60; ro = ro + 5) {
+    for (var rj = 10; rj < 30; rj = rj + 7) {
+        var lhs = f64_mul(fluor_donaldson_at(dm, ro, 15), fluor_donaldson_at(dm, ro + 2, rj));
+        var rhs = f64_mul(fluor_donaldson_at(dm, ro, rj), fluor_donaldson_at(dm, ro + 2, 15));
+        if (_near(lhs, rhs, f64_mul(R14, f64_abs(rhs))) == 0) { rk_ok = 0; }
+    }
+}
+assert(rk_ok == 1, "the luminescence is rank one: one emission shape at every excitation (Kasha, Vavilov)");
+# FLUOR_DOWN: nothing above the diagonal, the rest unchanged, and energy never gained.
+var dd = fluor_donaldson(dr, da, dem, phi, f64_from(380), f64_from(5), dn, FLUOR_DOWN, &e);
+assert(e == PK_ERR_NONE, "down: built");
+var dn_ok = 1;
+var gain = 0;
+for (var di = 0; di < dn; di = di + 1) {
+    var col = Z;
+    for (var do2 = 0; do2 < dn; do2 = do2 + 1) {
+        var v = fluor_donaldson_at(dd, do2, di);
+        if (do2 < di) {
+            if (v != 0) { dn_ok = 0; }
+        } else {
+            if (v != fluor_donaldson_at(dm, do2, di)) { dn_ok = 0; }
+        }
+        col = f64_add(col, v);
+    }
+    var cap = f64_add(load64(Spd_values(dr) + di * 8), load64(Spd_values(da) + di * 8));
+    if (f64_gt(col, cap) == 1) { gain = 1; }
+}
+assert(dn_ok == 1, "FLUOR_DOWN: 0 above the diagonal, FLUOR_ALL's values on and below it");
+assert(gain == 0, "FLUOR_DOWN: no column returns more than R + a of the energy");
+# Without fluorescence the matrix is diag(R), exactly.
+var d0 = fluor_donaldson(dr, da, dem, Z, f64_from(380), f64_from(5), dn, FLUOR_ALL, &e);
+var d0_ok = 1;
+for (var zi = 0; zi < dn; zi = zi + 1) {
+    for (var zo = 0; zo < dn; zo = zo + 1) {
+        var want0 = Z;
+        if (zo == zi) { want0 = load64(Spd_values(dr) + zi * 8); }
+        if (fluor_donaldson_at(d0, zo, zi) != want0) { d0_ok = 0; }
+    }
+}
+assert(d0_ok == 1, "Phi = 0: diag(R) exactly");
+# apply: one sample of light in returns its column.
+var mono = _flat(f64_from(380), f64_from(5), dn, Z);
+store64(Spd_values(mono) + 18 * 8, ONE);
+var mo = fluor_donaldson_apply(dm, mono, &e);
+assert(e == PK_ERR_NONE, "apply: monochromatic");
+var mo_ok = 1;
+for (var mk = 0; mk < dn; mk = mk + 1) {
+    if (load64(Spd_values(mo) + mk * 8) != fluor_donaldson_at(dm, mk, 18)) { mo_ok = 0; }
+}
+assert(mo_ok == 1, "apply: light at one grid wavelength returns that column");
+# Under D65 the photons emitted are Phi times the photons absorbed, summed over the spectrum.
+var d65 = illuminant_d65();
+var od = fluor_donaldson_apply(dm, d65, &e);
+assert(e == PK_ERR_NONE, "apply: D65");
+var ph_in = Z;
+var ph_out = Z;
+for (var wk = 0; wk < dn; wk = wk + 1) {
+    var wl = f64_from(380 + 5 * wk);
+    var inp = load64(Spd_values(d65) + wk * 8);
+    ph_in = f64_add(ph_in, f64_mul(f64_mul(load64(Spd_values(da) + wk * 8), inp), wl));
+    var outl = f64_sub(load64(Spd_values(od) + wk * 8), f64_mul(load64(Spd_values(dr) + wk * 8), inp));
+    ph_out = f64_add(ph_out, f64_mul(outl, wl));
+}
+_assert_rel(ph_out, f64_mul(phi, ph_in), R14, "D65: photons out = Phi x photons absorbed");
+# A fluorescent sample is brighter under D65 than the same surface without its fluorescence.
+var od0 = fluor_donaldson_apply(d0, d65, &e);
+assert(f64_gt(Xyz_y(spd_to_xyz(od)), f64_mul(_fd(105, 100), Xyz_y(spd_to_xyz(od0)))) == 1,
+  "D65: the fluorescence adds more than 5% to Y");
+# Emission sampled on a 1 nm grid, the matrix on 5 nm: photons still conserved, to quadrature.
+var dem1 = fluor_gaussian_band(f64_from(520), f64_from(2200), f64_from(380), ONE, 401, FLUOR_BAND_DENSITY, &e);
+var dm1 = fluor_donaldson(dr, da, dem1, phi, f64_from(380), f64_from(5), dn, FLUOR_ALL, &e);
+var q1 = Z;
+for (var qo = 0; qo < dn; qo = qo + 1) {
+    var lq1 = fluor_donaldson_at(dm1, qo, 18);
+    if (qo == 18) { lq1 = f64_sub(lq1, load64(Spd_values(dr) + 144)); }
+    q1 = f64_add(q1, f64_mul(lq1, f64_div(f64_from(380 + 5 * qo), f64_from(470))));
+}
+_assert_rel(q1, f64_mul(phi, load64(Spd_values(da) + 144)), _fd(2, 1000000000000),
+  "1 nm emission, 5 nm matrix: to 2e-12 (1.1e-12 measured)");
+# Refusals.
+rf = fluor_donaldson(0, da, dem, phi, f64_from(380), f64_from(5), dn, FLUOR_ALL, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "donaldson: null reflectance");
+rf = fluor_donaldson(dr, 0, dem, phi, f64_from(380), f64_from(5), dn, FLUOR_ALL, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "donaldson: null absorptance");
+rf = fluor_donaldson(dr, da, 0, phi, f64_from(380), f64_from(5), dn, FLUOR_ALL, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "donaldson: null emission");
+rf = fluor_donaldson(_flat(f64_from(380), f64_from(5), dn, _fd(6, 10)), da, dem, phi, f64_from(380), f64_from(5), dn,
+  FLUOR_ALL, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "donaldson: R + a > 1 at the absorption peak");
+rf = fluor_donaldson(_flat(f64_from(380), f64_from(5), dn, _fd(11, 10)), _flat(f64_from(380), f64_from(5), dn, Z), dem,
+  phi, f64_from(380), f64_from(5), dn, FLUOR_ALL, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "donaldson: R > 1");
+rf = fluor_donaldson(dr, _flat(f64_from(380), f64_from(5), dn, f64_neg(_fd(1, 10))), dem, phi, f64_from(380),
+  f64_from(5),
+  dn, FLUOR_ALL, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "donaldson: a < 0");
+rf = fluor_donaldson(dr, da, dem, _fd(11, 10), f64_from(380), f64_from(5), dn, FLUOR_ALL, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "donaldson: Phi 1.1");
+rf = fluor_donaldson(dr, da, dem, NAN, f64_from(380), f64_from(5), dn, FLUOR_ALL, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "donaldson: Phi NaN");
+rf = fluor_donaldson(dr, da, dem, phi, Z, f64_from(5), dn, FLUOR_ALL, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "donaldson: start 0");
+rf = fluor_donaldson(dr, da, dem, phi, f64_from(380), Z, dn, FLUOR_ALL, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "donaldson: step 0");
+rf = fluor_donaldson(dr, da, dem, phi, f64_from(380), f64_from(5), 0, FLUOR_ALL, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "donaldson: n 0");
+rf = fluor_donaldson(dr, da, dem, phi, f64_from(380), f64_from(5), 2049, FLUOR_ALL, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "donaldson: n 2049");
+rf = fluor_donaldson(dr, da, dem, phi, f64_from(380), f64_from(5), dn, 2, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "donaldson: mode 2");
+rf = fluor_donaldson(dr, da, _flat(f64_from(380), f64_from(5), dn, Z), phi, f64_from(380), f64_from(5), dn, FLUOR_ALL,
+  &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "donaldson: no emission");
+var neg = _flat(f64_from(380), f64_from(5), dn, ONE);
+store64(Spd_values(neg) + 80, f64_neg(ONE));
+rf = fluor_donaldson(dr, da, neg, phi, f64_from(380), f64_from(5), dn, FLUOR_ALL, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "donaldson: a negative emission sample");
+var nan_em = _flat(f64_from(380), f64_from(5), dn, ONE);
+store64(Spd_values(nan_em) + 80, NAN);
+rf = fluor_donaldson(dr, da, nan_em, phi, f64_from(380), f64_from(5), dn, FLUOR_ALL, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "donaldson: a NaN emission sample");
+rf = fluor_donaldson(dr, da, _flat(f64_from(380), Z, dn, ONE), phi, f64_from(380), f64_from(5), dn, FLUOR_ALL, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "donaldson: emission step 0");
+# An Spd without a values buffer, empty, or with a step of 0 or below is refused, not read: the
+# first cut checked only the emission, and read through the others' null buffers (SIGSEGV).
+var nob = spd_new(f64_from(380), f64_from(5), 0, dn);
+rf = fluor_donaldson(nob, da, dem, phi, f64_from(380), f64_from(5), dn, FLUOR_ALL, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "donaldson: a reflectance with no values buffer");
+rf = fluor_donaldson(dr, nob, dem, phi, f64_from(380), f64_from(5), dn, FLUOR_ALL, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "donaldson: an absorptance with no values buffer");
+rf = fluor_donaldson(spd_new(f64_from(380), f64_from(5), Spd_values(dr), 0), spd_new(f64_from(380), f64_from(5),
+    Spd_values(da), 0), dem, phi, f64_from(380), f64_from(5), dn, FLUOR_ALL, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "donaldson: empty reflectance and absorptance");
+rf = fluor_donaldson(dr, spd_new(f64_from(780), f64_from(0 - 5), Spd_values(da), dn), dem, phi, f64_from(380),
+  f64_from(5),
+  dn, FLUOR_ALL, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "donaldson: an absorptance with a negative step");
+rf = fluor_donaldson(dr, da, dem, phi, 0x7FE1CCF385EBC8A0, 0x7FE1CCF385EBC8A0, 3, FLUOR_ALL, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "donaldson: a grid past 1.8e308");
+# An emission one sample wide on a step of 1e-308 has W = 5e-306, so an entry would reach 4.5e308:
+# refused before it is written.
+var spike = _flat(f64_from(500), 0x000730D67819E8D2, 1, ONE);
+rf = fluor_donaldson(_flat(f64_from(500), f64_from(5), 1, Z), _flat(f64_from(500), f64_from(5), 1, F64_HALF), spike,
+  phi,
+  f64_from(500), f64_from(5), 1, FLUOR_ALL, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "donaldson: an entry that would overflow");
+# A refused matrix costs no memory: the first cut allocated n^2 before checking R and a, and kept
+# 32 MiB of every refused 2048-wide call.
+var r_one = _flat(f64_from(380), f64_from(5), dn, ONE);
+var a_quarter = _flat(f64_from(380), f64_from(5), dn, _fd(1, 4));
+var used0 = alloc_used();
+rf = fluor_donaldson(r_one, a_quarter, dem, phi, f64_from(380), _fd(1, 5), 2048, FLUOR_ALL, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "donaldson: R + a = 1.25, 2048 wide");
+assert(alloc_used() - used0 < 1024, "a refused 2048-wide matrix allocates nothing");
+# A built one keeps the matrix and the struct, and no scratch.
+var used1 = alloc_used();
+var dk = fluor_donaldson(dr, da, dem, phi, f64_from(380), f64_from(5), dn, FLUOR_ALL, &e);
+assert(alloc_used() - used1 < dn * dn * 8 + 256, "a built matrix allocates n^2 f64 and the struct, no more");
+var used2 = alloc_used();
+var ak = fluor_donaldson_apply(dk, d65, &e);
+assert(alloc_used() - used2 < dn * 8 + 256, "apply allocates its output and nothing else");
+assert(_is_nan(fluor_donaldson_at(0, 0, 0)), "at: null");
+assert(_is_nan(fluor_donaldson_at(dm, 81, 0)), "at: row n");
+assert(_is_nan(fluor_donaldson_at(dm, 0, 0 - 1)), "at: column -1");
+rf = fluor_donaldson_apply(0, d65, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "apply: null matrix");
+rf = fluor_donaldson_apply(dm, 0, &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "apply: null spectrum");
+rf = fluor_donaldson_apply(dm, spd_new(f64_from(380), f64_from(5), 0, dn), &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "apply: no values buffer");
+rf = fluor_donaldson_apply(dm, spd_new(f64_from(380), f64_from(5), Spd_values(d65), 0), &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "apply: an empty spectrum");
+rf = fluor_donaldson_apply(dm, _flat(f64_from(380), f64_from(5), dn, 0x7FEFFFFFFFFFFFFF), &e);
+assert((rf == 0) & (e == PK_ERR_INVALID_PARAMETER), "apply: an output that overflows");
+
+# ── Forster transfer ────────
+test_group("fret");
+assert(fret_efficiency(f64_from(5), f64_from(5)) == F64_HALF, "E(R0) = 1/2");
+assert(fret_efficiency(Z, f64_from(5)) == ONE, "E(0) = 1");
+assert(fret_efficiency(f64_from(10), f64_from(5)) == _fd(1, 65), "E(2 R0) = 1/65");
+assert(fret_efficiency(_fd(5, 2), f64_from(5)) == _fd(64, 65), "E(R0/2) = 64/65");
+_assert_rel(fret_distance(_fd(1, 65), f64_from(5)), f64_from(10), R15, "distance at 1/65: 2 R0");
+var fd_ok = 1;
+for (var fe = 1; fe < 100; fe = fe + 7) {
+    var ef = _fd(fe, 100);
+    if (_near(fret_efficiency(fret_distance(ef, _fd(56, 10)), _fd(56, 10)), ef,
+        f64_mul(_fd(4, 1000000000000000), ef)) == 0) {
+        fd_ok = 0;
+    }
+}
+assert(fd_ok == 1, "distance inverts efficiency, E from 0.01 to 0.99");
+assert(fret_distance(ONE, f64_from(5)) == Z, "E = 1 at r = 0");
+assert(_is_nan(fret_distance(Z, f64_from(5))), "distance: E = 0 is at infinity");
+assert(_is_nan(fret_distance(_fd(11, 10), f64_from(5))), "distance: E > 1");
+assert(_is_nan(fret_efficiency(f64_neg(ONE), f64_from(5))), "efficiency: r < 0");
+assert(_is_nan(fret_efficiency(ONE, Z)), "efficiency: R0 = 0");
+assert(fret_efficiency_lifetimes(_fd(5, 2), f64_from(4)) == _fd(3, 8), "lifetimes 2.5 and 4: 0.375");
+assert(fret_efficiency_lifetimes(Z, f64_from(4)) == ONE, "lifetimes: the donor quenched completely");
+assert(_is_nan(fret_efficiency_lifetimes(f64_from(5), f64_from(4))), "lifetimes: longer with the acceptor");
+assert(_is_nan(fret_efficiency_lifetimes(ONE, Z)), "lifetimes: tau_d 0");
+assert(fret_rate(f64_from(5), f64_from(5), f64_from(4)) == _fd(1, 4), "k_T(R0) = 1/tau_D");
+assert(fret_rate(f64_from(10), f64_from(5), f64_from(4)) == _fd(1, 256), "k_T(2 R0) = 1/(64 tau_D)");
+assert(_is_nan(fret_rate(Z, f64_from(5), f64_from(4))), "rate: r = 0");
+assert(_is_nan(fret_rate(ONE, f64_from(5), Z)), "rate: tau_d = 0");
+# (1e60)^6/1e300 = 1e60: the first cut overflowed on the way and answered NaN.
+_assert_rel(fret_rate(ONE, 0x4C63E9E4E4C2F344, 0x7E37E43C8800759C), 0x4C63E9E4E4C2F344, _fd(4, 1000000000000000),
+  "rate: 1e60, without overflowing on the way");
+assert(_is_nan(fret_distance(1, ONE)), "distance: E = 5e-324 is past 1e53 R0, refused");
+assert(_is_nan(fret_rate(0x39B4484BFEEBC2A0, 0x46293E5939A08CEA, ONE)), "rate: (1e60)^6 overflows");
+# R0's prefactor (kappa^2 = Phi = n = J = 1): 0.0210842 nm, from the exact N_A.
+_assert_rel(fret_forster_radius(ONE, ONE, ONE, ONE), 0x3F95971B88A1582B, _fd(4, 1000000000000000),
+  "prefactor 0.0210842 nm");
+_assert_rel(fret_forster_radius(ONE, ONE, ONE, ONE), _fd(2108, 100000), _fd(3, 10000), "IUPAC's 2.108e-2 nm");
+_assert_rel(f64_mul(f64_from(10), fret_forster_radius(ONE, ONE, ONE, ONE)), _fd(211, 1000), _fd(1, 1000),
+  "Lakowicz's 0.211 Angstrom");
+# The same from its parts, here: 9000 ln 10/(128 pi^5 N_A) 1e14.
+var pi5 = f64_mul(_sq(_sq(F64_PI)), F64_PI);
+var cf = f64_mul(f64_div(f64_mul(f64_from(9000), f64_ln(f64_from(10))), f64_mul(f64_mul(f64_from(128), pi5),
+      0x44DFE185CA57C517)), f64_from(100000000000000));
+_assert_rel(_sq(f64_mul(_sq(fret_forster_radius(ONE, ONE, ONE, ONE)), fret_forster_radius(ONE, ONE, ONE, ONE))), cf,
+  _fd(4, 100000000000000), "R0^6 = 9000 ln 10/(128 pi^5 N_A), in nm^6");
+# kappa^2 = 2/3, Phi_D = 0.79, n = 1.4, J = 1.6e15 M^-1 cm^-1 nm^4: 5.178 nm, a GFP-like pair.
+_assert_rel(fret_forster_radius(_fd(2, 3), _fd(79, 100), _fd(14, 10), f64_from(1600000000000000)), 0x4014B61BA00BE0CC,
+  R14,
+  "R0 = 5.178 nm");
+_assert_rel(f64_div(fret_forster_radius(ONE, ONE, ONE, f64_from(64)), fret_forster_radius(ONE, ONE, ONE, ONE)), F64_TWO,
+  R15, "R0 grows as J^(1/6)");
+_assert_rel(f64_div(fret_forster_radius(ONE, ONE, ONE, ONE), fret_forster_radius(ONE, ONE, _fd(2, 1), ONE)),
+  ganita_f64_cbrt(f64_from(4)), R15, "and falls as n^(-2/3)");
+assert(fret_forster_radius(Z, ONE, ONE, ONE) == Z, "kappa^2 = 0: perpendicular dipoles do not transfer");
+assert(fret_forster_radius(0x8000000000000000, ONE, ONE, ONE) == 0, "radius: -0 in, +0 out");
+assert(_is_nan(fret_forster_radius(_fd(41, 10), ONE, ONE, ONE)), "radius: kappa^2 > 4");
+assert(_is_nan(fret_forster_radius(ONE, _fd(11, 10), ONE, ONE)), "radius: Phi > 1");
+assert(_is_nan(fret_forster_radius(ONE, ONE, Z, ONE)), "radius: n = 0");
+assert(_is_nan(fret_forster_radius(ONE, ONE, ONE, f64_neg(ONE))), "radius: J < 0");
+# Overlap of a donor Gaussian in wavelength (510 nm, sigma 15) and an acceptor
+# 85000 exp(-(lambda - 560)^2/(2 20^2)) M^-1 cm^-1, both on 380 + k nm.
+fn _donor(l) { return _prk_exp(f64_neg(f64_div(_sq(f64_sub(l, f64_from(510))), f64_from(450)))); }
+fn _accept(l) {
+    return f64_mul(f64_from(85000), _prk_exp(f64_neg(f64_div(_sq(f64_sub(l, f64_from(560))), f64_from(800)))));
+}
+var dj = spd_from_function(&_donor, f64_from(380), f64_from(780), 401, &e);
+var aj = spd_from_function(&_accept, f64_from(380), f64_from(780), 401, &e);
+_assert_rel(fret_overlap_integral(dj, aj), 0x4304643C0CF8FFE9, _fd(1, 10000000000000), "J = 7.1746e14 M^-1 cm^-1 nm^4");
+# The donor's scale does not matter.
+var dj3 = spd_photons_to_energy(dj, &e);
+var dj3p = spd_energy_to_photons(dj3, &e);
+_assert_rel(fret_overlap_integral(dj3p, aj), 0x4304643C0CF8FFE9, _fd(1, 10000000000000),
+  "J after a round trip to energy");
+# An acceptor on a coarser grid is read by linear interpolation: 4 nm steps cost 0.55% here,
+# h^2 eps''/8 of a band 20 nm wide.
+var aj4 = spd_from_function(&_accept, f64_from(380), f64_from(780), 101, &e);
+_assert_rel(fret_overlap_integral(dj, aj4), 0x4304643C0CF8FFE9, _fd(6, 1000), "acceptor on 4 nm steps: to 0.6%");
+assert(f64_gt(fret_overlap_integral(dj, aj4), fret_overlap_integral(dj, aj)) == 1,
+  "linear interpolation overestimates a band that curves down");
+assert(_is_nan(fret_overlap_integral(0, aj)), "overlap: null donor");
+assert(_is_nan(fret_overlap_integral(dj, 0)), "overlap: null acceptor");
+# The first cut read an acceptor without a values buffer (SIGSEGV) and an empty one as J = 0.
+assert(_is_nan(fret_overlap_integral(dj, spd_new(f64_from(380), ONE, 0, 401))), "overlap: no acceptor values buffer");
+assert(_is_nan(fret_overlap_integral(dj, spd_new(f64_from(380), ONE, Spd_values(aj), 0))),
+  "overlap: an empty acceptor");
+assert(_is_nan(fret_overlap_integral(_flat(f64_from(380), ONE, 401, Z), aj)), "overlap: a donor that emits nothing");
+assert(_is_nan(fret_overlap_integral(_flat(f64_from(380), ONE, 401, f64_neg(ONE)), aj)), "overlap: a negative donor");
+assert(_is_nan(fret_overlap_integral(dj, _flat(f64_from(380), ONE, 401, NAN))), "overlap: a NaN acceptor");
+# One bad value among good ones is refused, not summed: a negative donor sample at 510 nm, then a
+# negative acceptor value there.
+var djb = spd_from_function(&_donor, f64_from(380), f64_from(780), 401, &e);
+store64(Spd_values(djb) + 130 * 8, f64_neg(_fd(1, 100)));
+assert(_is_nan(fret_overlap_integral(djb, aj)), "overlap: one negative donor sample");
+var ajb = spd_from_function(&_accept, f64_from(380), f64_from(780), 401, &e);
+store64(Spd_values(ajb) + 130 * 8, f64_neg(ONE));
+assert(_is_nan(fret_overlap_integral(dj, ajb)), "overlap: one negative acceptor value");
+
+var r = assert_summary();

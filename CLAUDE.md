@@ -9,7 +9,7 @@
   (math-only) and `dist/prakash-ai.cyr` (adds the sandhi HTTP/TLS AI client)
 - **License**: GPL-3.0
 - **Toolchain pin**: cyrius 6.7.18 — single source of truth is `cyrius = "..."` in `cyrius.cyml`
-- **Version**: SemVer, currently 2.14.x. `VERSION` is the single source; `cyrius.cyml`
+- **Version**: SemVer, currently 2.15.x. `VERSION` is the single source; `cyrius.cyml`
   reads it via `${file:VERSION}` and the release workflow fails if the tag disagrees
 
 ⚠ **The Rust original is a FIDELITY reference, not a CORRECTNESS one.** 2.2.6 found six
@@ -33,7 +33,8 @@ soorat, kiran on the frozen Rust 1.x crate. Per-consumer detail: `docs/architect
    `cyrius lint <file>` (⚠ exits 0 even with warnings — grep stdout for `^\s*warn `),
    `cyrius doc --check <file>`, `cyrius vet src/main.cyr`, `cyrius deny src/main.cyr`,
    `cyrius deps --verify`, and `cyrius audit` (the project sweep: fmt/lint/docs/tests/bench —
-   it must exit **0**)
+   it must exit **0**, ⚠ and that is not enough: at 6.7.18 it exits 0 when the bench fails to
+   compile, so read its bench section for `=== 1 passed, 0 failed ===`)
 3. Get baseline benchmarks (`./scripts/bench-history.sh`)
 4. Internal deep review — gaps, optimizations, security, logging/errors, docs
 5. External research — domain completeness, missing capabilities, best practices, world-class accuracy
@@ -49,7 +50,8 @@ soorat, kiran on the frozen Rust 1.x crate. Per-consumer detail: `docs/architect
    `cyrius lint <file>` (⚠ exits 0 even with warnings — grep stdout for `^\s*warn `),
    `cyrius doc --check <file>`, `cyrius vet src/main.cyr`, `cyrius deny src/main.cyr`,
    `cyrius deps --verify`, and `cyrius audit` (the project sweep: fmt/lint/docs/tests/bench —
-   it must exit **0**)
+   it must exit **0**, ⚠ and that is not enough: at 6.7.18 it exits 0 when the bench fails to
+   compile, so read its bench section for `=== 1 passed, 0 failed ===`)
 3. Test + benchmark additions for new code
 4. Run benchmarks (`./scripts/bench-history.sh`)
 5. Internal review — performance, memory, security, throughput, correctness

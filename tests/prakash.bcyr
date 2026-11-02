@@ -16,6 +16,8 @@ include "src/ray_simulate.cyr"
 include "src/ray_grin.cyr"
 include "src/spectral_cie.cyr"
 include "src/spectral_photometry.cyr"
+# 2.15.0: fluorescence.
+include "src/spectral_fluor.cyr"
 include "src/wave_core.cyr"
 # 2.3.9: wave_polarization and wave_coherence were never included here, so the
 # Mueller calculus and the coherence functions could not be benchmarked at all.
@@ -73,6 +75,13 @@ var _abr_m = 0;
 var _abr_c = 0;
 var _abr_s = 0;
 var _abr_tr[16];
+var _flu_band = 0;
+var _flu_abs = 0;
+var _flu_refl = 0;
+var _flu_mat = 0;
+var _flu_d65 = 0;
+var _flu_donor = 0;
+var _flu_acc = 0;
 var _fa_buf[80];
 var _plane = 0;
 var _out3 = 0;
@@ -340,6 +349,28 @@ fn b_focus_linear() {
 fn b_aberr_sums() {
     var e = 0;
     var r = aberr_sums(_abr_p, _abr_m, _abr_c, &e);
+    return 0;
+}
+# The per-nm peak of an 81-sample emission band.
+fn b_fluor_peak() {
+    var r = fluor_peak_nm(_flu_band);
+    return 0;
+}
+# An 81 x 81 Donaldson matrix: a fluorescent surface on 380 + 5k nm.
+fn b_fluor_donaldson() {
+    var e = 0;
+    var r = fluor_donaldson(_flu_refl, _flu_abs, _flu_band, _bf(9, 10), f64_from(380), f64_from(5), 81, FLUOR_ALL, &e);
+    return 0;
+}
+# That matrix applied to D65.
+fn b_fluor_apply() {
+    var e = 0;
+    var r = fluor_donaldson_apply(_flu_mat, _flu_d65, &e);
+    return 0;
+}
+# Forster's overlap integral over a 401-sample donor.
+fn b_fret_overlap() {
+    var r = fret_overlap_integral(_flu_donor, _flu_acc);
     return 0;
 }
 # That triplet's transverse aberration to fifth order at one pupil and field point.
@@ -798,6 +829,31 @@ fn main() {
     _abr_m = aberr_marginal_ray(_abr_p, 0x7FF0000000000000, 4, f64_from(4), &prt_e);
     _abr_c = aberr_chief_ray(_abr_p, 0x7FF0000000000000, 0x3FD74B49CF3902D4, 4, &prt_e);
     _abr_s = aberr_sums(_abr_p, _abr_m, _abr_c, &prt_e);
+    # 2.15.0: an emission band at 520 nm, an absorption profile at 470 nm scaled to 0.9 at its
+    # sample peak, the reflectance 0.95 - a, and a donor-acceptor pair.
+    _flu_band = fluor_gaussian_band(f64_from(520), f64_from(2200), f64_from(380), f64_from(5), 81, FLUOR_BAND_DENSITY,
+      &prt_e);
+    _flu_abs = fluor_gaussian_band(f64_from(470), f64_from(2500), f64_from(380), f64_from(5), 81, FLUOR_BAND_PROFILE,
+      &prt_e);
+    var fpk = 0;
+    for (var fk = 0; fk < 81; fk = fk + 1) {
+        if (f64_gt(load64(Spd_values(_flu_abs) + fk * 8), fpk) == 1) { fpk = load64(Spd_values(_flu_abs) + fk * 8); }
+    }
+    var frv = alloc(648);
+    if (frv == 0) { return 1; }
+    for (var fk2 = 0; fk2 < 81; fk2 = fk2 + 1) {
+        var fa = f64_mul(_bf(9, 10), f64_div(load64(Spd_values(_flu_abs) + fk2 * 8), fpk));
+        store64(Spd_values(_flu_abs) + fk2 * 8, fa);
+        store64(frv + fk2 * 8, f64_sub(_bf(95, 100), fa));
+    }
+    _flu_refl = spd_new(f64_from(380), f64_from(5), frv, 81);
+    _flu_mat = fluor_donaldson(_flu_refl, _flu_abs, _flu_band, _bf(9, 10), f64_from(380), f64_from(5), 81, FLUOR_ALL,
+      &prt_e);
+    _flu_d65 = illuminant_d65();
+    _flu_donor = fluor_gaussian_band(f64_from(510), f64_from(2000), f64_from(380), F64_ONE, 401, FLUOR_BAND_DENSITY,
+      &prt_e);
+    _flu_acc = fluor_gaussian_band(f64_from(560), f64_from(1800), f64_from(380), F64_ONE, 401, FLUOR_BAND_PROFILE,
+      &prt_e);
     for (var by = 0; by < 64; by = by + 1) {
         for (var bx = 0; bx < 64; bx = bx + 1) {
             var _sv = pattern2d_set(_bigpat, bx, by, f64_from(bx * 64 + by + 1));
@@ -991,6 +1047,10 @@ fn main() {
     bench("focus/linear_field", &b_focus_linear, 20000);
     bench("aberration/sums_triplet", &b_aberr_sums, 20000);
     bench("aberration/transverse_fifth", &b_aberr_transverse, 200000);
+    bench("fluor/peak_nm", &b_fluor_peak, 200000);
+    bench("fluor/donaldson_81", &b_fluor_donaldson, 500);
+    bench("fluor/donaldson_apply_81", &b_fluor_apply, 5000);
+    bench("fret/overlap_401", &b_fret_overlap, 20000);
     bench("wave/fabry_perot_etalon", &b_fabry_perot_etalon, 200000);
     bench("wave/fabry_perot_long_cavity", &b_fabry_perot_long_cavity, 200000);
     bench("wave/pattern2d_normalized_64x64", &b_pattern_normalized, 20000);

@@ -2,6 +2,200 @@
 
 ## [Unreleased]
 
+## [2.15.0] - 2026-11-02 — Fluorescence
+
+Closes the 2.15.0 roadmap row and the gap `docs/research/physics-completeness-audit.md` §18
+deferred: prakash had no luminescence. A fluorescent surface absorbs at one wavelength and
+re-emits part of it at longer ones. Its response is then not one reflectance per wavelength but
+a matrix from incident to emitted wavelength (Donaldson 1954). This builds that matrix and the
+measurements behind it:
+- excitation and emission spectra as `Spd`s, with their peaks and the Stokes shift;
+- quantum yields;
+- Förster transfer between two fluorophores.
+
+New API only: nothing existing changes value or signature. Toolchain unchanged, cyrius 6.7.18.
+
+Suite **13,460 → 13,681 assertions across 39 suites**, 0 failed; `cyrius audit` exits 0 with
+its bench section passing; `deps --verify` 114/114; `#must_use` 520 → **540**, 0 lost; reference
+coverage **550/550**. Benchmarks 180 → **184**.
+
+### Added — fluorescence (`spectral_fluor`, new module)
+- **Photons and energy:** `spd_energy_to_photons` and `spd_photons_to_energy` convert an `Spd`
+  between W nm⁻¹ and photons s⁻¹ nm⁻¹ with the exact CODATA h and c. A spectrofluorometer's
+  corrected spectrum counts photons, and Förster's overlap integral needs them.
+- ⚠ **Two kinds of spectrum.** An emission spectrum is a DENSITY: per cm⁻¹ it is λ²/10⁷ times its
+  value per nm, so it peaks elsewhere on that scale. An excitation or absorption spectrum
+  (absorptance, ε, a corrected excitation scan) is a FUNCTION, a response per photon at λ. It
+  has no per-nm unit, and it peaks at the same point on either scale.
+- **`fluor_gaussian_band(center_nm, fwhm_cm1, start_nm, step_nm, n, kind, err_out)`** returns a
+  band Gaussian in wavenumber, the shape electronic bands approach. `kind` sets which of the two
+  it is:
+  - `FLUOR_BAND_PROFILE`, an excitation or absorption band, 1 at its peak, which is
+    `center_nm` on either scale;
+  - `FLUOR_BAND_DENSITY`, an emission band with unit area per nm. Per nm it peaks BLUE of its
+    centre and tails to the red: a 490 nm band 2500 cm⁻¹ wide peaks at 487.376 nm.
+- **`fluor_peak_nm` and `fluor_peak_cm1`** find a spectrum's maximum as recorded per nm, or as a
+  density per cm⁻¹ (for emission). They fit the parabola through the logarithms of the largest
+  sample and its neighbours, against wavenumber.
+  - Exact, to rounding, for a profile and for a density per cm⁻¹ Gaussian in energy.
+  - A density per nm is within 4e-4 of a step, over centres of 250–1200 nm, widths of
+    1000–6000 cm⁻¹ and steps of 0.5–10 nm.
+  - NaN when the maximum is on the first or last sample, shared by two samples, or equal to a
+    neighbour (a flat top, as a saturated detector gives).
+  - The fit is local and smooths nothing: noise on the top three samples moves it.
+- **`fluor_stokes_shift_nm`, `_cm1` and `_ev`** give the emission peak less the excitation peak.
+  - nm: both per-nm peaks, as the spectra are recorded.
+  - cm⁻¹ and eV: the excitation's peak as it stands, and the emission's per-cm⁻¹ peak.
+  - Taken as photons, as a spectrofluorometer records it, the emission peaks per cm⁻¹ about
+    σ²/ν̃₀ red of its power peak: 37 cm⁻¹ for a 515 nm band 2000 cm⁻¹ wide.
+- **Quantum yield:**
+  - `fluor_quantum_yield_rates(k_r, k_nr)`;
+  - `fluor_absorptance(A)`, which is 1 − 10^(−A), exact to the last digits at small A;
+  - `fluor_quantum_yield_relative`, the comparative method against a standard (IUPAC, Brouwer
+    2011), with F in photons and the absorbed fraction 1 − 10^(−A) in place of A. That corrects
+    the absorbed fraction only: the method still needs A < 0.1, for the inner-filter effects
+    no formula undoes.
+- **The Donaldson matrix:** `fluor_donaldson(reflectance, absorptance, emission, Φ, start, step,
+  n, mode, err_out)` builds the re-radiation matrix of a fluorescent surface on a wavelength
+  grid. `fluor_donaldson_at` reads it and `fluor_donaldson_apply` applies it to an incident
+  spectrum.
+  - Each column returns Φa photons per photon absorbed. In energy that is Φaλ_i/⟨λ⟩, less by
+    the Stokes loss.
+  - `FLUOR_ALL` keeps the whole emission band at every excitation (Kasha and Vavilov). Excited
+    on the red edge, a column can then return more energy than it absorbed: anti-Stokes
+    emission, real, paid for in heat.
+  - `FLUOR_DOWN` keeps only emission at or beyond the excitation wavelength, so energy is never
+    gained.
+- **Förster transfer:**
+  - `fret_efficiency`, and its inverse `fret_distance`;
+  - `fret_efficiency_lifetimes` and `fret_rate`;
+  - `fret_forster_radius(κ², Φ_D, n, J)`, from R₀⁶ = 9000 ln 10 κ²Φ_D J/(128π⁵N_A n⁴), which
+    is 0.0210842 (κ²Φ_D J n⁻⁴)^(1/6) nm;
+  - `fret_overlap_integral`, J in M⁻¹ cm⁻¹ nm⁴, with the donor's emission in photons.
+- **Refusals.** A function that returns an `Spd` or a matrix gives 0 with an error code; a
+  scalar function gives NaN. Refused inputs:
+  - an `Spd` that is null, has no values buffer or no samples, holds more than 2²⁸ samples, or
+    has a wavelength that is not finite and positive;
+  - a reflectance or absorptance outside [0, 1], or summing past 1;
+  - a negative or non-finite emission sample, or an emission that sums to 0;
+  - a quantum yield outside [0, 1];
+  - κ² outside [0, 4];
+  - a result that overflows.
+
+  `fluor_donaldson` checks all of these before it allocates its n² matrix, so a refusal costs
+  no memory, and no function keeps a scratch buffer. A zero comes back as +0.
+
+### Validation
+- **50-digit closed forms:**
+  - a band Gaussian in wavenumber, its values and unit area;
+  - its peak, per cm⁻¹ at ν̃₀ and per nm at ν̃* = (ν̃₀ + √(ν̃₀² + 8σ²))/2;
+  - the Stokes shift between an excitation profile and an emission density;
+  - 1 − 10^(−A) at twelve absorbances, on both sides of the series switch;
+  - the comparative yield;
+  - R₀ from the exact N_A;
+  - the overlap integral of two bands Gaussian in wavelength, from the moments of their
+    product, m⁴ + 6m²v + 3v², to 1e-13.
+- **Peak accuracy:**
+  - per cm⁻¹ exact to 1e-15;
+  - per nm within 1.6e-4 nm at 5 nm steps and 0.004 nm for 900 and 1200 nm bands at 10 nm;
+  - for a profile, exact.
+- **Literature:**
+  - CODATA's 8065.544 cm⁻¹ per eV;
+  - Lakowicz's 0.211 Å and IUPAC's 2.108×10⁻² nm for R₀'s prefactor;
+  - Brouwer (IUPAC 2011) for the comparative yield. Its n² direction and F in photons were
+    confirmed against the text by the review.
+- **spectral_core's `photon_energy`:** photons times photon energy is the power back.
+- **Invariants of the Donaldson matrix** that share no formula with the module:
+  - photons are conserved column by column, Φa per photon, to 1e-14, and over D65 as a whole;
+  - each column returns energy Φaλ_i/⟨λ⟩;
+  - a column has the emission's shape, diagonal included;
+  - the luminescence is rank one;
+  - FLUOR_DOWN zeroes everything above the diagonal and gains no energy;
+  - Φ = 0 gives diag(R) exactly;
+  - one sample of light in returns its column;
+  - a 1 nm emission against a 5 nm matrix conserves photons to 1.1e-12;
+  - the fluorescent sample is more than 5% brighter in Y under D65.
+- **Mutation:** 76 mutants of the final code; 75 are killed. They include one that restores each
+  defect the review found, every one of which the suite now fails. The survivor drops the
+  Donaldson grid's overflow check, which the entry-size check after it then makes. Three earlier
+  sweeps found nine gaps, now tested:
+  - the 2²⁸-sample cap;
+  - a NaN away from the peak;
+  - two equal maxima;
+  - one bad donor or acceptor value among good ones;
+  - a photon grid past 1.8e308;
+  - a band width whose height overflows;
+  - an emission whose entries would overflow.
+
+### Fixed during the release's verification (never shipped)
+An independent review confirmed every constant to the bit against the exact CODATA values. It
+also independently derived the Donaldson kernel and the photon units in J, and found the
+following wrong. Each fix has a test that fails on the first cut.
+- **The cm⁻¹ and eV Stokes shift was wrong in kind.** It converted the excitation spectrum per
+  cm⁻¹ as if it were a density. An excitation or absorption spectrum is a response per photon,
+  and peaks at one point on either scale. For a fluorescein-like pair it read 879.6 cm⁻¹ where
+  the shift is 990.7, 11% low. The same error ran through the band generator, which made every
+  band a density; it now has `FLUOR_BAND_PROFILE` for absorption.
+- **An `Spd` without a values buffer crashed four entry points (SIGSEGV).** The reflectance,
+  absorptance, incident spectrum and acceptor were checked only for a null handle. An empty or
+  negative-step `Spd` was also accepted silently: a Donaldson matrix of zeros, J = 0. Every
+  `Spd` input is now checked as the emission was.
+- **The peak finder returned plausible wrong peaks.** On a saturated top it gave the plateau's
+  blue end per nm and its red end per cm⁻¹, 21 nm apart, and it picked the first of two equal
+  maxima. Both are now NaN. Noise is documented: the fit is local and smooths nothing.
+- **A refused 2048-wide Donaldson matrix leaked 32 MiB.** The matrix was allocated before R and
+  a were checked. Every build also leaked an emission scratch, and every apply an input
+  scratch. Now every check comes first, column 0 serves as the scratch, and apply accumulates
+  column by column with the same order of sums.
+- **The comparative yield's doc** said the absorbed fraction makes it hold at any absorbance.
+  Brouwer requires A < 0.1, for inner-filter effects.
+- **The per-nm peak's accuracy claim**, 3.1e-5 of a step, failed outside the tested centres: 3.6×
+  at 900 nm. It was re-measured over the whole stated range, at 4e-4.
+- **Overflow and subnormals got past refusals,** returning NaN or ∞ with no error:
+  - a Donaldson grid at 1e308;
+  - a band width of 3e-309;
+  - a photon grid past 1.8e308;
+  - `fret_distance` at E = 5e-324;
+  - `fret_rate` overflowing on the way to a finite 1e60.
+- **−0 came back** from `fluor_quantum_yield_rates`, `fluor_absorptance` and
+  `fret_forster_radius`.
+- **`fluor_absorptance` was 7 ulp out** just above its series switch at A ln 10 = 2⁻⁵. The
+  series now runs to 1, where 1 − e⁻ˣ no longer cancels.
+- **Test gaps:**
+  - no excitation profile, and no ties, plateaus or a wider peak range;
+  - no `Spd` without a values buffer;
+  - no −0;
+  - the anti-Stokes check tested Φa, not the absorbed energy itself;
+  - the diagonal check used the module's own formula.
+
+### Changed
+- **Docs:**
+  - README;
+  - `docs/architecture/overview.md`: spectral 2232 → 2453 tests, 32 science modules;
+  - `math.md`;
+  - the upgrading guide;
+  - the audit's shipped list;
+  - the roadmap: the 2.15.0 row is gone and 2.16.0 leads.
+- **CLAUDE.md:** `cyrius audit` exits 0 even when the bench fails to compile, which this release
+  hit, so the gate now reads its bench section too.
+- **`tests/prakash.bcyr`** gains four rows.
+- **`dist/`:** `prakash.cyr` 19607 → 20267 lines, `prakash-ai.cyr` 19908 → 20568; the `.deps`
+  sidecars are unchanged.
+
+### Performance
+- **New rows:**
+  - `fluor/peak_nm`, 1.07 µs: an 81-sample band;
+  - `fluor/donaldson_81`, 67.1 µs: an 81×81 matrix;
+  - `fluor/donaldson_apply_81`, 27.8 µs: that matrix applied to D65;
+  - `fret/overlap_401`, 23.7 µs: a 401-sample overlap integral.
+- **Existing rows are unchanged.** Three interleaved rounds against 2.14.0 at load ~4:
+  - per-row median ratio 1.0000 in every round, geomean 0.995;
+  - nine rows past ±10%:
+    - four are 1–2 ns steps on rows of 8–13 ns;
+    - `wave/bessel_j1` read 59 → 52 ns, in a module this release does not touch;
+    - four atmosphere rows are 3–5 ns faster. That is code placement: the new module sits
+      ahead of them in the binary, as `wave_focus` did in 2.13.0.
+
 ## [2.14.0] - 2026-11-02 — Fifth-order aberrations
 
 Closes the 2.14.0 roadmap row and the stretch goal of

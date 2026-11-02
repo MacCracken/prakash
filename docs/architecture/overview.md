@@ -12,7 +12,7 @@ after the port-completeness review; recover it with
 |--------|-------|-------|-----------|---------|
 | `error` | error.cyr | (smoke) | `PK_ERR_*` codes | Shared error codes + `prakash_set_log_level` / `_prk_trace` (sakshi logging) |
 | `ray` | ray_core, ray_fresnel, ray_trace, ray_prt, ray_simulate, ray_system, ray_dispersion, ray_fiber, ray_grin | 2064 | `Medium`, `ComplexMedium`, `*Coefficients`, `TraceRay`, `OpticalSurface`, `PolarizedTraceHit`, `FresnelAmplitudes`, `PrtStep`, `PrtTraceHit`, `ParaxialRay`, `Prescription`, `GrinProfile` | Geometric optics: Snell, Fresnel (real + complex), dispersion (Sellmeier/Cauchy/Herzberger/Schott/Conrady, analytic derivatives and group index), chromatic aberration, fiber optics and fiber chromatic dispersion (material, waveguide, total; LP01 exact within weak guidance), sequential/recursive tracing with polarization, ray fans, spot diagrams, OPD; gradient-index tracing (SELFOC, sech, polynomial, Luneburg, fish-eye) by RK-Nyström with optical path |
-| `spectral` | spectral_core, spectral_cie, spectral_photometry | 2232 | `Rgb`, `Xyz`, `Spd`, `Observer` (tag constants) | Color science: wavelength↔RGB, Planck (numerically stable), Wien, CIE 1931/1964/2015 XYZ, SPD, illuminants, CRI, photometry (V(λ), luminous flux/efficacy) |
+| `spectral` | spectral_core, spectral_cie, spectral_photometry, spectral_fluor | 2453 | `Rgb`, `Xyz`, `Spd`, `Observer` (tag constants), `Donaldson` | Color science: wavelength↔RGB, Planck (numerically stable), Wien, CIE 1931/1964/2015 XYZ, SPD, illuminants, CRI, photometry (V(λ), luminous flux/efficacy); fluorescence (peaks, Stokes shift, quantum yield, the Donaldson re-radiation matrix, Förster transfer) |
 | `wave` | wave_core, wave_polarization, wave_coherence, wave_airy, wave_fabry_perot, wave_diffraction, wave_doe, wave_zernike, wave_pattern, wave_beam, wave_focus | 5132 | `Polarization`, `StokesVector`, `MuellerMatrix` (16-f64 buffer), `Pattern2D`, `ZernikeWavefront`, `ThinFilmResult`, `AbsorbingFilmResult`, `GaussianBeam`, `VolumeGrating`, `FocusLens` | Wave optics: interference, coherence, Airy/Bessel, Fabry-Pérot, Fraunhofer/Fresnel diffraction, TMM (oblique s/p; complex-index R/T/A for absorbing layers), AR coatings, Jones/Stokes/Mueller, Zernike polynomials, 2D FFT patterns, PSF; Gaussian beams (q/ABCD, resonator modes, HG/LG modes, M², OAM); diffractive optics (grating equation, blazed/multilevel/binary/Dammann efficiencies, diffractive lens, Kogelnik volume holograms); vectorial focusing (Richards-Wolf: linear/elliptical, radial, azimuthal; uniform, Gaussian, doughnut or `GaussianBeam` pupil) |
 | `lens` | lens.cyr, lens_aberration.cyr | 1605 | `CardinalPoints`, `SeidelCoefficients`, `WavefrontCoefficients`, `AberrSums` | Lens/mirror geometry: thin/thick lens, aberrations, wavefront coefficients from the Seidel sums, MTF (mono + poly + through-focus), aberrated OTF/MTF by pupil autocorrelation (Zernike or Seidel, sagittal/tangential, polychromatic complex sum), DoF, Petzval, multi-element; the Seidel and Buchdahl fifth-order sums of a `Prescription`, surface by surface, each fifth-order term split into intrinsic and induced |
 | `pbr` | pbr_core, pbr_advanced | 1428 | (free functions) | PBR shading: Cook-Torrance, GGX, sheen, clearcoat, SSS, iridescence, volumetric, importance sampling, split-sum IBL |
@@ -21,8 +21,8 @@ after the port-completeness review; recover it with
 | `serialize` | serialize.cyr | 62 | (free functions) | JSON roundtrips for the seven serde-tested types. ⚠ **Encode goes straight into a `str_builder`** since 2.3.4/2.3.5 — bayan is used only for Grisu2 float rendering; **decode** still walks a bayan value tree. The encoder emits round-trip-correct floats; bayan's decoder mis-rounds ~1 in 10⁵ doubles by 1 ULP (see serialize.cyr); every `*_from_json` reports via `err_out`; every wire format is pinned to exact bytes |
 | `ai` | ai.cyr | 62 | `DaimonClient`, `DaimonConfig`, `HooshConfig` | AI-assisted optics queries via sandhi HTTP POST — **not in the core bundle** |
 
-**Total**: 31 science modules + error, **13460 test assertions across 38 suites**,
-180 benchmarks. (`tests/hardening.tcyr` is the cross-module regression suite for the
+**Total**: 32 science modules + error, **13681 test assertions across 39 suites**,
+184 benchmarks. (`tests/hardening.tcyr` is the cross-module regression suite for the
 2.0.2 audit repairs and the 2.1.0 error channels — see those CHANGELOG entries.)
 
 ## Design Principles
@@ -54,6 +54,7 @@ after the port-completeness review; recover it with
 
 ```
 spectral ──> color science (wavelength <-> RGB, blackbody, CIE XYZ, SPD, CRI)
+    |         └──> spectral_fluor (Stokes shift, quantum yield, Donaldson matrix, FRET)
     |
 ray ──> geometric optics (Snell, Fresnel [real + complex], dispersion, trace, 3×3 polarization)
     |         ├──> ray_trace (polarization-aware sequential tracing, s/p tracking)
@@ -104,7 +105,7 @@ avoid cross-module coupling:
 - `atmosphere` defines its own RGB wavelength constants — sky color does not pull
   `spectral`.
 
-`[lib]` order (dependency order): `error` → the 9 ray modules → the 3 spectral →
+`[lib]` order (dependency order): `error` → the 9 ray modules → the 4 spectral →
 the 11 wave → pbr_core, pbr_advanced → lens, lens_aberration → atmosphere → bridge →
 serialize.
 `[lib.ai]` is the same list plus `ai.cyr`.

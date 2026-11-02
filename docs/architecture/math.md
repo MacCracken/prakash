@@ -487,6 +487,70 @@ CCT = 449n³ + 3525n² + 6823.3n + 5520.33 where n = (x - 0.3320)/(0.1858 - y)
 ### Luminance (Rec. 709)
 Y = 0.2126R + 0.7152G + 0.0722B
 
+### Fluorescence (`spectral_fluor`, 2.15.0)
+Spectra are `Spd`s, point samples per nm; an integral over one is Σ samples × step.
+
+**Photons and energy.** N(λ) = P(λ)·λ·10⁻⁹/(hc) photons s⁻¹ nm⁻¹ for P in W nm⁻¹, with the exact
+CODATA h and c.
+
+**Two kinds of spectrum.** An emission spectrum is a density: per cm⁻¹ it is λ²/10⁷ times its value
+per nm. An excitation or absorption spectrum (absorptance, ε, a corrected excitation scan) is a
+response per photon at λ, with no per-nm unit; it peaks at the same point on either scale.
+
+**A band Gaussian in energy**, centred on ν̃₀ = 10⁷/λ₀ cm⁻¹ with σ = FWHM/(2√(2 ln 2)):
+
+    profile (excitation, absorption):  P(λ) = exp(−(ν̃ − ν̃₀)²/(2σ²)),   ν̃ = 10⁷/λ
+    density (emission, unit area):     S(λ) = (1/(σ√(2π))) exp(−(ν̃ − ν̃₀)²/(2σ²)) · ν̃/λ
+
+The profile peaks at λ₀. The density peaks per cm⁻¹ at ν̃₀, and per nm at the maximum of g(ν̃)ν̃²,
+ν̃* = (ν̃₀ + √(ν̃₀² + 8σ²))/2. That is blue of λ₀: a 490 nm band 2500 cm⁻¹ wide peaks at 487.376 nm.
+
+**Peak.** The parabola through ln y of the largest sample and its two neighbours, against
+ν̃ = 10⁷/λ (unevenly spaced). For three points:
+
+    x* = x₂ − ½ [(x₂ − x₁)²(y₂ − y₃) − (x₂ − x₃)²(y₂ − y₁)] / [(x₂ − x₁)(y₂ − y₃) − (x₂ − x₃)(y₂ − y₁)]
+
+This is exact for a profile, and for a density taken per cm⁻¹. A density taken per nm is
+within 4e-4 of a step, for centres of 250–1200 nm, widths of 1000–6000 cm⁻¹ and steps of 0.5–10 nm.
+A parabola in λ was off by 0.3–0.7% of a 5 nm step. The fit is NaN when:
+- the maximum is on the first or last sample;
+- two samples share it;
+- it equals a neighbour (a flat top).
+
+It smooths nothing, so noise on the top three samples moves it.
+
+**Stokes shift:**
+- in nm, λ_em − λ_ex from the per-nm peaks;
+- in cm⁻¹, 10⁷/λ_ex (the excitation peak as it stands) − ν̃_em (the emission's per-cm⁻¹ peak);
+- in eV, the cm⁻¹ value × hc·100/e (1 eV = 8065.544 cm⁻¹).
+
+Taken as photons rather than power, the emission peaks per cm⁻¹ about σ²/ν̃₀ further red.
+
+**Quantum yield:** Φ = k_r/(k_r + k_nr). By the comparative method (IUPAC, Brouwer 2011):
+
+    Φ = Φ_ref (F/F_ref) (f_ref/f) (n/n_ref)²,   f = 1 − 10^(−A)
+
+F is in photons, and 1 − 10^(−A) comes from its Taylor series in A ln 10 below 1. The method
+still needs A < 0.1: f corrects the absorbed fraction, not inner-filter effects.
+
+**Donaldson matrix**, on the grid λ_k = start + k·step:
+
+    M[o][i] = R(λ_i)[o = i] + Φ a(λ_i) λ_i E(λ_o) step / W,   W = Σ_k E_k λ_k step_E
+    out(λ_o) = Σ_i M[o][i] in(λ_i)
+
+A column returns Φa photons per photon in: Σ_o (M[o][i] − R[o = i]) λ_o/λ_i = Φ a(λ_i). It
+returns Φ a λ_i Σ E/Σ Eλ of the energy in. The luminescence is rank one (Kasha, Vavilov).
+FLUOR_DOWN zeroes o < i.
+
+**Förster transfer:**
+
+    E = 1/(1 + (r/R₀)⁶)   r = R₀((1 − E)/E)^(1/6)   E = 1 − τ_DA/τ_D   k_T = (1/τ_D)(R₀/r)⁶
+    R₀⁶ = 9000 ln 10 κ² Φ_D J/(128 π⁵ N_A n⁴)   → R₀ = 0.0210842 (κ² Φ_D J n⁻⁴)^(1/6) nm
+    J = Σ F_D ε_A λ⁴ / Σ F_D   (F_D in photons, ε_A in M⁻¹ cm⁻¹, λ in nm)
+
+The prefactor is (9000 ln 10/(128 π⁵ N_A) × 10¹⁴)^(1/6) nm, against Lakowicz's 0.211 Å and IUPAC's
+2.108×10⁻² nm.
+
 ## Lens
 
 ### Thin Lens

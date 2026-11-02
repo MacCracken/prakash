@@ -36,6 +36,9 @@
 >   does.
 >
 > **Formerly open, now all shipped:**
+> - the fluorescence §18 deferred — **2.15.0**, `src/spectral_fluor.cyr`: excitation and
+>   emission spectra as `Spd`s, the Stokes shift, quantum yield, the Donaldson re-radiation
+>   matrix and Förster transfer;
 > - the fifth-order (Buchdahl) aberrations §4 left as a stretch goal — **2.14.0**,
 >   `src/lens_aberration.cyr`: Seidel and fifth-order sums surface by surface for a
 >   `Prescription`, each fifth-order term split into intrinsic and induced parts;

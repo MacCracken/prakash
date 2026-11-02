@@ -28,6 +28,16 @@ details of each change are in `CHANGELOG.md`.
   `./scripts/check-consumer-link.sh --root ~/Repos/ranga ~/.cyrius/versions/<pin>/bin/cycc`.
   ⚠ From 2.10.1 that passes in full only at cyrius ≥ 6.6.13; see below.
 
+## 2.15.0: fluorescence
+
+New API only: nothing existing changes value or signature, and the cyrius pin stays at
+6.7.18. `dist/prakash.cyr` gains `spectral_fluor`. A name of yours that now collides:
+- one beginning `fluor_`, `fret_` or `FLUOR_`;
+- `Donaldson`;
+- `spd_energy_to_photons` or `spd_photons_to_energy`.
+
+Its spectra are `Spd`s of spectral power, except where a function asks for photons.
+
 ## 2.14.0: fifth-order aberrations
 
 New API only: nothing existing changes value or signature, and the cyrius pin stays at
