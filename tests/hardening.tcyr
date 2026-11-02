@@ -630,6 +630,17 @@ fn _h_sin_exact(x, exact) {
 assert(_h_sin_exact(0x41067E57CDD4DC54, 0x3CC396F53352C401) == 1, "sin near 58654 pi: exact");
 assert(_h_sin_exact(0x411102FBD5A41B84, 0xBCE948F9FF33F4C3) == 1, "sin near 88719 pi: exact");
 assert(_h_sin_exact(0x4116C6CBC45DC8DE, 0x3CF6D61B58C99C43) == 1, "sin near 118784 pi: exact");
+# 2.11.0: whole cycles go before sin/cos, and only while a fraction is left to keep.
+assert(_h_bits(_prk_cycles_phase(ZZ), ZZ) == 1, "0 cycles: phase 0");
+assert(_h_bits(_prk_cycles_phase(_h_frac(5, 4)), F64_PI_2) == 1, "1.25 cycles: pi/2");
+assert(_h_bits(_prk_cycles_phase(f64_from(1000000)), ZZ) == 1, "1e6 whole cycles: phase 0");
+assert(_h_bits(_prk_cycles_phase(_h_frac(0 - 1, 4)), f64_mul(F64_TAU, _h_frac(3, 4))) == 1,
+  "-0.25 cycles: 3 pi/2, one period on");
+assert(_h_bits(_prk_cycles_phase(0x432FFFFFFFFFFFFF), F64_PI) == 1, "2^52 - 1/2 cycles: pi");
+assert(_h_bits(_prk_cycles_phase(0x4330000000000000), f64_mul(F64_TAU, 0x4330000000000000)) == 1,
+  "2^52 cycles: unreduced, never a fabricated 0");
+assert(_h_bits(_prk_cycles_phase(PINF), PINF) == 1, "+inf cycles: +inf, which _prk_sin reports");
+assert((_prk_cycles_phase(NAN) & 0x7FFFFFFFFFFFFFFF) > PINF, "NaN cycles: NaN");
 # Raw f64_to from cyrius 6.6.8. Below it all three answered i64::MIN, which is what
 # made num_modes report one mode for a hugely multimode fibre. Every call in src/
 # is range-guarded except num_modes, which now relies on the top of this table.

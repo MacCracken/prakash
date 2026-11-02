@@ -233,6 +233,23 @@ var pi3 = interference_pattern(three_src, 3, wl_i, F64_ONE,
   f64_neg(_fd(5, 1000)), _fd(5, 1000), f64_neg(_fd(5, 1000)), _fd(5, 1000), 16, 16);
 assert_eq(_all_nonneg(pi3), 1, "three sources non-negative");
 
+# 2.11.0: a phase of ~1.1e7 rad, past where sin/cos take full reduction. Two unit
+# sources 1 mm apart, a screen at 1 m, 550 nm, x = 3 mm. The reference is exact
+# rational arithmetic over these same doubles; the tolerance is the phase's own
+# rounding (1.8e6 cycles carry ~2e-10 cycles of it).
+var hp_src = alloc(2 * sizeof(PointSource));
+_mksrc(hp_src, 0, Z, Z, F64_ONE, Z);
+_mksrc(hp_src, 1, 0x3F50624DD2F1A9FC, Z, F64_ONE, Z);
+var hp = interference_pattern(hp_src, 2, 0x3EA27476CA61B882, F64_ONE,
+  0x3F689374BC6A7EFA, 0x3F689374BC6A7EFA, Z, Z, 1, 1);
+_assert_near(f64_div(pattern2d_get(hp, 0, 0), 0x3FB4B9E01E9D1E58), F64_ONE, _fd(1, 10000000),
+  "1.8e6 cycles: I matches the exact reference to 1e-7");
+# ⛔ Past 2^52 cycles the fraction is 0 for every argument, so a phase reduced anyway
+# would report a confident I = 1 here. It stays NaN. lambda = 1e-20: 1e20 cycles.
+var hp_nan = interference_pattern(one_src, 1, 0x3BC79CA10C924223, F64_ONE, Z, Z, Z, Z, 1, 1);
+assert((pattern2d_get(hp_nan, 0, 0) & _PRK_ABS) > 0x7FF0000000000000,
+  "1e20 cycles: NaN, never a fabricated phase");
+
 # ── spectrum strip ────────
 test_group("spectrum_strip");
 

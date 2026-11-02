@@ -38,7 +38,7 @@ cyrius deps --verify
 # ⚠ `cyrius fmt <f>` REWRITES IN PLACE as of cyrius 6.5.28 (it was stdout-only
 # before). To fix drift run `cyrius fmt "$f"` — never `cyrius fmt "$f" > tmp`,
 # which captures zero bytes and truncates the file.
-# ⛔ `cyrius lint` EXITS 0 EVEN WITH WARNINGS — verified at 6.6.4, 6.6.6 and 6.6.20, a file with two
+# ⛔ `cyrius lint` EXITS 0 EVEN WITH WARNINGS — verified at 6.6.4, 6.6.6, 6.6.20 and 6.7.9, a file with two
 # `warn` lines still returns rc=0. Running it bare, as this block used to, gives a
 # green local gate over code CI then rejects. CI greps stdout instead; so must you.
 fail=0
@@ -88,12 +88,12 @@ grep -nE '\bsandhi_|\btls_[a-z]|\bhttp_[a-z]|\btcp_|\bdynlib_|\brand_[a-z]' \
 cyrius audit
 ```
 
-⚠ **Counting assertions:** `cyrius tests` prints a per-suite line *and* a
+⚠ **Counting assertions:** `cyrius test tests/` prints a per-suite line *and* a
 suite-level line, so a naive `grep -E '^[0-9]+ passed'` sum overcounts by the
 number of suites. Require the parenthesised total:
 
 ```bash
-cyrius tests tests/ | grep -E '^[0-9]+ passed, [0-9]+ failed \([0-9]+ total\)$' \
+cyrius test tests/ | grep -E '^[0-9]+ passed, [0-9]+ failed \([0-9]+ total\)$' \
   | awk '{s+=$1} END {print s}'
 ```
 

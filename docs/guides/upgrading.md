@@ -28,6 +28,20 @@ details of each change are in `CHANGELOG.md`.
   `./scripts/check-consumer-link.sh --root ~/Repos/ranga ~/.cyrius/versions/<pin>/bin/cycc`.
   ⚠ From 2.10.1 that passes in full only at cyrius ≥ 6.6.13; see below.
 
+## 2.11.0: cyrius 6.7.9 and long optical paths
+
+- **The bump itself moves nothing.** About 3 million samples are bit-identical between
+  6.6.20 and 6.7.9, so a consumer can take either pin for the same numbers.
+- **`interference_pattern` and `fabry_perot_transmittance` move, within rounding:** at
+  most 3.0e-8 and 6.3e-8 relative, and their worst phase error is smaller. A pin on an
+  old value of either may need its tolerance checked.
+- **`fabry_perot_transmittance` is corrected at a high-finesse resonance:** it returns 1
+  exactly at a whole order, where R = 1 − 2⁻³⁰ at 2²² orders used to give 0.451.
+- **The 9× cost below is gone** from both functions, which now run ~9× faster on long
+  paths. Other calls with a huge sin/cos argument still pay it.
+- **hisab 3.4.0 retires 27 public names.** prakash calls none of them, but a consumer
+  that calls hisab directly should read hisab's `docs/guides/migration-3.4.md`.
+
 ## 2.10.1: what the cyrius 6.6.20 bump moves
 
 A consumer compiles the bundle against its **own** stdlib, so none of this reaches it

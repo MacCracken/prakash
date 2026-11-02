@@ -24,53 +24,46 @@ Fixes found along the way ship as patches of the current minor.
 
 | Version | Release | Pinned against |
 |---|---|---|
-| 2.10.2 | Large-phase interference | Same-binary A/B, exact-rational reference |
-| **2.11.0** | 3×3 polarization ray tracing | Chipman's PRT matrix |
-| 2.12.0 | Vectorial focusing | Richards-Wolf, scalar Airy limit |
-| 2.13.0 | Fifth-order aberrations | Buchdahl, real-ray residual |
-| 2.14.0 | Fluorescence | Stokes shift, Donaldson matrix |
-| 2.15.0 | Nonlinear optics | SHG, Kerr |
-| 2.16.0 | Negative-index media | Veselago-Pendry lens |
-| 2.17.0 | CIE 2006 observer | CIE 170-1:2006 tables |
+| **2.12.0** | 3×3 polarization ray tracing | Chipman's PRT matrix |
+| 2.13.0 | Vectorial focusing | Richards-Wolf, scalar Airy limit |
+| 2.14.0 | Fifth-order aberrations | Buchdahl, real-ray residual |
+| 2.15.0 | Fluorescence | Stokes shift, Donaldson matrix |
+| 2.16.0 | Nonlinear optics | SHG, Kerr |
+| 2.17.0 | Negative-index media | Veselago-Pendry lens |
+| 2.18.0 | CIE 2006 observer | CIE 170-1:2006 tables |
 
 Keep each section below to a few lines: what ships and what it is pinned against.
 
-### 2.10.2 — Large-phase interference
-`interference_pattern` calls sin/cos on k·r ≈ 1e7, past the 1.65e6 where they take full
-Payne-Hanek reduction: 9× at 2.10.1 (98 µs → 889 µs, 16×16). Reduce first, as
-2π·frac(r/λ). This moves bits, so pin it against exact rational arithmetic and prove
-the gain same-binary. Check Fabry-Perot's δ at the same threshold.
-
-### 2.11.0 — 3×3 polarization ray tracing
+### 2.12.0 — 3×3 polarization ray tracing
 Chipman's polarization ray-tracing matrix per surface, accumulated through the
 sequential tracer with the complex Fresnel coefficients. Today
 `trace_sequential_polarized` tracks scalar s/p transmittance from the real
 coefficients only.
 
-### 2.12.0 — Vectorial focusing (Richards-Wolf)
+### 2.13.0 — Vectorial focusing (Richards-Wolf)
 The I₀, I₁, I₂ integrals for high-NA focusing of linear, radial and azimuthal
 polarization, with a `GaussianBeam` pupil fill. It must reproduce the scalar Airy
 pattern at low NA.
 
-### 2.13.0 — Fifth-order aberrations (Buchdahl)
+### 2.14.0 — Fifth-order aberrations (Buchdahl)
 Buchdahl's fifth-order sums for a surface sequence. They are pinned against the
 real-ray residual left after the third-order wavefront coefficients are subtracted.
 
-### 2.14.0 — Fluorescence
+### 2.15.0 — Fluorescence
 Excitation and emission spectra as `Spd`s, Stokes shift, quantum yield, the
 re-radiation (Donaldson) matrix for spectral rendering, and FRET efficiency.
 
-### 2.15.0 — Nonlinear optics
+### 2.16.0 — Nonlinear optics
 - **SHG:** phase mismatch sinc²(ΔkL/2), coherence length, undepleted-pump
   efficiency.
 - **Kerr:** n = n₀ + n₂I, self-phase modulation, B-integral, critical power for
   self-focusing.
 
-### 2.16.0 — Negative-index media
+### 2.17.0 — Negative-index media
 Snell and Fresnel for ε, μ < 0, Drude-Lorentz ε(ω) and μ(ω), and the
 Veselago-Pendry flat lens.
 
-### 2.17.0 — CIE 2006 physiological observer
+### 2.18.0 — CIE 2006 physiological observer
 Age- and field-size-dependent cone fundamentals: lens and macular pigment optical
 densities, and LMS → XYZ. Pinned to the published 2° and 10° tables at age 32.
 
@@ -79,13 +72,14 @@ densities, and LMS → XYZ. Pinned to the published 2° and 10° tables at age 3
 Each of these rules is a measurement. The CHANGELOG has the story behind each one.
 
 **Performance**
-- **Cost model (cyrius 6.6.20):**
+- **Cost model (cyrius 6.7.9):**
   - `f64_mul` (~2 ns) and `f64_div` (~4.5 ns) are inline; a user-function call adds
     1–3 ns.
   - The expensive calls are transcendentals: ln ~43 ns, atan2 ~53 ns, exp ~20 ns,
     sin/cos ~45 ns, pow ~198 ns.
-  - ⚠ sin/cos cost ~525 ns at |x| ≥ 2^20·π/2 ≈ 1.65e6 (full reduction). Reduce a
-    large phase first: a path of 0.14 m at 550 nm crosses it.
+  - ⚠ sin/cos cost ~525 ns at |x| ≥ 2^20·π/2 ≈ 1.65e6 (full reduction). A phase from a
+    path goes through `_prk_cycles_phase(r/λ)`, not k·r: a path of 0.14 m at 550 nm
+    crosses that line, and the reduced form also rounds less.
   - So remove transcendental and function calls, not arithmetic, and hoist
     loop-invariant transcendentals first.
 - **Benchmarking:** run-to-run spread reaches 40%. Prove any change same-binary,

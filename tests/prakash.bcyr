@@ -21,6 +21,7 @@ include "src/wave_core.cyr"
 include "src/wave_polarization.cyr"
 include "src/wave_coherence.cyr"
 include "src/wave_airy.cyr"
+include "src/wave_fabry_perot.cyr"
 include "src/wave_diffraction.cyr"
 # 2.9.0: diffractive optics.
 include "src/wave_doe.cyr"
@@ -269,6 +270,17 @@ fn b_pattern_normalized() { var r = pattern2d_normalized(_bigpat); return 0; }
 fn b_interference_pattern() {
     var r = interference_pattern(_srcs, 3, _wl_m, F64_ONE,
       f64_neg(F64_ONE), F64_ONE, f64_neg(F64_ONE), F64_ONE, 16, 16);
+    return 0;
+}
+
+# Fabry-Perot transmittance of a 1 mm etalon: ~4e3 orders.
+fn b_fabry_perot_etalon() {
+    var r = fabry_perot_transmittance(_wl_m, 0x3F50624DD2F1A9FC, 0x3FF8000000000000, 0, 0x3FECCCCCCCCCCCCD);
+    return 0;
+}
+# The same through a 0.2 m cavity: ~1e6 orders, a phase past 1.65e6 rad unreduced.
+fn b_fabry_perot_long_cavity() {
+    var r = fabry_perot_transmittance(_wl_m, 0x3FC999999999999A, 0x3FF8000000000000, 0, 0x3FECCCCCCCCCCCCD);
     return 0;
 }
 
@@ -866,6 +878,8 @@ fn main() {
     bench("ray/trace_sequential", &b_trace_sequential, 100000);
     bench("ray/spot_diagram", &b_spot_diagram, 5000);
     bench("wave/interference_pattern_16x16", &b_interference_pattern, 2000);
+    bench("wave/fabry_perot_etalon", &b_fabry_perot_etalon, 200000);
+    bench("wave/fabry_perot_long_cavity", &b_fabry_perot_long_cavity, 200000);
     bench("wave/pattern2d_normalized_64x64", &b_pattern_normalized, 20000);
 
     println("=== done ===");

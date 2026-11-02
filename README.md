@@ -29,7 +29,7 @@ Consumed by [ranga](https://github.com/MacCracken/ranga) (spectral/colour — **
 name     = "your-project"
 version  = "${file:VERSION}"
 language = "cyrius"
-cyrius   = "6.6.20"
+cyrius   = "6.7.9"
 
 [deps]
 # ganita provides the transcendentals (acos/asin/atan2/pow/sinh/…) and subsumes
@@ -55,12 +55,12 @@ stdlib = [
 # refuses to build. Everything else in prakash is self-contained. CI proves this
 # on every commit: scripts/check-consumer-link.sh.
 git     = "https://github.com/MacCracken/hisab.git"
-tag     = "3.3.7"
+tag     = "3.4.0"
 modules = ["dist/hisab.cyr"]
 
 [deps.prakash]
 git     = "https://github.com/MacCracken/prakash.git"
-tag     = "2.10.1"
+tag     = "2.11.0"
 modules = ["dist/prakash.cyr"]        # math-only core (no TLS)
 # For the AI client instead, pull the ai bundle (adds the sandhi HTTP/TLS stack):
 # modules = ["dist/prakash-ai.cyr"]
@@ -105,7 +105,7 @@ var transmitted = malus_law(F64_ONE, F64_PI_4);
 
 ```
 prakash (Cyrius)
-  ├── hisab   (git dep, tag 3.3.7) — FFT (num_fft) for wave_pattern
+  ├── hisab   (git dep, tag 3.4.0) — FFT (num_fft) for wave_pattern
   ├── ganita  (stdlib) — transcendentals + linear algebra
   ├── bayan   (stdlib) — JSON (serialize module)
   ├── sakshi  (stdlib) — logging (trace diagnostics)
@@ -119,7 +119,7 @@ cyrius deps                 # resolve the hisab git dep
 for f in tests/*.tcyr; do cyrius test "$f"; done   # 9622 assertions, 35 suites
 cyrius distlib              # regenerate dist/prakash.cyr
 cyrius distlib ai           # regenerate dist/prakash-ai.cyr
-cyrius bench tests/prakash.bcyr                     # 166 benchmarks
+cyrius bench tests/prakash.bcyr                     # 168 benchmarks
 ./scripts/bench-history.sh  # append to the CSV history + benchmarks.md
 ```
 

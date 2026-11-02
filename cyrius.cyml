@@ -5,7 +5,7 @@ description = "prakash — optics and light simulation (ray optics, wave optics,
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/prakash"
 language = "cyrius"
-cyrius = "6.6.20"
+cyrius = "6.7.9"
 
 [build]
 src = "src/main.cyr"
@@ -134,9 +134,10 @@ stdlib = [
 # also exercises num_ifft); the rest of hisab's modules ride along in the bundle
 # unused. 2.6.8 was the collision-hardening patch (FLOAT_RENDER_BUF stack-array
 # -> alloc; ERR_* -> HSB_ERR_) that let hisab co-compile with the sandhi/TLS
-# stack pulled by [lib.ai]; both properties still hold in 3.3.7, which pins
-# cyrius 6.6.20 itself and sakshi 2.5.7 / ganita 1.2.14 to match its stdlib.
-# 3.4.x pins cyrius 6.7.x, so 3.3.7 is the tag for this toolchain.
+# stack pulled by [lib.ai]; both properties still hold in 3.4.0, which pins
+# cyrius 6.7.9 itself and sakshi 2.5.8 / ganita 1.2.15 to match its stdlib.
+# 3.4.1 pins cyrius 6.7.18, so 3.4.0 is the tag for this toolchain. It retires 27
+# public names (docs/guides/migration-3.4.md in hisab); none is one prakash calls.
 # ⚠ hisab >= 3.1.0 requires cyrius >= 6.6.3 (`public struct` + `#derive`) —
 # stated by hisab only from 3.2.1; prakash has been above that floor since 2.3.0.
 #
@@ -150,10 +151,10 @@ stdlib = [
 #
 # ⚠ The ganita `f64_pow` domain change described in src/error.cyr's shim block
 # dates from 1.1.4 and prakash re-measured it at 2.2.4 rather than inheriting the
-# claim. Re-measured at 1.2.5 (2.3.0), 1.2.6 (2.4.1) and 1.2.14 (2.10.1): ganita
+# claim. Re-measured at 1.2.5 (2.3.0), 1.2.6 (2.4.1), 1.2.14 (2.10.1) and 1.2.15 (2.11.0): ganita
 # still answers 0.0 / 1.0 / +inf for a zero base, bit-for-bit, so the shim's
 # zero-base branch stays a redundant pin rather than a live repair.
 [deps.hisab]
 git = "https://github.com/MacCracken/hisab.git"
-tag = "3.3.7"
+tag = "3.4.0"
 modules = ["dist/hisab.cyr"]

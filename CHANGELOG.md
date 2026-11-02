@@ -2,6 +2,91 @@
 
 ## [Unreleased]
 
+## [2.11.0] - 2026-11-01 — cyrius 6.7.9, hisab 3.4.0, and long optical paths stop paying for full reduction
+
+Toolchain **6.6.20 → 6.7.9**, hisab **3.3.7 → 3.4.0** (its 6.7.9 release; 3.4.1 pins
+6.7.18), sakshi **2.5.7 → 2.5.8**, and from the 6.7.9 stdlib snapshot ganita
+**1.2.14 → 1.2.15**, bayan **1.5.12 → 1.5.13**, sandhi **1.10.8 → 1.10.9**, sigil
+**3.13.10 → 3.13.11**. It also carries the large-phase repair that 2.10.1 filed as 2.10.2.
+
+Suite **9622 → 9634 assertions across 35 suites**, 0 failed; `cyrius audit` exits 0;
+`deps --verify` 114/114; `#must_use` 500 → **501**, 0 lost; reference coverage
+**498/498**. Benchmarks 166 → **168**.
+
+### Fixed — long optical paths (`error`, `wave_pattern`, `wave_fabry_perot`)
+`interference_pattern` and `fabry_perot_transmittance` formed a phase of k·r radians
+and handed it straight to sin/cos. From 2²⁰·π/2 ≈ 1.65e6 rad, a path of 0.14 m at
+550 nm, those take full Payne-Hanek reduction at ~525 ns, the cost 2.10.1 recorded.
+- **`_prk_cycles_phase(cycles)`** returns 2π·(cycles − ⌊cycles⌋). The whole cycles go
+  first, by an exact subtraction, so sin/cos stay on their fast path. Interference
+  passes r/λ; Fabry-Perot passes the order 2nd·cos θ/λ, and sin² has period 1 in it.
+- **`fabry_perot_transmittance` was wrong at a resonance.** T is exactly 1 there at any
+  order. At m = 2²² whole orders and R = 1 − 2⁻³⁰ it returned **0.451**: the unreduced
+  sin read a rounding residue where it should read 0, and F ≈ 2⁶² amplified that. It now
+  returns 1 exactly, pinned.
+- **The new form rounds less:** k·r rounds twice, r/λ once. Against exact rational
+  arithmetic over r = 1 mm to 1e9 m at 400–700 nm, the worst phase error is **2.4×
+  smaller** at every scale, and Fabry-Perot's 1.7× smaller. Results move by at most
+  3.0e-8 relative for interference and 6.3e-8 for Fabry-Perot.
+- **No fabricated phase.** Past 2⁵² cycles the fraction is 0 for every argument, so a
+  reduced phase would be a confident 0. The unreduced phase goes through instead, and
+  `_prk_sin` still reports NaN past 2⁶³ rad. Pinned at λ = 1e-20.
+- **Pins, each mutation-checked:** dropping the 2⁵² guard fails 3, `trunc` for `floor`
+  fails 1, and the old Fabry-Perot formula fails the resonance pin. ⚠ The interference
+  value pin holds to rounding, so the old formula also passes it; the speed gain is
+  held by the benchmark row, not by a test.
+
+### Changed
+- **The toolchain bump moves no value.** One program built from the unchanged source
+  under both toolchains, ~3 million samples including FFT-backed patterns to n = 1024:
+  **bit-identical**, and the suite's assertion output is too. The results above are the
+  repair's alone.
+- **hisab 3.4.0 retires 27 public names; none is prakash's.** prakash calls `num_fft`,
+  `num_ifft` and seven `hvec3_*` functions. `num_fft`'s body is unchanged from 3.3.7.
+- **cyrius.cyml, lib/, cyrius.lock** — pin `6.7.9`, `[deps.hisab]` tag `3.4.0`. 68 files
+  changed, none new. 113 files byte-match the 6.7.9 snapshot and `lib/hisab.cyr` matches
+  the 3.4.0 tag. The lock holds hisab `a07be4e`, sakshi `b22fcda` and trailer `cyrius 6.7.9`.
+- **`cyrius tests` is deprecated** and goes in the next cyrius release. CLAUDE.md and
+  CONTRIBUTING now use `cyrius test tests/`, which gives the same count.
+- **`tests/prakash.bcyr`** now includes `wave_fabry_perot` and has two rows for it.
+- **Binary size:** `src/main.cyr` 3,366,656 → 3,701,432 B (+10%). hisab's bundle went
+  2.10 → 2.64 MB.
+- **Roadmap:** 2.11.0 was pinned to 3×3 polarization ray tracing. It moves to 2.12.0 and
+  the rest of the plan moves up one, in the same order, to the CIE 2006 observer at 2.18.0.
+
+### Not exposed — checked rather than assumed
+- **6.7.9's approved behaviour changes** — pointer steps, `&q` of a `*P`, method results,
+  generics at f64, unary on a constant. `src/` has no `*T`, generic, method, `const` or
+  enum operand of those shapes, and nothing refused them.
+- **6.7.x's new keywords** (`const`, `bool`, `true`, `false`, `loop`, `do`) collide with
+  no identifier.
+- **Sidecars** — `cyrius distlib` still derives `bayan` and `sandhi bayan`, so
+  `scripts/sync-deps-sidecar.sh` stays. The bundle with those leaves alone is still
+  refused, and `check-consumer-link.sh` passes on the script's output.
+- **The cyrius ≥ 6.6.13 floor** for the JSON surface is unchanged: the consumer gate
+  passes at 6.6.13 with that snapshot's own `lib/`.
+- **`cyrius lint` still exits 0 with warnings at 6.7.9** — re-verified.
+
+### Performance
+Same binary, old body beside new, old run again after it as the control:
+
+| Call | Before | After |
+|---|---|---|
+| `interference_pattern` 16×16, paths ~1 m | ~1,000 µs | **~112 µs** |
+| `interference_pattern` 16×16, paths ~1 cm | ~120 µs | **~107 µs** |
+| `fabry_perot_transmittance`, 0.2 m cavity | ~640 ns | **~66 ns** |
+| `fabry_perot_transmittance`, 1 mm etalon | ~93 ns | ~88 ns |
+
+- **Whole suite, both trees interleaved five rounds, per-row minimum:**
+  `wave/interference_pattern_16x16` 915,206 → 109,773 ns (**−88%**).
+  `wave/fabry_perot_long_cavity` 68 ns and `wave/fabry_perot_etalon` 87 ns are new rows.
+- **No speed claim for the toolchain.** Median +2.56%, and no other row over 100 ns moves
+  past ±8%. Two rounds with 6.6.20 first read +6.18% and three with 6.7.9 first +0.00%,
+  so that is run order. ⚠ The host stayed loaded (load average 6–15).
+- ⚠ **Do not compare this release's CSV rows across time.** `bench-history.csv`'s 04:15:54Z
+  run reads a median +22% against 03:43:46Z, and both are identical 6.6.20 code. The
+  interleaved figures above are the measurement.
+
 ## [2.10.1] - 2026-11-01 — cyrius 6.6.20, hisab 3.3.7, and what fourteen toolchain releases moved
 
 Toolchain **6.6.6 → 6.6.20**, hisab **3.2.1 → 3.3.7** (its 6.6.20 release; 3.4.x pins

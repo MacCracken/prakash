@@ -22,7 +22,7 @@ after the port-completeness review; recover it with
 | `ai` | ai.cyr | 62 | `DaimonClient`, `DaimonConfig`, `HooshConfig` | AI-assisted optics queries via sandhi HTTP POST — **not in the core bundle** |
 
 **Total**: 28 science modules + error, **9622 test assertions across 35 suites**,
-166 benchmarks. (`tests/hardening.tcyr` is the cross-module regression suite for the
+168 benchmarks. (`tests/hardening.tcyr` is the cross-module regression suite for the
 2.0.2 audit repairs and the 2.1.0 error channels — see those CHANGELOG entries.)
 
 ## Design Principles
@@ -123,9 +123,9 @@ advertised the sandhi/TLS stack and the ai sidecar under-reported.
 compile-verify fixpoint proves the bundle needs, and the bundle opens with a matching
 `# Requires` include block. But the verify runs with the package's named deps in scope,
 and hisab is optional for prakash's consumers: its own requires block supplies `math`
-and `ganita`, and `[deps.sakshi]` supplies sakshi. So at 6.6.20 the generator reports
+and `ganita`, and `[deps.sakshi]` supplies sakshi. So at 6.7.9 the generator reports
 `bayan` for core and `sandhi bayan` for ai, "compile-verified", and that is false for
-the hisab-free link the README promises: the bundle with those leaves alone is 798
+the hisab-free link the README promises: the bundle with those leaves alone is ~800
 errors, and `scripts/check-consumer-link.sh` fails on it. With `[deps.hisab]` removed
 from a scratch manifest, the same generator derives ten leaves (`math sakshi ganita
 string alloc vec fnptr result bayan str`) and warns on `num_fft`.
@@ -142,7 +142,7 @@ are the checks with teeth. bayan's include closure is 24 files, none of them net
 
 | Dependency | Kind | Purpose |
 |-----------|------|---------|
-| `hisab` | git dep (tag 3.3.7) | FFT (`num_fft`) for `wave_pattern` (the suite also exercises `num_ifft`). `RayVec3` is layout-identical to hisab's `HVec3`, so all 26 `hvec3_*` ops work on prakash vectors unconverted — contract pinned by `tests/hisab_interop.tcyr` |
+| `hisab` | git dep (tag 3.4.0) | FFT (`num_fft`) for `wave_pattern` (the suite also exercises `num_ifft`). `RayVec3` is layout-identical to hisab's `HVec3`, so all 26 `hvec3_*` ops work on prakash vectors unconverted — contract pinned by `tests/hisab_interop.tcyr` |
 | `ganita` | stdlib | Transcendentals (acos/asin/atan2/pow/sinh/…) + linear algebra |
 | `math` | stdlib | Comparisons, clamp/lerp/min/max, `F64_PI` etc., aarch64 polyfills |
 | `bayan` | stdlib | JSON (`serialize` module) |
