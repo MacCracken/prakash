@@ -38,18 +38,20 @@ fn stokes_circular_right(intensity) { return stokes_new(intensity, f64_from(0), 
 fn stokes_circular_left(intensity) { return stokes_new(intensity, f64_from(0), f64_from(0), f64_neg(intensity)); }
 
 # Total intensity (S0).
+# NaN for a null vector (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn stokes_intensity(s) {
-    if (s == 0) { return f64_from(0); }
+    if (s == 0) { return _PRK_NAN; }
     return StokesVector_s0(s);
 }
 
 # Ellipticity angle chi: 0.5 * atan2(S3, sqrt(S1^2 + S2^2)); 0 for a vector with no polarized
 # part. An angle, so the same at every scale: 2.15.1 found a 1e-15 threshold answering 0 for a
 # circular vector of intensity 1e-16.
+# NaN for a null vector (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn stokes_ellipticity_angle(s) {
-    if (s == 0) { return f64_from(0); }
+    if (s == 0) { return _PRK_NAN; }
     var s1 = StokesVector_s1(s);
     var s2 = StokesVector_s2(s);
     var s3 = StokesVector_s3(s);
@@ -61,9 +63,10 @@ fn stokes_ellipticity_angle(s) {
 }
 
 # Orientation angle psi: 0.5 * atan2(S2, S1).
+# NaN for a null vector (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn stokes_orientation_angle(s) {
-    if (s == 0) { return f64_from(0); }
+    if (s == 0) { return _PRK_NAN; }
     return f64_mul(F64_HALF, ganita_f64_atan2(StokesVector_s2(s), StokesVector_s1(s)));
 }
 
@@ -71,15 +74,16 @@ fn stokes_orientation_angle(s) {
 
 # Element accessors: (i, j) at offset (i*4 + j)*8. The buffer is exactly 128
 # bytes (4x4 f64), so an index past 3 would read or write outside it — the Rust
-# original used a checked [[f64; 4]; 4]. Out-of-range reads return 0.0 and
-# out-of-range writes are refused with PK_ERR_INVALID_PARAMETER.
+# original used a checked [[f64; 4]; 4]. Out-of-range reads, and any read of a null matrix,
+# return NaN (2.15.1: 0.0, which is also a legitimate element); out-of-range writes are refused
+# with PK_ERR_INVALID_PARAMETER.
 #must_use
 fn mueller_get(m, i, j) {
-    if (m == 0) { return f64_from(0); }
-    if (i < 0) { return f64_from(0); }
-    if (j < 0) { return f64_from(0); }
-    if (i > 3) { return f64_from(0); }
-    if (j > 3) { return f64_from(0); }
+    if (m == 0) { return _PRK_NAN; }
+    if (i < 0) { return _PRK_NAN; }
+    if (j < 0) { return _PRK_NAN; }
+    if (i > 3) { return _PRK_NAN; }
+    if (j > 3) { return _PRK_NAN; }
     return load64(m + (i * 4 + j) * 8);
 }
 
@@ -317,30 +321,34 @@ fn biref_rutile() { return _biref_mk(_wp_r(2616, 1000), _wp_r(2903, 1000), "ruti
 fn biref_mica() { return _biref_mk(_wp_r(15936, 10000), _wp_r(15977, 10000), "mica"); }
 
 # Birefringence: delta_n = n_e - n_o.
+# NaN for a null material (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn biref_birefringence(mat) {
-    if (mat == 0) { return f64_from(0); }
+    if (mat == 0) { return _PRK_NAN; }
     return f64_sub(BirefringentMaterial_n_e(mat), BirefringentMaterial_n_o(mat));
 }
 
 # Phase retardation: 2*pi * d * |delta_n| / lambda.
+# NaN for a null material (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn biref_retardation(mat, thickness, wavelength) {
-    if (mat == 0) { return f64_from(0); }
+    if (mat == 0) { return _PRK_NAN; }
     return f64_div(f64_mul(f64_mul(F64_TAU, thickness), f64_abs(biref_birefringence(mat))), wavelength);
 }
 
 # Quarter-wave-plate thickness: lambda / (4*|delta_n|).
+# NaN for a null material (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn biref_quarter_wave_thickness(mat, wavelength) {
-    if (mat == 0) { return f64_from(0); }
+    if (mat == 0) { return _PRK_NAN; }
     return f64_div(wavelength, f64_mul(f64_from(4), f64_abs(biref_birefringence(mat))));
 }
 
 # Half-wave-plate thickness: lambda / (2*|delta_n|).
+# NaN for a null material (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn biref_half_wave_thickness(mat, wavelength) {
-    if (mat == 0) { return f64_from(0); }
+    if (mat == 0) { return _PRK_NAN; }
     return f64_div(wavelength, f64_mul(F64_TWO, f64_abs(biref_birefringence(mat))));
 }
 

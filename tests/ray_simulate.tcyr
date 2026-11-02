@@ -226,7 +226,9 @@ while (isn < vec_len(spots_near)) {
 }
 
 # spot_rms
-_assert_near(spot_rms_radius(vec_new()), Z, TOL6, "rms empty = 0");
+# No spots have no RMS (2.15.1: 0.0, a perfect focus, for a diagram where every ray missed).
+var _rms0 = spot_rms_radius(vec_new());
+assert(f64_eq(_rms0, _rms0) == 0, "rms of no spots is NaN");
 var one_spot = vec_new();
 vec_push(one_spot, _spot(F64_ONE, F64_TWO));
 _assert_near(spot_rms_radius(one_spot), Z, TOL6, "rms single point = 0");

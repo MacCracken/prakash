@@ -1765,15 +1765,17 @@ fn spd_from_static(start_nm, step_nm, values, len) {
     return spd_new(start_nm, step_nm, values, len);
 }
 
-# Wavelength of the last sample: start + step*(len - 1); 0 for a null handle.
+# Wavelength of the last sample: start + step*(len - 1). NaN for a null SPD (2.15.1: 0.0, which is
+# also a legitimate answer).
 #must_use
 fn spd_end_nm(s) {
     # 2.2.8: see spd_at below — null-guarded at the dereference site.
-    if (s == 0) { return f64_from(0); }
+    if (s == 0) { return _PRK_NAN; }
     return f64_add(Spd_start_nm(s), f64_mul(Spd_step_nm(s), f64_from(Spd_len(s) - 1)));
 }
 
 # Interpolate the SPD at a wavelength (0 outside range).
+# NaN for a null SPD (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn spd_at(s, wavelength_nm) {
     # 2.2.8: a null handle used to be dereferenced here. `spd_from_json` is
@@ -1793,7 +1795,7 @@ fn spd_at(s, wavelength_nm) {
     # the very repair that should have gone looking. It is true now (2.4.8 guarded
     # all seven), but the lesson is that "the convention covers this" is a claim to
     # CHECK, not to state.
-    if (s == 0) { return f64_from(0); }
+    if (s == 0) { return _PRK_NAN; }
     # An empty SPD has no value to interpolate. Without this, a zero step makes
     # idx_f = 0/0 = NaN and the `idx >= len - 1` branch reads _spd_val(vals, -1)
     # — a load from 8 bytes before the buffer. (The Rust original indexed a Vec
@@ -2030,12 +2032,13 @@ fn _cri_band_delta(test_spd, ref_spd, test_y_total, ref_y_total, start, end) {
 # ⚠ Implementing real Ra needs the eight TCS reflectance tables (8 x 81 values)
 # from the CIE dataset. That is data this repo does not have, and reconstructing
 # it is the same hazard documented at illuminant_f11 above.
+# NaN for a null SPD (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn spectral_band_similarity(test_spd) {
     # 2.2.8: guarded to match its sibling color_rendering_index, which already
     # returned 0 for a null SPD. The two are documented as alternatives and
     # differed in whether one of them crashed.
-    if (test_spd == 0) { return f64_from(0); }
+    if (test_spd == 0) { return _PRK_NAN; }
     return _cri_impl(test_spd);
 }
 
@@ -3516,16 +3519,16 @@ fn _cri_ri(test_spd, ctx, i) {
 # ⚠ 2.2.8 SPLIT THE FAILURE SENTINELS, because 0.0 is a LEGITIMATE R_i — a
 # source that renders a sample badly enough scores 0, and a very bad one scores
 # NEGATIVE — so returning 0.0 on failure was indistinguishable from an answer.
-#   - a null SPD, or an index outside 1..8, returns 0.0: the documented, tested
-#     contract, unchanged.
 #   - an INTERNAL failure (allocation refused, degenerate von Kries denominator)
 #     returns NaN, which is never a valid R_i and propagates visibly through
 #     color_rendering_index's mean rather than quietly dragging it toward zero.
+#   - a null SPD, or an index outside 1..8, returned 0.0 until 2.15.1, "the documented, tested
+#     contract". It was the same ambiguity, and it is NaN now too.
 #must_use
 fn cri_special(test_spd, i) {
-    if (test_spd == 0) { return f64_from(0); }
-    if (i < 1) { return f64_from(0); }
-    if (i > 8) { return f64_from(0); }
+    if (test_spd == 0) { return _PRK_NAN; }
+    if (i < 1) { return _PRK_NAN; }
+    if (i > 8) { return _PRK_NAN; }
     var ctx[88];
     # An internal failure is NaN, as the note above says: until 2.15.1 a refused allocation
     # here returned 0.0, which is a legitimate R_i.
@@ -3541,10 +3544,11 @@ fn cri_special(test_spd, i) {
 # published CIE Ra is 64 — a lamp famous for poor rendering reported as nearly
 # perfect. That metric is still available, honestly named, as
 # `spectral_band_similarity`; this is now real CIE 13.3.
+# NaN for a null SPD (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn color_rendering_index(test_spd) {
     _prk_trace("color_rendering_index");
-    if (test_spd == 0) { return f64_from(0); }
+    if (test_spd == 0) { return _PRK_NAN; }
     var ctx[88];
     # An internal failure is NaN, as for cri_special (2.15.1: it was 0.0, a legitimate Ra).
     if (_cri_context(test_spd, &ctx) == 0) { return _PRK_NAN; }

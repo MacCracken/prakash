@@ -203,9 +203,10 @@ fn zernike_wf_flat() {
 # Evaluate the wavefront W(rho,theta) = sum_j c_j Z_j. Returns 0 outside pupil. Every nonzero
 # coefficient counts: 2.15.1 found terms below 1e-15 dropped, which in metres is a wavefront of
 # 1e-15 m whatever the aberration, and in waves of nothing at all.
+# NaN for a null wavefront (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn zernike_wf_evaluate(wf, rho, theta) {
-    if (wf == 0) { return f64_from(0); }
+    if (wf == 0) { return _PRK_NAN; }
     if (f64_gt(rho, F64_ONE) == 1) {
         return f64_from(0);
     }
@@ -264,9 +265,10 @@ fn zernike_wf_to_grid(wf, grid_size) {
 # RMS wavefront error (excludes piston j=1, tilt X j=2, tilt Y j=3: Noll's even j is the cosine,
 # so j = 2 is 2 rho cos(theta), x; 2.15.1 corrected the labels, which were swapped):
 # RMS = sqrt(sum_{j>3} c_j^2).
+# NaN for a null wavefront (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn zernike_wf_rms_error(wf) {
-    if (wf == 0) { return f64_from(0); }
+    if (wf == 0) { return _PRK_NAN; }
     var coeffs = ZernikeWavefront_coeffs(wf);
     var len = ZernikeWavefront_len(wf);
     var sum = f64_from(0);
@@ -313,9 +315,10 @@ fn zernike_wf_peak_to_valley(wf, samples) {
 
 # Strehl ratio (Marechal): S = exp(-(2*pi*sigma)^2), sigma = RMS/wavelength. NaN unless the
 # wavelength is finite and > 0 (2.15.1: lambda = 0 answered 0 and a negative one a number).
+# NaN for a null wavefront (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn zernike_wf_strehl_ratio(wf, wavelength) {
-    if (wf == 0) { return f64_from(0); }
+    if (wf == 0) { return _PRK_NAN; }
     if ((f64_gt(wavelength, f64_from(0)) & f64_lt(wavelength, 0x7FF0000000000000)) == 0) { return _PRK_NAN; }
     var sigma = f64_div(zernike_wf_rms_error(wf), wavelength);
     var x = f64_mul(f64_mul(F64_TWO, F64_PI), sigma);

@@ -353,12 +353,13 @@ fn spot_diagram(surfaces, aperture_radius, num_rings, num_arms, field_angle, sta
     return spots;
 }
 
-# RMS distance of spot points from their centroid (0 for empty).
+# RMS distance of spot points from their centroid. NaN for a null or empty vec: no spots have no
+# RMS (2.15.1: 0.0, a perfect focus, for a diagram where every ray missed).
 #must_use
 fn spot_rms_radius(spots) {
-    if (spots == 0) { return f64_from(0); }
+    if (spots == 0) { return _PRK_NAN; }
     var n = vec_len(spots);
-    if (n == 0) { return f64_from(0); }
+    if (n == 0) { return _PRK_NAN; }
     var nf = f64_from(n);
     var sx = f64_from(0);
     var sy = f64_from(0);

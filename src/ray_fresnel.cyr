@@ -129,9 +129,10 @@ fn complex_dielectric(n, name) {
 
 # Fresnel reflectance at normal incidence for an absorbing medium:
 # R = ((n1-n2)^2 + k2^2) / ((n1+n2)^2 + k2^2).
+# NaN for a null medium (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn fresnel_normal_complex(n1, medium) {
-    if (medium == 0) { return f64_from(0); }
+    if (medium == 0) { return _PRK_NAN; }
     var mn = ComplexMedium_n(medium);
     var mk = ComplexMedium_k(medium);
     var dn = f64_sub(n1, mn);
@@ -164,9 +165,10 @@ fn _fr_complex_cos_t(n1, mn, mk, incident_angle, cos_re_out, cos_im_out) {
 }
 
 # Fresnel reflectance for s-polarized light on an absorbing medium. R_s = |r_s|^2.
+# NaN for a null medium (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn fresnel_s_complex(n1, medium, incident_angle) {
-    if (medium == 0) { return f64_from(0); }
+    if (medium == 0) { return _PRK_NAN; }
     var mn = ComplexMedium_n(medium);
     var mk = ComplexMedium_k(medium);
     var cos_i = _prk_cos(incident_angle);
@@ -185,9 +187,10 @@ fn fresnel_s_complex(n1, medium, incident_angle) {
 }
 
 # Fresnel reflectance for p-polarized light on an absorbing medium. R_p = |r_p|^2.
+# NaN for a null medium (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn fresnel_p_complex(n1, medium, incident_angle) {
-    if (medium == 0) { return f64_from(0); }
+    if (medium == 0) { return _PRK_NAN; }
     var mn = ComplexMedium_n(medium);
     var mk = ComplexMedium_k(medium);
     var cos_i = _prk_cos(incident_angle);
@@ -206,9 +209,10 @@ fn fresnel_p_complex(n1, medium, incident_angle) {
 }
 
 # Average (unpolarized) Fresnel reflectance on an absorbing medium.
+# NaN for a null medium (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn fresnel_unpolarized_complex(n1, medium, incident_angle) {
-    if (medium == 0) { return f64_from(0); }
+    if (medium == 0) { return _PRK_NAN; }
     var rs = fresnel_s_complex(n1, medium, incident_angle);
     var rp = fresnel_p_complex(n1, medium, incident_angle);
     return f64_mul(F64_HALF, f64_add(rs, rp));

@@ -465,10 +465,14 @@ for (var _ci = 1; _ci <= 8; _ci = _ci + 1) {
     assert(f64_le(cri_special(illuminant_d65(), _ci), f64_add(f64_from(100), TOL_01)),
       "no R_i exceeds 100 for the reference illuminant");
 }
-# Out-of-range sample indices report 0 rather than reading past the tables.
-assert_eq(cri_special(illuminant_f2(), 0), Z, "cri_special rejects sample index 0");
-assert_eq(cri_special(illuminant_f2(), 9), Z, "cri_special rejects sample index 9");
-assert_eq(color_rendering_index(0), Z, "color_rendering_index rejects a null SPD");
+# Out-of-range sample indices and a null SPD report NaN rather than reading past the tables
+# (2.15.1: they reported 0.0, a legitimate R_i).
+var _c0 = cri_special(illuminant_f2(), 0);
+assert(f64_eq(_c0, _c0) == 0, "cri_special rejects sample index 0: NaN");
+var _c9 = cri_special(illuminant_f2(), 9);
+assert(f64_eq(_c9, _c9) == 0, "cri_special rejects sample index 9: NaN");
+var _cn = color_rendering_index(0);
+assert(f64_eq(_cn, _cn) == 0, "color_rendering_index rejects a null SPD: NaN");
 
 # ── spd_from_function ────────
 #

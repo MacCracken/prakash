@@ -21,7 +21,7 @@ The method:
 
 No API is removed or renamed. Toolchain unchanged, cyrius 6.7.18.
 
-Suite **13,681 → 14,187 assertions across 39 suites**, 0 failed. Every new group was run against
+Suite **13,681 → 14,191 assertions across 39 suites**, 0 failed. Every new group was run against
 the 2.15.0 code and fails there, except the R_p/R_s pin, which was right and simply never read.
 `cyrius audit` exits 0 with its bench section passing; `deps --verify` 114/114; `#must_use`
 540 → **551**, 0 lost; reference coverage **550/550**. Benchmarks 184 → **185**. Both consumer-link
@@ -54,6 +54,25 @@ checks pass: the pinned toolchain bare, and cyrius 6.6.13's stdlib.
   to the bit. The rest is the reference spectrum and the XYZ results the public API returns.
 - **`cri_special` and `color_rendering_index` returned 0.0 for an internal failure**, a
   legitimate score. The 2.2.8 note above `cri_special` promised NaN, and they now return it.
+- **A null handle answered 0.0 from 41 f64 functions, a value each of them also computes.**
+  CLAUDE.md asks that a null handle be distinguishable from a computed zero. For these functions
+  without an `err_out` it was not:
+  - `color_rendering_index(null)` read like a source with Ra = 0;
+  - `sellmeier_n_at(null, λ)` like an index of 0;
+  - `spd_at(null, λ)` like an SPD with no power at λ.
+
+  Nine of them had their 0.0 pinned as "the documented, tested contract", so this changes a
+  contract on purpose. They answer NaN now, and so do three related non-answers:
+  - an index outside the object in `mueller_get`, `pattern2d_get` and `cri_special`;
+  - `spot_rms_radius` of no spots, which said 0, a perfect focus;
+  - `lens_mtf_polychromatic` with no weight.
+
+  `luminous_flux`, `luminous_efficacy` and `luminous_flux_scotopic` also answer NaN if their
+  internal V(λ) table cannot be allocated. The full list is in `docs/guides/upgrading.md`.
+  Physically real zeros are unchanged and pinned beside them: `spd_at` outside its range, a
+  wavefront outside its pupil, the DOP of unpolarized light. `tests/hardening.tcyr` checks all
+  45 null, empty and out-of-range calls in one group, and 38 existing assertions that pinned 0.0
+  are re-pinned to NaN; on the 2.15.0 code those 38 fail.
 - **wave_core, wave_polarization, wave_airy, wave_fabry_perot — five wrong results:**
   - `thin_film_reflectance` added the reflection's π to the phase and then halved it with the
     rest, returning cos²(2πnd/λ), which is 1 − R. A vanishing film read 1, its brightest. It is

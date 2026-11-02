@@ -175,9 +175,10 @@ fn polarization_circular_left() {
 # Malus's law for linear light (phase 0). ⛔ 2.15.1: this applied Malus to the angle
 # atan2(e_y, e_x) and ignored the phase, so circular light passed whole at 45 degrees (1, not
 # 1/2) and linear light at -45 degrees (phase pi) passed whole through a polarizer at +45.
+# NaN for a null state (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn polarization_through_polarizer(p, polarizer_angle) {
-    if (p == 0) { return f64_from(0); }
+    if (p == 0) { return _PRK_NAN; }
     var ex = Polarization_ex(p);
     var ey = Polarization_ey(p);
     var c = _prk_cos(polarizer_angle);
@@ -188,9 +189,10 @@ fn polarization_through_polarizer(p, polarizer_angle) {
 }
 
 # Total intensity: ex^2 + ey^2.
+# NaN for a null state (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn polarization_intensity(p) {
-    if (p == 0) { return f64_from(0); }
+    if (p == 0) { return _PRK_NAN; }
     return f64_add(f64_mul(Polarization_ex(p), Polarization_ex(p)),
       f64_mul(Polarization_ey(p), Polarization_ey(p)));
 }
@@ -215,9 +217,10 @@ fn stokes_new(s0, s1, s2, s3) {
 # Degree of polarization: sqrt(s1^2 + s2^2 + s3^2) / s0; 0 for zero intensity. A ratio, so the
 # same at every scale: 2.15.1 found a 1e-15 threshold on s0 answering 0 for a fully polarized
 # vector of intensity 1e-16.
+# NaN for a null vector (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn stokes_degree_of_polarization(s) {
-    if (s == 0) { return f64_from(0); }
+    if (s == 0) { return _PRK_NAN; }
     if ((StokesVector_s0(s) & _PRK_ABS) == 0) {
         return f64_from(0);
     }

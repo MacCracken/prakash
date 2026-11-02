@@ -40,6 +40,7 @@ fn _h_near(a, b, tol) { return f64_lt(f64_abs(f64_sub(a, b)), tol); }
 # plain i64 at the `==`, which avoids the compiler's mixed f64/integer warning
 # when one side is a bit-pattern constant.
 fn _h_bits(a, b) { if (a == b) { return 1; } return 0; }
+fn _h_isnan(x) { if (f64_eq(x, x) == 1) { return 0; } return 1; }
 fn _h_frac(num, den) { return f64_div(f64_from(num), f64_from(den)); }
 
 var PINF = 0x7FF0000000000000;
@@ -282,7 +283,7 @@ assert(pattern2d_set(okp, 99, 99, F64_ONE) == PK_ERR_INVALID_PARAMETER,
 assert(pattern2d_set(okp, 0 - 1, 0, F64_ONE) == PK_ERR_INVALID_PARAMETER,
   "pattern2d_set negative col returns PK_ERR_INVALID_PARAMETER");
 assert(pattern2d_set(okp, 0, 0, F64_ONE) == PK_ERR_NONE, "pattern2d_set in range still succeeds (control)");
-assert(_h_bits(pattern2d_get(okp, 99, 99), ZERO) == 1, "pattern2d_get out of range returns 0.0");
+assert(_h_isnan(pattern2d_get(okp, 99, 99)) == 1, "pattern2d_get out of range returns NaN (2.15.1: 0.0)");
 assert(_h_bits(pattern2d_get(okp, 0, 0), F64_ONE) == 1, "pattern2d_get in range still reads (control)");
 assert(pattern2d_set(0, 0, 0, F64_ONE) == PK_ERR_INVALID_PARAMETER,
   "pattern2d_set on a null pattern returns PK_ERR_INVALID_PARAMETER");
@@ -298,9 +299,9 @@ assert(prakash_is_err(PK_ERR_ALLOCATION) == 1, "PK_ERR_ALLOCATION reads as an er
 assert(prakash_is_err(pattern2d_set(0, 0, 0, F64_ONE)) == 1, "a refused pattern2d_set reads as an error");
 
 var mm = mueller_identity();
-assert(_h_bits(mueller_get(mm, 4, 0), ZERO) == 1, "mueller_get row 4 returns 0.0 (matrix is 4x4)");
-assert(_h_bits(mueller_get(mm, 0, 4), ZERO) == 1, "mueller_get col 4 returns 0.0");
-assert(_h_bits(mueller_get(mm, 0 - 1, 0), ZERO) == 1, "mueller_get negative index returns 0.0");
+assert(_h_isnan(mueller_get(mm, 4, 0)) == 1, "mueller_get row 4 returns NaN (2.15.1: 0.0) (matrix is 4x4)");
+assert(_h_isnan(mueller_get(mm, 0, 4)) == 1, "mueller_get col 4 returns NaN (2.15.1: 0.0)");
+assert(_h_isnan(mueller_get(mm, 0 - 1, 0)) == 1, "mueller_get negative index returns NaN (2.15.1: 0.0)");
 assert(mueller_set(mm, 4, 0, F64_ONE) == PK_ERR_INVALID_PARAMETER,
   "mueller_set row 4 refused with PK_ERR_INVALID_PARAMETER");
 assert(mueller_set(mm, 0, 0, F64_ONE) == PK_ERR_NONE, "mueller_set in range still succeeds (control)");
@@ -583,12 +584,12 @@ assert(_h_bits(multilayer_reflectance(f64_from(550), F64_ONE, _h_frac(152, 100),
 
 # 2.2.8: the Spd consumer family dereferenced null, reachable from the
 # documented spd_from_json failure return.
-assert(_h_bits(spd_at(0, f64_from(550)), ZZ) == 1, "spd_at(null) returns 0.0 instead of segfaulting");
-assert(_h_bits(spd_end_nm(0), ZZ) == 1, "spd_end_nm(null) returns 0.0");
+assert(_h_isnan(spd_at(0, f64_from(550))) == 1, "spd_at(null) returns NaN (2.15.1: 0.0) instead of segfaulting");
+assert(_h_isnan(spd_end_nm(0)) == 1, "spd_end_nm(null) returns NaN (2.15.1: 0.0)");
 assert(spd_to_xyz(0) != 0, "spd_to_xyz(null) returns a zero Xyz rather than crashing");
 assert(_h_bits(Xyz_y(spd_to_xyz(0)), ZZ) == 1, "and that Xyz is all zeros");
-assert(_h_bits(luminous_flux(0), ZZ) == 1, "luminous_flux(null) returns 0.0");
-assert(_h_bits(spectral_band_similarity(0), ZZ) == 1, "spectral_band_similarity(null) returns 0.0");
+assert(_h_isnan(luminous_flux(0)) == 1, "luminous_flux(null) returns NaN (2.15.1: 0.0)");
+assert(_h_isnan(spectral_band_similarity(0)) == 1, "spectral_band_similarity(null) returns NaN (2.15.1: 0.0)");
 
 # 2.2.8: pbr_integrate_brdf_lut wrote NaN and reported PK_ERR_NONE.
 var _bl = alloc(16);
@@ -825,30 +826,31 @@ var _nb = alloc(65536);
 var _ne = 0;
 assert(pbr_fresnel_schlick_rgb(0, 0, _nb) == 0, "pbr_fresnel_schlick_rgb(null) returns its sentinel, not a SIGSEGV");
 assert(pbr_lambert_diffuse_rgb(0, _nb) == 0, "pbr_lambert_diffuse_rgb(null) returns its sentinel, not a SIGSEGV");
-assert(medium_permittivity(0) == 0, "medium_permittivity(null) returns its sentinel, not a SIGSEGV");
+assert(_h_isnan(medium_permittivity(0)) == 1, "medium_permittivity(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
 assert(ray_reflect_2d(0, 0) == 0, "ray_reflect_2d(null) returns its sentinel, not a SIGSEGV");
 assert(ray_reflect_3d(0, 0) == 0, "ray_reflect_3d(null) returns its sentinel, not a SIGSEGV");
 _ne = 0;
 assert(ray_refract_3d(0, 0, 0, 0, &_ne) == 0, "ray_refract_3d(null) returns its sentinel, not a SIGSEGV");
 assert(prakash_is_err(_ne) == 1, "ray_refract_3d(null) reports through err_out");
-assert(abbe_number(0) == 0, "abbe_number(null) returns its sentinel, not a SIGSEGV");
-assert(cauchy_n_at(0, 0) == 0, "cauchy_n_at(null) returns its sentinel, not a SIGSEGV");
-assert(conrady_n_at(0, 0) == 0, "conrady_n_at(null) returns its sentinel, not a SIGSEGV");
-assert(herzberger_n_at(0, 0) == 0, "herzberger_n_at(null) returns its sentinel, not a SIGSEGV");
-assert(partial_dispersion(0) == 0, "partial_dispersion(null) returns its sentinel, not a SIGSEGV");
+assert(_h_isnan(abbe_number(0)) == 1, "abbe_number(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
+assert(_h_isnan(cauchy_n_at(0, 0)) == 1, "cauchy_n_at(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
+assert(_h_isnan(conrady_n_at(0, 0)) == 1, "conrady_n_at(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
+assert(_h_isnan(herzberger_n_at(0, 0)) == 1, "herzberger_n_at(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
+assert(_h_isnan(partial_dispersion(0)) == 1, "partial_dispersion(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
 _ne = 0;
 assert(prism_angular_spread(0, 0, 0, 0, &_ne) == 0, "prism_angular_spread(null) returns its sentinel, not a SIGSEGV");
 assert(prakash_is_err(_ne) == 1, "prism_angular_spread(null) reports through err_out");
 _ne = 0;
 assert(prism_dispersion(0, 0, 0, &_ne) == 0, "prism_dispersion(null) returns its sentinel, not a SIGSEGV");
 assert(prakash_is_err(_ne) == 1, "prism_dispersion(null) reports through err_out");
-assert(schott_n_at(0, 0) == 0, "schott_n_at(null) returns its sentinel, not a SIGSEGV");
-assert(sellmeier_n_at(0, 0) == 0, "sellmeier_n_at(null) returns its sentinel, not a SIGSEGV");
-assert(fresnel_normal_complex(0, 0) == 0, "fresnel_normal_complex(null) returns its sentinel, not a SIGSEGV");
-assert(fresnel_p_complex(0, 0, 0) == 0, "fresnel_p_complex(null) returns its sentinel, not a SIGSEGV");
-assert(fresnel_s_complex(0, 0, 0) == 0, "fresnel_s_complex(null) returns its sentinel, not a SIGSEGV");
-assert(fresnel_unpolarized_complex(0, 0, 0) == 0,
-  "fresnel_unpolarized_complex(null) returns its sentinel, not a SIGSEGV");
+assert(_h_isnan(schott_n_at(0, 0)) == 1, "schott_n_at(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
+assert(_h_isnan(sellmeier_n_at(0, 0)) == 1, "sellmeier_n_at(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
+assert(_h_isnan(fresnel_normal_complex(0, 0)) == 1,
+  "fresnel_normal_complex(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
+assert(_h_isnan(fresnel_p_complex(0, 0, 0)) == 1, "fresnel_p_complex(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
+assert(_h_isnan(fresnel_s_complex(0, 0, 0)) == 1, "fresnel_s_complex(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
+assert(_h_isnan(fresnel_unpolarized_complex(0, 0, 0)) == 1,
+  "fresnel_unpolarized_complex(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
 _ne = 0;
 assert(ray_snell_3d(0, 0, 0, 0, _nb, &_ne) == 0, "ray_snell_3d(null) returns its sentinel, not a SIGSEGV");
 assert(prakash_is_err(_ne) == 1, "ray_snell_3d(null) reports through err_out");
@@ -861,7 +863,7 @@ _ne = 0;
 assert(optical_path_length(0, 0, 0, &_ne) == 0, "optical_path_length(null) returns its sentinel, not a SIGSEGV");
 assert(prakash_is_err(_ne) == 1, "optical_path_length(null) reports through err_out");
 assert(spot_diagram(0, 0, 0, 0, 0, 0, 0) == 0, "spot_diagram(null) returns its sentinel, not a SIGSEGV");
-assert(spot_rms_radius(0) == 0, "spot_rms_radius(null) returns its sentinel, not a SIGSEGV");
+assert(_h_isnan(spot_rms_radius(0)) == 1, "spot_rms_radius(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
 assert(trace_recursive(0, 0, 0) == 0, "trace_recursive(null) returns its sentinel, not a SIGSEGV");
 assert(paraxial_refract(0, 0) == 0, "paraxial_refract(null) returns its sentinel, not a SIGSEGV");
 assert(paraxial_trace(0, 0) == 0, "paraxial_trace(null) returns its sentinel, not a SIGSEGV");
@@ -878,26 +880,32 @@ assert(xyz_to_linear_srgb(0) == 0, "xyz_to_linear_srgb(null) returns its sentine
 assert(xyz_to_srgb(0) == 0, "xyz_to_srgb(null) returns its sentinel, not a SIGSEGV");
 assert(xyz_to_xyy(0) == 0, "xyz_to_xyy(null) returns its sentinel, not a SIGSEGV");
 assert(rgb_clamp(0) == 0, "rgb_clamp(null) returns its sentinel, not a SIGSEGV");
-assert(rgb_luminance(0) == 0, "rgb_luminance(null) returns its sentinel, not a SIGSEGV");
+assert(_h_isnan(rgb_luminance(0)) == 1, "rgb_luminance(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
 assert(rgb_to_u8(0) == 0, "rgb_to_u8(null) returns its sentinel, not a SIGSEGV");
-assert(polarization_intensity(0) == 0, "polarization_intensity(null) returns its sentinel, not a SIGSEGV");
-assert(polarization_through_polarizer(0, 0) == 0,
-  "polarization_through_polarizer(null) returns its sentinel, not a SIGSEGV");
+assert(_h_isnan(polarization_intensity(0)) == 1,
+  "polarization_intensity(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
+assert(_h_isnan(polarization_through_polarizer(0, 0)) == 1,
+  "polarization_through_polarizer(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
 assert(polarization_to_stokes(0) == 0, "polarization_to_stokes(null) returns its sentinel, not a SIGSEGV");
-assert(stokes_degree_of_polarization(0) == 0,
-  "stokes_degree_of_polarization(null) returns its sentinel, not a SIGSEGV");
-assert(biref_birefringence(0) == 0, "biref_birefringence(null) returns its sentinel, not a SIGSEGV");
-assert(biref_half_wave_thickness(0, 0) == 0, "biref_half_wave_thickness(null) returns its sentinel, not a SIGSEGV");
-assert(biref_quarter_wave_thickness(0, 0) == 0,
-  "biref_quarter_wave_thickness(null) returns its sentinel, not a SIGSEGV");
-assert(biref_retardation(0, 0, 0) == 0, "biref_retardation(null) returns its sentinel, not a SIGSEGV");
+assert(_h_isnan(stokes_degree_of_polarization(0)) == 1,
+  "stokes_degree_of_polarization(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
+assert(_h_isnan(biref_birefringence(0)) == 1, "biref_birefringence(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
+assert(_h_isnan(biref_half_wave_thickness(0, 0)) == 1,
+  "biref_half_wave_thickness(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
+assert(_h_isnan(biref_quarter_wave_thickness(0, 0)) == 1,
+  "biref_quarter_wave_thickness(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
+assert(_h_isnan(biref_retardation(0, 0, 0)) == 1, "biref_retardation(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
 assert(biref_to_mueller(0, 0, 0) == 0, "biref_to_mueller(null) returns its sentinel, not a SIGSEGV");
-assert(stokes_ellipticity_angle(0) == 0, "stokes_ellipticity_angle(null) returns its sentinel, not a SIGSEGV");
-assert(stokes_intensity(0) == 0, "stokes_intensity(null) returns its sentinel, not a SIGSEGV");
-assert(stokes_orientation_angle(0) == 0, "stokes_orientation_angle(null) returns its sentinel, not a SIGSEGV");
-assert(zernike_wf_evaluate(0, 0, 0) == 0, "zernike_wf_evaluate(null) returns its sentinel, not a SIGSEGV");
-assert(zernike_wf_rms_error(0) == 0, "zernike_wf_rms_error(null) returns its sentinel, not a SIGSEGV");
-assert(zernike_wf_strehl_ratio(0, 0) == 0, "zernike_wf_strehl_ratio(null) returns its sentinel, not a SIGSEGV");
+assert(_h_isnan(stokes_ellipticity_angle(0)) == 1,
+  "stokes_ellipticity_angle(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
+assert(_h_isnan(stokes_intensity(0)) == 1, "stokes_intensity(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
+assert(_h_isnan(stokes_orientation_angle(0)) == 1,
+  "stokes_orientation_angle(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
+assert(_h_isnan(zernike_wf_evaluate(0, 0, 0)) == 1,
+  "zernike_wf_evaluate(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
+assert(_h_isnan(zernike_wf_rms_error(0)) == 1, "zernike_wf_rms_error(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
+assert(_h_isnan(zernike_wf_strehl_ratio(0, 0)) == 1,
+  "zernike_wf_strehl_ratio(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
 _ne = 0;
 assert(rgb_from_json(0, 4, &_ne) == 0, "rgb_from_json(null) returns its sentinel, not a SIGSEGV");
 assert(prakash_is_err(_ne) == 1, "rgb_from_json(null) reports through err_out");
@@ -920,12 +928,13 @@ _ne = 0;
 assert(lens_type_from_json(0, 4, &_ne) == LENS_TYPE_INVALID,
   "lens_type_from_json(null) returns its sentinel, not a SIGSEGV");
 assert(prakash_is_err(_ne) == 1, "lens_type_from_json(null) reports through err_out");
-assert(lens_mtf_polychromatic(0, 4, 0, 4, 0, 0) == 0,
-  "lens_mtf_polychromatic(null) returns its sentinel, not a SIGSEGV");
+assert(_h_isnan(lens_mtf_polychromatic(0, 4, 0, 4, 0, 0)) == 1,
+  "lens_mtf_polychromatic(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
 assert(lens_mtf_through_focus(0, 0, 0, 0, 4, _nb) == 0,
   "lens_mtf_through_focus(null) returns its sentinel, not a SIGSEGV");
-assert(lens_petzval_sum(0, 4) == 0, "lens_petzval_sum(null) returns its sentinel, not a SIGSEGV");
-assert(lens_system_magnification(0, 4) == 0, "lens_system_magnification(null) returns its sentinel, not a SIGSEGV");
+assert(_h_isnan(lens_petzval_sum(0, 4)) == 1, "lens_petzval_sum(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
+assert(_h_isnan(lens_system_magnification(0, 4)) == 1,
+  "lens_system_magnification(null) returns NaN (2.15.1: 0.0), not a SIGSEGV");
 
 # ── prakash_reset_caches covers the 2D-diffraction scratch (2.5.1) ────────
 test_group("reset_caches_pattern_scratch");
@@ -1022,4 +1031,65 @@ var cri_ra = color_rendering_index(cri_f2);
 assert(alloc_used() - cri_u0 <= 1136, "one Ra allocates at most 1136 bytes");
 assert(_h_bits(cri_ra, cri_w) == 1, "and the same value as the call before it");
 
+# ── 2.15.1: a null handle is NaN, never a 0.0 that is also a real answer ────────
+# Every f64 function below took a null handle (or a null buffer with a nonzero count, or an index
+# outside the object) and answered 0.0, which each of them can also return as a computed value: a
+# luminance, an index, an R_i, a Mueller element. CLAUDE.md asks that a null handle be
+# distinguishable from a computed zero. One assertion per function, so the whole set is pinned.
+test_group("2.15.1 null handles are NaN");
+var _nn = 0;
+fn _nan_ok(x) { return _h_isnan(x); }
+_nn = _nn + _nan_ok(lens_mtf_polychromatic(0, 2, 0, 0, F64_TWO, f64_from(10)));
+_nn = _nn + _nan_ok(lens_mtf_polychromatic(0, 0, 0, 0, F64_TWO, f64_from(10)));
+_nn = _nn + _nan_ok(lens_petzval_sum(0, 2));
+_nn = _nn + _nan_ok(lens_system_magnification(0, 2));
+_nn = _nn + _nan_ok(spot_rms_radius(0));
+_nn = _nn + _nan_ok(spot_rms_radius(vec_new()));
+_nn = _nn + _nan_ok(fresnel_normal_complex(F64_ONE, 0));
+_nn = _nn + _nan_ok(fresnel_s_complex(F64_ONE, 0, ZERO));
+_nn = _nn + _nan_ok(fresnel_p_complex(F64_ONE, 0, ZERO));
+_nn = _nn + _nan_ok(fresnel_unpolarized_complex(F64_ONE, 0, ZERO));
+_nn = _nn + _nan_ok(polarization_through_polarizer(0, ZERO));
+_nn = _nn + _nan_ok(polarization_intensity(0));
+_nn = _nn + _nan_ok(stokes_degree_of_polarization(0));
+_nn = _nn + _nan_ok(medium_permittivity(0));
+_nn = _nn + _nan_ok(rgb_luminance(0));
+_nn = _nn + _nan_ok(cauchy_n_at(0, F64_ONE));
+_nn = _nn + _nan_ok(sellmeier_n_at(0, F64_ONE));
+_nn = _nn + _nan_ok(abbe_number(0));
+_nn = _nn + _nan_ok(herzberger_n_at(0, F64_ONE));
+_nn = _nn + _nan_ok(schott_n_at(0, F64_ONE));
+_nn = _nn + _nan_ok(conrady_n_at(0, F64_ONE));
+_nn = _nn + _nan_ok(partial_dispersion(0));
+_nn = _nn + _nan_ok(stokes_intensity(0));
+_nn = _nn + _nan_ok(stokes_ellipticity_angle(0));
+_nn = _nn + _nan_ok(stokes_orientation_angle(0));
+_nn = _nn + _nan_ok(mueller_get(0, 0, 0));
+_nn = _nn + _nan_ok(biref_birefringence(0));
+_nn = _nn + _nan_ok(biref_retardation(0, F64_ONE, F64_ONE));
+_nn = _nn + _nan_ok(biref_quarter_wave_thickness(0, F64_ONE));
+_nn = _nn + _nan_ok(biref_half_wave_thickness(0, F64_ONE));
+_nn = _nn + _nan_ok(luminous_flux(0));
+_nn = _nn + _nan_ok(luminous_efficacy(0));
+_nn = _nn + _nan_ok(luminous_flux_scotopic(0));
+_nn = _nn + _nan_ok(zernike_wf_evaluate(0, ZERO, ZERO));
+_nn = _nn + _nan_ok(zernike_wf_rms_error(0));
+_nn = _nn + _nan_ok(zernike_wf_strehl_ratio(0, F64_ONE));
+_nn = _nn + _nan_ok(spd_end_nm(0));
+_nn = _nn + _nan_ok(spd_at(0, f64_from(550)));
+_nn = _nn + _nan_ok(spectral_band_similarity(0));
+_nn = _nn + _nan_ok(cri_special(0, 1));
+_nn = _nn + _nan_ok(cri_special(illuminant_d65(), 0));
+_nn = _nn + _nan_ok(cri_special(illuminant_d65(), 9));
+_nn = _nn + _nan_ok(color_rendering_index(0));
+_nn = _nn + _nan_ok(pattern2d_get(0, 0, 0));
+_nn = _nn + _nan_ok(pattern2d_max_intensity(0));
+assert_eq(_nn, 45, "45 null, empty or out-of-range calls across 41 functions all answer NaN");
+# The legitimate zeros stay zeros: outside a sampled spectrum there is no power, outside the pupil
+# no wavefront, and an unpolarized beam has no polarized part.
+assert_eq(spd_at(illuminant_d65(), f64_from(100)), ZZ, "spd_at below the sampled range is still 0.0");
+assert_eq(zernike_wf_evaluate(zernike_defocus(F64_ONE), F64_TWO, ZERO), ZZ,
+  "a wavefront outside its pupil is still 0.0");
+assert_eq(stokes_degree_of_polarization(stokes_new(F64_ONE, ZERO, ZERO, ZERO)), ZZ,
+  "unpolarized light still has DOP 0");
 var r = assert_summary();

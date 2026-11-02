@@ -52,9 +52,10 @@ fn cauchy_bk7() { return _cauchy_mk(_disp_r(15046, 10000), _disp_r(420, 100000))
 fn cauchy_fused_silica() { return _cauchy_mk(_disp_r(14483, 10000), _disp_r(351, 100000)); }
 
 # Refractive index at wavelength_um: b + c/l^2.
+# NaN for a null coefficient set (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn cauchy_n_at(coef, wavelength_um) {
-    if (coef == 0) { return f64_from(0); }
+    if (coef == 0) { return _PRK_NAN; }
     if (_disp_wl_ok(wavelength_um) == 0) { return _PRK_NAN; }
     var l2 = f64_mul(wavelength_um, wavelength_um);
     return f64_add(CauchyCoefficients_b(coef), f64_div(CauchyCoefficients_c(coef), l2));
@@ -197,9 +198,10 @@ fn _sellmeier_term(b, l2, c) {
 # has no real index). 0 < n < 1 is returned as computed.
 # ⛔ 2.15.1: n^2 < 1 was clamped to 1.0, so one ulp below a pole, where n^2 is -5e7, the answer
 # was vacuum; lambda = 0 and NaN answered 1.0, and a negative lambda answered n(|lambda|).
+# NaN for a null coefficient set (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn sellmeier_n_at(coef, wavelength_um) {
-    if (coef == 0) { return f64_from(0); }
+    if (coef == 0) { return _PRK_NAN; }
     if (_disp_wl_ok(wavelength_um) == 0) { return _PRK_NAN; }
     var l2 = f64_mul(wavelength_um, wavelength_um);
     var t1 = _sellmeier_term(SellmeierCoefficients_b1(coef), l2, SellmeierCoefficients_c1(coef));
@@ -302,9 +304,10 @@ fn sellmeier_group_index(coef, wavelength_um) {
 }
 
 # Abbe number V = (n_d - 1) / (n_F - n_C).
+# NaN for a null coefficient set (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn abbe_number(sellmeier) {
-    if (sellmeier == 0) { return f64_from(0); }
+    if (sellmeier == 0) { return _PRK_NAN; }
     var n_d = sellmeier_n_at(sellmeier, fraunhofer_d());
     var n_f = sellmeier_n_at(sellmeier, fraunhofer_f());
     var n_c = sellmeier_n_at(sellmeier, fraunhofer_c());
@@ -396,9 +399,10 @@ fn _herzberger_mk(a, b, c, d, e) {
 }
 
 # Herzberger index at wavelength_um: a + b*L + c*L^2 + d*l^2 + e*l^4, L = 1/(l^2 - 0.028).
+# NaN for a null coefficient set (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn herzberger_n_at(coef, wavelength_um) {
-    if (coef == 0) { return f64_from(0); }
+    if (coef == 0) { return _PRK_NAN; }
     var l2 = f64_mul(wavelength_um, wavelength_um);
     var l = f64_div(F64_ONE, f64_sub(l2, _disp_r(28, 1000)));   # 0.028
     # Match Rust's left-associative coefficient-first order: c*l*l = (c*l)*l.
@@ -446,9 +450,10 @@ fn schott_bk7() {
 
 # Schott power-series index: sqrt(a0 + a1*l^2 + a2/l^2 + a3/l^4 + a4/l^6 + a5/l^8). NaN if n^2 < 0
 # or the wavelength is not finite and > 0 (2.15.1: those answered 1.0, NaN included).
+# NaN for a null coefficient set (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn schott_n_at(coef, wavelength_um) {
-    if (coef == 0) { return f64_from(0); }
+    if (coef == 0) { return _PRK_NAN; }
     if (_disp_wl_ok(wavelength_um) == 0) { return _PRK_NAN; }
     var l2 = f64_mul(wavelength_um, wavelength_um);
     var li = f64_div(F64_ONE, l2);
@@ -479,9 +484,10 @@ fn _conrady_mk(n0, a, b) {
 }
 
 # Conrady index at wavelength_um: n0 + a/l + b/l^3.5.
+# NaN for a null coefficient set (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn conrady_n_at(coef, wavelength_um) {
-    if (coef == 0) { return f64_from(0); }
+    if (coef == 0) { return _PRK_NAN; }
     if (_disp_wl_ok(wavelength_um) == 0) { return _PRK_NAN; }
     var term_a = f64_div(ConradyCoefficients_a(coef), wavelength_um);
     var term_b = f64_div(ConradyCoefficients_b(coef), _prk_pow(wavelength_um, _disp_r(7, 2)));
@@ -491,9 +497,10 @@ fn conrady_n_at(coef, wavelength_um) {
 # ── Partial dispersion & chromatic aberration ────────
 
 # Partial dispersion P_g,F = (n_g - n_F) / (n_F - n_C). 0 if n_F ~ n_C.
+# NaN for a null coefficient set (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn partial_dispersion(sellmeier) {
-    if (sellmeier == 0) { return f64_from(0); }
+    if (sellmeier == 0) { return _PRK_NAN; }
     var n_g = sellmeier_n_at(sellmeier, _disp_r(43584, 100000));   # g-line 0.43584
     var n_f = sellmeier_n_at(sellmeier, fraunhofer_f());
     var n_c = sellmeier_n_at(sellmeier, fraunhofer_c());

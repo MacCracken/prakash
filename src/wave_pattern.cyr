@@ -107,15 +107,15 @@ fn pattern2d_new(width, height) {
     return p;
 }
 
-# Intensity at (col, row). Returns 0.0 for a null pattern or an out-of-range
-# index rather than reading outside the buffer.
+# Intensity at (col, row). NaN for a null pattern or an out-of-range index, rather than reading
+# outside the buffer (2.15.1: 0.0, which is also a legitimate intensity).
 #must_use
 fn pattern2d_get(p, col, row) {
-    if (p == 0) { return f64_from(0); }
-    if (col < 0) { return f64_from(0); }
-    if (row < 0) { return f64_from(0); }
-    if (col >= Pattern2D_width(p)) { return f64_from(0); }
-    if (row >= Pattern2D_height(p)) { return f64_from(0); }
+    if (p == 0) { return _PRK_NAN; }
+    if (col < 0) { return _PRK_NAN; }
+    if (row < 0) { return _PRK_NAN; }
+    if (col >= Pattern2D_width(p)) { return _PRK_NAN; }
+    if (row >= Pattern2D_height(p)) { return _PRK_NAN; }
     return load64(Pattern2D_data(p) + (row * Pattern2D_width(p) + col) * 8);
 }
 
@@ -133,6 +133,7 @@ fn pattern2d_set(p, col, row, value) {
 }
 
 # Maximum intensity (fold from 0.0).
+# NaN for a null pattern (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn pattern2d_max_intensity(p) {
     # 0 is a routine return from pattern2d_new, diffraction_pattern_2d,
@@ -140,7 +141,7 @@ fn pattern2d_max_intensity(p) {
     # and interference_pattern, and every sibling accessor already tolerates it.
     # Without this the first statement is load64(0). 0.0 is also the fold's own
     # identity, so an absent pattern degrades to "empty, max 0.0".
-    if (p == 0) { return f64_from(0); }
+    if (p == 0) { return _PRK_NAN; }
     var data = Pattern2D_data(p);
     var total = Pattern2D_width(p) * Pattern2D_height(p);
     var m = f64_from(0);

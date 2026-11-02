@@ -275,13 +275,14 @@ fn lens_mtf_diffraction_limited(spatial_freq, cutoff_freq) {
 
 # Polychromatic MTF: weighted mean of monochromatic MTFs. wavelengths/weights are
 # f64 buffers; missing weights (i >= n_weights) default to 1.0.
+# NaN for a null buffer with a nonzero count, or no weight at all (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn lens_mtf_polychromatic(wavelengths, n_wl, weights, n_weights, f_num, spatial_freq) {
     if (n_wl > 0) {
-        if (wavelengths == 0) { return f64_from(0); }
+        if (wavelengths == 0) { return _PRK_NAN; }
     }
     if (n_weights > 0) {
-        if (weights == 0) { return f64_from(0); }
+        if (weights == 0) { return _PRK_NAN; }
     }
     var sum_w = f64_from(0);
     var sum_mtf = f64_from(0);
@@ -295,7 +296,7 @@ fn lens_mtf_polychromatic(wavelengths, n_wl, weights, n_weights, f_num, spatial_
         sum_w = f64_add(sum_w, w);
     }
     if (f64_lt(sum_w, _lens_eps15()) == 1) {
-        return f64_from(0);
+        return _PRK_NAN;
     }
     return f64_div(sum_mtf, sum_w);
 }
@@ -537,10 +538,11 @@ fn lens_chromatic_aberration(focal_length, abbe_v) {
 }
 
 # Petzval sum S = sum 1/(n_i*f_i). elements is an interleaved (n, f) buffer.
+# NaN for a null buffer with a nonzero count (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn lens_petzval_sum(elements, n_elements) {
     if (n_elements > 0) {
-        if (elements == 0) { return f64_from(0); }
+        if (elements == 0) { return _PRK_NAN; }
     }
     var sum = f64_from(0);
     for (var i = 0; i < n_elements; i = i + 1) {
@@ -589,10 +591,11 @@ fn lens_separated_bfd(f1, f2, separation, err_out) {
 }
 
 # System magnification = product of individual magnifications (empty = 1).
+# NaN for a null buffer with a nonzero count (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn lens_system_magnification(magnifications, n) {
     if (n > 0) {
-        if (magnifications == 0) { return f64_from(0); }
+        if (magnifications == 0) { return _PRK_NAN; }
     }
     var prod = F64_ONE;
     for (var i = 0; i < n; i = i + 1) {

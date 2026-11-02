@@ -34,12 +34,49 @@ A repair release: results that were wrong change value, and inputs that used to 
 plausible number are refused. Nothing is renamed or removed, no signature changes, and the cyrius
 pin stays at 6.7.18. `CHANGELOG.md` has the measurement behind each item.
 
-**What ranga calls does not move.** `spd_to_xyz`, `spd_blackbody`, `cct_from_xy`, `cie_cmf_at`,
-`xyz_new` and the illuminant tables give the same bits; `spd_to_xyz` and `spd_blackbody` were
-refactored onto shared stack-buffer cores with the same arithmetic. If you call
-`color_rendering_index` or `cri_special`, they now follow CIE 13.3's whiteness limit: NaN for a
-source more than DC = 5.4e-3 from the Planckian locus at its CCT, or below 1000 K. Every
-illuminant prakash ships passes.
+**What ranga calls does not move on a valid handle.** `spd_to_xyz`, `spd_blackbody`,
+`cct_from_xy`, `cie_cmf_at`, `xyz_new` and the illuminant tables give the same bits;
+`spd_to_xyz` and `spd_blackbody` were refactored onto shared stack-buffer cores with the same
+arithmetic. On a NULL handle, `spd_at` and `spd_end_nm` now answer NaN instead of 0.0 (see the
+null-handle list below). That happens only after an `Spd` constructor or `spd_from_json` has
+already reported its own failure. If you call `color_rendering_index` or `cri_special`, they now
+follow CIE 13.3's whiteness limit: NaN for a source more than DC = 5.4e-3 from the Planckian locus
+at its CCT, or below 1000 K. Every illuminant prakash ships passes.
+
+**A null handle is NaN, not 0.0.** 41 f64 functions with no `err_out` answered 0.0 for a null
+handle or a null buffer with a nonzero count. They are listed below. Each can also return 0.0 as a
+computed answer (an index, a luminance, an R_i, a Mueller element), so the two could not be told
+apart. They answer NaN now, which no valid input produces, and a caller that checked
+`== 0` for failure should test `f64_eq(x, x) == 0`. The same goes for
+three other non-answers:
+- an index outside the object, in `mueller_get`, `pattern2d_get` and `cri_special`;
+- an empty spot diagram, in `spot_rms_radius`, which said 0, a perfect focus;
+- a polychromatic MTF with no weight.
+
+The functions:
+- `lens_mtf_polychromatic`, `lens_petzval_sum` and `lens_system_magnification`;
+- `spot_rms_radius`;
+- `fresnel_normal_complex`, `fresnel_s_complex`, `fresnel_p_complex` and
+  `fresnel_unpolarized_complex`;
+- `polarization_through_polarizer`, `polarization_intensity` and
+  `stokes_degree_of_polarization`;
+- `medium_permittivity` and `rgb_luminance`;
+- the dispersion family: `cauchy_n_at`, `sellmeier_n_at`, `abbe_number`, `herzberger_n_at`,
+  `schott_n_at`, `conrady_n_at` and `partial_dispersion`;
+- `stokes_intensity`, `stokes_ellipticity_angle` and `stokes_orientation_angle`;
+- `mueller_get`;
+- the `biref_*` family: `biref_birefringence`, `biref_retardation`,
+  `biref_quarter_wave_thickness` and `biref_half_wave_thickness`;
+- `luminous_flux`, `luminous_efficacy` and `luminous_flux_scotopic` (also for an internal table
+  that could not be allocated);
+- `zernike_wf_evaluate`, `zernike_wf_rms_error` and `zernike_wf_strehl_ratio`;
+- `spd_end_nm`, `spd_at`, `spectral_band_similarity`, `cri_special` and `color_rendering_index`;
+- `pattern2d_get` and `pattern2d_max_intensity`.
+
+Zeros that are physically correct stay: `spd_at` outside its sampled range (no power), a
+wavefront outside its pupil, and the degree of polarization of unpolarized light.
+Functions that return a pointer still return 0 for a null input, as a null pointer is
+unambiguous; functions with an `err_out` still return 0 and write the code.
 
 **Values that change, because the old one was wrong:**
 - `thin_film_reflectance` is sin²(2πnd/λ). It was cos², so a vanishing film read 1.
@@ -246,7 +283,8 @@ does not call — relevant only if a consumer starts to:
 
 Across 2.3.5–2.4.9, 68+ public functions that dereferenced a null handle now return
 their documented sentinel (0 / 0.0), reporting through `err_out` where the function
-has one, instead of exiting 139.
+has one, instead of exiting 139. ⚠ From 2.15.1 the 41 f64 functions without an `err_out`
+answer NaN rather than 0.0; see the 2.15.1 section.
 
 ## Toolchain and transitive dependencies
 

@@ -97,9 +97,10 @@ fn rgb_to_u8(c) {
 }
 
 # Rec. 709 luminance: 0.2126*r + 0.7152*g + 0.0722*b.
+# NaN for a null colour (2.15.1: 0.0, which is also a legitimate answer).
 #must_use
 fn rgb_luminance(c) {
-    if (c == 0) { return f64_from(0); }
+    if (c == 0) { return _PRK_NAN; }
     return f64_add(f64_add(
         f64_mul(_r(2126, 10000), Rgb_r(c)),
         f64_mul(_r(7152, 10000), Rgb_g(c))),
