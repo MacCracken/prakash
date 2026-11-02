@@ -9,7 +9,7 @@
   (math-only) and `dist/prakash-ai.cyr` (adds the sandhi HTTP/TLS AI client)
 - **License**: GPL-3.0
 - **Toolchain pin**: cyrius 6.7.18 — single source of truth is `cyrius = "..."` in `cyrius.cyml`
-- **Version**: SemVer, currently 2.13.x. `VERSION` is the single source; `cyrius.cyml`
+- **Version**: SemVer, currently 2.14.x. `VERSION` is the single source; `cyrius.cyml`
   reads it via `${file:VERSION}` and the release workflow fails if the tag disagrees
 
 ⚠ **The Rust original is a FIDELITY reference, not a CORRECTNESS one.** 2.2.6 found six

@@ -2,6 +2,176 @@
 
 ## [Unreleased]
 
+## [2.14.0] - 2026-11-02 — Fifth-order aberrations
+
+Closes the 2.14.0 roadmap row and the stretch goal of
+`docs/research/physics-completeness-audit.md` §4. Until now prakash's aberrations were third
+order only, and for a single thin lens with the stop at the lens. This adds both the third and
+the fifth order for any `Prescription`, surface by surface:
+- the Seidel sums;
+- the twelve fifth-order coefficients of Buchdahl's theory, in Rimmer's letters, each split
+  into what the surface makes on its own and what it makes from the aberration it is handed.
+
+New API only: nothing existing changes value or signature. Toolchain unchanged, cyrius 6.7.18.
+
+Suite **12,213 → 13,460 assertions across 38 suites**, 0 failed; `cyrius audit` exits 0;
+`deps --verify` 114/114; `#must_use` 514 → **520**, 0 lost; reference coverage **530/530**.
+Benchmarks 178 → **180**.
+
+### Added — third- and fifth-order sums (`lens_aberration`, new module)
+- **`aberr_sums(prescription, marginal, chief, err_out)`** takes a prescription and its
+  paraxial marginal and chief rays (`ParaxialRay`: height at the first vertex, n·u in object
+  space). It returns an `AberrSums` holding every surface's coefficients and the system's.
+- **Accessors**, by surface index or `ABERR_SYSTEM`:
+  - **`aberr_third(ab, surface, k)`:** B, F, C, Π, E — spherical, coma, astigmatism, Petzval
+    and distortion (`ABERR3_*`).
+  - **`aberr_seidel(ab, surface, k)`:** Welford's S_I to S_V.
+  - **`aberr_fifth(ab, surface, k, part)`:** B₅, F₁, F₂, M₁–M₃, N₁–N₃, C₅, Π₅, E₅ (`ABERR5_*`).
+    `part` is `ABERR_INTRINSIC`, `ABERR_INDUCED` or their sum, `ABERR_TOTAL`.
+- **`aberr_transverse(ab, px, py, h, order, out)`** evaluates the system's ε_x and ε_y at a
+  pupil and field point, to third order or to fifth.
+- **`aberr_marginal_ray` and `aberr_chief_ray`** build the two rays for a stop on a surface's
+  vertex plane. The object is at a finite distance or at infinity; the field is an object
+  height or the tangent of the field angle.
+- **The expansion** is Rimmer's, as J. Sasián gives it (OPTI 517, "Higher-order aberrations"),
+  written out in the module header and `docs/architecture/math.md`.
+- **Coordinates.** A ray is ρ⃗ times the marginal ray plus H times the chief ray, as a line in
+  object space in height and direction tangent:
+  - ρ⃗ is the fractional entrance-pupil coordinate;
+  - H is the fractional object height, or for an object at infinity the fractional tangent of
+    the field angle;
+  - ε is measured at the paraxial image plane, from the paraxial image point.
+
+  Every coefficient is a length, the aberration at ρ = H = 1.
+- ⚠ **A term odd in H takes its sign from the chief ray,** as the image point H·ȳ′ does: read
+  it against the sign of ȳ′, `AberrSums_image_height`. With ȳ′ > 0, E < 0 is barrel
+  distortion. `aberr_chief_ray` reads a positive field from opposite sides for the two kinds
+  of object, as lens design programs do: a positive object height is above the axis, a
+  positive field slope a ray rising from below.
+- **How (Buchdahl's method).** Ray coordinates are taken on each surface's tangent plane, with
+  direction tangents times n. In those variables transfer between surfaces is exactly linear.
+  - A ray's coordinates against the paraxial marginal and chief rays, from Lagrange brackets,
+    then change only at a refraction. So ε is ȳ′ times the sum of those changes, exactly.
+  - Each refraction is expanded by truncated-series arithmetic on the exact ray-sphere
+    intersection and Snell's law, so no fifth-order formula is typed in.
+  - The **induced** part is the surface's third order responding to the image and pupil
+    aberrations of every surface before it.
+- ⚠ **The split between surfaces** follows from those variables, and another program's surface
+  contributions may differ from these by terms that cancel in the total. The system totals do
+  not depend on it.
+- **Refusals,** each returning 0 with an error code (NaN from an accessor):
+  - an empty or null prescription;
+  - a refractive index that is not finite and positive;
+  - a radius of 0 or NaN;
+  - rays that are not finite, or whose Lagrange invariant is 0;
+  - an image at infinity, `PK_ERR_DIVISION_BY_ZERO`, or a stop on an image of the object:
+    either one to within 2⁻⁴⁰ of the terms the slope or height was formed from;
+  - a result that overflows.
+
+### Validation
+- **The roadmap's pin, the real-ray residual.** The library's own `trace_sequential` traces
+  rays through the triplet, singlet, doublet and immersed systems. What is left of their error
+  after the third and fifth order are taken away shrinks by 2⁷ each time ρ and H halve, at
+  128 ± 8; a fifth order that was wrong would leave 2⁵. At ρ = H = 0.1 the real error less
+  the third order is the fifth order to 2%.
+  - Buchdahl's coefficients are transverse, so this residual is the transverse one. The third
+    order it subtracts is the Seidel sums' third order.
+- **A 100-digit real-ray trace,** by 3D vector refraction, not the expansion the module uses.
+  From it, by Richardson extrapolation:
+  - the system coefficients, from where rays meet the paraxial image plane;
+  - each surface's whole contribution, from the change in the ray's coordinates across it;
+  - its intrinsic part, from that surface alone fed the paraxial line.
+
+  Seven systems:
+  - a seven-surface Cooke-type triplet with a dummy stop plane, at 20°;
+  - a singlet behind a remote stop, with a finite object;
+  - a cemented doublet;
+  - an object in water;
+  - an object in water with the stop between two lenses;
+  - an aplanatic surface;
+  - a plate in a converging beam.
+
+  Every coefficient is within 1.3e-15 (third order) or 1.2e-14 (fifth) of the largest surface
+  term of its order.
+- **Welford's per-surface Seidel sums** equal each surface's third order here: to 1e-99 for
+  the algorithm run in 100-digit arithmetic, and to 1.3e-15 for the module.
+- **Closed forms that share nothing with either:**
+  - a plate in a converging beam, all seventeen coefficients, from the exact displacement
+    (d/N)T⃗((1 + k|T⃗|²)^(−1/2) − 1), k = 1 − 1/N²;
+  - an aplanatic surface's B = F = B₅ = F₁ = F₂ = 0.
+- **Symmetries:**
+  - doubling every length doubles every coefficient exactly;
+  - turning the chief or the marginal ray around flips exactly the terms odd in H or in ρ.
+- **Mutation:** 73 mutants of the final code; 70 are killed. The three survivors change nothing
+  a caller can see:
+  - one alters γ's constant term, which only the discarded first-order part reads;
+  - one takes F from q_a, which equals p_b/2 identically;
+  - one drops the early refusal of a NaN thickness, which the final finiteness check still
+    makes.
+
+  Two earlier sweeps found gaps, now closed:
+  - expanding a surface between equal indices instead of skipping it went unseen, because
+    both test cases were flat;
+  - a scale term in the afocal test duplicated another, and is gone.
+
+### Fixed during the release's verification (never shipped)
+An independent review checked the module against its own 90-digit real-ray trace over 13
+systems. It found the physics right and the following wrong. Every code fix has a test that
+fails on the first cut.
+- **The sign of the field was mis-stated.** The header said the field point lies on +y. In
+  fact a term odd in H takes the chief ray's sign, and `aberr_chief_ray` puts a positive field
+  on opposite sides for the two kinds of object. Documented now (above); the code was right.
+- **A distant finite object's chief ray lost digits.** Its height was field + d·ū, a
+  difference of nearly equal terms:
+  - 1.9e-9 out at d = 1e8;
+  - 3.9% out at d = 1e15, where E came back 9% wrong with no error.
+
+  It is now field·y₂/d.
+- **Rounding defeated two refusals that tested for exactly 0:**
+  - a system afocal to 1 ulp came back with an image 2.9e17 away and B = −2.5e12;
+  - a stop 2 ulps short of a focus came back with a marginal ray 1.35e16 high.
+- **Zeros came back as −0** whenever ȳ′ or n′u′ was negative: in a row that refracts nothing,
+  in its Seidel sums, and in `aberr_transverse` at the image point. They are now +0.
+- **`aberr_chief_ray`'s doc claimed an object-space telecentric stop is refused.** With a
+  finite object it is accepted, and its ray is right. At infinity the same stop is on the
+  object's image, which is refused.
+- **Test gaps:**
+  - no finite object had a remote stop, so three mutants of the helpers survived;
+  - 13 assertions could not fail: ε_x at px = 0, and a sign check on the test's own constant;
+  - the plate was pinned on 2 of its 17 closed forms;
+  - there was no system Seidel pin and no negative-index refusal.
+
+### Changed
+- **Docs:**
+  - README;
+  - `docs/architecture/overview.md`: lens 358 → 1605 tests, 31 science modules, a fifth
+    cross-group dependency;
+  - `math.md`;
+  - the upgrading guide;
+  - the audit's shipped list;
+  - the roadmap: the 2.14.0 row is gone and 2.15.0 leads.
+- **`tests/prakash.bcyr`** gains two rows.
+- **`dist/`:** `prakash.cyr` 18810 → 19607 lines, `prakash-ai.cyr` 19111 → 19908; the `.deps`
+  sidecars are unchanged.
+
+### Performance
+- **New rows**, on the test triplet (seven surfaces, one a dummy stop):
+  - `aberration/sums_triplet`, 25.1 µs: every surface's Seidel and fifth-order terms,
+    intrinsic and induced, and the system's;
+  - `aberration/transverse_fifth`, 114 ns.
+- **The series product is inlined.** It was three helper calls per coefficient, 122 ns a
+  product; inlined, it is 46 ns. The order of operations is unchanged, so the results are
+  identical to the bit: over 4,000 random products, aliasing included, and over all 800
+  coefficients and evaluations of the six original test systems. Measured in one binary, `aberr_sums` on the triplet went 33.96 → 24.97 µs
+  (−26.5%), with an A/A pair at 24.96 µs.
+- **Existing rows are unchanged.** Three interleaved rounds against 2.13.0 at load ~4:
+  - per-row median ratio 1.0000, geomean 1.0035;
+  - four rows past ±10%. Three are a 1 ns step on rows of 7–11 ns, and
+    `atmosphere/king_factor` sits at both 21 ns and 26–28 ns in either tree.
+
+  Seven earlier rounds, run at load 10–15 from other sessions, swung 0.80–1.17 between rounds
+  and are not a measurement.
+
 ## [2.13.0] - 2026-11-02 — Vectorial focusing
 
 Closes the 2.13.0 roadmap row and the gap `docs/research/physics-completeness-audit.md` §14

@@ -35,6 +35,8 @@ include "src/wave_focus.cyr"
 include "src/pbr_core.cyr"
 include "src/pbr_advanced.cyr"
 include "src/lens.cyr"
+# 2.14.0: the third- and fifth-order sums of a surface sequence.
+include "src/lens_aberration.cyr"
 include "src/atmosphere.cyr"
 include "src/bridge.cyr"
 include "src/serialize.cyr"
@@ -66,6 +68,11 @@ var _fo_lens = 0;
 var _fo_field = 0;
 var _fo_ib[96];
 var _fo_bj[24];
+var _abr_p = 0;
+var _abr_m = 0;
+var _abr_c = 0;
+var _abr_s = 0;
+var _abr_tr[16];
 var _fa_buf[80];
 var _plane = 0;
 var _out3 = 0;
@@ -327,6 +334,17 @@ fn b_focus_integrals_far() {
 # The x-polarized field at the near point: the integrals and the field formulas.
 fn b_focus_linear() {
     var r = focus_linear(_fo_lens, 0x3E7E2112F62D1291, 0x3FEA8F5C28F5C28F, 0xBE7644F7C1162F1D, _fo_field);
+    return 0;
+}
+# Seidel and Buchdahl sums of a seven-surface Cooke triplet (a dummy stop plane among them).
+fn b_aberr_sums() {
+    var e = 0;
+    var r = aberr_sums(_abr_p, _abr_m, _abr_c, &e);
+    return 0;
+}
+# That triplet's transverse aberration to fifth order at one pupil and field point.
+fn b_aberr_transverse() {
+    var r = aberr_transverse(_abr_s, 0x3FE3333333333333, 0x3FE999999999999A, F64_ONE, 5, &_abr_tr);
     return 0;
 }
 # Fabry-Perot transmittance of a 1 mm etalon: ~4e3 orders.
@@ -768,6 +786,18 @@ fn main() {
     _fo_lens = focus_new(0x3FF4CCCCCCCCCCCD, F64_ONE, 0x3FF849BA5E353F7D, 0x3EA05FE359450486, 0x3F5D7DBF487FCB92,
       FOCUS_PUPIL_GAUSSIAN, 0x3F554C985F06F694, &prt_e);
     _fo_field = prt_field_new(0, 0, 0, 0, 0, 0);
+    # The 2.14.0 test triplet, f/4-ish at 20 degrees, stop on the plane between flint and crown.
+    _abr_p = prescription_new("triplet");
+    _abr_p = prescription_add_surface(_abr_p, f64_from(22), _bf(7, 2), _bf(16204, 10000), f64_from(100));
+    _abr_p = prescription_add_surface(_abr_p, f64_from(0 - 435), f64_from(4), F64_ONE, f64_from(100));
+    _abr_p = prescription_add_surface(_abr_p, f64_from(0 - 22), F64_ONE, _bf(16475, 10000), f64_from(100));
+    _abr_p = prescription_add_surface(_abr_p, f64_from(20), F64_TWO, F64_ONE, f64_from(100));
+    _abr_p = prescription_add_surface(_abr_p, 0x7FF0000000000000, F64_TWO, F64_ONE, f64_from(100));
+    _abr_p = prescription_add_surface(_abr_p, f64_from(79), f64_from(3), _bf(16204, 10000), f64_from(100));
+    _abr_p = prescription_add_surface(_abr_p, f64_from(0 - 18), 0, F64_ONE, f64_from(100));
+    _abr_m = aberr_marginal_ray(_abr_p, 0x7FF0000000000000, 4, f64_from(4), &prt_e);
+    _abr_c = aberr_chief_ray(_abr_p, 0x7FF0000000000000, 0x3FD74B49CF3902D4, 4, &prt_e);
+    _abr_s = aberr_sums(_abr_p, _abr_m, _abr_c, &prt_e);
     for (var by = 0; by < 64; by = by + 1) {
         for (var bx = 0; bx < 64; bx = bx + 1) {
             var _sv = pattern2d_set(_bigpat, bx, by, f64_from(bx * 64 + by + 1));
@@ -959,6 +989,8 @@ fn main() {
     bench("focus/integrals_near", &b_focus_integrals_near, 20000);
     bench("focus/integrals_far", &b_focus_integrals_far, 2000);
     bench("focus/linear_field", &b_focus_linear, 20000);
+    bench("aberration/sums_triplet", &b_aberr_sums, 20000);
+    bench("aberration/transverse_fifth", &b_aberr_transverse, 200000);
     bench("wave/fabry_perot_etalon", &b_fabry_perot_etalon, 200000);
     bench("wave/fabry_perot_long_cavity", &b_fabry_perot_long_cavity, 200000);
     bench("wave/pattern2d_normalized_64x64", &b_pattern_normalized, 20000);

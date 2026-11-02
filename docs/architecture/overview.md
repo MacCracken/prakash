@@ -14,15 +14,15 @@ after the port-completeness review; recover it with
 | `ray` | ray_core, ray_fresnel, ray_trace, ray_prt, ray_simulate, ray_system, ray_dispersion, ray_fiber, ray_grin | 2064 | `Medium`, `ComplexMedium`, `*Coefficients`, `TraceRay`, `OpticalSurface`, `PolarizedTraceHit`, `FresnelAmplitudes`, `PrtStep`, `PrtTraceHit`, `ParaxialRay`, `Prescription`, `GrinProfile` | Geometric optics: Snell, Fresnel (real + complex), dispersion (Sellmeier/Cauchy/Herzberger/Schott/Conrady, analytic derivatives and group index), chromatic aberration, fiber optics and fiber chromatic dispersion (material, waveguide, total; LP01 exact within weak guidance), sequential/recursive tracing with polarization, ray fans, spot diagrams, OPD; gradient-index tracing (SELFOC, sech, polynomial, Luneburg, fish-eye) by RK-Nyström with optical path |
 | `spectral` | spectral_core, spectral_cie, spectral_photometry | 2232 | `Rgb`, `Xyz`, `Spd`, `Observer` (tag constants) | Color science: wavelength↔RGB, Planck (numerically stable), Wien, CIE 1931/1964/2015 XYZ, SPD, illuminants, CRI, photometry (V(λ), luminous flux/efficacy) |
 | `wave` | wave_core, wave_polarization, wave_coherence, wave_airy, wave_fabry_perot, wave_diffraction, wave_doe, wave_zernike, wave_pattern, wave_beam, wave_focus | 5132 | `Polarization`, `StokesVector`, `MuellerMatrix` (16-f64 buffer), `Pattern2D`, `ZernikeWavefront`, `ThinFilmResult`, `AbsorbingFilmResult`, `GaussianBeam`, `VolumeGrating`, `FocusLens` | Wave optics: interference, coherence, Airy/Bessel, Fabry-Pérot, Fraunhofer/Fresnel diffraction, TMM (oblique s/p; complex-index R/T/A for absorbing layers), AR coatings, Jones/Stokes/Mueller, Zernike polynomials, 2D FFT patterns, PSF; Gaussian beams (q/ABCD, resonator modes, HG/LG modes, M², OAM); diffractive optics (grating equation, blazed/multilevel/binary/Dammann efficiencies, diffractive lens, Kogelnik volume holograms); vectorial focusing (Richards-Wolf: linear/elliptical, radial, azimuthal; uniform, Gaussian, doughnut or `GaussianBeam` pupil) |
-| `lens` | lens.cyr | 358 | `CardinalPoints`, `SeidelCoefficients`, `WavefrontCoefficients` | Lens/mirror geometry: thin/thick lens, aberrations, wavefront coefficients from the Seidel sums, MTF (mono + poly + through-focus), aberrated OTF/MTF by pupil autocorrelation (Zernike or Seidel, sagittal/tangential, polychromatic complex sum), DoF, Petzval, multi-element |
+| `lens` | lens.cyr, lens_aberration.cyr | 1605 | `CardinalPoints`, `SeidelCoefficients`, `WavefrontCoefficients`, `AberrSums` | Lens/mirror geometry: thin/thick lens, aberrations, wavefront coefficients from the Seidel sums, MTF (mono + poly + through-focus), aberrated OTF/MTF by pupil autocorrelation (Zernike or Seidel, sagittal/tangential, polychromatic complex sum), DoF, Petzval, multi-element; the Seidel and Buchdahl fifth-order sums of a `Prescription`, surface by surface, each fifth-order term split into intrinsic and induced |
 | `pbr` | pbr_core, pbr_advanced | 1428 | (free functions) | PBR shading: Cook-Torrance, GGX, sheen, clearcoat, SSS, iridescence, volumetric, importance sampling, split-sum IBL |
 | `atmosphere` | atmosphere.cyr | 378 | (free functions + constants) | Rayleigh/Mie scattering, King correction, sky color, air mass, optical depth, sunset model |
 | `bridge` | bridge.cyr | 28 | (free functions) | Primitive-value cross-crate hooks (bijli/tara/badal) — no dependency on sibling crates |
 | `serialize` | serialize.cyr | 62 | (free functions) | JSON roundtrips for the seven serde-tested types. ⚠ **Encode goes straight into a `str_builder`** since 2.3.4/2.3.5 — bayan is used only for Grisu2 float rendering; **decode** still walks a bayan value tree. The encoder emits round-trip-correct floats; bayan's decoder mis-rounds ~1 in 10⁵ doubles by 1 ULP (see serialize.cyr); every `*_from_json` reports via `err_out`; every wire format is pinned to exact bytes |
 | `ai` | ai.cyr | 62 | `DaimonClient`, `DaimonConfig`, `HooshConfig` | AI-assisted optics queries via sandhi HTTP POST — **not in the core bundle** |
 
-**Total**: 30 science modules + error, **12213 test assertions across 37 suites**,
-178 benchmarks. (`tests/hardening.tcyr` is the cross-module regression suite for the
+**Total**: 31 science modules + error, **13460 test assertions across 38 suites**,
+180 benchmarks. (`tests/hardening.tcyr` is the cross-module regression suite for the
 2.0.2 audit repairs and the 2.1.0 error channels — see those CHANGELOG entries.)
 
 ## Design Principles
@@ -68,6 +68,7 @@ wave ──> wave optics (interference, diffraction, Fabry-Pérot, AR coatings)
     |         └──> wave_focus (Richards-Wolf vectorial focusing; fields as ray_prt's PrtField)
     |
 lens ──> lens geometry (thin/thick lens, aberrations, MTF, DoF, Petzval)
+    |         └──> lens_aberration (Seidel and Buchdahl sums of a ray_system Prescription)
 pbr  ──> PBR shading (Cook-Torrance, GGX; advanced: sheen/clearcoat/SSS/iridescence)
 atmosphere ──> sky models (Rayleigh/Mie, air mass, optical depth, sunset)
 bridge ──> primitive-value cross-crate hooks (bijli/tara/badal)
@@ -82,8 +83,10 @@ is why that order is load-bearing. Every module *uses* `error.cyr`'s `PK_ERR_*`
 and `_prk_trace`, which is why it is bundled first. Within the
 ray and wave groups, later files build on earlier ones (ray_trace/simulate/system
 on ray_core+ray_fresnel; ray_prt and ray_grin on ray_core+ray_trace; wave_polarization on wave_core; pbr_advanced on pbr_core).
-Across module groups there are four cross-dependencies: `lens`, whose aberrated
+Across module groups there are five cross-dependencies: `lens`, whose aberrated
 OTF (2.7.0) evaluates Zernike wavefronts from `wave_zernike` (bundled before it);
+`lens_aberration` (2.14.0), which expands `ray_system`'s `Prescription` with its
+`ParaxialRay`s;
 `wave_focus` (2.13.0), which writes its fields into `ray_prt`'s `PrtField` and reads
 a `wave_beam` beam;
 `serialize`, which reads accessors from the ray/spectral/wave/lens type modules for
@@ -102,7 +105,8 @@ avoid cross-module coupling:
   `spectral`.
 
 `[lib]` order (dependency order): `error` → the 9 ray modules → the 3 spectral →
-the 11 wave → pbr_core, pbr_advanced → lens → atmosphere → bridge → serialize.
+the 11 wave → pbr_core, pbr_advanced → lens, lens_aberration → atmosphere → bridge →
+serialize.
 `[lib.ai]` is the same list plus `ai.cyr`.
 
 ### The `dist/*.deps` sidecars

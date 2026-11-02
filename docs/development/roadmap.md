@@ -24,17 +24,12 @@ Fixes found along the way ship as patches of the current minor.
 
 | Version | Release | Pinned against |
 |---|---|---|
-| **2.14.0** | Fifth-order aberrations | Buchdahl, real-ray residual |
-| 2.15.0 | Fluorescence | Stokes shift, Donaldson matrix |
+| **2.15.0** | Fluorescence | Stokes shift, Donaldson matrix |
 | 2.16.0 | Nonlinear optics | SHG, Kerr |
 | 2.17.0 | Negative-index media | Veselago-Pendry lens |
 | 2.18.0 | CIE 2006 observer | CIE 170-1:2006 tables |
 
 Keep each section below to a few lines: what ships and what it is pinned against.
-
-### 2.14.0 — Fifth-order aberrations (Buchdahl)
-Buchdahl's fifth-order sums for a surface sequence. They are pinned against the
-real-ray residual left after the third-order wavefront coefficients are subtracted.
 
 ### 2.15.0 — Fluorescence
 Excitation and emission spectra as `Spd`s, Stokes shift, quantum yield, the

@@ -36,6 +36,9 @@
 >   does.
 >
 > **Formerly open, now all shipped:**
+> - the fifth-order (Buchdahl) aberrations §4 left as a stretch goal — **2.14.0**,
+>   `src/lens_aberration.cyr`: Seidel and fifth-order sums surface by surface for a
+>   `Prescription`, each fifth-order term split into intrinsic and induced parts;
 > - the Richards-Wolf vectorial focusing §14 recommends — **2.13.0**,
 >   `src/wave_focus.cyr`: linear, elliptical, radial and azimuthal input, uniform,
 >   Gaussian, doughnut or `GaussianBeam` pupils, reducing to the Airy pattern at low NA;

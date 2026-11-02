@@ -28,6 +28,15 @@ details of each change are in `CHANGELOG.md`.
   `./scripts/check-consumer-link.sh --root ~/Repos/ranga ~/.cyrius/versions/<pin>/bin/cycc`.
   ⚠ From 2.10.1 that passes in full only at cyrius ≥ 6.6.13; see below.
 
+## 2.14.0: fifth-order aberrations
+
+New API only: nothing existing changes value or signature, and the cyrius pin stays at
+6.7.18. `dist/prakash.cyr` gains `lens_aberration`, so a name of yours beginning `aberr_`,
+`Aberr` or `ABERR` would now collide. Its third-order coefficients are a `Prescription`'s
+surface sums, which `lens_seidel_coefficients` (one thin lens, stop at the lens) never was;
+that function is unchanged. A coefficient here is the transverse aberration in lens units at
+full aperture and field for the rays you pass, not a per-unit-height form.
+
 ## 2.13.0: vectorial focusing
 
 New API only: nothing existing changes value or signature, and the cyrius pin stays at

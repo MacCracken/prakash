@@ -658,6 +658,91 @@ Transfer: y' = y + (t/n) nu
 ### Chromatic Aberration
 Δf = f/V
 
+### Third- and Fifth-Order Sums of a Surface Sequence (`lens_aberration`, 2.14.0)
+For a `Prescription` and its paraxial marginal ray m and chief ray c (height at the first
+vertex, nu = n u in object space), a ray is ρ⃗·m + H·c as a line in object space in (height,
+direction tangent). So ρ⃗ is the fractional entrance-pupil coordinate and H the fractional
+object height, or, for an object at infinity, the fractional tangent of the field angle.
+ρ⃗ = (ρ sin φ, ρ cos φ), φ from +y, and H runs along the y of the rays passed in. ε is the ray's
+intercept with the paraxial image plane minus the paraxial image point H·ȳ′. In Rimmer's
+letters (J. Sasián, OPTI 517, "Higher-order aberrations"):
+
+    ε_y = B cos φ ρ³ + F (2 + cos 2φ) ρ²H + (3C + Π) cos φ ρH² + E H³
+        + B₅ cos φ ρ⁵ + (F₁ + F₂ cos 2φ) ρ⁴H + (M₁ + M₂ + M₃ cos² φ) cos φ ρ³H²
+        + (N₁ + N₂ cos² φ) ρ²H³ + (5C₅ + Π₅) cos φ ρH⁴ + E₅ H⁵
+    ε_x = B sin φ ρ³ + F sin 2φ ρ²H + (C + Π) sin φ ρH²
+        + B₅ sin φ ρ⁵ + F₂ sin 2φ ρ⁴H + (M₂ + M₃ cos² φ) sin φ ρ³H²
+        + N₃ sin 2φ ρ²H³ + (C₅ + Π₅) sin φ ρH⁴
+
+Every coefficient is a length: the aberration at ρ = H = 1. ⚠ A term odd in H (F, E, F₁, F₂,
+N₁–N₃, E₅) takes its sign from the chief ray, as the image point H·ȳ′ does. Read it against
+the sign of ȳ′: with ȳ′ > 0, E < 0 is barrel distortion, and with ȳ′ < 0 it is E > 0.
+`aberr_chief_ray` reads a positive field from opposite sides for the two kinds of object, as
+lens design programs do. A positive object height is above the axis, so a positive lens images
+it below. A positive field slope is a ray rising from below, so it images above.
+
+**Seidel sums**, per surface (Welford). A = n(u + yκ), Ā likewise, κ the curvature,
+H_L = y n ū − n u ȳ, and Δ is the change across the surface:
+
+    S_I = −A² y Δ(u/n)   S_II = −A Ā y Δ(u/n)   S_III = −Ā² y Δ(u/n)
+    S_IV = −H_L² κ Δ(1/n)   S_V = (Ā/A)(S_III + S_IV)
+    B = S_I/(2n′u′), F = S_II/(2n′u′), C = S_III/(2n′u′), Π = S_IV/(2n′u′), E = S_V/(2n′u′)
+
+with n′u′ the marginal ray's reduced slope in image space. These hold surface by surface, not
+only in total.
+
+**Buchdahl's method.** Use the height Y on each surface's tangent plane and n times the
+direction tangent T as ray coordinates; transfer between surfaces is then exactly linear. A
+ray's coordinates (A, B) against m and c, A = [r, c]/[m, c] and B = [m, r]/[m, c] with
+[r₁, r₂] = y₁(nu)₂ − (nu)₁y₂, are therefore constant between surfaces. At the paraxial image
+plane the ray's height is B·ȳ′, so
+
+    ε = ȳ′ Σ_surfaces ΔB
+
+exactly. The exact refraction, as tangent-plane height and n′T′ against the paraxial
+refraction's, is
+
+    ΔY = Y α + T β        Δ(n′T′) = Y γ + T δ
+    β = tG/W   α = κβ   γ = (n′ − n)κ − n′κG/W   δ = n′(n s − κGt)/W − n
+
+with s = 1/√(1 + T·T), t the axial depth of the hit, cos I = D·s where
+D = √((1 − κY·T)² − κ²Y·Y(1 + T·T)), G = n′cos I′ − n cos I and W = n s + G(1 − κt). These
+are expanded as truncated series in the invariants a = A·A, b = A·B, c = B·B of the incoming
+ray. The changes are ΔB = (y Δ(n′T′) − n′u′ ΔY)/H_L and ΔA = (n′ū′ ΔY − ȳ Δ(n′T′))/H_L, as
+A P + B Q.
+- The linear parts of P and Q are the surface's Seidel terms.
+- The quadratic parts, at the object-space (ρ, H), are its **intrinsic** fifth order.
+- The **induced** fifth order is the cubic part's response to the third-order error already
+  in the incoming A and B. With SPA, SQA, SPB, SQB the cubic sums of the surfaces before, the
+  invariants move by
+  δa = 2(a SPA + b SQA), δb = a SPB + b SQB + b SPA + c SQA and δc = 2(b SPB + c SQB), and
+  the result is iP = SPA P₁ + SPB Q₁ + δP₁, iQ = SQA P₁ + SQB Q₁ + δQ₁.
+
+With ε = ρ⃗ P + H⃗ Q, the letters are read off the coefficients p_k, q_k of a², ab, ac, b², bc
+and c² in P and Q:
+
+    B₅ = p_aa   F₁ = q_aa + p_ab/2   F₂ = p_ab/2   M₁ = q_ab   M₂ = p_ac   M₃ = p_bb
+    N₁ = q_ac   N₂ = p_bc + q_bb   N₃ = p_bc/2   C₅ = q_bc/4   Π₅ = p_cc − q_bc/4   E₅ = q_cc
+
+⚠ The split between surfaces follows from these variables. The system totals do not: they are
+the expansion of a measured quantity.
+
+Checks:
+- **A 100-digit real-ray trace,** by 3D vector refraction. From it, by Richardson
+  extrapolation: the system coefficients, each surface's whole contribution, and its intrinsic
+  part from that surface alone.
+- **Welford's sums** per surface.
+- **A plate** (thickness d, index N) in a beam with marginal tangent u_m and chief tangent u_c.
+  It displaces a ray of direction tangent T⃗ by ε = (d/N)T⃗((1 + k|T⃗|²)^(−1/2) − 1), with
+  k = 1 − 1/N² and T⃗ = ρ⃗u_m + Hŷu_c. With A₃ = −(d/N)(k/2) and K = (d/N)(3k²/8), expanded:
+
+      B = A₃u_m³   F = A₃u_m²u_c   C = A₃u_m u_c²   Π = 0   E = A₃u_c³
+      B₅ = K u_m⁵   F₁ = 3K u_m⁴u_c   F₂ = 2K u_m⁴u_c   M₁ = M₃ = 4K u_m³u_c²   M₂ = 2K u_m³u_c²
+      N₁ = N₃ = 2K u_m²u_c³   N₂ = 8K u_m²u_c³   C₅ = K u_m u_c⁴   Π₅ = 0   E₅ = K u_c⁵
+- **An aplanatic surface:** B = F = B₅ = F₁ = F₂ = 0.
+- **The library's own real trace:** what is left after the third and fifth order shrinks by
+  2⁷ each time ρ and H halve.
+
 ## PBR
 
 ### Fresnel-Schlick
