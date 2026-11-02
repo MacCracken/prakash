@@ -7,6 +7,7 @@ include "src/spectral_core.cyr"
 include "src/ray_core.cyr"
 include "src/ray_fresnel.cyr"
 include "src/ray_trace.cyr"
+include "src/ray_prt.cyr"
 include "src/ray_dispersion.cyr"
 include "src/ray_fiber.cyr"
 include "src/ray_system.cyr"
@@ -53,6 +54,13 @@ var _surfaces = 0;
 var _ray0 = 0;
 var _srcs = 0;
 var _bigpat = 0;
+var _prt_step = 0;
+var _prt_k = 0;
+var _prt_eta = 0;
+var _prt_ray = 0;
+var _prt_surfs = 0;
+var _prt_hits = 0;
+var _fa_buf[80];
 var _plane = 0;
 var _out3 = 0;
 var _bk7 = 0;
@@ -273,6 +281,28 @@ fn b_interference_pattern() {
     return 0;
 }
 
+# Complex Fresnel amplitudes on gold, at 45 degrees.
+fn b_fresnel_amplitudes() {
+    var r = fresnel_amplitudes(F64_ONE, 0x3FDB851EB851EB85, 0x4003AE147AE147AE, 0x3FE6A09E667F3BCD, &_fa_buf);
+    return 0;
+}
+# One surface's P and Q, reflecting from gold.
+fn b_prt_reflect() { var r = prt_reflect(_prt_k, _prt_eta, F64_ONE, 0x3FDB851EB851EB85, 0x4003AE147AE147AE,
+      _prt_step); return 0; }
+# One surface's P and Q, refracting into glass.
+fn b_prt_refract() { var r = prt_refract(_prt_k, _prt_eta, F64_ONE, 0x3FF8000000000000, _prt_step); return 0; }
+# A skew ray through a singlet, with P and Q at each surface.
+fn b_trace_sequential_prt() {
+    var e = 0;
+    var r = trace_sequential_prt(_prt_ray, _prt_surfs, 0, &e);
+    return 0;
+}
+# Retardance of that path, from its P and Q.
+fn b_prt_retardance() {
+    var h = vec_get(_prt_hits, 1);
+    var r = prt_retardance(PrtTraceHit_total_p(h), PrtTraceHit_total_q(h), _prt_k);
+    return 0;
+}
 # Fabry-Perot transmittance of a 1 mm etalon: ~4e3 orders.
 fn b_fabry_perot_etalon() {
     var r = fabry_perot_transmittance(_wl_m, 0x3F50624DD2F1A9FC, 0x3FF8000000000000, 0, 0x3FECCCCCCCCCCCCD);
@@ -698,6 +728,16 @@ fn main() {
     vec_push(_surfaces, surface_sphere(f64_neg(f64_from(50)), f64_from(12), F64_ONE, f64_from(5)));
     # a realistic diffraction-sized pattern (64x64 = 4096 cells)
     _bigpat = pattern2d_new(64, 64);
+    _prt_step = prt_step_new();
+    var pl = f64_sqrt(_bf(105, 100));
+    _prt_k = ray_vec3(f64_div(_bf(1, 10), pl), f64_div(_bf(2, 10), pl), f64_div(F64_ONE, pl));
+    _prt_eta = ray_vec3(0, 0, f64_neg(F64_ONE));
+    _prt_ray = trace_ray_new(ray_vec3(f64_from(3), f64_from(0 - 2), 0), _prt_k, F64_ONE);
+    _prt_surfs = vec_new();
+    vec_push(_prt_surfs, surface_sphere(f64_from(50), f64_from(10), 0x3FF8000000000000, f64_from(20)));
+    vec_push(_prt_surfs, surface_sphere(f64_from(0 - 50), f64_from(15), F64_ONE, f64_from(20)));
+    var prt_e = 0;
+    _prt_hits = trace_sequential_prt(_prt_ray, _prt_surfs, 0, &prt_e);
     for (var by = 0; by < 64; by = by + 1) {
         for (var bx = 0; bx < 64; bx = bx + 1) {
             var _sv = pattern2d_set(_bigpat, bx, by, f64_from(bx * 64 + by + 1));
@@ -807,7 +847,8 @@ fn main() {
     WavefrontCoefficients_set_w311(_otf_wc, 0);
     _grin_sf = grin_selfoc(_bf(16, 10), F64_HALF, 0, 0, _err);
     _grin_lu = grin_luneburg(F64_ONE, F64_ONE, 0, _err);
-    _grin_ray = trace_ray_new(ray_vec3(_bf(3, 10), _bf(1, 10), 0), ray_vec3(_bf(1, 10), _bf(2, 10), F64_ONE), F64_ONE);
+    _grin_ray = trace_ray_new(ray_vec3(_bf(3, 10), _bf(1, 10), 0), ray_vec3(_bf(1, 10), _bf(2, 10), F64_ONE),
+      F64_ONE);
     _grin_lray = trace_ray_new(ray_vec3(0, F64_HALF, f64_from(0 - 1)), ray_vec3(0, 0, F64_ONE), F64_ONE);
     _doe_dm = alloc(24);
     store64(_doe_dm, 0x3FCDD02E524BCFEE);
@@ -878,6 +919,11 @@ fn main() {
     bench("ray/trace_sequential", &b_trace_sequential, 100000);
     bench("ray/spot_diagram", &b_spot_diagram, 5000);
     bench("wave/interference_pattern_16x16", &b_interference_pattern, 2000);
+    bench("ray/fresnel_amplitudes", &b_fresnel_amplitudes, 200000);
+    bench("prt/reflect", &b_prt_reflect, 100000);
+    bench("prt/refract", &b_prt_refract, 100000);
+    bench("prt/trace_singlet", &b_trace_sequential_prt, 20000);
+    bench("prt/retardance", &b_prt_retardance, 100000);
     bench("wave/fabry_perot_etalon", &b_fabry_perot_etalon, 200000);
     bench("wave/fabry_perot_long_cavity", &b_fabry_perot_long_cavity, 200000);
     bench("wave/pattern2d_normalized_64x64", &b_pattern_normalized, 20000);

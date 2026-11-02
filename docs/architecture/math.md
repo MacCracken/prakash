@@ -31,6 +31,37 @@ R = ((n₁ - n₂) / (n₁ + n₂))²
 ### Critical Angle
 θ_c = arcsin(n₂ / n₁)
 
+### Fresnel Amplitudes (complex)
+Time dependence e^(-iωt), ñ = n + ik. With q = ñ cos θₜ = √(ñ² − (n₁ sin θᵢ)²), Im q ≥ 0,
+and c = cos θᵢ:
+
+r_s = (n₁c − q) / (n₁c + q)            t_s = 2n₁c / (n₁c + q)
+
+r_p = (ñ²c − n₁q) / (ñ²c + n₁q)        t_p = 2n₁ñc / (ñ²c + n₁q)
+
+Power: T_s = Re(q)/(n₁c) |t_s|², T_p = Re(q ñ*/ñ)/(n₁c) |t_p|². The sign is Chipman's, with
+E_r = r_s ŝ + r_p p̂′ and p̂′ = k̂′ × ŝ, so r_p = −r_s at normal incidence and a perfect
+conductor has r_s = −1, r_p = +1.
+
+### Polarization Ray Tracing (Chipman)
+For a ray k̂ at a surface of normal η̂, leaving along k̂′: ŝ = k̂ × η̂ / |k̂ × η̂|, p̂ = k̂ × ŝ,
+p̂′ = k̂′ × ŝ, and in global coordinates E′ = P E with
+
+P = a_s ŝŝᵀ + a_p p̂′p̂ᵀ + k̂′k̂ᵀ = O_out diag(a_s, a_p, 1) O_inᵀ
+
+where (a_s, a_p) is (t_s, t_p) on refraction and (r_s, r_p) on reflection. A path multiplies:
+P_total = P_N ⋯ P₂ P₁.
+
+The geometry alone is Q = ŝŝᵀ ± p̂′p̂ᵀ + k̂′k̂ᵀ, + on refraction and − on reflection, where it is
+the mirror matrix I − 2η̂η̂ᵀ. QᵀP on the plane transverse to the first k̂ is a 2×2 Jones matrix
+J in the input frame. With singular values Λ₁ ≥ Λ₂:
+
+Diattenuation D = (Λ₁² − Λ₂²) / (Λ₁² + Λ₂²)
+
+Retardance δ = the phase between the eigenstates of U, J = U H, H = √(JᴴJ). A reflection reads
+from an ideal mirror, so one total internal reflection gives π − δ_TIR and two give 2 δ_TIR,
+with tan(δ_TIR/2) = cos θ √(sin²θ − n²) / sin²θ (Born & Wolf), n = n₂/n₁.
+
 ### Beer-Lambert
 I = I₀ exp(-αd)
 

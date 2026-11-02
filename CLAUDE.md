@@ -9,7 +9,7 @@
   (math-only) and `dist/prakash-ai.cyr` (adds the sandhi HTTP/TLS AI client)
 - **License**: GPL-3.0
 - **Toolchain pin**: cyrius 6.7.18 — single source of truth is `cyrius = "..."` in `cyrius.cyml`
-- **Version**: SemVer, currently 2.11.x. `VERSION` is the single source; `cyrius.cyml`
+- **Version**: SemVer, currently 2.12.x. `VERSION` is the single source; `cyrius.cyml`
   reads it via `${file:VERSION}` and the release workflow fails if the tag disagrees
 
 ⚠ **The Rust original is a FIDELITY reference, not a CORRECTNESS one.** 2.2.6 found six
@@ -84,6 +84,8 @@ soorat, kiran on the frozen Rust 1.x crate. Per-consumer detail: `docs/architect
 - **Never skip benchmarks.** Numbers don't lie. The CSV history is the proof.
   ⚠ This host is shared and its load moves. Identical code read a median +22% between two
   runs at 2.11.0, so a comparison across time is not a measurement: interleave the trees.
+  ⚠ Under load a row is BIMODAL, two levels ~2× apart, so compare MEDIANS: at 2.12.0 a
+  min-of-4 read +99% on an untouched row from one lucky window on the other side.
   ⚠ This host's run-to-run spread reaches 40% on sub-100 ns benchmarks. A whole-suite
   delta below ~10% is NOT a signal — put both versions in ONE binary and bench them
   against each other before claiming any movement.

@@ -24,8 +24,7 @@ Fixes found along the way ship as patches of the current minor.
 
 | Version | Release | Pinned against |
 |---|---|---|
-| **2.12.0** | 3×3 polarization ray tracing | Chipman's PRT matrix |
-| 2.13.0 | Vectorial focusing | Richards-Wolf, scalar Airy limit |
+| **2.13.0** | Vectorial focusing | Richards-Wolf, scalar Airy limit |
 | 2.14.0 | Fifth-order aberrations | Buchdahl, real-ray residual |
 | 2.15.0 | Fluorescence | Stokes shift, Donaldson matrix |
 | 2.16.0 | Nonlinear optics | SHG, Kerr |
@@ -33,12 +32,6 @@ Fixes found along the way ship as patches of the current minor.
 | 2.18.0 | CIE 2006 observer | CIE 170-1:2006 tables |
 
 Keep each section below to a few lines: what ships and what it is pinned against.
-
-### 2.12.0 — 3×3 polarization ray tracing
-Chipman's polarization ray-tracing matrix per surface, accumulated through the
-sequential tracer with the complex Fresnel coefficients. Today
-`trace_sequential_polarized` tracks scalar s/p transmittance from the real
-coefficients only.
 
 ### 2.13.0 — Vectorial focusing (Richards-Wolf)
 The I₀, I₁, I₂ integrals for high-NA focusing of linear, radial and azimuthal

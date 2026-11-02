@@ -1,0 +1,1205 @@
+# ray_prt test suite — three-dimensional polarization ray tracing.
+#
+# References, none of them this code:
+# - Maxwell's tangential boundary conditions solved as a 6x6 linear system in 60-digit
+#   arithmetic, with the surface in a generic orientation: no Fresnel formula, no s/p split.
+# - Whole paths through that solver, geometry by Householder and Rodrigues, diattenuation and
+#   retardance by numpy's SVD.
+# - Lam's worked gold mirror (dissertation, Univ. Arizona 2015, pp. 121-122).
+# - Born & Wolf's closed form for the phase of total internal reflection, and the Fresnel
+#   rhomb. Lam's corner cube.
+# - trace_sequential and trace_sequential_polarized, which name the same quantities.
+
+include "src/error.cyr"
+include "src/ray_core.cyr"
+include "src/ray_fresnel.cyr"
+include "src/ray_trace.cyr"
+include "src/ray_prt.cyr"
+include "src/wave_core.cyr"
+include "src/wave_diffraction.cyr"
+
+fn _fd(num, den) { return f64_div(f64_from(num), f64_from(den)); }
+fn _near(a, b, tol) { return f64_le(f64_abs(f64_sub(a, b)), tol); }
+fn _assert_near(a, b, tol, msg) { assert(_near(a, b, tol), msg); }
+fn _is_nan(x) { return (x & 0x7FFFFFFFFFFFFFFF) > 0x7FF0000000000000; }
+fn _n3(x, y, z) {
+    var l = f64_sqrt(f64_add(f64_add(f64_mul(x, x), f64_mul(y, y)), f64_mul(z, z)));
+    return ray_vec3(f64_div(x, l), f64_div(y, l), f64_div(z, l));
+}
+fn _dot(a, b) {
+    return f64_add(f64_add(f64_mul(RayVec3_x(a), RayVec3_x(b)), f64_mul(RayVec3_y(a), RayVec3_y(b))),
+      f64_mul(RayVec3_z(a), RayVec3_z(b)));
+}
+fn _stepk(st) { return ray_vec3(PrtStep_kx(st), PrtStep_ky(st), PrtStep_kz(st)); }
+fn _mirror(k, eta) {
+    var t = f64_mul(F64_TWO, _dot(k, eta));
+    return ray_vec3(f64_sub(RayVec3_x(k), f64_mul(t, RayVec3_x(eta))),
+      f64_sub(RayVec3_y(k), f64_mul(t, RayVec3_y(eta))),
+      f64_sub(RayVec3_z(k), f64_mul(t, RayVec3_z(eta))));
+}
+fn _sq(x) { return f64_mul(x, x); }
+fn _rad(deg) { return f64_mul(f64_div(F64_PI, f64_from(180)), deg); }
+
+var Z = f64_from(0);
+var ONE = F64_ONE;
+var TOL14 = _fd(1, 100000000000000);    # 1e-14
+var TOL13 = _fd(1, 10000000000000);     # 1e-13
+var TOL12 = _fd(1, 1000000000000);      # 1e-12
+var TOL10 = _fd(1, 10000000000);        # 1e-10
+var GLASS = f64_mul(_fd(3, 2), ONE);
+var st = 0;
+var e = 0;
+
+alloc_init();
+st = prt_step_new();
+assert(st != 0, "prt_step_new");
+assert_eq(sizeof(OpticalSurface), 40, "trace_sequential_prt's stack copy of a surface is 40 bytes");
+
+# ── Matrices ────────
+test_group("prt matrices");
+
+var mi = prt_new();
+assert(mi != 0, "prt_new");
+assert_eq(prt_re(mi, 0, 0), ONE, "identity (0,0)");
+assert_eq(prt_re(mi, 1, 1), ONE, "identity (1,1)");
+assert_eq(prt_re(mi, 2, 2), ONE, "identity (2,2)");
+assert_eq(prt_re(mi, 0, 1), 0, "identity off the diagonal");
+assert_eq(prt_im(mi, 2, 2), 0, "identity is real");
+assert_eq(_is_nan(prt_re(mi, 3, 0)), 1, "prt_re past the end is NaN");
+assert_eq(_is_nan(prt_re(mi, 0, 0 - 1)), 1, "prt_re before the start is NaN");
+assert_eq(_is_nan(prt_im(0, 0, 0)), 1, "prt_im of a null matrix is NaN");
+assert_eq(prt_identity(0), 0, "prt_identity of null");
+assert_eq(prt_multiply(0, mi, mi), PK_ERR_INVALID_PARAMETER, "prt_multiply null a");
+assert_eq(prt_multiply(mi, 0, mi), PK_ERR_INVALID_PARAMETER, "prt_multiply null b");
+assert_eq(prt_multiply(mi, mi, 0), PK_ERR_INVALID_PARAMETER, "prt_multiply null out");
+assert_eq(prt_apply(0, mi, mi), PK_ERR_INVALID_PARAMETER, "prt_apply null m");
+
+# (1+i) at (0,1) times (2-i) at (1,2) gives (3+i) at (0,2), aliased onto either operand.
+fn _set(m, i, j, re, im) {
+    store64(m + (i * 3 + j) * 8, re);
+    store64(m + 72 + (i * 3 + j) * 8, im);
+    return 0;
+}
+var ma = prt_new();
+var mb = prt_new();
+var _s = _set(ma, 0, 1, ONE, ONE);
+_s = _set(mb, 1, 2, F64_TWO, f64_neg(ONE));
+var mc = prt_new();
+assert_eq(prt_multiply(ma, mb, mc), PK_ERR_NONE, "prt_multiply");
+assert_eq(prt_re(mc, 0, 2), f64_from(3), "complex product, real part");
+assert_eq(prt_im(mc, 0, 2), ONE, "complex product, imaginary part");
+assert_eq(prt_re(mc, 0, 1), ONE, "the identity's terms survive");
+assert_eq(prt_multiply(ma, mb, ma), PK_ERR_NONE, "out may be a");
+assert_eq(prt_re(ma, 0, 2), f64_from(3), "aliased on a");
+ma = prt_new();
+_s = _set(ma, 0, 1, ONE, ONE);
+assert_eq(prt_multiply(ma, mb, mb), PK_ERR_NONE, "out may be b");
+assert_eq(prt_im(mb, 0, 2), ONE, "aliased on b");
+var fe = prt_field_new(ONE, F64_TWO, f64_from(3), f64_from(4), f64_from(5), f64_from(6));
+assert(fe != 0, "prt_field_new");
+var fm = prt_new();
+_s = _set(fm, 0, 1, Z, ONE);
+assert_eq(prt_apply(fm, fe, fe), PK_ERR_NONE, "prt_apply aliased");
+assert_eq(PrtField_x_re(fe), f64_sub(ONE, f64_from(4)), "row 0, real: 1 + i(3 + 4i)");
+assert_eq(PrtField_x_im(fe), f64_add(F64_TWO, f64_from(3)), "row 0, imaginary");
+assert_eq(PrtField_z_im(fe), f64_from(6), "row 2 untouched");
+
+# ── Refusals ────────
+test_group("prt refusals");
+
+var kz = ray_vec3(Z, Z, ONE);
+var nz = ray_vec3(Z, Z, ONE);
+var bad = ray_vec3(Z, Z, F64_TWO);
+var fa[80];
+var sentinel = prt_step_new();
+assert_eq(fresnel_amplitudes(ONE, GLASS, Z, ONE, 0), PK_ERR_INVALID_PARAMETER, "null out");
+assert_eq(fresnel_amplitudes(Z, GLASS, Z, ONE, &fa), PK_ERR_INVALID_PARAMETER, "n1 = 0");
+assert_eq(fresnel_amplitudes(f64_neg(ONE), GLASS, Z, ONE, &fa), PK_ERR_INVALID_PARAMETER, "n1 < 0");
+assert_eq(fresnel_amplitudes(ONE, Z, Z, ONE, &fa), PK_ERR_INVALID_PARAMETER, "n~ = 0");
+assert_eq(fresnel_amplitudes(ONE, GLASS, f64_neg(ONE), ONE, &fa), PK_ERR_INVALID_PARAMETER, "gain");
+assert_eq(fresnel_amplitudes(ONE, 0x7FF8000000000000, Z, ONE, &fa), PK_ERR_INVALID_PARAMETER, "NaN n2");
+assert_eq(fresnel_amplitudes(ONE, 0x7FF0000000000000, Z, ONE, &fa), PK_ERR_INVALID_PARAMETER, "+inf n2");
+assert_eq(fresnel_amplitudes(ONE, GLASS, 0x7FF8000000000000, ONE, &fa), PK_ERR_INVALID_PARAMETER, "NaN k2");
+assert_eq(fresnel_amplitudes(ONE, 0x4640000000000000, Z, ONE, &fa), PK_ERR_INVALID_PARAMETER, "n2 past 2^100");
+assert_eq(fresnel_amplitudes(0x3990000000000000, GLASS, Z, ONE, &fa), PK_ERR_INVALID_PARAMETER, "n1 under 2^-100");
+assert_eq(fresnel_amplitudes(ONE, GLASS, Z, Z, &fa), PK_ERR_INVALID_ANGLE, "cos_i = 0");
+assert_eq(fresnel_amplitudes(ONE, GLASS, Z, f64_neg(F64_HALF), &fa), PK_ERR_INVALID_ANGLE, "cos_i < 0");
+assert_eq(fresnel_amplitudes(ONE, GLASS, Z, _fd(11, 10), &fa), PK_ERR_INVALID_ANGLE, "cos_i > 1");
+assert_eq(fresnel_amplitudes(ONE, GLASS, Z, 0x7FF8000000000000, &fa), PK_ERR_INVALID_ANGLE, "NaN cos_i");
+
+assert_eq(prt_refract(0, nz, ONE, GLASS, st), PK_ERR_INVALID_PARAMETER, "refract: null k");
+assert_eq(prt_refract(kz, 0, ONE, GLASS, st), PK_ERR_INVALID_PARAMETER, "refract: null normal");
+assert_eq(prt_refract(kz, nz, ONE, GLASS, 0), PK_ERR_INVALID_PARAMETER, "refract: null step");
+assert_eq(prt_refract(bad, nz, ONE, GLASS, st), PK_ERR_INVALID_PARAMETER, "refract: k not unit");
+assert_eq(prt_refract(kz, bad, ONE, GLASS, st), PK_ERR_INVALID_PARAMETER, "refract: normal not unit");
+assert_eq(prt_refract(ray_vec3(0x7FF8000000000000, Z, ONE), nz, ONE, GLASS, st), PK_ERR_INVALID_PARAMETER,
+  "refract: NaN k");
+assert_eq(prt_reflect(0, nz, ONE, GLASS, Z, st), PK_ERR_INVALID_PARAMETER, "reflect: null k");
+assert_eq(prt_reflect(kz, nz, ONE, GLASS, Z, 0), PK_ERR_INVALID_PARAMETER, "reflect: null step");
+assert_eq(prt_reflect(kz, bad, ONE, GLASS, Z, st), PK_ERR_INVALID_PARAMETER, "reflect: normal not unit");
+assert_eq(prt_reflect(kz, nz, ONE, GLASS, f64_neg(ONE), st), PK_ERR_INVALID_PARAMETER, "reflect: gain");
+# A ray in the plane of the surface meets nothing.
+assert_eq(prt_reflect(ray_vec3(ONE, Z, Z), nz, ONE, GLASS, Z, st), PK_ERR_INVALID_ANGLE, "reflect: grazing");
+assert_eq(prt_refract(ray_vec3(ONE, Z, Z), nz, ONE, GLASS, st), PK_ERR_INVALID_ANGLE, "refract: grazing");
+assert_eq(prt_surface(0, nz, kz, ONE, Z, ONE, Z, 0, st), PK_ERR_INVALID_PARAMETER, "surface: null k_in");
+assert_eq(prt_surface(kz, nz, 0, ONE, Z, ONE, Z, 0, st), PK_ERR_INVALID_PARAMETER, "surface: null k_out");
+assert_eq(prt_surface(kz, nz, kz, ONE, Z, ONE, Z, 2, st), PK_ERR_INVALID_PARAMETER, "surface: unknown reflect");
+assert_eq(prt_surface(kz, nz, kz, ONE, Z, ONE, Z, 0, 0), PK_ERR_INVALID_PARAMETER, "surface: null step");
+
+# Total internal reflection has no refracted ray, and a refused step keeps what it held.
+var tir_k = _n3(ONE, Z, _fd(1, 4));
+assert_eq(prt_refract(kz, nz, ONE, GLASS, sentinel), PK_ERR_NONE, "a good step to compare with");
+var kept = prt_re(PrtStep_p(sentinel), 0, 0);
+assert_eq(prt_refract(tir_k, nz, GLASS, ONE, sentinel), PK_ERR_TIR, "refract: total internal reflection");
+assert_eq(prt_re(PrtStep_p(sentinel), 0, 0), kept, "a refused step is untouched");
+
+# ── Against Maxwell's boundary conditions ────────
+test_group("prt against Maxwell's boundary conditions");
+
+fn _vec_ok(lab, st_, e_in, re0, im0, re1, im1, re2, im2, kx, ky, kz_) {
+    var o[48];
+    assert_eq(prt_apply(PrtStep_p(st_), e_in, &o), PK_ERR_NONE, lab);
+    var tol = _fd(1, 10000000000000);
+    assert(_near(load64(&o), re0, tol) & _near(load64(&o + 8), im0, tol), "E_x");
+    assert(_near(load64(&o + 16), re1, tol) & _near(load64(&o + 24), im1, tol), "E_y");
+    assert(_near(load64(&o + 32), re2, tol) & _near(load64(&o + 40), im2, tol), "E_z");
+    assert(_near(PrtStep_kx(st_), kx, tol) & _near(PrtStep_ky(st_), ky, tol) & _near(PrtStep_kz(st_), kz_,
+        tol), "k'");
+    return 0;
+}
+fn _refl_pin(lab, n1, n2, k2, k, eta, f, re0, im0, re1, im1, re2, im2, kx, ky, kz_) {
+    assert_eq(prt_reflect(k, eta, n1, n2, k2, st), PK_ERR_NONE, lab);
+    return _vec_ok(lab, st, f, re0, im0, re1, im1, re2, im2, kx, ky, kz_);
+}
+fn _refr_pin(lab, n1, n2, k, eta, f, re0, im0, re1, im1, re2, im2, kx, ky, kz_) {
+    assert_eq(prt_refract(k, eta, n1, n2, st), PK_ERR_NONE, lab);
+    return _vec_ok(lab, st, f, re0, im0, re1, im1, re2, im2, kx, ky, kz_);
+}
+_refl_pin("gold 0", 0x3FF0000000000000, 0x3FDB851EB851EB85, 0x4003AE147AE147AE,
+  ray_vec3(0x3FCDA53D203AC78D, 0xBFE3E57C73EEE700, 0xBFE7F1117F54B67F), ray_vec3(0x3FC0DF0C7E39F6D0,
+    0x3FEEBFFF0EB1969D, 0xBFCF269C7C779AE7),
+  prt_field_new(0xBFF530C443CA82BB, 0xBFE0A34F0C701C06, 0xBFA8D23679BAB2E1, 0x3FC7CCCA2EFD24F0,
+    0xBFD7A9129CE18FE3, 0xBFD430AF73B720D9),
+  0x3FF084EF10C698AC, 0x3FEBD0A9EA41E9AE, 0xBFC9F9D228EEDD16, 0xBFC65B3B44417B54, 0x3FD5E35A9F54239C,
+  0x3FD2659787247095,
+  0x3FD550E19B17B434, 0x3FBE2EEE2D348AEC, 0xBFEDEFA72DF02FE2);
+_refl_pin("gold 1", 0x3FF0000000000000, 0x3FDB851EB851EB85, 0x4003AE147AE147AE,
+  ray_vec3(0xBFD2272B37E70AA9, 0x3FED50D7ADE5BFE3, 0x3FD2220CF7E9D1C6), ray_vec3(0x3FEBD7775ACA13F7,
+    0x3FCB788AE59FAF0A, 0x3FDC670D3C725AC3),
+  prt_field_new(0xBFF1D3D0773F27C3, 0xBFC2E74EAD5A9095, 0xBFD2D19CF5C4FBAB, 0xBFD8F265EAAF1EA1,
+    0xBFC51411062500D8, 0x3FF1CCE439ADA8DE),
+  0x3FEB19E50E19CFD6, 0xBFB952D45317D12E, 0x3FD6E96CE17F8D55, 0x3FD0FFDF2B5D70F0, 0x3FC4DA714E416B71,
+  0xBFF467970940C0B7,
+  0xBFDA91A7F4FC13A1, 0x3FEC471E4743C4E8, 0x3FCBAE360ADFA105);
+_refl_pin("aluminum in water 0", 0x3FF547AE147AE148, 0x3FEEB851EB851EB8, 0x401AC28F5C28F5C3,
+  ray_vec3(0xBFEE6F4F0984EF88, 0xBFD1D628496C9694, 0x3FC10F02B6ECC298), ray_vec3(0x3FDEFF8B3ECF7722,
+    0x3FB354A42E4A1B05, 0x3FEBE43D194902BD),
+  prt_field_new(0xBFC4F1941B8259BE, 0x3FC5B3E4953F2064, 0x3FE21576C6629207, 0xBFCF2732CE606B7A,
+    0x3F8CDA68BD8AD883, 0x3FE66EFBDC9F376E),
+  0xBFD0160702AD8B7A, 0x3FCAB863DFC69977, 0xBFE57D3B549F0484, 0x3FC8EBA91E30B4ED, 0xBFD8EE27D99DF6AC,
+  0x3FCBEE95097CCD83,
+  0xBFE31A8B23E9BE51, 0xBFCC9B6263FB11B9, 0x3FE8A7D99B2C8463);
+_refl_pin("aluminum in water 1", 0x3FF547AE147AE148, 0x3FEEB851EB851EB8, 0x401AC28F5C28F5C3,
+  ray_vec3(0x3FAD1DFCAA111C3B, 0xBFC55B4F75FAADF7, 0xBFEF7FB8C0F10A31), ray_vec3(0x3FDDCA284D7E80CE,
+    0xBFE46DDB1B7B2B5C, 0x3FE39DBE30E9C7AB),
+  prt_field_new(0x3FEB427A1D45730C, 0xBFE166642322806B, 0x3FCD057EF8B2B731, 0xBFA7076B0E6F4F42,
+    0x3F861605C661BF98, 0xBF985C9013E9E1BB),
+  0xBFE4509EACF468E1, 0x3FD0B7241B87F58E, 0xBFE35A8AE2896943, 0x3FC56878AEECC327, 0x3FD78FEC19B773D2,
+  0x3F616A0A27DFB11D,
+  0x3FDFAAB5DA122C05, 0xBFE88F4366C73CD9, 0xBFDA162C18901DE9);
+_refl_pin("partial dielectric 0", 0x3FF0000000000000, 0x3FF8000000000000, 0x0000000000000000,
+  ray_vec3(0x3FE084D145DB8F7B, 0xBFD81CA8708C968B, 0x3FE89CD622BD7E96), ray_vec3(0xBFE6CD7ABEDA43B5,
+    0xBF88299EE187DE46, 0x3FE672985D58AADA),
+  prt_field_new(0x3FAE564C322478B2, 0xBFD340DA4B8C2756, 0xBFEC571E411BE26F, 0xBFE0B1479574835D,
+    0xBFDE4F127A4DF372, 0xBFAB72B7C77C501F),
+  0x3FB2A5F01098D6A3, 0x3FC4AA1EEE4F52DA, 0x3FE3C7A3A4ADFA6C, 0x3FD9532A8E8400C9, 0x3FD562435BF1375D,
+  0x3FA71DE59697190E,
+  0x3FE88D532B29F656, 0xBFD7D88F3264597E, 0x3FE0B458D70C40CC);
+_refl_pin("partial dielectric 1", 0x3FF0000000000000, 0x3FF8000000000000, 0x0000000000000000,
+  ray_vec3(0x3FEFDAB4B32B9721, 0xBFB85B293161C0B2, 0x3F7757D8E14EA446), ray_vec3(0xBFE43A2BE5EC57F4,
+    0x3FD9E3F7E6CF6E26, 0xBFE52623DD656210),
+  prt_field_new(0x3FAAEB6891053535, 0x3FB1FAF0D48FD96C, 0x3FE0CEE4595FB74C, 0x3FE7AFA35CF140DB,
+    0xBFDA8DED8559A192, 0x3FB6C4F06650EE28),
+  0xBFAA608E52CFBF0B, 0xBFA33374AA03D56A, 0xBFB26403892BAD22, 0xBFC900BE08FA4256, 0xBFA7132CA5ACCE46,
+  0xBFBB01C500C14CDF,
+  0x3FC2C2979A3D8882, 0x3FDCAE48094C93B3, 0xBFEC38445CACAB30);
+_refl_pin("TIR 0", 0x3FF8000000000000, 0x3FF0000000000000, 0x0000000000000000,
+  ray_vec3(0xBFDE2C954DFE7561, 0xBFE05196FD7721C2, 0x3FE70601A09A5D65), ray_vec3(0x3FE26B4FA39509E1,
+    0xBFE565576A05940D, 0x3FDE2137FF78B357),
+  prt_field_new(0xBFC51854C346D820, 0x3FD6254C33DA1F99, 0x3FCFFF1259E92941, 0xBFE7619663AA442F,
+    0x3FB1B5DAC9D46510, 0xBFD2A1F5E2E96C33),
+  0xBFABEC0652A8A96F, 0xBFACF449FE435580, 0xBFEA5D75125032F9, 0x3FD4D66C8231DD6F, 0xBFB08A44A66E211A,
+  0xBFC8D3467320591E,
+  0xBFEE20E2E8E7A036, 0x3FA274A60FFB3CF7, 0x3FD57147EDBB35DB);
+_refl_pin("TIR 1", 0x3FF8000000000000, 0x3FF0000000000000, 0x0000000000000000,
+  ray_vec3(0xBFDDF66AF0EA1D59, 0xBFC919526DABA2F4, 0xBFEB924F587CD036), ray_vec3(0x3FEFB3C4E9798EA0,
+    0xBFA8F2AC2942C991, 0xBFC0444472FA566F),
+  prt_field_new(0x3FCE255C3913AB43, 0xBFD6E75676ED0CA1, 0x3FDCF168E7BF14C5, 0xBFE00D969583816D,
+    0xBFCD8DC751BF7B03, 0x3FD3C06DAA577919),
+  0xBFDA139FAEC5C3B4, 0x3FCDDC40AB481D89, 0xBFE7B9C7EDDA973A, 0xBFB30306C94D0921, 0x3FB64EFBECAF270D,
+  0x3FB21F68B500C577,
+  0x3FCB82F61F46D1E9, 0xBFCD663FE08D6A06, 0xBFEE6024494F6585);
+_refl_pin("Lam gold 0", 0x3FF0000000000000, 0x3FC604189374BC6A, 0x4012FEF9DB22D0E5,
+  ray_vec3(0x3FD300ED89A56381, 0xBFE7F10827537AC9, 0x3FE2FCC19C8993D9), ray_vec3(0xBFE0A23AA8F1A8D6,
+    0x3FE384F7DAF639E5, 0x3FE323A8AF15738D),
+  prt_field_new(0xBFE0A4533487277C, 0xBFE34DAFB2C764DC, 0x3FBAA493AB627449, 0x3F8FB734C0408136,
+    0x3FD90E08C1AC7775, 0x3FD491DADA7C50B7),
+  0x3FDBB59041C3C4C4, 0x3F9D29A868EB5D1D, 0xBFC6C35DBD1D245B, 0x3FE6C63026836720, 0xBFB9E3DAA5833E87,
+  0x3FD605851C67D9FF,
+  0x3F9FB61DCD909B1F, 0xBFDBE88C93C07334, 0x3FECC7B9624B6750);
+_refl_pin("Lam gold 1", 0x3FF0000000000000, 0x3FC604189374BC6A, 0x4012FEF9DB22D0E5,
+  ray_vec3(0x3F98CEB333ACD9C7, 0x3FE9CB1A640504A8, 0x3FE2EC6E395B2A87), ray_vec3(0x3FE8AADBCA4292E3,
+    0x3FE0A18804302C90, 0xBFD792D981F21D58),
+  prt_field_new(0x3FDAA6C9D43A05F5, 0xBFEEC033D67DEB05, 0xBFD013113BC3060D, 0x3FD2BB177B1C390D,
+    0x3FD4D1741849838D, 0xBFD702DC0D603A11),
+  0xBFB5E2EC712E6D03, 0x3FE333C0B856B331, 0x3FE3B052EC6850C9, 0xBFD8E9CE7FC0A1D4, 0xBFE03D790A0AEDC8,
+  0x3FE19251FD44B28D,
+  0xBFD422532C91D73C, 0x3FE27BC158D63D17, 0x3FE81AB443F1C0EA);
+_refr_pin("air to glass 0", 0x3FF0000000000000, 0x3FF8000000000000,
+  ray_vec3(0xBFDDF1BA2114E11F, 0x3FD94D3F80BA8996, 0x3FE94B4959739A1F), ray_vec3(0x3FE50B9B9DC0DFC1,
+    0xBFE7B6A681D78E46, 0x3FC153C2FF24B5AA),
+  prt_field_new(0x3FD4D1DCB02E35FA, 0x3FE46EA043B6017B, 0x3FD997490C96A634, 0x3FD293160CBD6123,
+    0xBF7E717BB91C9E95, 0x3FCDCBF5EC6F55F5),
+  0x3FC980007C03D570, 0x3FD5550CB312B314, 0x3FCC26910F146854, 0x3FC910771B70B8B3, 0xBF992FA3932E3791,
+  0x3FC884DF846CD2E5,
+  0xBFE433D56C380EF4, 0x3FE3F367FFC0336D, 0x3FDD848F7F82C43D);
+_refr_pin("air to glass 1", 0x3FF0000000000000, 0x3FF8000000000000,
+  ray_vec3(0x3FE8A186BEDF1649, 0xBFDEB3D7CC2B5D41, 0xBFDAF4B3758622B4), ray_vec3(0xBFE2E3334CECCB95,
+    0xBFDE14F0F91F534A, 0x3FE5003466F3CCB8),
+  prt_field_new(0x3FDDFEAC9578DB57, 0xBFC9F72913EC80E6, 0x3FEBE169098B7630, 0xBFE93EED3D6670BC,
+    0xBFC16435AAB9A0DB, 0x3FE0E44B7FFFE169),
+  0x3FB6DC64EC0429A6, 0x3FB495E2D3AC3B6E, 0x3FE3EFC88FA8CF01, 0xBFE2B1125DECBA5B, 0x3F95FEDF2F58CAD3,
+  0x3FC97F012630D50B,
+  0x3FE981E7F4E7E6F1, 0xBFB7FBD877F538B3, 0xBFE316BBC459370E);
+_refr_pin("glass to air 0", 0x3FF8000000000000, 0x3FF0000000000000,
+  ray_vec3(0x3FB53CB710613A62, 0x3FEC524BC839137B, 0xBFDD50B9F9A78859), ray_vec3(0x3FBF7533747858F5,
+    0xBFDE597AD39521EE, 0x3FEBE5BB06585E0B),
+  prt_field_new(0xBFDD9C5C63BD7646, 0xBFCA759F29E9D079, 0x3FC15BC6F44DCD18, 0x3FC9663D18413751,
+    0x3FC6D07D0DF10CC2, 0x3FD62469335F9D1B),
+  0xBFE56FB4631C2AC4, 0xBFD435172CE7DDEE, 0x3FC4665848586B6E, 0x3FB8271C6E68338E, 0x3FD1A005B1003F4A,
+  0x3FE31EDE715B7D75,
+  0x3FCB99B8B5F02563, 0x3FEF388900BEDCDF, 0xBFA48963A2677E96);
+_refr_pin("glass to air 1", 0x3FF8000000000000, 0x3FF0000000000000,
+  ray_vec3(0xBFD68D0AC1CB2E16, 0x3FEA87A092245B49, 0x3FDBC98DA311EC20), ray_vec3(0xBFD5394A8ABD05AE,
+    0x3FE76743A5EA3D53, 0x3FE311F3A975B989),
+  prt_field_new(0xBFD24A05B5D03108, 0x3FCA6C5F918373D9, 0x3FA963B6DDD1FC0A, 0xBFB385202445BCB1,
+    0xBFD4E71CB01001B4, 0x3FD40A5235DDA13E),
+  0xBFD541FD7F81D2A4, 0x3FCE3F98BDCCC2A2, 0x3F9BBAB32AC1B31D, 0xBFAEB98A06036EC0, 0xBFDA6D541DAE4433,
+  0x3FD95C6F5BADC630,
+  0xBFD6EAACB2579AC4, 0x3FEBC3BC7111E905, 0x3FD6135DA46D3595);
+_refr_pin("glass to flint 0", 0x3FF844D013A92A30, 0x3FFC8E219652BD3C,
+  ray_vec3(0x3FE0A5ACCEC9F214, 0x3F97576C4947215A, 0x3FEB51B859BDB00B), ray_vec3(0x3FEA2FA677FB32A8,
+    0x3F9FC265953F583D, 0x3FE25DA2DE7B4C9A),
+  prt_field_new(0xBFEC090EBECAFAE5, 0x3FD46D7BD28D1792, 0xBFD190506FB26622, 0x3FDBD057B7FA613B,
+    0x3FE1516B33AFE2B4, 0xBFCA61798006E9B6),
+  0xBFE8637D9DF80487, 0x3FD1BEB007EC78F7, 0xBFCFA6501668F356, 0x3FD92ACECF6C0B49, 0x3FE15A5E9C63A321,
+  0xBFCA688DDB2718AA,
+  0x3FE260BD669CEAD5, 0x3F98F7B02DAD04CD, 0x3FEA2F4FDA8100FE);
+_refr_pin("glass to flint 1", 0x3FF844D013A92A30, 0x3FFC8E219652BD3C,
+  ray_vec3(0xBFD42BA7385C5226, 0x3FEC9C3ECDB80655, 0xBFD45EC60761C365), ray_vec3(0x3FE0D12D65388A43,
+    0xBFD9517B82AD9D3F, 0x3FE81A3E6937D9BB),
+  prt_field_new(0x3FC9C9FD96A8101E, 0x3FD5384320634CEC, 0xBFCE4424FB7605C3, 0x3FD83DE7EA642D79,
+    0xBFEBA3860526195C, 0x3FE78ACDD61E5E78),
+  0x3FC984AA35F0BE4C, 0x3FD0983987586CCC, 0xBFD17990AA637D9D, 0x3FDAA1618B1BE24D, 0xBFE75DDDFEB2D74A,
+  0x3FE3938DB1380345,
+  0xBFD77624919FB4D3, 0x3FEAB1A2FFF319AE, 0xBFDA5E5BCBBF8CBD);
+
+# ── Lam's worked gold mirror ────────
+# Dissertation pp. 121-122: k = (-0.195, -0.195, 0.961) on a mirror of normal (0, 1, 1)/sqrt 2.
+# Printed to three figures, so held to +-0.002. ⚠ Her Fig. 3.5 gives the gold as
+# 0.718 + 4.749i, which does NOT reproduce her numbers: it has |r_s| = 0.969 and |r| = 0.942
+# at normal incidence where she prints 0.992 and plots ~0.985. n = 0.172 with her k
+# reproduces all five to ~1e-4 (r_s, r_p, the 2.727 rad at normal incidence), and is what real
+# gold has at 765 nm, so the printed n looks like a typo and the worked numbers stand. She
+# also uses e^(+iwt), so her P is the conjugate of prakash's.
+test_group("Lam's gold mirror");
+
+var lk = _n3(_fd(0 - 195, 1000), _fd(0 - 195, 1000), _fd(961, 1000));
+var leta = _n3(Z, ONE, ONE);
+var lko = _mirror(lk, leta);
+assert(_near(RayVec3_x(lko), _fd(0 - 195, 1000), _fd(2, 1000)), "k'x");
+assert(_near(RayVec3_y(lko), _fd(0 - 961, 1000), _fd(2, 1000)), "k'y");
+assert(_near(RayVec3_z(lko), _fd(195, 1000), _fd(2, 1000)), "k'z");
+fn _lam(i, j, re, im) {
+    var t = _fd(2, 1000);
+    var ok = _near(prt_re(PrtStep_p(st), i, j), _fd(re, 1000), t);
+    return ok & _near(prt_im(PrtStep_p(st), i, j), _fd(im, 1000), t);
+}
+# Eq. 3.4 from her own coefficients, through prt_surface.
+var lrs = _fd(992, 1000);
+var lrp = _fd(975, 1000);
+assert_eq(prt_surface(lk, leta, lko,
+    f64_mul(lrs, f64_cos(_fd(2918, 1000))), f64_mul(lrs, f64_sin(_fd(2918, 1000))),
+    f64_mul(lrp, f64_cos(_fd(751, 1000))), f64_neg(f64_mul(lrp, f64_sin(_fd(751, 1000)))), 1, st), PK_ERR_NONE,
+  "prt_surface");
+assert_eq(_lam(0, 0, 0 - 889, 219), 1, "P(0,0) = -0.889 + 0.219i");
+assert_eq(_lam(0, 1, 106, 46), 1, "P(0,1) = 0.106 + 0.046i");
+assert_eq(_lam(0, 2, 0 - 361, 54), 1, "P(0,2) = -0.361 + 0.054i");
+assert_eq(_lam(1, 0, 361, 0 - 54), 1, "P(1,0) = 0.361 - 0.054i");
+assert_eq(_lam(1, 1, 314, 0 - 137), 1, "P(1,1) = 0.314 - 0.137i");
+assert_eq(_lam(1, 2, 0 - 863, 0 - 39), 1, "P(1,2) = -0.863 - 0.039i");
+assert_eq(_lam(2, 0, 0 - 106, 0 - 46), 1, "P(2,0) = -0.106 - 0.046i");
+assert_eq(_lam(2, 1, 655, 0 - 628), 1, "P(2,1) = 0.655 - 0.628i");
+assert_eq(_lam(2, 2, 314, 0 - 137), 1, "P(2,2) = 0.314 - 0.137i");
+# The same matrix from the metal: conjugate, in this time convention.
+assert_eq(prt_reflect(lk, leta, ONE, _fd(172, 1000), _fd(4749, 1000), st), PK_ERR_NONE, "prt_reflect, gold");
+assert_eq(_lam(0, 0, 0 - 889, 0 - 219), 1, "conj P(0,0) from the metal");
+assert_eq(_lam(1, 2, 0 - 863, 39), 1, "conj P(1,2) from the metal");
+assert_eq(_lam(2, 1, 655, 628), 1, "conj P(2,1) from the metal");
+# Her Eq. 3.12: at normal incidence s and p take one phase, 2.727 rad.
+assert_eq(fresnel_amplitudes(ONE, _fd(172, 1000), _fd(4749, 1000), ONE, &fa), PK_ERR_NONE,
+  "gold at normal incidence");
+var nrs = ganita_f64_atan2(FresnelAmplitudes_rs_im(&fa), FresnelAmplitudes_rs_re(&fa));
+assert(_near(f64_abs(nrs), _fd(2727, 1000), _fd(1, 1000)), "normal incidence phase is 2.727 rad");
+_assert_near(FresnelAmplitudes_rp_re(&fa), f64_neg(FresnelAmplitudes_rs_re(&fa)), TOL14,
+  "r_p = -r_s at normal incidence, real");
+_assert_near(FresnelAmplitudes_rp_im(&fa), f64_neg(FresnelAmplitudes_rs_im(&fa)), TOL14,
+  "r_p = -r_s at normal incidence, imaginary");
+
+# ── Invariants ────────
+test_group("prt invariants");
+
+# P k = k', Q k = k', Q orthogonal, over reflections and refractions in general position.
+fn _pk(m, k, o, tol) {
+    for (var i = 0; i < 3; i = i + 1) {
+        var re = Z;
+        var im = Z;
+        for (var j = 0; j < 3; j = j + 1) {
+            re = f64_add(re, f64_mul(prt_re(m, i, j), load64(k + j * 8)));
+            im = f64_add(im, f64_mul(prt_im(m, i, j), load64(k + j * 8)));
+        }
+        if (_near(re, load64(o + i * 8), tol) == 0) { return 0; }
+        if (_near(im, Z, tol) == 0) { return 0; }
+    }
+    return 1;
+}
+fn _orth(q, tol) {
+    for (var a = 0; a < 3; a = a + 1) {
+        for (var b = 0; b < 3; b = b + 1) {
+            var s = Z;
+            for (var i = 0; i < 3; i = i + 1) { s = f64_add(s, f64_mul(prt_re(q, a, i), prt_re(q, b, i))); }
+            var want = Z;
+            if (a == b) { want = ONE; }
+            if (_near(s, want, tol) == 0) { return 0; }
+        }
+    }
+    return 1;
+}
+fn _det(q) {
+    var a = f64_mul(prt_re(q, 0, 0), f64_sub(f64_mul(prt_re(q, 1, 1), prt_re(q, 2, 2)), f64_mul(prt_re(q, 1,
+            2), prt_re(q, 2, 1))));
+    var b = f64_mul(prt_re(q, 0, 1), f64_sub(f64_mul(prt_re(q, 1, 0), prt_re(q, 2, 2)), f64_mul(prt_re(q, 1,
+            2), prt_re(q, 2, 0))));
+    var c = f64_mul(prt_re(q, 0, 2), f64_sub(f64_mul(prt_re(q, 1, 0), prt_re(q, 2, 1)), f64_mul(prt_re(q, 1,
+            1), prt_re(q, 2, 0))));
+    return f64_add(f64_sub(a, b), c);
+}
+var iv_eta = _n3(_fd(3, 10), _fd(0 - 4, 10), _fd(9, 10));
+var iv_bad = 0;
+var iv_i = 0;
+while (iv_i < 12) {
+    var ang = f64_mul(_fd(iv_i + 1, 13), F64_PI_2);
+    var tan_x = _n3(_fd(4, 10), _fd(3, 10), Z);
+    var cs = f64_cos(ang);
+    var sn = f64_sin(ang);
+    var w = ray_vec3(
+      f64_sub(f64_mul(RayVec3_y(iv_eta), RayVec3_z(tan_x)), f64_mul(RayVec3_z(iv_eta), RayVec3_y(tan_x))),
+      f64_sub(f64_mul(RayVec3_z(iv_eta), RayVec3_x(tan_x)), f64_mul(RayVec3_x(iv_eta), RayVec3_z(tan_x))),
+      f64_sub(f64_mul(RayVec3_x(iv_eta), RayVec3_y(tan_x)), f64_mul(RayVec3_y(iv_eta), RayVec3_x(tan_x))));
+    var ku = _n3(RayVec3_x(w), RayVec3_y(w), RayVec3_z(w));
+    var iv_k = _n3(f64_add(f64_mul(cs, RayVec3_x(iv_eta)), f64_mul(sn, RayVec3_x(ku))),
+      f64_add(f64_mul(cs, RayVec3_y(iv_eta)), f64_mul(sn, RayVec3_y(ku))),
+      f64_add(f64_mul(cs, RayVec3_z(iv_eta)), f64_mul(sn, RayVec3_z(ku))));
+    assert_eq(prt_reflect(iv_k, iv_eta, ONE, _fd(43, 100), _fd(246, 100), st), PK_ERR_NONE, "invariant reflect");
+    var ko = _stepk(st);
+    if (_pk(PrtStep_p(st), iv_k, ko, TOL14) == 0) { iv_bad = iv_bad + 1; }
+    if (_pk(PrtStep_q(st), iv_k, ko, TOL14) == 0) { iv_bad = iv_bad + 1; }
+    if (_orth(PrtStep_q(st), TOL14) == 0) { iv_bad = iv_bad + 1; }
+    if (_near(_det(PrtStep_q(st)), f64_neg(ONE), TOL14) == 0) { iv_bad = iv_bad + 1; }
+    # A reflection's Q is the mirror matrix I - 2 eta eta^T.
+    for (var a = 0; a < 3; a = a + 1) {
+        for (var b = 0; b < 3; b = b + 1) {
+            var want = f64_neg(f64_mul(F64_TWO, f64_mul(load64(iv_eta + a * 8), load64(iv_eta + b * 8))));
+            if (a == b) { want = f64_add(want, ONE); }
+            if (_near(prt_re(PrtStep_q(st), a, b), want, TOL14) == 0) { iv_bad = iv_bad + 1; }
+        }
+    }
+    assert_eq(prt_refract(iv_k, iv_eta, ONE, GLASS, st), PK_ERR_NONE, "invariant refract");
+    ko = _stepk(st);
+    if (_pk(PrtStep_p(st), iv_k, ko, TOL14) == 0) { iv_bad = iv_bad + 1; }
+    if (_pk(PrtStep_q(st), iv_k, ko, TOL14) == 0) { iv_bad = iv_bad + 1; }
+    if (_orth(PrtStep_q(st), TOL14) == 0) { iv_bad = iv_bad + 1; }
+    if (_near(_det(PrtStep_q(st)), ONE, TOL14) == 0) { iv_bad = iv_bad + 1; }
+    iv_i = iv_i + 1;
+}
+assert_eq(iv_bad, 0, "P k = k', Q k = k', Q orthogonal with det -1 / +1, Q = I - 2 eta eta^T");
+
+# The sign of the normal means nothing.
+var sg_k = _n3(_fd(3, 10), _fd(2, 10), _fd(9, 10));
+var sg_eta = _n3(_fd(1, 10), _fd(0 - 2, 10), _fd(9, 10));
+var sg_neg = ray_vec3(f64_neg(RayVec3_x(sg_eta)), f64_neg(RayVec3_y(sg_eta)), f64_neg(RayVec3_z(sg_eta)));
+var st2 = prt_step_new();
+assert_eq(prt_reflect(sg_k, sg_eta, ONE, _fd(43, 100), _fd(246, 100), st), PK_ERR_NONE, "eta");
+assert_eq(prt_reflect(sg_k, sg_neg, ONE, _fd(43, 100), _fd(246, 100), st2), PK_ERR_NONE, "-eta");
+var sg_bad = 0;
+for (var sgi = 0; sgi < 18; sgi = sgi + 1) {
+    if (load64(PrtStep_p(st) + sgi * 8) != load64(PrtStep_p(st2) + sgi * 8)) {
+        if (_near(load64(PrtStep_p(st) + sgi * 8), load64(PrtStep_p(st2) + sgi * 8),
+            TOL14) == 0) { sg_bad = sg_bad + 1; }
+    }
+}
+assert_eq(sg_bad, 0, "P does not depend on the normal's sign");
+
+# At normal incidence s is arbitrary, and P must not notice, nor jump one step away from it.
+var n_k = _n3(_fd(2, 10), _fd(3, 10), _fd(9, 10));
+assert_eq(prt_reflect(n_k, n_k, ONE, _fd(43, 100), _fd(246, 100), st), PK_ERR_NONE, "mirror at normal incidence");
+assert_eq(fresnel_amplitudes(ONE, _fd(43, 100), _fd(246, 100), ONE, &fa), PK_ERR_NONE, "r at normal");
+var nbad = 0;
+for (var ni = 0; ni < 3; ni = ni + 1) {
+    for (var nj = 0; nj < 3; nj = nj + 1) {
+        # r_s (I - k k^T) - k k^T: the transverse field takes r_s and the ray turns round.
+        var kk = f64_mul(load64(n_k + ni * 8), load64(n_k + nj * 8));
+        var dl = Z;
+        if (ni == nj) { dl = ONE; }
+        var tr = f64_sub(dl, kk);
+        if (_near(prt_re(PrtStep_p(st), ni, nj), f64_sub(f64_mul(FresnelAmplitudes_rs_re(&fa), tr), kk),
+            TOL14) == 0) { nbad = nbad + 1; }
+        if (_near(prt_im(PrtStep_p(st), ni, nj), f64_mul(FresnelAmplitudes_rs_im(&fa), tr),
+            TOL14) == 0) { nbad = nbad + 1; }
+    }
+}
+assert_eq(nbad, 0, "normal incidence: P = r_s(I - kk^T) - kk^T, whatever s was chosen");
+var near_k = _n3(f64_add(RayVec3_x(n_k), 0x3CB0000000000000), RayVec3_y(n_k), RayVec3_z(n_k));
+assert_eq(prt_reflect(near_k, n_k, ONE, _fd(43, 100), _fd(246, 100), st2), PK_ERR_NONE, "one ulp off normal");
+var njump = 0;
+for (var nji = 0; nji < 18; nji = nji + 1) {
+    if (_near(load64(PrtStep_p(st) + nji * 8), load64(PrtStep_p(st2) + nji * 8), TOL13) == 0) { njump = njump + 1; }
+}
+assert_eq(njump, 0, "P is continuous across normal incidence");
+
+# Normalised vectors can have k.k just above 1, and a ray straight down a normal is a legal
+# ray: 343 of 2000 of these were refused as an impossible angle.
+var nn_bad = 0;
+var nn_i = 0;
+var nn_x = _fd(1, 7);
+while (nn_i < 400) {
+    nn_x = f64_mul(f64_from(3), f64_mul(nn_x, f64_sub(ONE, f64_mul(nn_x, _fd(9, 10)))));
+    nn_x = f64_sub(nn_x, f64_floor(nn_x));
+    var nn_y = f64_sub(f64_mul(nn_x, f64_from(7)), f64_floor(f64_mul(nn_x, f64_from(7))));
+    var nn_k = _n3(f64_add(nn_x, _fd(1, 10)), f64_add(nn_y, _fd(1, 10)), _fd(38, 100));
+    if (prt_reflect(nn_k, nn_k, ONE, _fd(43, 100), _fd(246, 100), st) != PK_ERR_NONE) { nn_bad = nn_bad + 1; }
+    if (prt_refract(nn_k, nn_k, ONE, GLASS, st) != PK_ERR_NONE) { nn_bad = nn_bad + 1; }
+    nn_i = nn_i + 1;
+}
+assert_eq(nn_bad, 0, "a ray straight down the normal is never refused");
+var rev_k = ray_vec3(0x3FE754DE3B5FDF65, 0x3FE235A454DB8060, 0x3FD855DD82EFDFA0);
+assert(f64_gt(_dot(rev_k, rev_k), ONE), "this k.k is just above 1");
+assert_eq(prt_reflect(rev_k, rev_k, ONE, _fd(43, 100), _fd(246, 100), st), PK_ERR_NONE, "and it is still a legal ray");
+
+# Near normal incidence k x eta loses digits as the angle falls: P and Q lost five of them
+# just above an earlier 2^-20 rad threshold for re-orthogonalising s.
+# Generic orientations: tidy vectors like (1, 2, 2)/3 hide this, their products rounding
+# little. Every halving from 0.1 rad to 1e-19 rad, each on eight normals.
+var tl_bad = 0;
+var tl_x = _fd(3, 11);
+var tl_b = 0;
+while (tl_b < 8) {
+    tl_x = f64_mul(f64_from(3), f64_mul(tl_x, f64_sub(ONE, f64_mul(tl_x, _fd(9, 10)))));
+    tl_x = f64_sub(tl_x, f64_floor(tl_x));
+    var tl_y = f64_sub(f64_mul(tl_x, f64_from(11)), f64_floor(f64_mul(tl_x, f64_from(11))));
+    var tl_eta = _n3(f64_sub(tl_x, F64_HALF), f64_sub(tl_y, _fd(3, 10)), _fd(7, 10));
+    var tl_w = _n3(RayVec3_z(tl_eta), f64_neg(RayVec3_x(tl_eta)), RayVec3_y(tl_eta));
+    var tl_d = _dot(tl_w, tl_eta);
+    var tl_u = _n3(f64_sub(RayVec3_x(tl_w), f64_mul(tl_d, RayVec3_x(tl_eta))),
+      f64_sub(RayVec3_y(tl_w), f64_mul(tl_d, RayVec3_y(tl_eta))), f64_sub(RayVec3_z(tl_w), f64_mul(tl_d,
+          RayVec3_z(tl_eta))));
+    var tl_th = _fd(1, 10);
+    var tl_i = 0;
+    while (tl_i < 60) {
+        var tl_k = _n3(f64_add(RayVec3_x(tl_eta), f64_mul(tl_th, RayVec3_x(tl_u))),
+          f64_add(RayVec3_y(tl_eta), f64_mul(tl_th, RayVec3_y(tl_u))), f64_add(RayVec3_z(tl_eta),
+            f64_mul(tl_th, RayVec3_z(tl_u))));
+        if (prt_refract(tl_k, tl_eta, ONE, GLASS, st) != PK_ERR_NONE) { tl_bad = tl_bad + 1; }
+        var tl_o = _stepk(st);
+        if (_pk(PrtStep_p(st), tl_k, tl_o, TOL14) == 0) { tl_bad = tl_bad + 1; }
+        if (_orth(PrtStep_q(st), TOL14) == 0) { tl_bad = tl_bad + 1; }
+        if (prt_reflect(tl_k, tl_eta, ONE, _fd(43, 100), _fd(246, 100), st) != PK_ERR_NONE) { tl_bad = tl_bad + 1; }
+        tl_o = _stepk(st);
+        if (_pk(PrtStep_p(st), tl_k, tl_o, TOL14) == 0) { tl_bad = tl_bad + 1; }
+        if (_orth(PrtStep_q(st), TOL14) == 0) { tl_bad = tl_bad + 1; }
+        tl_th = f64_mul(tl_th, _fd(1, 2));
+        tl_i = tl_i + 1;
+    }
+    tl_b = tl_b + 1;
+}
+assert_eq(tl_bad, 0, "P k = k' and Q stays orthogonal at every angle down to 1e-19 rad");
+
+# prt_surface takes its amplitudes on trust, but not its geometry.
+var sg_a = ray_vec3(_fd(3, 5), Z, _fd(4, 5));
+assert_eq(prt_surface(sg_a, nz, ray_vec3(Z, _fd(3, 5), _fd(4, 5)), ONE, Z, ONE, Z, 0, st), PK_ERR_INVALID_PARAMETER,
+  "k' out of the plane of incidence");
+assert_eq(prt_surface(sg_a, nz, sg_a, ONE, Z, ONE, Z, 1, st), PK_ERR_INVALID_PARAMETER,
+  "a reflection that does not reverse the normal component");
+assert_eq(prt_surface(sg_a, nz, ray_vec3(_fd(4, 5), Z, _fd(0 - 3, 5)), ONE, Z, ONE, Z, 1, st), PK_ERR_INVALID_PARAMETER,
+  "a reflection off the law of reflection");
+assert_eq(prt_surface(sg_a, nz, ray_vec3(_fd(3, 5), Z, _fd(0 - 4, 5)), ONE, Z, ONE, Z, 0, st), PK_ERR_INVALID_PARAMETER,
+  "a refraction that comes back");
+assert_eq(prt_surface(sg_a, nz, sg_a, ONE, Z, ONE, Z, 0, st), PK_ERR_NONE, "a straight-through surface is fine");
+assert_eq(prt_surface(sg_a, nz, ray_vec3(_fd(3, 5), Z, _fd(0 - 4, 5)), ONE, Z, ONE, Z, 1, st), PK_ERR_NONE,
+  "and the true mirror direction is fine");
+
+# Near normal the tangential directions are tiny, so comparing them unnormalised let a k'
+# 37 degrees out of the plane of incidence through at 1e-12 rad.
+var sg_n = _n3(_fd(1, 1000000000000), Z, ONE);
+assert_eq(prt_surface(sg_n, nz, ray_vec3(Z, _fd(3, 5), _fd(4, 5)), F64_HALF, Z, F64_HALF, Z, 0, st),
+  PK_ERR_INVALID_PARAMETER,
+  "k' out of plane, 1e-12 rad off normal");
+var sg_n2 = _n3(_fd(9, 10000000), Z, ONE);
+var sg_o2 = _n3(_fd(9, 10000000), _fd(9, 10000000), ONE);
+assert_eq(prt_surface(sg_n2, nz, sg_o2, F64_HALF, Z, F64_HALF, Z, 0, st), PK_ERR_INVALID_PARAMETER,
+  "k' 45 degrees round the normal, 9e-7 rad off it");
+# ... and every ray the library itself sends is accepted back, down to the same angles.
+var lg_bad = 0;
+var lg_th = _fd(3, 10);
+var lg_i = 0;
+while (lg_i < 56) {
+    var lg_k = _n3(f64_mul(lg_th, _fd(3, 5)), f64_mul(lg_th, _fd(4, 5)), ONE);
+    if (prt_refract(lg_k, nz, ONE, GLASS, st2) != PK_ERR_NONE) { lg_bad = lg_bad + 1; }
+    if (prt_surface(lg_k, nz, _stepk(st2), ONE, Z, ONE, Z, 0, st) != PK_ERR_NONE) { lg_bad = lg_bad + 1; }
+    if (prt_reflect(lg_k, nz, ONE, GLASS, Z, st2) != PK_ERR_NONE) { lg_bad = lg_bad + 1; }
+    if (prt_surface(lg_k, nz, _stepk(st2), ONE, Z, ONE, Z, 1, st) != PK_ERR_NONE) { lg_bad = lg_bad + 1; }
+    lg_th = f64_mul(lg_th, _fd(1, 2));
+    lg_i = lg_i + 1;
+}
+assert_eq(lg_bad, 0, "prt_surface accepts what prt_refract and prt_reflect send, at every angle");
+
+# ... and at every index ratio, in general position: a guard that refuses a legal ray is as
+# wrong as one that passes an illegal one.
+var lr_bad = 0;
+var lr_x = _fd(2, 7);
+var lr_i = 0;
+while (lr_i < 1500) {
+    lr_x = f64_mul(f64_from(3), f64_mul(lr_x, f64_sub(ONE, f64_mul(lr_x, _fd(9, 10)))));
+    lr_x = f64_sub(lr_x, f64_floor(lr_x));
+    var lr_a = f64_sub(f64_mul(lr_x, f64_from(13)), f64_floor(f64_mul(lr_x, f64_from(13))));
+    var lr_b = f64_sub(f64_mul(lr_x, f64_from(17)), f64_floor(f64_mul(lr_x, f64_from(17))));
+    var lr_c = f64_sub(f64_mul(lr_x, f64_from(23)), f64_floor(f64_mul(lr_x, f64_from(23))));
+    var lr_k = _n3(f64_sub(lr_x, F64_HALF), f64_sub(lr_a, F64_HALF), f64_add(lr_b, _fd(1, 10)));
+    var lr_e = _n3(f64_sub(lr_a, F64_HALF), f64_sub(lr_c, F64_HALF), f64_add(lr_x, _fd(1, 10)));
+    # n1/n2 from 1/100 to 100, on a log scale.
+    var lr_r = f64_exp(f64_mul(f64_sub(f64_mul(lr_c, F64_TWO), ONE), f64_ln(f64_from(100))));
+    var lr_st = prt_refract(lr_k, lr_e, lr_r, ONE, st2);
+    if (lr_st == PK_ERR_NONE) {
+        if (prt_surface(lr_k, lr_e, _stepk(st2), ONE, Z, ONE, Z, 0, st) != PK_ERR_NONE) { lr_bad = lr_bad + 1; }
+        if (_near(_dot(_stepk(st2), _stepk(st2)), ONE, TOL14) == 0) { lr_bad = lr_bad + 1; }
+    } else {
+        if ((lr_st != PK_ERR_TIR) & (lr_st != PK_ERR_INVALID_ANGLE)) { lr_bad = lr_bad + 1; }
+    }
+    if (prt_reflect(lr_k, lr_e, lr_r, ONE, Z, st2) == PK_ERR_NONE) {
+        if (prt_surface(lr_k, lr_e, _stepk(st2), ONE, Z, ONE, Z, 1, st) != PK_ERR_NONE) { lr_bad = lr_bad + 1; }
+    } else { lr_bad = lr_bad + 1; }
+    lr_i = lr_i + 1;
+}
+assert_eq(lr_bad, 0, "no legal ray refused, at index ratios from 1/100 to 100");
+
+# A direction a step hands out is a unit vector, so that it can be handed back. It was left at
+# whatever length the arithmetic gave: a light guide fed its own k' drifted out of the unit
+# test and was refused, the first time at bounce 1691.
+var bn_eta_a = _n3(_fd(3, 100), _fd(0 - 2, 100), ONE);
+var bn_eta_b = _n3(_fd(0 - 1, 100), _fd(4, 100), ONE);
+var bn_k = _n3(ONE, _fd(1, 3), _fd(1, 2));
+var bn_bad = 0;
+var bn_i = 0;
+while (bn_i < 6000) {
+    var bn_e = bn_eta_a;
+    if ((bn_i & 1) == 1) { bn_e = bn_eta_b; }
+    if (prt_reflect(bn_k, bn_e, GLASS, ONE, Z, st) != PK_ERR_NONE) { bn_bad = bn_bad + 1; }
+    bn_k = _stepk(st);
+    bn_i = bn_i + 1;
+}
+assert_eq(bn_bad, 0, "6000 reflections, each fed the last one's k'");
+_assert_near(_dot(bn_k, bn_k), ONE, TOL14, "and k' is still a unit vector");
+var ov_k = ray_vec3(Z, Z, ONE);
+var ov_eta = ray_vec3(Z, Z, 0x3FF0000000000709);      # 1 + 4e-13, inside the unit test
+assert_eq(prt_reflect(ov_k, ov_eta, ONE, GLASS, Z, st), PK_ERR_NONE, "a normal at the edge of the unit test");
+_assert_near(_dot(_stepk(st), _stepk(st)), ONE, TOL14, "k' is unit even so");
+# A large index step: k' = ratio*t - cos_t*eta has to come out unit too. n1/n2 = 100 left
+# 2143 of 3000 too long to pass back in.
+var hr_bad = 0;
+var hr_i = 0;
+while (hr_i < 200) {
+    var hr_s = _fd(hr_i, 25000);      # sin(theta_i) up to the critical 0.01 of 100:1
+    var hr_k = ray_vec3(f64_mul(hr_s, _fd(3, 5)), f64_mul(hr_s, _fd(4, 5)), f64_sqrt(f64_sub(ONE, _sq(hr_s))));
+    if (prt_refract(hr_k, nz, f64_from(100), ONE, st) != PK_ERR_NONE) { hr_bad = hr_bad + 1; }
+    if (_near(_dot(_stepk(st), _stepk(st)), ONE, TOL14) == 0) { hr_bad = hr_bad + 1; }
+    # Snell's invariant, on the tangential components.
+    var hr_t = f64_sqrt(f64_add(_sq(PrtStep_kx(st)), _sq(PrtStep_ky(st))));
+    if (_near(hr_t, f64_mul(f64_from(100), hr_s), TOL13) == 0) { hr_bad = hr_bad + 1; }
+    hr_i = hr_i + 1;
+}
+assert_eq(hr_bad, 0, "a 100:1 index step gives a unit k' that keeps n sin(theta)");
+
+# ── Fresnel relations ────────
+test_group("fresnel_amplitudes relations");
+
+var rel_bad = 0;
+var rel_i = 1;
+var cg = complex_gold_550nm();
+while (rel_i < 60) {
+    var c_ = _fd(rel_i, 60);
+    var th = ganita_f64_acos(c_);
+    assert_eq(fresnel_amplitudes(ONE, ComplexMedium_n(cg), ComplexMedium_k(cg), c_, &fa), PK_ERR_NONE, "gold sweep");
+    var rs2 = f64_add(_sq(FresnelAmplitudes_rs_re(&fa)), _sq(FresnelAmplitudes_rs_im(&fa)));
+    var rp2 = f64_add(_sq(FresnelAmplitudes_rp_re(&fa)), _sq(FresnelAmplitudes_rp_im(&fa)));
+    var ts2 = f64_mul(FresnelAmplitudes_flux_s(&fa), f64_add(_sq(FresnelAmplitudes_ts_re(&fa)),
+        _sq(FresnelAmplitudes_ts_im(&fa))));
+    var tp2 = f64_mul(FresnelAmplitudes_flux_p(&fa), f64_add(_sq(FresnelAmplitudes_tp_re(&fa)),
+        _sq(FresnelAmplitudes_tp_im(&fa))));
+    if (_near(f64_add(rs2, ts2), ONE, TOL13) == 0) { rel_bad = rel_bad + 1; }
+    if (_near(f64_add(rp2, tp2), ONE, TOL13) == 0) { rel_bad = rel_bad + 1; }
+    # Two independent routes to the same reflectance.
+    if (_near(rs2, fresnel_s_complex(ONE, cg, th), TOL13) == 0) { rel_bad = rel_bad + 1; }
+    if (_near(rp2, fresnel_p_complex(ONE, cg, th), TOL13) == 0) { rel_bad = rel_bad + 1; }
+    rel_i = rel_i + 1;
+}
+assert_eq(rel_bad, 0, "gold: R + T = 1 at every angle, |r|^2 = fresnel_*_complex");
+
+# multilayer_rta with no layers is the bare interface, through a transfer matrix.
+var rta[72];
+var t_ang = _rad(f64_from(50));
+assert_eq(multilayer_rta(_fd(55, 100000000), t_ang, ONE, _fd(96, 100), _fd(669, 100), 0, 0, &rta), PK_ERR_NONE,
+  "multilayer_rta");
+assert_eq(fresnel_amplitudes(ONE, _fd(96, 100), _fd(669, 100), f64_cos(t_ang), &fa), PK_ERR_NONE, "aluminum");
+_assert_near(f64_add(_sq(FresnelAmplitudes_rs_re(&fa)), _sq(FresnelAmplitudes_rs_im(&fa))),
+  AbsorbingFilmResult_r_s(&rta), TOL13, "R_s = multilayer_rta");
+_assert_near(f64_add(_sq(FresnelAmplitudes_rp_re(&fa)), _sq(FresnelAmplitudes_rp_im(&fa))),
+  AbsorbingFilmResult_r_p(&rta), TOL13, "R_p = multilayer_rta");
+_assert_near(f64_mul(FresnelAmplitudes_flux_s(&fa), f64_add(_sq(FresnelAmplitudes_ts_re(&fa)),
+      _sq(FresnelAmplitudes_ts_im(&fa)))),
+  AbsorbingFilmResult_t_s(&rta), TOL13, "T_s = multilayer_rta");
+_assert_near(f64_mul(FresnelAmplitudes_flux_p(&fa), f64_add(_sq(FresnelAmplitudes_tp_re(&fa)),
+      _sq(FresnelAmplitudes_tp_im(&fa)))),
+  AbsorbingFilmResult_t_p(&rta), TOL13, "T_p = multilayer_rta");
+
+# The real coefficients of fresnel_s / fresnel_p, on a dielectric.
+var d_c = _fd(4, 5);
+var d_t = f64_sqrt(f64_sub(ONE, f64_mul(_sq(f64_div(ONE, GLASS)), f64_sub(ONE, _sq(d_c)))));
+assert_eq(fresnel_amplitudes(ONE, GLASS, Z, d_c, &fa), PK_ERR_NONE, "dielectric");
+_assert_near(_sq(FresnelAmplitudes_rs_re(&fa)), fresnel_s(ONE, GLASS, d_c, d_t), TOL13, "R_s = fresnel_s");
+_assert_near(_sq(FresnelAmplitudes_rp_re(&fa)), fresnel_p(ONE, GLASS, d_c, d_t), TOL13, "R_p = fresnel_p");
+assert_eq(FresnelAmplitudes_rs_im(&fa), 0, "a dielectric below critical is real, r_s");
+assert_eq(FresnelAmplitudes_tp_im(&fa), 0, "a dielectric below critical is real, t_p");
+_assert_near(FresnelAmplitudes_flux_s(&fa), FresnelAmplitudes_flux_p(&fa), TOL14, "flux_s = flux_p on a dielectric");
+
+# Brewster: r_p vanishes. Total internal reflection: unit modulus, no flux. The critical
+# angle: r_s = r_p = 1. A perfect conductor: r_s = -1, r_p = +1.
+var br = brewster_angle(ONE, GLASS);
+assert_eq(fresnel_amplitudes(ONE, GLASS, Z, f64_cos(br), &fa), PK_ERR_NONE, "Brewster");
+_assert_near(FresnelAmplitudes_rp_re(&fa), Z, TOL14, "r_p = 0 at Brewster");
+assert_eq(fresnel_amplitudes(GLASS, ONE, Z, _fd(1, 3), &fa), PK_ERR_NONE, "TIR");
+_assert_near(f64_add(_sq(FresnelAmplitudes_rs_re(&fa)), _sq(FresnelAmplitudes_rs_im(&fa))), ONE, TOL14,
+  "|r_s| = 1 past critical");
+_assert_near(f64_add(_sq(FresnelAmplitudes_rp_re(&fa)), _sq(FresnelAmplitudes_rp_im(&fa))), ONE, TOL14,
+  "|r_p| = 1 past critical");
+assert_eq(FresnelAmplitudes_flux_s(&fa), 0, "no flux past critical, s");
+assert_eq(FresnelAmplitudes_flux_p(&fa), 0, "no flux past critical, p");
+# n1 = 2, n2 = 1: sin(critical) = 1/2, and cos^2 = 3/4 lands q^2 on exactly 0 here.
+var crit_c = f64_sqrt(_fd(3, 4));
+assert_eq(fresnel_amplitudes(F64_TWO, ONE, Z, crit_c, &fa), PK_ERR_NONE, "critical");
+_assert_near(FresnelAmplitudes_rs_re(&fa), ONE, _fd(1, 10000000), "r_s = 1 at critical");
+_assert_near(FresnelAmplitudes_rp_re(&fa), ONE, _fd(1, 10000000), "r_p = 1 at critical");
+assert_eq(fresnel_amplitudes(ONE, ONE, 0x4415AF1D78B58C40, _fd(1, 2), &fa), PK_ERR_NONE, "k = 1e20");
+_assert_near(FresnelAmplitudes_rs_re(&fa), f64_neg(ONE), TOL12, "perfect conductor: r_s = -1");
+_assert_near(FresnelAmplitudes_rp_re(&fa), ONE, TOL12, "perfect conductor: r_p = +1");
+
+# ── Retardance and diattenuation ────────
+test_group("prt retardance and diattenuation");
+
+fn _chain_new() { return prt_new(); }
+var cp = prt_new();
+var cq = prt_new();
+fn _push(step) {
+    assert_eq(prt_multiply(PrtStep_p(step), cp, cp), PK_ERR_NONE, "chain P");
+    assert_eq(prt_multiply(PrtStep_q(step), cq, cq), PK_ERR_NONE, "chain Q");
+    return 0;
+}
+fn _reset() {
+    prt_identity(cp);
+    prt_identity(cq);
+    return 0;
+}
+
+# An empty path, and a nonpolarizing one, do nothing.
+var _r0 = _reset();
+assert_eq(prt_diattenuation(cp, cq, kz), 0, "identity: D = 0");
+assert_eq(prt_retardance(cp, cq, kz), 0, "identity: retardance 0");
+assert_eq(_is_nan(prt_retardance(0, cq, kz)), 1, "retardance: null P");
+assert_eq(_is_nan(prt_diattenuation(cp, 0, kz)), 1, "diattenuation: null Q");
+assert_eq(_is_nan(prt_retardance(cp, cq, bad)), 1, "retardance: k not unit");
+assert_eq(prt_jones(cp, cq, kz, 0), PK_ERR_INVALID_PARAMETER, "jones: null out");
+
+# Born & Wolf: the phase between s and p in total internal reflection,
+#   tan(delta/2) = cos(th) sqrt(sin^2(th) - n^2)/sin^2(th), n = n2/n1.
+# Measured from an ideal mirror, one reflection reads pi - delta and two read 2 delta.
+fn _bw(th, n) {
+    var s = f64_sin(th);
+    var c = f64_cos(th);
+    var t = f64_div(f64_mul(c, f64_sqrt(f64_sub(_sq(s), _sq(n)))), _sq(s));
+    return f64_mul(F64_TWO, ganita_f64_atan2(t, ONE));
+}
+var GL151 = _fd(151, 100);
+var rh_n = f64_div(ONE, GL151);
+var rh_top = ray_vec3(Z, Z, ONE);
+var rh_bad = 0;
+var rh_deg = 42;
+while (rh_deg < 86) {
+    var th_ = _rad(f64_from(rh_deg));
+    var d_ = _bw(th_, rh_n);
+    var kin = ray_vec3(f64_sin(th_), Z, f64_cos(th_));
+    assert_eq(prt_reflect(kin, rh_top, GL151, ONE, Z, st), PK_ERR_NONE, "rhomb face 1");
+    var _p = _reset();
+    _p = _push(st);
+    if (_near(prt_retardance(cp, cq, kin), f64_sub(F64_PI, d_), TOL13) == 0) { rh_bad = rh_bad + 1; }
+    if (_near(prt_diattenuation(cp, cq, kin), Z, TOL14) == 0) { rh_bad = rh_bad + 1; }
+    assert_eq(prt_reflect(_stepk(st), rh_top, GL151, ONE, Z, st2), PK_ERR_NONE, "rhomb face 2");
+    _p = _push(st2);
+    if (_near(prt_retardance(cp, cq, kin), f64_mul(F64_TWO, d_), TOL13) == 0) { rh_bad = rh_bad + 1; }
+    rh_deg = rh_deg + 3;
+}
+assert_eq(rh_bad, 0, "TIR: one reflection reads pi - delta, two read 2 delta (Born & Wolf)");
+
+# The Fresnel rhomb: n = 1.51 at 54 deg 37', two reflections, a quarter wave.
+var fr_th = _rad(f64_add(f64_from(54), _fd(37, 60)));
+var fr_k = ray_vec3(f64_sin(fr_th), Z, f64_cos(fr_th));
+assert_eq(prt_reflect(fr_k, rh_top, GL151, ONE, Z, st), PK_ERR_NONE, "rhomb 1");
+var _f = _reset();
+_f = _push(st);
+assert_eq(prt_reflect(_stepk(st), rh_top, GL151, ONE, Z, st2), PK_ERR_NONE, "rhomb 2");
+_f = _push(st2);
+_assert_near(prt_retardance(cp, cq, fr_k), F64_PI_2, _rad(_fd(1, 5)), "a Fresnel rhomb is a quarter wave");
+
+# A mirror at normal incidence is no retarder, the point of Q's -1: and P alone would say pi.
+_f = _reset();
+assert_eq(prt_reflect(kz, nz, ONE, _fd(43, 100), _fd(246, 100), st), PK_ERR_NONE, "normal gold");
+_f = _push(st);
+_assert_near(prt_retardance(cp, cq, kz), Z, TOL14, "normal incidence on metal: no retardance");
+_assert_near(prt_diattenuation(cp, cq, kz), Z, TOL14, "normal incidence on metal: no diattenuation");
+# Total internal reflection at the critical angle inverts one axis: Lam's half wave.
+var cr_th = ganita_f64_asin(_fd(1, 2));
+var cr_k = ray_vec3(f64_sin(cr_th), Z, f64_cos(cr_th));
+_f = _reset();
+assert_eq(prt_reflect(cr_k, rh_top, F64_TWO, ONE, Z, st), PK_ERR_NONE, "critical");
+_f = _push(st);
+_assert_near(prt_retardance(cp, cq, cr_k), F64_PI, _fd(1, 1000000), "critical-angle TIR reads a half wave");
+
+# Reflection off a metal: |arg(-r_p/r_s)| and (R_s - R_p)/(R_s + R_p).
+var m_th = _rad(f64_from(60));
+var m_k = ray_vec3(f64_sin(m_th), Z, f64_cos(m_th));
+assert_eq(fresnel_amplitudes(ONE, _fd(43, 100), _fd(246, 100), f64_cos(m_th), &fa), PK_ERR_NONE, "gold 60");
+var m_rs = f64_add(_sq(FresnelAmplitudes_rs_re(&fa)), _sq(FresnelAmplitudes_rs_im(&fa)));
+var m_rp = f64_add(_sq(FresnelAmplitudes_rp_re(&fa)), _sq(FresnelAmplitudes_rp_im(&fa)));
+# -r_p conj(r_s)
+var m_re = f64_neg(f64_add(f64_mul(FresnelAmplitudes_rp_re(&fa), FresnelAmplitudes_rs_re(&fa)),
+    f64_mul(FresnelAmplitudes_rp_im(&fa), FresnelAmplitudes_rs_im(&fa))));
+var m_im = f64_neg(f64_sub(f64_mul(FresnelAmplitudes_rp_im(&fa), FresnelAmplitudes_rs_re(&fa)),
+    f64_mul(FresnelAmplitudes_rp_re(&fa), FresnelAmplitudes_rs_im(&fa))));
+_f = _reset();
+assert_eq(prt_reflect(m_k, rh_top, ONE, _fd(43, 100), _fd(246, 100), st), PK_ERR_NONE, "gold mirror");
+_f = _push(st);
+_assert_near(prt_retardance(cp, cq, m_k), f64_abs(ganita_f64_atan2(m_im, m_re)), TOL13, "metal retardance");
+_assert_near(prt_diattenuation(cp, cq, m_k), f64_div(f64_abs(f64_sub(m_rs, m_rp)), f64_add(m_rs, m_rp)), TOL14,
+  "metal diattenuation");
+
+# At Brewster the reflection is a perfect polarizer: D = 1, and a J with a zero singular value
+# has no retardance to report. It must not answer a number.
+_f = _reset();
+var b_k = ray_vec3(f64_sin(br), Z, f64_cos(br));
+assert_eq(prt_surface(b_k, rh_top, _mirror(b_k, rh_top), f64_neg(_fd(1, 3)), Z, Z, Z, 1, st), PK_ERR_NONE,
+  "a Brewster-like surface");
+_f = _push(st);
+assert_eq(prt_diattenuation(cp, cq, b_k), ONE, "a perfect polarizer has D = 1");
+assert_eq(_is_nan(prt_retardance(cp, cq, b_k)), 1, "and no retardance: NaN, not a number");
+_f = _reset();
+assert_eq(prt_surface(b_k, rh_top, _mirror(b_k, rh_top), Z, Z, Z, Z, 1, st), PK_ERR_NONE,
+  "a surface that passes nothing");
+_f = _push(st);
+assert_eq(_is_nan(prt_diattenuation(cp, cq, b_k)), 1, "a path that passes nothing has no D");
+
+# ... and in a general orientation, at any amplitude. P's elements carry k' k^T at unit size,
+# so its rounding is absolute: a zero singular value at 1e-5 scale read as retardance 2.1416,
+# because a guard relative to the larger singular value passed the noise.
+var gv_k = _n3(_fd(3, 10), _fd(0 - 4, 10), _fd(7, 10));
+var gv_eta = _n3(_fd(1, 10), _fd(5, 10), _fd(8, 10));
+var gv_o = _mirror(gv_k, gv_eta);
+var gv_bad = 0;
+var gv_a = _fd(1, 10);
+var gv_i = 0;
+while (gv_i < 12) {
+    assert_eq(prt_surface(gv_k, gv_eta, gv_o, f64_mul(gv_a, f64_cos(ONE)), f64_mul(gv_a, f64_sin(ONE)), Z, Z, 1, st),
+      PK_ERR_NONE, "a polarizer");
+    _f = _reset();
+    _f = _push(st);
+    if (_is_nan(prt_retardance(cp, cq, gv_k)) == 0) { gv_bad = gv_bad + 1; }
+    gv_a = f64_mul(gv_a, _fd(1, 10));
+    gv_i = gv_i + 1;
+}
+assert_eq(gv_bad, 0, "a singular J has no retardance, at any amplitude and orientation");
+# Brewster's angle between media nearly alike, where r_s is itself small and r_p is rounding.
+fn _brew(n2_) {
+    var th = brewster_angle(ONE, n2_);
+    var k = _n3(f64_sin(th), Z, f64_cos(th));
+    var _x = _reset();
+    assert_eq(prt_reflect(k, rh_top, ONE, n2_, Z, st), PK_ERR_NONE, "Brewster reflection");
+    _x = _push(st);
+    return prt_retardance(cp, cq, k);
+}
+assert_eq(_is_nan(_brew(GLASS)), 1, "Brewster reflection from glass has no retardance");
+assert_eq(_is_nan(_brew(_fd(10001, 10000))), 1, "nor from n = 1.0001");
+assert_eq(_is_nan(_brew(_fd(1000001, 1000000))), 1, "nor from n = 1.000001");
+# Amplitudes on trust can be enormous, and J^H J overflows long before P does. An overflow is
+# not a polarizer: f64_min(NaN, 1) is 1, so a clamp read D = 1 here, and retardance 1.5708.
+fn _huge(a, b) {
+    assert_eq(prt_surface(sg_k, sg_eta, _mirror(sg_k, sg_eta), f64_neg(a), Z, b, Z, 1, st), PK_ERR_NONE,
+      "huge amplitudes");
+    var _x = _reset();
+    _x = _push(st);
+    return 0;
+}
+var H200 = 0x6974E718D7D7625A;          # 1e200
+var H80 = 0x508AFCEF51F0FB5F;           # 1e80
+var _h = _huge(H200, H200);
+_assert_near(prt_diattenuation(cp, cq, sg_k), Z, TOL13, "D is scale-free at 1e200");
+_assert_near(prt_retardance(cp, cq, sg_k), Z, TOL13, "retardance is scale-free at 1e200");
+_h = _huge(H80, f64_mul(H80, F64_HALF));
+_assert_near(prt_diattenuation(cp, cq, sg_k), _fd(3, 5), TOL13, "D = 0.6 at 1e80");
+_h = _huge(0x7FEFFFFFFFFFFFFF, 0x7FEFFFFFFFFFFFFF);
+# At the very top of the range P itself may or may not overflow, and either a true answer or
+# NaN is honest. What is not is the D = 1 a NaN clamped to.
+var _hd = prt_diattenuation(cp, cq, sg_k);
+assert((_is_nan(_hd) == 1) | (f64_lt(_hd, TOL13) == 1), "the largest double: 0 or NaN, never a fabricated D = 1");
+# D is a fraction, rounding included.
+assert(f64_le(prt_diattenuation(cp, cq, ray_vec3(f64_sin(br), Z, f64_cos(br))), ONE), "D never exceeds 1");
+# prt_jones may write over P.
+var jl_p = prt_new();
+var jl_q = prt_new();
+_f = _set(jl_p, 0, 0, _fd(3, 10), _fd(1, 10));
+_f = _set(jl_p, 1, 1, _fd(7, 10), _fd(0 - 2, 10));
+_f = _set(jl_p, 0, 1, _fd(1, 10), _fd(1, 5));
+var jl_out[64];
+assert_eq(prt_jones(jl_p, jl_q, kz, &jl_out), PK_ERR_NONE, "jones to a buffer");
+assert_eq(prt_jones(jl_p, jl_q, kz, jl_p), PK_ERR_NONE, "jones over P");
+var jl_bad = 0;
+for (var jli = 0; jli < 8; jli = jli + 1) {
+    if (load64(jl_p + jli * 8) != load64(&jl_out + jli * 8)) { jl_bad = jl_bad + 1; }
+}
+assert_eq(jl_bad, 0, "prt_jones may be given P as its output");
+
+# Two crossed ideal fold mirrors: z to y to x. Nothing physical happens (r_s = -1, r_p = +1
+# at each), so D and retardance are 0, and the rotation is all Q: x to y, y to z, z to x, a
+# third of a turn about (1, 1, 1). This is why Q exists: P alone reads a rotation.
+var fk0 = ray_vec3(Z, Z, ONE);
+var fn1 = _n3(Z, ONE, f64_neg(ONE));
+var fk1 = _mirror(fk0, fn1);
+var fn2 = _n3(ONE, f64_neg(ONE), Z);
+var fk2 = _mirror(fk1, fn2);
+_f = _reset();
+assert_eq(prt_surface(fk0, fn1, fk1, f64_neg(ONE), Z, ONE, Z, 1, st), PK_ERR_NONE, "fold 1");
+_f = _push(st);
+assert_eq(prt_surface(fk1, fn2, fk2, f64_neg(ONE), Z, ONE, Z, 1, st), PK_ERR_NONE, "fold 2");
+_f = _push(st);
+_assert_near(prt_retardance(cp, cq, fk0), Z, TOL14, "ideal folds: no retardance");
+_assert_near(prt_diattenuation(cp, cq, fk0), Z, TOL14, "ideal folds: no diattenuation");
+_assert_near(prt_re(cq, 1, 0), ONE, TOL14, "Q takes x to y");
+_assert_near(prt_re(cq, 2, 1), ONE, TOL14, "Q takes y to z");
+_assert_near(prt_re(cq, 0, 2), ONE, TOL14, "Q takes z to x");
+_assert_near(_det(cq), ONE, TOL14, "two reflections are a proper rotation");
+
+# Lam's corner cube: three reflections at the critical angle, r_s = r_p = 1, return the ray
+# and turn a linear state by a path-dependent multiple of 120 degrees. cos^2 = 1/3 needs
+# n1 sin = n2. The ray reverses, so the map is a reflection in the plane transverse to k
+# (det -1), and a rotation only in the right-handed exit frame (u, -v) looking back along the
+# ray: there x, y, z reads +-60 degrees and y, x, z reads 180, which for a linear state,
+# defined mod 180, are her 240, 120 and 0.
+var cc_n1 = f64_div(ONE, f64_sqrt(_fd(2, 3)));
+var cc_k = _n3(f64_neg(ONE), f64_neg(ONE), f64_neg(ONE));
+var cc_e1 = ray_vec3(ONE, Z, Z);
+var cc_e2 = ray_vec3(Z, ONE, Z);
+var cc_e3 = ray_vec3(Z, Z, ONE);
+var cc_u = _n3(Z, ONE, f64_neg(ONE));
+var cc_v = ray_vec3(
+  f64_sub(f64_mul(RayVec3_y(cc_k), RayVec3_z(cc_u)), f64_mul(RayVec3_z(cc_k), RayVec3_y(cc_u))),
+  f64_sub(f64_mul(RayVec3_z(cc_k), RayVec3_x(cc_u)), f64_mul(RayVec3_x(cc_k), RayVec3_z(cc_u))),
+  f64_sub(f64_mul(RayVec3_x(cc_k), RayVec3_y(cc_u)), f64_mul(RayVec3_y(cc_k), RayVec3_x(cc_u))));
+fn _quad(m, a, b) {
+    var s = Z;
+    for (var i = 0; i < 3; i = i + 1) {
+        for (var j = 0; j < 3; j = j + 1) {
+            s = f64_add(s, f64_mul(load64(a + i * 8), f64_mul(prt_re(m, i, j), load64(b + j * 8))));
+        }
+    }
+    return s;
+}
+# cos of the rotation in the exit frame: (u.P u - v.P v)/2.
+fn _cube(f1, f2, f3) {
+    var _x = _reset();
+    assert_eq(prt_reflect(cc_k, f1, cc_n1, ONE, Z, st), PK_ERR_NONE, "cube face 1");
+    _x = _push(st);
+    assert_eq(prt_reflect(_stepk(st), f2, cc_n1, ONE, Z, st2), PK_ERR_NONE, "cube face 2");
+    _x = _push(st2);
+    assert_eq(prt_reflect(_stepk(st2), f3, cc_n1, ONE, Z, st), PK_ERR_NONE, "cube face 3");
+    _x = _push(st);
+    assert(_near(PrtStep_kz(st), f64_neg(RayVec3_z(cc_k)), TOL14), "the ray comes back");
+    return f64_mul(F64_HALF, f64_sub(_quad(cp, cc_u, cc_u), _quad(cp, cc_v, cc_v)));
+}
+_assert_near(_cube(cc_e1, cc_e2, cc_e3), F64_HALF, _fd(1, 100000), "corner cube x, y,
+  z: 60 degrees in the exit frame");
+_assert_near(_cube(cc_e2, cc_e1, cc_e3), f64_neg(ONE), _fd(1, 100000), "corner cube y, x,
+  z: 180 degrees in the exit frame");
+
+# Whole paths against the oracle's fields and numpy's SVD.
+var _ck = 0;
+var _ck0 = 0;
+fn _chain_begin(lab, x, y, z) {
+    var _x = _reset();
+    _ck0 = ray_vec3(x, y, z);
+    _ck = _ck0;
+    return 0;
+}
+fn _chain_step(reflect, ex, ey, ez, n1, n2, k2) {
+    var eta = ray_vec3(ex, ey, ez);
+    if (reflect == 1) {
+        assert_eq(prt_reflect(_ck, eta, n1, n2, k2, st), PK_ERR_NONE, "chain reflection");
+    } else {
+        assert_eq(prt_refract(_ck, eta, n1, n2, st), PK_ERR_NONE, "chain refraction");
+    }
+    var _x = _push(st);
+    _ck = _stepk(st);
+    return 0;
+}
+fn _chain_end(ret, diat, kx, ky, kz_) {
+    _assert_near(prt_retardance(cp, cq, _ck0), ret, TOL12, "path retardance = numpy's SVD");
+    _assert_near(prt_diattenuation(cp, cq, _ck0), diat, TOL12, "path diattenuation = numpy's SVD");
+    assert(_near(RayVec3_x(_ck), kx, TOL13) & _near(RayVec3_y(_ck), ky, TOL13) & _near(RayVec3_z(_ck), kz_,
+        TOL13), "path k'");
+    return 0;
+}
+# crossed gold folds: retardance 0.000000000000 rad, diattenuation 0.000000000000
+_chain_begin("crossed gold folds", 0x0000000000000000, 0x0000000000000000, 0x3FF0000000000000);
+_chain_step(1, 0x0000000000000000, 0x3FE6A09E667F3BCD, 0xBFE6A09E667F3BCD, 0x3FF0000000000000,
+  0x3FDB851EB851EB85, 0x4003AE147AE147AE);
+_chain_step(1, 0x3FE6A09E667F3BCD, 0xBFE6A09E667F3BCD, 0x0000000000000000, 0x3FF0000000000000,
+  0x3FDB851EB851EB85, 0x4003AE147AE147AE);
+_chain_end(0x3C9BFF8AB8DC0B12, 0x0000000000000000, 0x3FF0000000000000, 0x0000000000000000, 0x0000000000000000);
+# skew refract, aluminum, refract: retardance 0.414732541360 rad, diattenuation 0.051733888941
+_chain_begin("skew refract, aluminum, refract", 0x3FD3CDA44714C1B9, 0xBFCA6785B41BACF7, 0x3FEDB4766A9F2296);
+_chain_step(0, 0x3FB9B79FBB28888B, 0x3FC9B79FBB28888B, 0x3FEF2EA4DFBABF28, 0x3FF0000000000000,
+  0x3FF8000000000000, 0x0000000000000000);
+_chain_step(1, 0xBFDFCD4669F1B2F1, 0x3FD642E47D5C63A8, 0x3FE97105218E28C1, 0x3FF8000000000000,
+  0x3FEEB851EB851EB8, 0x401AC28F5C28F5C3);
+_chain_step(0, 0x3FEBC87F556259D2, 0xBFDFC065B07308F4, 0xBF7DB9BBDECDD119, 0x3FF8000000000000,
+  0x3FF0000000000000, 0x0000000000000000);
+_chain_end(0x3FDA8AFA5B6E9A71, 0x3FAA7CDD42309E4D, 0x3FEB9D4F6057F1D6, 0xBFE01F46FCAD08E1, 0xBFA3B1F06A9BE3D6);
+# skew silver folds: retardance 0.958921429589 rad, diattenuation 0.013689975799
+_chain_begin("skew silver folds", 0x3FB8FBA8A1BF6F96, 0x3FC8FBA8A1BF6F96, 0x3FEF3A92CA2F4B7C);
+_chain_step(1, 0x3FC61D72B7978671, 0x3FE8E1210E8A773F, 0xBFE359C460A495A2, 0x3FF0000000000000,
+  0x3FAE353F7CED9168, 0x400AA3D70A3D70A4);
+_chain_step(1, 0xBFE9DC22BE484458, 0x3FE02995B6ED2AB7, 0x3FD3651A0EB63341, 0x3FF0000000000000,
+  0x3FAE353F7CED9168, 0x400AA3D70A3D70A4);
+_chain_step(1, 0x3FD3CDA44714C1B9, 0xBFCA6785B41BACF8, 0x3FEDB4766A9F2296, 0x3FF0000000000000,
+  0x3FAE353F7CED9168, 0x400AA3D70A3D70A4);
+_chain_end(0x3FEEAF7BFE70912D, 0x3F8C097D72B4B253, 0x3FE37A652030D731, 0x3FE43B17AFBC100F, 0xBFDEAE1A184EC9FC);
+
+# ── The sequential tracer ────────
+test_group("trace_sequential_prt");
+
+var tk = _n3(_fd(1, 10), _fd(2, 10), ONE);
+fn _lens() {
+    var s = vec_new();
+    vec_push(s, surface_sphere(f64_from(50), f64_from(10), GLASS, f64_from(20)));
+    vec_push(s, surface_sphere(f64_from(0 - 50), f64_from(15), ONE, f64_from(20)));
+    return s;
+}
+# Off the axis, so that this ray is truly skew. From a point on the axis every normal lies in
+# one plane, every rotation has one axis, and rotations about one axis commute: Q chained in
+# the wrong order passed unnoticed on such a ray.
+var tray = trace_ray_new(ray_vec3(f64_from(3), f64_from(0 - 2), Z), tk, ONE);
+var ts_ = _lens();
+assert_eq(trace_sequential_prt(0, ts_, 0, &e), 0, "null ray");
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "null ray reports");
+assert_eq(trace_sequential_prt(tray, 0, 0, &e), 0, "null surfaces");
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "null surfaces reports");
+var short_m = vec_new();
+vec_push(short_m, 0);
+assert_eq(trace_sequential_prt(tray, ts_, short_m, &e), 0, "mirrors of the wrong length");
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "wrong length reports");
+var nulls = vec_new();
+vec_push(nulls, 0);
+assert_eq(trace_sequential_prt(tray, nulls, 0, &e), 0, "a null surface");
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "a null surface reports");
+var mnull = vec_new();
+vec_push(mnull, complex_gold_550nm());
+assert_eq(trace_sequential_prt(tray, nulls, mnull, &e), 0, "a null mirror surface");
+assert_eq(e, PK_ERR_INVALID_PARAMETER, "a null mirror surface reports");
+var tirs = vec_new();
+vec_push(tirs, surface_plane(f64_from(10), ONE, f64_from(1000)));
+var tir_ray = trace_ray_new(ray_vec3(Z, Z, Z), _n3(ONE, Z, _fd(1, 2)), F64_TWO);
+assert_eq(trace_sequential_prt(tir_ray, tirs, 0, &e), 0, "a refracting surface past critical");
+assert_eq(e, PK_ERR_TIR, "ends the path with PK_ERR_TIR");
+
+# Geometry and power agree with the tracers that name the same things.
+var th_ = trace_sequential_prt(tray, ts_, 0, &e);
+assert_eq(e, PK_ERR_NONE, "a singlet");
+assert_eq(vec_len(th_), 2, "two hits");
+var tseq = trace_sequential(tray, ts_, &e);
+assert_eq(e, PK_ERR_NONE, "trace_sequential");
+var tb = 0;
+for (var ti = 0; ti < 2; ti = ti + 1) {
+    var a_ = TraceHit_hit_point(PrtTraceHit_hit(vec_get(th_, ti)));
+    var b_ = TraceHit_hit_point(vec_get(tseq, ti));
+    if (_near(RayVec3_x(a_), RayVec3_x(b_), TOL13) == 0) { tb = tb + 1; }
+    if (_near(RayVec3_y(a_), RayVec3_y(b_), TOL13) == 0) { tb = tb + 1; }
+    if (_near(RayVec3_z(a_), RayVec3_z(b_), TOL13) == 0) { tb = tb + 1; }
+}
+assert_eq(tb, 0, "hit points are trace_sequential's");
+var hl = PrtTraceHit_hit(vec_get(th_, 1));
+var after = TraceRay_dir(TraceHit_ray_after(hl));
+var tlast = vec_get(th_, 1);
+assert(_pk(PrtTraceHit_total_p(tlast), tk, after, TOL12), "P k_first = k_last through the lens");
+assert(_pk(PrtTraceHit_total_q(tlast), tk, after, TOL12), "Q k_first = k_last through the lens");
+# total = surface 2 . surface 1
+var chk = prt_new();
+assert_eq(prt_multiply(PrtTraceHit_surface_p(vec_get(th_, 1)), PrtTraceHit_surface_p(vec_get(th_, 0)), chk),
+  PK_ERR_NONE, "product");
+var ord_bad = 0;
+for (var oi = 0; oi < 18; oi = oi + 1) {
+    if (_near(load64(chk + oi * 8), load64(PrtTraceHit_total_p(tlast) + oi * 8),
+        TOL14) == 0) { ord_bad = ord_bad + 1; }
+}
+assert_eq(ord_bad, 0, "P_total = P_2 P_1, in path order");
+
+# In a meridional plane s stays s, so the two polarized tracers must agree exactly.
+var mer = _n3(_fd(1, 4), Z, ONE);
+var mray = trace_ray_new(ray_vec3(Z, Z, Z), mer, ONE);
+var mps = trace_sequential_polarized(mray, ts_, &e);
+assert_eq(e, PK_ERR_NONE, "trace_sequential_polarized");
+var mprt = trace_sequential_prt(mray, ts_, 0, &e);
+assert_eq(e, PK_ERR_NONE, "meridional");
+var mlast = vec_get(mprt, 1);
+var mplast = vec_get(mps, 1);
+var fs_ = prt_field_new(Z, Z, ONE, Z, Z, Z);
+var pv = _n3(ONE, Z, f64_neg(_fd(1, 4)));
+var fp_ = prt_field_new(RayVec3_x(pv), Z, RayVec3_y(pv), Z, RayVec3_z(pv), Z);
+_assert_near(prt_transmittance(mlast, mer, fs_), PolarizedTraceHit_transmittance_s(mplast), TOL13,
+  "T_s = trace_sequential_polarized");
+_assert_near(prt_transmittance(mlast, mer, fp_), PolarizedTraceHit_transmittance_p(mplast), TOL13,
+  "T_p = trace_sequential_polarized");
+var mts = PolarizedTraceHit_transmittance_s(mplast);
+var mtp = PolarizedTraceHit_transmittance_p(mplast);
+_assert_near(prt_diattenuation(PrtTraceHit_total_p(mlast), PrtTraceHit_total_q(mlast), mer),
+  f64_div(f64_abs(f64_sub(mts, mtp)), f64_add(mts, mtp)), TOL13, "D = (T_p - T_s)/(T_p + T_s) on a meridional ray");
+_assert_near(prt_retardance(PrtTraceHit_total_p(mlast), PrtTraceHit_total_q(mlast), mer), Z, TOL13,
+  "a dielectric refraction has no retardance");
+
+assert_eq(_is_nan(prt_transmittance(0, mer, fs_)), 1, "transmittance: null hit");
+assert_eq(_is_nan(prt_transmittance(mlast, mer, 0)), 1, "transmittance: null field");
+assert_eq(_is_nan(prt_transmittance(mlast, 0, fs_)), 1, "transmittance: null k");
+assert_eq(_is_nan(prt_transmittance(mlast, mer, prt_field_new(Z, Z, Z, Z, Z, Z))), 1, "transmittance: zero field");
+var along = prt_field_new(RayVec3_x(mer), Z, RayVec3_y(mer), Z, RayVec3_z(mer), Z);
+assert_eq(_is_nan(prt_transmittance(mlast, mer, along)), 1, "a field along k is no plane wave");
+
+# The path runs on the step's own k': trace_surface's direction is not kept unit at a large
+# index step, and a later surface would refuse it.
+var hs_s = vec_new();
+vec_push(hs_s, surface_plane(f64_from(10), ONE, f64_from(1000)));
+vec_push(hs_s, surface_plane(f64_from(20), ONE, f64_from(1000)));
+var hs_bad = 0;
+var hs_i = 1;
+while (hs_i < 200) {
+    var hs_t = _fd(hs_i, 25000);
+    var hs_k = _n3(f64_mul(hs_t, _fd(3, 5)), f64_mul(hs_t, _fd(4, 5)), ONE);
+    var hs_r = trace_ray_new(ray_vec3(Z, Z, Z), hs_k, f64_from(100));
+    var hs_v = trace_sequential_prt(hs_r, hs_s, 0, &e);
+    if ((hs_v == 0) | (e != PK_ERR_NONE)) { hs_bad = hs_bad + 1; }
+    hs_i = hs_i + 1;
+}
+assert_eq(hs_bad, 0, "a path keeps going after a 100:1 index step");
+
+# A gold mirror, in the tracer: the ray folds back through a window it already crossed.
+var ms = vec_new();
+vec_push(ms, surface_plane(f64_from(10), GLASS, f64_from(50)));
+vec_push(ms, surface_plane(f64_from(20), GLASS, f64_from(50)));
+vec_push(ms, surface_plane(f64_from(10), ONE, f64_from(50)));
+var mm = vec_new();
+vec_push(mm, 0);
+vec_push(mm, complex_gold_550nm());
+vec_push(mm, 0);
+var mk0 = _n3(_fd(1, 5), _fd(1, 10), ONE);
+var mr = trace_ray_new(ray_vec3(Z, Z, Z), mk0, ONE);
+var mt = trace_sequential_prt(mr, ms, mm, &e);
+assert_eq(e, PK_ERR_NONE, "a window, a mirror, the window again");
+assert_eq(vec_len(mt), 3, "three surfaces");
+var mo = TraceHit_ray_after(PrtTraceHit_hit(vec_get(mt, 2)));
+var mdir = TraceRay_dir(mo);
+_assert_near(RayVec3_x(mdir), RayVec3_x(mk0), TOL13, "out through the window, x as in");
+_assert_near(RayVec3_y(mdir), RayVec3_y(mk0), TOL13, "out through the window, y as in");
+_assert_near(RayVec3_z(mdir), f64_neg(RayVec3_z(mk0)), TOL13, "out through the window, z reversed");
+assert_eq(TraceRay_n(mo), ONE, "back in air");
+assert_eq(TraceRay_n(TraceHit_ray_after(PrtTraceHit_hit(vec_get(mt, 1)))), GLASS,
+  "a mirror keeps the ray in its medium");
+# A mirror's hit reports the mirror's own reflectance. Its geometry comes from a surface that
+# does not refract, whose R is 0, so this has to be set: it read 0.0 for gold.
+var mr_c = f64_abs(RayVec3_z(TraceRay_dir(TraceHit_ray_after(PrtTraceHit_hit(vec_get(mt, 0))))));
+var mr_g = complex_gold_550nm();
+assert_eq(fresnel_amplitudes(GLASS, ComplexMedium_n(mr_g), ComplexMedium_k(mr_g), mr_c, &fa), PK_ERR_NONE,
+  "gold in glass");
+var mr_rs = f64_add(_sq(FresnelAmplitudes_rs_re(&fa)), _sq(FresnelAmplitudes_rs_im(&fa)));
+var mr_rp = f64_add(_sq(FresnelAmplitudes_rp_re(&fa)), _sq(FresnelAmplitudes_rp_im(&fa)));
+_assert_near(TraceHit_reflectance(PrtTraceHit_hit(vec_get(mt, 1))), f64_mul(F64_HALF, f64_add(mr_rs, mr_rp)), TOL13,
+  "a mirror hit reports (R_s + R_p)/2");
+_assert_near(PrtTraceHit_flux(vec_get(mt, 2)), ONE, TOL13, "window in and out: the flux factors cancel");
+# Against steps taken by hand.
+var hp = prt_new();
+var hs = prt_step_new();
+var hdir = mk0;
+var hnm = ray_vec3(Z, Z, f64_neg(ONE));
+assert_eq(prt_refract(hdir, hnm, ONE, GLASS, hs), PK_ERR_NONE, "by hand 1");
+assert_eq(prt_multiply(PrtStep_p(hs), hp, hp), PK_ERR_NONE, "accumulate 1");
+assert_eq(prt_reflect(_stepk(hs), hnm, GLASS, ComplexMedium_n(complex_gold_550nm()),
+    ComplexMedium_k(complex_gold_550nm()), hs), PK_ERR_NONE, "by hand 2");
+assert_eq(prt_multiply(PrtStep_p(hs), hp, hp), PK_ERR_NONE, "accumulate 2");
+assert_eq(prt_refract(_stepk(hs), hnm, GLASS, ONE, hs), PK_ERR_NONE, "by hand 3");
+assert_eq(prt_multiply(PrtStep_p(hs), hp, hp), PK_ERR_NONE, "accumulate 3");
+var hb = 0;
+for (var hi = 0; hi < 18; hi = hi + 1) {
+    if (_near(load64(hp + hi * 8), load64(PrtTraceHit_total_p(vec_get(mt, 2)) + hi * 8), TOL13) == 0) { hb = hb + 1; }
+}
+assert_eq(hb, 0, "the tracer's P is the product of the same steps taken by hand");
+
+# Named in mirrors, a dielectric past its critical angle reflects with its true phase, where
+# the same surface left refracting ends the path.
+var tm = vec_new();
+vec_push(tm, complex_dielectric(ONE, "air"));
+var tir_t = trace_sequential_prt(tir_ray, tirs, tm, &e);
+assert_eq(e, PK_ERR_NONE, "total internal reflection, named");
+var tirh = vec_get(tir_t, 0);
+_assert_near(prt_transmittance(tirh, TraceRay_dir(tir_ray), prt_field_new(Z, Z, ONE, Z, Z, Z)), ONE, TOL14,
+  "TIR keeps all the power");
+_assert_near(TraceHit_reflectance(PrtTraceHit_hit(tirh)), ONE, TOL14, "and its hit reports R = 1");
+
+# A curved mirror: a concave sphere reflects a ray about its local normal.
+var cvs = vec_new();
+vec_push(cvs, surface_sphere(f64_from(0 - 100), f64_from(50), ONE, f64_from(30)));
+var cvm = vec_new();
+vec_push(cvm, complex_silver_550nm());
+var cvr = trace_ray_new(ray_vec3(f64_from(10), Z, Z), ray_vec3(Z, Z, ONE), ONE);
+var cvt = trace_sequential_prt(cvr, cvs, cvm, &e);
+assert_eq(e, PK_ERR_NONE, "a concave mirror");
+var cvh = PrtTraceHit_hit(vec_get(cvt, 0));
+var cvn = TraceHit_normal(cvh);
+var cvo = TraceRay_dir(TraceHit_ray_after(cvh));
+var cvw = _mirror(ray_vec3(Z, Z, ONE), cvn);
+_assert_near(RayVec3_x(cvo), RayVec3_x(cvw), TOL14, "reflected about the local normal, x");
+_assert_near(RayVec3_z(cvo), RayVec3_z(cvw), TOL14, "reflected about the local normal, z");
+assert(f64_lt(RayVec3_z(cvo), Z), "and it goes back");
+
+var r = assert_summary();

@@ -31,7 +31,8 @@ alloc_init();
 # ── fresnel_normal ────────
 test_group("fresnel_normal");
 
-_assert_near(fresnel_normal(Medium_n(medium_air()), Medium_n(medium_glass())), _fd(4, 100), TOL_01, "air-glass ~0.04");
+_assert_near(fresnel_normal(Medium_n(medium_air()), Medium_n(medium_glass())), _fd(4, 100), TOL_01,
+  "air-glass ~0.04");
 _assert_near(fresnel_normal(F64_ONE, _fd(15, 10)), fresnel_normal(_fd(15, 10), F64_ONE), TOL6, "symmetric");
 _assert_near(fresnel_normal(_fd(15, 10), _fd(15, 10)), f64_from(0), TOL6, "same medium 0");
 
@@ -42,7 +43,8 @@ assert(_in01(fresnel_normal(_fd(1333, 1000), _fd(152, 100))), "range 1.333-1.52"
 assert(_in01(fresnel_normal(F64_ONE, f64_from(4))), "range 1-4");
 
 # diamond high reflectance ~0.17
-_assert_near(fresnel_normal(Medium_n(medium_air()), Medium_n(medium_diamond())), _fd(17, 100), TOL_02, "diamond ~0.17");
+_assert_near(fresnel_normal(Medium_n(medium_air()), Medium_n(medium_diamond())), _fd(17, 100), TOL_02,
+  "diamond ~0.17");
 
 # higher index contrast -> more reflection
 var r_water = fresnel_normal(F64_ONE, Medium_n(medium_water()));
@@ -201,5 +203,107 @@ for (var dega = 0; dega <= 80; dega = dega + 10) {
     var ra = fresnel_unpolarized_complex(F64_ONE, al, ray_deg_to_rad(f64_from(dega)));
     assert(f64_gt(ra, _fd(8, 10)), "aluminum reflectance > 0.8");
 }
+
+# ── fresnel_amplitudes (2.12.0) ────────
+# Every value below is the 60-digit solution of Maxwell's tangential boundary conditions at
+# the interface, as a 6x6 linear system in the lab frame, with the interface turned to a
+# generic orientation: no Fresnel formula and no s/p split went into them.
+test_group("fresnel_amplitudes against Maxwell's boundary conditions");
+
+var _FA_FLOOR = 0;
+fn _cnear(lab, re, im, xr, xi) {
+    var m = f64_add(f64_abs(xr), f64_abs(xi));
+    var tol = f64_add(_FA_FLOOR, f64_mul(f64_from(8), f64_mul(0x3CB0000000000000, f64_add(m, 0x3CB0000000000000))));
+    if ((f64_le(f64_abs(f64_sub(re, xr)), tol) & f64_le(f64_abs(f64_sub(im, xi)), tol)) == 1) { return 1; }
+    syscall(1, 2, lab, strlen(lab));
+    syscall(1, 2, " off\n", 5);
+    return 0;
+}
+fn _fa_pin(lab, n1, n2, k2, c, rsr, rsi, rpr, rpi, tsr, tsi, tpr, tpi) {
+    var o[80];
+    assert_eq(fresnel_amplitudes(n1, n2, k2, c, &o), PK_ERR_NONE, lab);
+    assert_eq(_cnear(lab, FresnelAmplitudes_rs_re(&o), FresnelAmplitudes_rs_im(&o), rsr, rsi), 1, "r_s");
+    assert_eq(_cnear(lab, FresnelAmplitudes_rp_re(&o), FresnelAmplitudes_rp_im(&o), rpr, rpi), 1, "r_p");
+    assert_eq(_cnear(lab, FresnelAmplitudes_ts_re(&o), FresnelAmplitudes_ts_im(&o), tsr, tsi), 1, "t_s");
+    assert_eq(_cnear(lab, FresnelAmplitudes_tp_re(&o), FresnelAmplitudes_tp_im(&o), tpr, tpi), 1, "t_p");
+    return 0;
+}
+_fa_pin("air to glass 37 deg", 0x3FF0000000000000, 0x3FF8000000000000, 0x0000000000000000, 0x3FE999999999999A,
+  0xBFD0EA24849CF6A8, 0x0000000000000000, 0x3FC124ED7DE35915, 0x0000000000000000,
+  0x3FE78AEDBDB184AC, 0x0000000000000000, 0x3FE830D23FA5E42E, 0x0000000000000000);
+_fa_pin("air to glass normal", 0x3FF0000000000000, 0x3FF8000000000000, 0x0000000000000000, 0x3FF0000000000000,
+  0xBFC999999999999A, 0x0000000000000000, 0x3FC999999999999A, 0x0000000000000000,
+  0x3FE999999999999A, 0x0000000000000000, 0x3FE999999999999A, 0x0000000000000000);
+_fa_pin("air to glass grazing", 0x3FF0000000000000, 0x3FF8000000000000, 0x0000000000000000, 0x3EB0C6F7A0B5ED8D,
+  0xBFEFFFFC3F9DF21B, 0x0000000000000000, 0xBFEFFFF78F23FF11, 0x0000000000000000,
+  0x3EBE03106F270370, 0x0000000000000000, 0x3EC6824AAD272EE7, 0x0000000000000000);
+_fa_pin("glass to air below critical", 0x3FF8000000000000, 0x3FF0000000000000, 0x0000000000000000, 0x3FE999999999999A,
+  0x3FDDE4D356DC3F91, 0x0000000000000000, 0x3FB9BCD619E3F603, 0x0000000000000000,
+  0x3FF77934D5B70FE4, 0x0000000000000000, 0x3FFA69B4126D5F10, 0x0000000000000000);
+_fa_pin("glass to air TIR", 0x3FF8000000000000, 0x3FF0000000000000, 0x0000000000000000, 0x3FE0000000000000,
+  0xBFB999999999999A, 0xBFEFD6EFE4C9B8A5, 0xBFE7187CA92EBF72, 0xBFE626379406C33B,
+  0x3FECCCCCCCCCCCCD, 0xBFEFD6EFE4C9B8A5, 0x3FDAB68A0473C1AB, 0xBFF09CA9AF05126C);
+# At the critical angle q is the square root of something small, so these two are as sharp
+# as the input allows: one ulp of cos_i moves q by 3.3e-13 here, on any algorithm, and the
+# measured errors are 2.5e-13 and 9.4e-13. The floor below is that bound, not a loosening.
+_FA_FLOOR = _fd(2, 1000000000000);
+_fa_pin("glass to air just past critical", 0x3FF8000000000000, 0x3FF0000000000000, 0x0000000000000000,
+  0x3FE7D9F49DCC2E41,
+  0x3FEFFFFEF57E6284, 0xBF50533470D360B0, 0x3FEFFFFABAD02BE4, 0xBF625D99C83D4528,
+  0x3FFFFFFF7ABF3142, 0xBF50533470D360B0, 0x4007FFFE060E1075, 0xBF6B8C66AC5BE7BC);
+_fa_pin("glass to air just before critical", 0x3FF8000000000000, 0x3FF0000000000000, 0x0000000000000000,
+  0x3FE7D9F5092BF8AC,
+  0x3FEFF7348A546AE3, 0x0000000000000000, 0x3FEFEC399CD27574, 0x0000000000000000,
+  0x3FFFFB9A452A3572, 0x0000000000000000, 0x4007F8959ACEEC0C, 0x0000000000000000);
+_FA_FLOOR = 0;
+_fa_pin("near-identical media", 0x3FF0000000000000, 0x3FF000000044B830, 0x0000000000000000, 0x3FE0000000000000,
+  0xBE212E0BFEFDBEDC, 0x0000000000000000, 0xBE112E0BFE206274, 0x0000000000000000,
+  0x3FEFFFFFFEED1F40, 0x0000000000000000, 0x3FEFFFFFFEED1F40, 0x0000000000000000);
+_fa_pin("air to gold 550 nm", 0x3FF0000000000000, 0x3FDB851EB851EB85, 0x4003AE147AE147AE, 0x3FC999999999999A,
+  0xBFEEF450F475BE56, 0xBFC26B9788CFE382, 0xBFE1E41FD79E01C0, 0x3FE4EE9489EA1890,
+  0x3FA0BAF0B8A41A9A, 0xBFC26B9788CFE382, 0x3FD27579B84BDE05, 0xBFC07CF9160C19B0);
+_fa_pin("air to Lam's gold", 0x3FF0000000000000, 0x3FC604189374BC6A, 0x4012FEF9DB22D0E5, 0x3FE156191148FDA0,
+  0xBFEEF662C3F567E5, 0xBFCC2552DFCD8DBF, 0x3FE6CD8949A28064, 0x3FE549C613960BD8,
+  0x3FA099D3C0A981AE, 0xBFCC2552DFCD8DBF, 0x3FC393A8C9FBBE9D, 0xBFD6B9A9187EF287);
+_fa_pin("water to aluminum", 0x3FF547AE147AE148, 0x3FEEB851EB851EB8, 0x401AC28F5C28F5C3, 0x3FEE666666666666,
+  0xBFEC659A4C9BB8C8, 0xBFD5BD8E5A85E00D, 0x3FEBC81A0035FF5C, 0x3FD7DA4BB97AB55C,
+  0x3FBCD32D9B2239BF, 0xBFD5BD8E5A85E00D, 0x3FBFF424E2DF6D25, 0xBFD69F94AF9F3F8F);
+_fa_pin("metal with n = k", 0x3FF0000000000000, 0x4000000000000000, 0x4000000000000000, 0x3FE3333333333333,
+  0xBFE6F1725CF27EF5, 0xBFCDE780C2E606F3, 0x3FD2D2E6B5F623AE, 0x3FD720E31F253A9C,
+  0x3FD21D1B461B0215, 0xBFCDE780C2E606F3, 0x3FDA7CF27546D793, 0xBFCDD901CB687489);
+_fa_pin("pure imaginary index", 0x3FF0000000000000, 0x39B4484BFEEBC2A0, 0x4008000000000000, 0x3FE6666666666666,
+  0xBFECDD2F1A9FBE77, 0xBFDBA19028D5FF32, 0x3FE3A117BA117BA1, 0x3FE945B8ED27A19C,
+  0x3FB916872B020C49, 0xBFDBA19028D5FF32, 0x3FD0D925F36FC113, 0xBFE135B2935B2936);
+_fa_pin("weak absorber", 0x3FF8000000000000, 0x3FF8000000000000, 0x3EB0C6F7A0B5ED8D, 0x3FD3333333333333,
+  0xBDBCCEB8BB85B97F, 0xBECF11A4A4D6A1EC, 0xBDBC902BEF0F3028, 0xBEC979FCC499B83E,
+  0x3FEFFFFFFFFC6629, 0xBECF11A4A4D6A1EC, 0x3FEFFFFFFFFC171B, 0xBECF11A4A4D5ADD7);
+
+# Between equal media nothing happens, at any angle. sin(theta_i) rounds to exactly 1 below
+# c ~ 1e-8, and a q formed from it came out 0, which made t_s = 2.
+test_group("fresnel_amplitudes between equal media");
+fn _same(c) {
+    var o[80];
+    assert_eq(fresnel_amplitudes(F64_ONE, F64_ONE, 0, c, &o), PK_ERR_NONE, "equal media");
+    assert_eq(FresnelAmplitudes_rs_re(&o), 0, "r_s = 0");
+    assert_eq(FresnelAmplitudes_rp_re(&o), 0, "r_p = 0");
+    assert_eq(FresnelAmplitudes_ts_re(&o), F64_ONE, "t_s = 1");
+    assert_eq(FresnelAmplitudes_tp_re(&o), F64_ONE, "t_p = 1");
+    assert_eq(FresnelAmplitudes_flux_s(&o), F64_ONE, "flux 1");
+    return 0;
+}
+var _s1 = _same(F64_ONE);
+var _s2 = _same(_fd(1, 2));
+var _s3 = _same(0x3B7A36E2EB1C432D);       # 1e-22
+var _s4 = _same(0x20C0000000000000);       # 2^-499, just above the floor below
+# Below n1 cos_i = 2^-500 the flux factor and |t|^2 leave the double range, so R + T = 1 could
+# not hold: flux came back +inf at cos_i = 1e-310. That ray is in the plane of the surface.
+var _uo[80];
+assert_eq(fresnel_amplitudes(F64_ONE, F64_ONE, 0, 0x0000000000000001, &_uo), PK_ERR_INVALID_ANGLE, "cos_i = 2^-1074");
+assert_eq(fresnel_amplitudes(F64_ONE, 0x3FF8000000000000, 0, 0x000012688B70E62B, &_uo), PK_ERR_INVALID_ANGLE,
+  "cos_i = 1e-310");
+assert_eq(fresnel_amplitudes(0x3FF0000000000000, 0x3FF8000000000000, 0, 0x20A0000000000000, &_uo), PK_ERR_INVALID_ANGLE,
+  "n1 cos_i under 2^-500");
+assert_eq(fresnel_amplitudes(0x39B0000000000000, F64_ONE, 0, 0x0000000000000001, &_uo), PK_ERR_INVALID_ANGLE,
+  "n1 cos_i underflowing to 0");
 
 var r = assert_summary();

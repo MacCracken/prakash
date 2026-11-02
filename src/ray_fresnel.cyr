@@ -203,6 +203,136 @@ fn fresnel_unpolarized_complex(n1, medium, incident_angle) {
     return f64_mul(F64_HALF, f64_add(rs, rp));
 }
 
+# ── Complex Fresnel amplitudes ────────
+
+# The complex amplitude coefficients of one plane interface. T_s = flux_s*|t_s|^2 and
+# T_p = flux_p*|t_p|^2 are the powers crossing it, so R + T = 1 at every angle, into an
+# absorber too. flux_s = flux_p = 0 at total internal reflection.
+#derive(accessors)
+struct FresnelAmplitudes { rs_re; rs_im; rp_re; rp_im; ts_re; ts_im; tp_re; tp_im; flux_s; flux_p; }
+
+# An index n + ik is admissible: finite, >= 0 and <= 2^100, with max(n, k) >= 2^-100, the
+# rule multilayer_rta keeps (see _diff_medium_ok). With the floor on n1 cos_i below, the
+# flux factors in fresnel_amplitudes stay finite. A |t|^2 can still round to 0 at the far
+# end of both ranges, where the power it stands for is 0 to double precision too.
+fn _fr_medium_ok(n, k) {
+    if (((n & _PRK_ABS) >= _PRK_INF) | ((k & _PRK_ABS) >= _PRK_INF)) { return 0; }
+    if ((f64_ge(n, 0) & f64_ge(k, 0)) == 0) { return 0; }
+    if ((f64_le(n, 0x4630000000000000) & f64_le(k, 0x4630000000000000)) == 0) { return 0; }
+    if ((f64_ge(n, 0x39B0000000000000) | f64_ge(k, 0x39B0000000000000)) == 0) { return 0; }
+    return 1;
+}
+
+# a/b for complex a, b, by Smith's algorithm: it forms no |b|^2, which an interface hit
+# at a grazing angle between near-equal media would underflow to a division by zero.
+fn _fr_cdiv(ar, ai, br, bi, re_out, im_out) {
+    if (f64_ge(f64_abs(br), f64_abs(bi)) == 1) {
+        var t = f64_div(bi, br);
+        var d = f64_add(br, f64_mul(bi, t));
+        store64(re_out, f64_div(f64_add(ar, f64_mul(ai, t)), d));
+        store64(im_out, f64_div(f64_sub(ai, f64_mul(ar, t)), d));
+        return 0;
+    }
+    var u = f64_div(br, bi);
+    var e = f64_add(f64_mul(br, u), bi);
+    store64(re_out, f64_div(f64_add(f64_mul(ar, u), ai), e));
+    store64(im_out, f64_div(f64_sub(f64_mul(ai, u), ar), e));
+    return 0;
+}
+
+# The Fresnel amplitude coefficients of the interface from real n1 into n2 + i k2, for a
+# ray meeting it at cos_i in (0, 1], written to a FresnelAmplitudes the caller owns.
+# Returns PK_ERR_NONE, PK_ERR_INVALID_PARAMETER (null out, or an index the rule above
+# refuses, which includes gain) or PK_ERR_INVALID_ANGLE (cos_i outside (0, 1], or n1 cos_i
+# under 2^-500: a ray in the plane of the surface meets nothing, and that close to it the
+# flux factor and |t|^2 leave the double range, so R + T = 1 could not hold). out is untouched
+# on a refusal.
+#
+# CONVENTIONS. Time dependence e^(-i w t), so n + ik with k >= 0 decays, as in
+# multilayer_rta. With q = n~ cos(theta_t) = sqrt(n~^2 - (n1 sin(theta_i))^2), Im q >= 0:
+#   r_s = (n1 c - q)/(n1 c + q)                  t_s = 2 n1 c/(n1 c + q)
+#   r_p = (n~^2 c - n1 q)/(n~^2 c + n1 q)        t_p = 2 n1 n~ c/(n~^2 c + n1 q)
+# This is Chipman's sign: E_r = r_s s + r_p p', p' = k' x s, so r_p = -r_s at normal
+# incidence, and a perfect conductor has r_s = -1, r_p = +1. Above the critical angle q is
+# purely imaginary and |r_s| = |r_p| = 1, with the phases of total internal reflection.
+# Everything is checked against Maxwell's boundary conditions solved as a 6x6 system
+# (tests/ray_fresnel.tcyr), not against these formulas.
+#
+# r_s and r_p are evaluated without their numerators' cancellation, which is the whole
+# reflectance of a weak interface: (n1 c)^2 - q^2 = n1^2 - n~^2, so
+#   r_s = (n1^2 - n~^2)/(n1 c + q)^2
+#   r_p = (n~^2 - n1^2)(n~ c - n1 s)(n~ c + n1 s)/(n~^2 c + n1 q)^2
+# and q^2 = (n~^2 - n1^2) + (n1 c)^2 never forms sin: below c ~ 1e-8 it rounds to 1, and
+# between equal media q would come out 0 and t_s = 2, where the ray does not notice.
+#must_use
+fn fresnel_amplitudes(n1, n2, k2, cos_i, out) {
+    if (out == 0) { return PK_ERR_INVALID_PARAMETER; }
+    if ((_fr_medium_ok(n1, 0) & _fr_medium_ok(n2, k2)) == 0) { return PK_ERR_INVALID_PARAMETER; }
+    if ((f64_gt(cos_i, 0) & f64_le(cos_i, F64_ONE)) == 0) { return PK_ERR_INVALID_ANGLE; }
+    var c = cos_i;
+    var ns = f64_mul(n1, f64_sqrt(f64_mul(f64_sub(F64_ONE, c), f64_add(F64_ONE, c))));
+    # n~^2, and q = a + ib = the root of n~^2 - ns^2 with b >= 0.
+    var e2r = f64_mul(f64_sub(n2, k2), f64_add(n2, k2));
+    var e2i = f64_mul(f64_mul(F64_TWO, n2), k2);
+    var ac = f64_mul(n1, c);
+    if (f64_ge(ac, 0x20B0000000000000) == 0) { return PK_ERR_INVALID_ANGLE; }     # 2^-500
+    var wr = f64_add(f64_sub(f64_mul(f64_sub(n2, n1), f64_add(n2, n1)), f64_mul(k2, k2)), f64_mul(ac, ac));
+    var mag = ganita_f64_hypot(wr, e2i);
+    var a = 0;
+    var b = 0;
+    if (f64_ge(wr, 0) == 1) {
+        a = f64_sqrt(f64_mul(F64_HALF, f64_add(mag, wr)));
+        if (f64_gt(a, 0) == 1) { b = f64_div(e2i, f64_mul(F64_TWO, a)); }
+    } else {
+        b = f64_sqrt(f64_mul(F64_HALF, f64_sub(mag, wr)));
+        a = f64_div(e2i, f64_mul(F64_TWO, b));
+    }
+    var dsr = f64_add(ac, a);
+    # n~^2 c + n1 q, and n1^2 - n~^2.
+    var dpr = f64_add(f64_mul(e2r, c), f64_mul(n1, a));
+    var dpi = f64_add(f64_mul(e2i, c), f64_mul(n1, b));
+    var dr = f64_add(f64_mul(f64_sub(n1, n2), f64_add(n1, n2)), f64_mul(k2, k2));
+    var di = f64_neg(e2i);
+    var rr = 0;
+    var ri = 0;
+    var _c = _fr_cdiv(dr, di, dsr, b, &rr, &ri);
+    var rsr = 0;
+    var rsi = 0;
+    _c = _fr_cdiv(rr, ri, dsr, b, &rsr, &rsi);
+    # (n~ c - ns)(n~ c + ns), times n~^2 - n1^2 = -(dr + i di).
+    var ncr = f64_mul(n2, c);
+    var nci = f64_mul(k2, c);
+    var yr = f64_sub(f64_mul(f64_sub(ncr, ns), f64_add(ncr, ns)), f64_mul(nci, nci));
+    var yi = f64_mul(f64_mul(F64_TWO, ncr), nci);
+    var nr = f64_neg(f64_sub(f64_mul(dr, yr), f64_mul(di, yi)));
+    var ni = f64_neg(f64_add(f64_mul(dr, yi), f64_mul(di, yr)));
+    _c = _fr_cdiv(nr, ni, dpr, dpi, &rr, &ri);
+    var rpr = 0;
+    var rpi = 0;
+    _c = _fr_cdiv(rr, ri, dpr, dpi, &rpr, &rpi);
+    var tsr = 0;
+    var tsi = 0;
+    _c = _fr_cdiv(f64_mul(F64_TWO, ac), 0, dsr, b, &tsr, &tsi);
+    var tpr = 0;
+    var tpi = 0;
+    var tw = f64_mul(F64_TWO, ac);
+    _c = _fr_cdiv(f64_mul(tw, n2), f64_mul(tw, k2), dpr, dpi, &tpr, &tpi);
+    FresnelAmplitudes_set_rs_re(out, rsr);
+    FresnelAmplitudes_set_rs_im(out, rsi);
+    FresnelAmplitudes_set_rp_re(out, rpr);
+    FresnelAmplitudes_set_rp_im(out, rpi);
+    FresnelAmplitudes_set_ts_re(out, tsr);
+    FresnelAmplitudes_set_ts_im(out, tsi);
+    FresnelAmplitudes_set_tp_re(out, tpr);
+    FresnelAmplitudes_set_tp_im(out, tpi);
+    # T_s = Re(q)/(n1 c) |t_s|^2, T_p = Re(q conj(n~)/n~)/(n1 c) |t_p|^2 (Byrnes 2016).
+    FresnelAmplitudes_set_flux_s(out, f64_div(a, ac));
+    var nn = f64_add(f64_mul(n2, n2), f64_mul(k2, k2));
+    FresnelAmplitudes_set_flux_p(out,
+      f64_div(f64_div(f64_add(f64_mul(e2r, a), f64_mul(e2i, b)), nn), ac));
+    return PK_ERR_NONE;
+}
+
 # ── Attenuation ────────
 
 # Beer-Lambert law: I = intensity * exp(-alpha * distance).

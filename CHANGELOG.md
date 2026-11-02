@@ -2,6 +2,123 @@
 
 ## [Unreleased]
 
+## [2.12.0] - 2026-11-01 — 3×3 polarization ray tracing
+
+Closes the 2.12.0 roadmap row and the gap `docs/research/physics-completeness-audit.md` §13
+recorded: `trace_sequential_polarized` tracked scalar s/p transmittance from the real
+coefficients, and the polarization state of a ray had no representation at all. A ray now
+carries a 3D electric field through Chipman's matrix, with complex Fresnel coefficients,
+parallel transport, diattenuation and retardance. New API only: nothing existing changes
+value or signature. Toolchain unchanged, cyrius 6.7.18.
+
+Suite **9645 → 10,376 assertions across 36 suites**, 0 failed; `cyrius audit` exits 0;
+`deps --verify` 114/114; `#must_use` 501 → **511**, 0 lost; reference coverage **515/515**.
+Benchmarks 168 → **173**.
+
+### Added — complex Fresnel amplitudes (`ray_fresnel`)
+- **`fresnel_amplitudes(n1, n2, k2, cos_i, out)`** writes the complex r_s, r_p, t_s, t_p of
+  one interface, plus the flux factors that turn |t|² into power, into a
+  `FresnelAmplitudes` the caller owns. It covers dielectrics, absorbers and total internal
+  reflection. R + T = 1 at every angle, into an absorber too.
+- **Conventions:** e^(−iωt) and ñ = n + ik, as `multilayer_rta`; Chipman's sign, so r_p = −r_s
+  at normal incidence and a perfect conductor has r_s = −1, r_p = +1.
+- **Numerics:** r_s and r_p avoid the cancellation in their numerators, so a weak interface
+  keeps its digits, and q² = (ñ² − n₁²) + (n₁c)² never forms sin θ, so two equal media
+  give r = 0, t = 1 exactly down to grazing incidence.
+- **Refusals:** gain, an index outside the `multilayer_rta` range, cos_i outside (0, 1], and
+  n₁ cos_i under 2⁻⁵⁰⁰, where the flux factor overflowed so R + T = 1 could not hold.
+
+### Added — polarization ray tracing (`ray_prt`, new module)
+- **`prt_refract` and `prt_reflect`** give one surface's P and Q from a unit k, any unit
+  normal and the media, into a reusable `PrtStep`. Fold mirrors and prisms work here, which
+  `OpticalSurface` cannot express since its surfaces are all perpendicular to z.
+- **`P = a_s ŝŝᵀ + a_p p̂′p̂ᵀ + k̂′k̂ᵀ`** (Yun, Crabtree & Chipman, Appl. Opt. 50, 2855 (2011)),
+  applied to a complex 3D field by `prt_apply`, chained by `prt_multiply`.
+- **`prt_surface`** builds a surface from amplitudes you supply, for a coating. They are
+  taken on trust; the geometry is checked.
+- **`trace_sequential_prt(ray, surfaces, mirrors, err_out)`** carries P, Q and the flux
+  through a `vec` of `OpticalSurface`, returning `PrtTraceHit`s. `mirrors` is 0 or a `vec` with
+  a `ComplexMedium` per reflecting surface, so `complex_gold_550nm()` makes a gold mirror
+  and `complex_dielectric` a surface with total internal reflection. On a purely refracting
+  real-index path complex coefficients collapse to real ones, so this is where they matter.
+- **`prt_transmittance`, `prt_jones`, `prt_diattenuation`, `prt_retardance`** read a path.
+- **Geometry is not retardance.** A fold mirror turns a state with no physical phase shift, and
+  P cannot tell the two apart. Q is the same chain for a nonpolarizing system, and QᵀP in
+  the transverse plane is a 2×2 Jones matrix with the geometry gone.
+- ⚠ **A reflection's Q carries −1 on p**, Lam's Eqs. 4.5–4.6 (*Anisotropic Ray Trace*,
+  Univ. Arizona 2015), so retardance is measured from an ideal mirror. A normal-incidence
+  mirror reads 0, not a half wave. An odd number of reflections reads π away from a bare
+  arg(r_p/r_s): one critical-angle TIR reads π, and a Fresnel rhomb, with two, reads 90°.
+- ⚠ **A noise floor, stated:** P keeps k̂′k̂ᵀ at unit size, so its rounding is absolute. Under
+  ~1e-12 of the input amplitude, diattenuation and retardance answer NaN rather than a number
+  made of rounding. 200 bounces in a gold guide get there, and a true value is unreadable
+  a few dozen bounces further on.
+
+### Validation
+- **Maxwell:** 30 interface pins from the tangential boundary conditions, solved as a 6×6
+  system in 60-digit arithmetic with the surface in a generic orientation: no Fresnel
+  formula, no s/p split.
+- **Whole paths:** three chains through that solver, geometry by Householder and Rodrigues,
+  diattenuation and retardance by numpy's SVD, agree to 1e-12.
+- **Literature:** Lam's worked gold mirror, all nine complex elements of P (pp. 121–122);
+  Born & Wolf's TIR phase and the Fresnel rhomb's quarter wave at 54°37′, n = 1.51; her
+  corner cube's 0°, 120° and 240°.
+- ⚠ **Lam's printed gold index does not match her results.** 0.718 + 4.749i gives |r_s| = 0.969
+  where she prints 0.992. n = 0.172 with her k reproduces all five of her numbers to ~1e-4
+  and is what gold has near 765 nm, so her formalism stands and the index looks like a
+  typo. She also uses e^(+iωt), so her P is the conjugate of prakash's. The test says both.
+- **Relations:** |r|² = `fresnel_*_complex`; R and T = `multilayer_rta` with no layers; hit
+  points = `trace_sequential`; T_s, T_p = `trace_sequential_polarized` on a meridional ray.
+- **Mutation:** 22 mutants of the new code, all killed. A surviving one showed the tracer's
+  "skew" test ray was meridional, since a ray from the axis keeps every normal in one plane,
+  and rotations about one axis commute. It now starts off the axis.
+
+### Fixed during the release's verification (never shipped)
+Two independent review rounds, plus this release's own testing. Every fix has a test that
+fails on the first cut.
+- **`prt_jones` applied Q instead of Qᵀ.** Diagonal cases cannot see it; numpy's SVD did.
+- **`ŝ` was noise near normal incidence:** every element of P wrong at 2e-16 rad, five digits
+  gone at 1e-6 rad, because k × η is mostly rounding there. Tidy test vectors hid it.
+- **A legal ray straight down a normal was refused about one time in six**, because
+  k·k rounds above 1 and the cosine was not clamped.
+- **Retardance answered numbers it should have refused.** A guard relative to the larger
+  singular value passed absolute noise: a zero singular value at 1e-5 read 2.1416 rad.
+- **`f64_min(NaN, 1)` is 1**, so a clamp turned an overflow into D = 1, and retardance read
+  1.5708 at amplitude 1e80. J is now scaled, and neither depends on amplitude.
+- **k′ was not kept unit,** so a light guide fed its own k′ was refused at bounce 1691, and at
+  n₁/n₂ = 100 the refracted direction broke Snell's invariant by 1e-12. It now comes from
+  the tangential part of k, since a cosine near 1 cannot resolve a small angle.
+- **`prt_surface` accepted impossible geometry,** first everywhere, then near normal, where
+  an unnormalised check passed a k′ 37° out of the plane of incidence.
+- **Between equal media at grazing incidence** q came out 0 and t_s = 2.
+- **Mirror hits reported R = 0,** from the non-refracting copy of the surface that gives them
+  their geometry; the test compared the value with itself.
+
+### Changed
+- **`docs/architecture/overview.md`'s per-module test counts** had drifted across recent
+  releases. Recomputed from the suites: ray 2064, wave 3295, serialize 62. README's and
+  overview's assertion totals had also gone stale at 2.11.0, the miss being that release's.
+- **Roadmap:** the row is gone and 2.13.0 leads. The audit's finding moves to its shipped list.
+- **`tests/prakash.bcyr`** gains five rows.
+- **`dist/`:** `prakash.cyr` 17172 → 18088 lines, `prakash-ai.cyr` 17473 → 18389.
+
+### Performance
+No existing path changed. Both trees interleaved seven rounds, alternating which ran first,
+per-row median over 168 rows: median **+0.37%**, geomean 1.0033. Individual rows spread ±25%
+at this load (14), so nothing is claimed for them.
+
+⚠ **Medians, not minimums, under load.** A row is bimodal there, two levels ~2× apart, and a
+min-of-4 read +99% on `fiber/sellmeier_group_index`, which this release does not touch, from
+one lucky window on the other side. `CLAUDE.md` now says so.
+
+| New row | Typical, load 14 | Quiet window |
+|---|---|---|
+| `ray/fresnel_amplitudes` | 415 ns | 212 ns |
+| `prt/reflect` | 1.02 µs | 568 ns |
+| `prt/refract` | 1.15 µs | 595 ns |
+| `prt/trace_singlet` (a skew ray, two surfaces) | 7.4 µs | 3.7 µs |
+| `prt/retardance` | 1.35 µs | 732 ns |
+
 ## [2.11.1] - 2026-11-01 — cyrius 6.7.18, hisab 3.4.1, and JSON decoders that refuse what they used to guess
 
 Toolchain **6.7.9 → 6.7.18**, hisab **3.4.0 → 3.4.1**, sakshi **2.5.8 → 2.5.10**, and

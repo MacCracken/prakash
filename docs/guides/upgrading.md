@@ -28,6 +28,13 @@ details of each change are in `CHANGELOG.md`.
   `./scripts/check-consumer-link.sh --root ~/Repos/ranga ~/.cyrius/versions/<pin>/bin/cycc`.
   ⚠ From 2.10.1 that passes in full only at cyrius ≥ 6.6.13; see below.
 
+## 2.12.0: polarization ray tracing
+
+New API only: nothing existing changes value or signature, and the cyrius pin stays at
+6.7.18. `dist/prakash.cyr` gains `ray_prt`, so a name of yours beginning `prt_` or `Prt`, or
+one called `fresnel_amplitudes`, would now collide. A complex phase from the new API follows
+e^(-iωt), the conjugate of a published matrix written in e^(+iωt), which Chipman's group's is.
+
 ## 2.11.1: cyrius 6.7.18 and stricter JSON
 
 - **No optics result moves.** About 3 million samples are bit-identical between 6.7.9

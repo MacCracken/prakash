@@ -28,18 +28,18 @@
 > unachievable as written. The report's "Rust ecosystem" competitive framing is
 > also obsolete: prakash is Cyrius, and `rust-old/` was deleted in 2.2.3.
 >
-> ⛔ **Two things are WORSE than this report implies, and they are the findings
-> that matter most here:**
-> - **§13 is marked IMPLEMENTED but the 3×3 polarization ray-tracing matrix it
->   recommends was never built.** What shipped (`trace_sequential_polarized`)
->   tracks scalar s/p Fresnel transmittance using the **real** coefficients, not
->   the complex ones §1 provides. The header overstates it.
+> ⛔ **One thing is WORSE than this report implies, and it is the finding that
+> matters most here:**
 > - **`lens_mtf_polychromatic` is a real weighted mean**, `Σ(wᵢ·MTFᵢ) / Σwᵢ`, not
 >   the coherent vector sum with the `exp(j·Phase)` term §5 specifies. It carries
 >   no phase, so it cannot show the contrast reversals a true polychromatic MTF
 >   does.
 >
 > **Formerly open, now all shipped:**
+> - the 3×3 polarization ray-tracing matrix §13 recommends — **2.12.0**,
+>   `src/ray_prt.cyr`. Until then what §13 called implemented
+>   (`trace_sequential_polarized`) tracked scalar s/p Fresnel transmittance from the
+>   real coefficients; it still does, and now has a tracer that carries the state;
 > - complex refractive indices in the TMM — **2.10.0**, `multilayer_rta`: a new
 >   (n, k, d) entry point at a 24-byte stride, since the `(n, d)` buffer could not
 >   admit `k`;

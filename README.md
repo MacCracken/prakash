@@ -10,7 +10,7 @@ Consumed by [ranga](https://github.com/MacCracken/ranga) (spectral/colour — **
 
 | Module | Files | Description |
 |--------|-------|-------------|
-| **ray** | ray_core, ray_fresnel, ray_trace, ray_simulate, ray_system, ray_dispersion, ray_fiber, ray_grin | Geometric optics: Snell, Fresnel (real + complex refractive index), reflection (2D/3D), critical/Brewster angle, Beer-Lambert, TIR, 12 materials. Dispersion (Sellmeier/Cauchy/Herzberger/Schott/Conrady) with analytic dn/dλ, d²n/dλ² and group index, chromatic aberration, fiber optics. **Fiber dispersion** (2.10.0): material, Gloge waveguide and total step-index D from the LP01 eigenvalue (exact within weak guidance), zero-dispersion wavelength. Sequential + recursive ray tracer with polarization, ray fans, spot diagrams, OPD, paraxial system builder, cardinal points. **GRIN ray tracing** (2.8.0): SELFOC, sech, radial/axial polynomial, Luneburg and Maxwell fish-eye profiles by Sharma's RK-Nyström, with optical path, rod and ball traces, SELFOC pitch and ABCD |
+| **ray** | ray_core, ray_fresnel, ray_trace, ray_prt, ray_simulate, ray_system, ray_dispersion, ray_fiber, ray_grin | Geometric optics: Snell, Fresnel (real + complex refractive index), reflection (2D/3D), critical/Brewster angle, Beer-Lambert, TIR, 12 materials. Dispersion (Sellmeier/Cauchy/Herzberger/Schott/Conrady) with analytic dn/dλ, d²n/dλ² and group index, chromatic aberration, fiber optics. **Fiber dispersion** (2.10.0): material, Gloge waveguide and total step-index D from the LP01 eigenvalue (exact within weak guidance), zero-dispersion wavelength. Sequential + recursive ray tracer with polarization, ray fans, spot diagrams, OPD, paraxial system builder, cardinal points. **GRIN ray tracing** (2.8.0): SELFOC, sech, radial/axial polynomial, Luneburg and Maxwell fish-eye profiles by Sharma's RK-Nyström, with optical path, rod and ball traces, SELFOC pitch and ABCD |
 | **spectral** | spectral_core, spectral_cie, spectral_photometry | Wavelength↔RGB, Planck (numerically stable), Wien, color-temperature→RGB, photon energy. CIE 1931/1964/2015 observers, XYZ, SPD integration, illuminants (A/D50/D65/F2/F11, all verified against published CIE chromaticities and CCTs), **CIE 13.3 CRI** (Ra plus per-sample R_i, validated against published Ra for F2/F11/D65/A), photometry (V(λ), CIE 1951 V'(λ), luminous flux/efficacy) |
 | **wave** | wave_core, wave_polarization, wave_coherence, wave_airy, wave_fabry_perot, wave_diffraction, wave_doe, wave_zernike, wave_pattern, wave_beam | Interference, single/double-slit + grating diffraction, thin-film reflectance, Malus, Jones/Stokes/Mueller, coherence, Airy/Bessel, Fabry-Pérot, Fraunhofer/Fresnel/Huygens diffraction, AR coatings + TMM, **absorbing multilayers** (2.10.0: complex-index TMM, R/T/A for s and p, metals and absorbing substrates), Zernike wavefronts, 2D FFT patterns, PSF. **Gaussian beams** (2.6.0): TEM00, q-parameter ABCD propagation, resonator eigenmodes, mode coupling, Hermite-/Laguerre-Gaussian modes, M² and ISO 11146 second moments, orbital angular momentum. **Diffractive optics** (2.9.0): grating equation, blazed/multilevel/binary/Dammann efficiencies, diffractive lens and its Abbe number, hybrid achromats, Kogelnik volume holograms |
 | **lens** | lens | Thin/thick lens, lensmaker, mirrors, f-number/NA, FOV, MTF (mono/poly/through-focus), Seidel aberrations and their wavefront coefficients (W₀₄₀…W₃₁₁), aberrated OTF/MTF by pupil autocorrelation (Zernike or Seidel, sagittal/tangential, polychromatic), Petzval, depth of field, multi-element systems |
@@ -60,7 +60,7 @@ modules = ["dist/hisab.cyr"]
 
 [deps.prakash]
 git     = "https://github.com/MacCracken/prakash.git"
-tag     = "2.11.1"
+tag     = "2.12.0"
 modules = ["dist/prakash.cyr"]        # math-only core (no TLS)
 # For the AI client instead, pull the ai bundle (adds the sandhi HTTP/TLS stack):
 # modules = ["dist/prakash-ai.cyr"]
@@ -116,10 +116,10 @@ prakash (Cyrius)
 
 ```sh
 cyrius deps                 # resolve the hisab git dep
-for f in tests/*.tcyr; do cyrius test "$f"; done   # 9645 assertions, 35 suites
+for f in tests/*.tcyr; do cyrius test "$f"; done   # 10376 assertions, 36 suites
 cyrius distlib              # regenerate dist/prakash.cyr
 cyrius distlib ai           # regenerate dist/prakash-ai.cyr
-cyrius bench tests/prakash.bcyr                     # 168 benchmarks
+cyrius bench tests/prakash.bcyr                     # 173 benchmarks
 ./scripts/bench-history.sh  # append to the CSV history + benchmarks.md
 ```
 
