@@ -69,7 +69,8 @@ fn prakash_is_ok(code) {
 # it — all 5485 assertions passed either side of the bump — because the shim
 # masks the builtin at exactly the point the table describes.
 #
-# Re-measured on cyrius 6.6.6 / ganita 1.2.6, x86_64 (raw f64 bits), for 2.4.9:
+# Re-measured on cyrius 6.6.20 / ganita 1.2.14, x86_64 (raw f64 bits), for 2.10.1;
+# every row is as it was at 6.6.6 / 1.2.6 (2.4.9):
 #
 #   expression              Cyrius builtin              Rust    shim
 #   ganita_f64_pow(0.0, 2)  0.0  (NaN before 1.1.4)     0.0     0.0
@@ -99,21 +100,27 @@ fn _prk_exp(x) {
     return f64_exp(x);
 }
 
-# Sine/cosine with an explicit domain guard. The x86 `fsin`/`fcos` instructions
-# are undefined for |x| >= 2^63 and return the ARGUMENT UNCHANGED there, so
-# `f64_sin(1e300)` yields 1e300 — an "intensity" far outside [-1, 1] that then
-# propagates silently through an interference or slit calculation. Measured on
-# cyrius 6.5.33 (re-measured for 2.2.4, unchanged from 6.5.20): correct through
-# 2^62, broken at 1e300 — where f64_sin returns the ARGUMENT, 0x7E37E43C8800759C
-# in and 0x7E37E43C8800759C out — and NaN at the infinities.
+# Sine/cosine with an explicit domain guard. Below cyrius 6.6.9 the x86 builtins
+# were bare `fsin`/`fcos`, undefined for |x| >= 2^63: they returned the ARGUMENT
+# UNCHANGED, so `f64_sin(1e300)` yielded 1e300 — an "intensity" far outside
+# [-1, 1] that then propagated silently through an interference or slit
+# calculation. A consumer's pin decides which builtin the bundle compiles against.
 #
-# Beyond 2^63 a double's spacing exceeds 2048 while a period is 2*pi, so the
-# argument no longer identifies a phase at all and the result is unrecoverable
-# without Payne-Hanek reduction. prakash reports the loss instead of inventing a
-# value: these return NaN, which propagates visibly. (Rust's libm would perform
-# the full reduction and return a value; this is a deliberate, documented
-# divergence in favour of not fabricating.) Below the limit both delegate
-# unchanged, so no in-range result moves.
+# ⛔ 2.10.1: THE GUARD OUTLIVES THAT DEFECT, BECAUSE ITS REASON IS THE ARGUMENT, NOT
+# THE BUILTIN. 6.6.9's software sin/cos do the full reduction: measured at 6.6.20,
+# f64_sin(1e300) = -0.81788 and f64_cos(1e300) = -0.57539, both right, and NaN at
+# the infinities. But beyond 2^63 a double's spacing exceeds 2048 while a period is
+# 2*pi, so the argument no longer identifies a physical phase at all. prakash
+# reports the loss instead of returning a number: these return NaN, which
+# propagates visibly. (Rust's libm returns a value; this is a deliberate,
+# documented divergence in favour of not fabricating.) Below the limit both
+# delegate unchanged.
+#
+# ⛔ 6.6.9 ALSO CLOSED A DEFECT THIS COMMENT NEVER NAMED. fsin reduces against a
+# 66-bit pi, so near a multiple of pi it returned noise WELL inside the limit.
+# Against exact rational arithmetic, over 39,999 points x = (7k + 1)*pi up to
+# 8.8e5: fsin was up to 44% wrong relative (2.4e15 ulp), the polyfill at most
+# 0.5 ulp. tests/hardening.tcyr pins three of those points.
 var _PRK_TRIG_LIMIT = 0x43E0000000000000;   # 2^63
 var _PRK_NAN        = 0x7FF8000000000000;
 
@@ -131,13 +138,19 @@ fn _prk_cos(x) {
 
 # Rust `f64::powf` semantics across the whole non-finite domain.
 #
-# Rust's `powf` is IEEE-754 / C99 `pow`. `ganita_f64_pow` is not: its core is
-# `exp(y * ln x)`, and every operand it does not special-case ahead of that core
-# reaches `f64_exp`, which is the x87 `exp` — NaN for an infinite argument. That
-# is the same defect `_prk_exp` above exists to repair, and pow inherits it
-# through the delegate. This shim restores conformance; the C99 F.10.4.4 order
-# is followed literally, because the cases overlap and the order is what
+# Rust's `powf` is IEEE-754 / C99 `pow`. `ganita_f64_pow` was not when this was
+# written: its core was `exp(y * ln x)`, and every operand it did not special-case
+# ahead of that core reached `f64_exp`, which was the x87 `exp` — NaN for an
+# infinite argument. This shim restores conformance; the C99 F.10.4.4 order is
+# followed literally, because the cases overlap and the order is what
 # disambiguates them (pow(NaN, 0) is 1, not NaN; pow(1, NaN) is 1, not NaN).
+#
+# ⛔ 2.10.1: ganita 1.2.7 took C99's table itself and 1.2.8 sent every finite pow
+# through fdlibm's e_pow. Re-measured at 1.2.14, raw ganita_f64_pow against this
+# shim over the 256 rows of {+-0, +-1, +-2, +-1/2, +-3, +-5/2, +-inf, +-NaN}^2: NO
+# VALUE DIFFERS. The 27 rows that do differ are all NaN sign: ganita answers
+# 0xFFF8..., this shim the operand's NaN, as Rust does. So the shim now repairs that
+# sign and is otherwise a pin, kept for consumers whose ganita is older than theirs.
 #
 # ⚠ 2.2.5 IS THE BEHAVIOUR CHANGE. Through 2.2.4 this shim handled a zero base
 # and delegated everything else, so 24 of the 50 rows in the C99 special-case
@@ -186,7 +199,7 @@ fn _prk_cos(x) {
 #   pow(-5e-324, 3) = 0x0  vs Rust 0x8000000000000000 (-0.0)   [was; now fixed]
 # Root cause traced, not guessed: ganita takes the magnitude from
 # exp(3*ln(5e-324)), which underflows to +0 (measured), then applies the sign
-# with `f64_neg` — and cyrius's `f64_neg(+0.0)` yields +0.0, not -0.0 (measured).
+# with `f64_neg` — and cyrius's `f64_neg(+0.0)` yielded +0.0 until 6.6.8 (measured).
 # The sign is lost in the delegate's underflow tail, not in the domain guard
 # below, so repairing it means intercepting the inexact negative-base path this
 # release deliberately leaves alone. Also a negative base: unreachable.
@@ -257,10 +270,9 @@ fn _prk_pow(base, exp) {
         return _PRK_INF;
     }
 
-    # Zero base — same parity rule. `f64_neg(f64_from(0))` yields +0 on cyrius,
-    # but `f64_mul(f64_from(-1), f64_from(0))` yields 0x8000000000000000, so a
-    # negative zero IS reachable through the f64 surface and the sign is carried
-    # (ganita's own comment states the opposite; measured, it is wrong).
+    # Zero base — same parity rule. `f64_mul(f64_from(-1), f64_from(0))` yields
+    # 0x8000000000000000, and so does `f64_neg(f64_from(0))` from cyrius 6.6.8, so
+    # a negative zero IS reachable through the f64 surface and the sign is carried.
     if ((base & _PRK_ABS) == 0) {
         var zero_neg = 0;
         if (base == _PRK_NZERO) {

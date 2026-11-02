@@ -2,6 +2,138 @@
 
 ## [Unreleased]
 
+## [2.10.1] - 2026-11-01 — cyrius 6.6.20, hisab 3.3.7, and what fourteen toolchain releases moved
+
+Toolchain **6.6.6 → 6.6.20**, hisab **3.2.1 → 3.3.7** (its 6.6.20 release; 3.4.x pins
+cyrius 6.7.x), sakshi **2.5.2 → 2.5.7**, and from the 6.6.20 stdlib snapshot ganita
+**1.2.6 → 1.2.14**, bayan **1.5.6 → 1.5.12**, sandhi **1.9.17 → 1.10.8**, sigil
+**3.12.18 → 3.13.10**. No prakash API or formula changes, but the toolchain moves some
+results, closes three latent defects and has a real cost. All of it is measured below.
+
+Suite **9605 → 9622 assertions across 35 suites**, 0 failed; `cyrius audit` exits 0;
+`deps --verify` 114/114; `#must_use` 500, 0 lost. Benchmarks 166. Reference coverage
+**498/498** (6.6.11 stopped counting `main`, so the total reads one lower).
+
+### Fixed — by the toolchain, and pinned here
+Each pin below fails when run on the 6.6.6 tree.
+- **`sin`/`cos` were badly wrong near multiples of π.** x87 `fsin` reduces against a
+  66-bit π. Against exact rational arithmetic, over 39,999 points x = (7k + 1)π up to
+  8.8e5, it was up to **44% wrong relative** (2.4e15 ulp): sin(58654π) read 7.8e-16 where
+  the truth is 5.437e-16. 6.6.9's software sin/cos are within **0.5 ulp** there and
+  closer at all 39,999 points. This reached every resonant formula: Fabry-Perot
+  transmittance moved by up to 2.2e-11, and the new value is the right one.
+- **`num_modes` reported 1 mode for a hugely multimode fibre.** From V ≈ 2³², V²/2
+  overflows i64. Old `f64_to` returned `i64::MIN`, `n < 1` took that for "no modes", and
+  V = 2³³ gave 1. 6.6.8's `f64_to` saturates, so it now gives `i64::MAX`.
+- **A finite double now survives `to_json`/`from_json` bit-exactly.** bayan 1.5.7's
+  decoder is correctly rounded, closing prakash's 2.5.0 filing: **0 mismatches in
+  299,763** seeded doubles, against 6 on 2.10.0's bayan. `tests/hardening.tcyr`'s pin
+  was written to fail on this fix; it did, and it now holds the right bits. The caveat
+  in `src/serialize.cyr`'s header is gone.
+- **`point_source_new` had no test.** `cyrius coverage` counted a comment's mention of
+  the name as a reference until 6.6.8. It now has five assertions.
+
+### Changed — what a consumer sees
+A consumer compiles the bundle against its **own** stdlib, so none of this reaches it
+before its own pin moves. See `docs/guides/upgrading.md`.
+- **`f64_neg(+0)` is −0** from 6.6.8, and `x == 0` is a bit compare, so a function that
+  negates a zero can now return `0x8000000000000000`. Seen from `doe_lens_phase`,
+  `fiber_dispersion`, the Seidel and wavefront coefficients and on-axis beam phases.
+  Compare with `f64_eq` or `(x & _PRK_ABS) == 0`. Four assertions pinned the sign of an
+  incidental zero and now compare values, which still fails for a NaN or any residue.
+- **Result bits move, within rounding.** One program under both toolchains, over
+  87,440 samples of 54 public results: 2.2% moved, **0 NaN flips, 0 sign flips**.
+  - Bit-identical in this sample: Planck, CCT, CIE CMFs, SPD→XYZ, `wavelength_to_rgb`,
+    Sellmeier, fibre dispersion, beam radius, the HG field, GGX, Beckmann, Cook-Torrance.
+  - ≤ 5e-15 relative: `fresnel_*_complex`, thin films, `pow`-based rows (raw `pow` itself
+    moved up to 26 ulp; ganita 1.2.8 now sends it through `e_pow`, within 1 ulp).
+  - Larger, all near a zero of the sine: double slit 5.7e-14, multilayer 3.2e-14, single
+    slit 2.3e-14, Airy 1.1e-14, unpolarized Fresnel 1.0e-14, Fabry-Perot 2.2e-11.
+- **FFT-backed patterns** are bit-identical to n = 128. hisab 3.3.7 reseeds every 64th
+  twiddle, so from n = 256 they move, by at most **3.4e-14 of peak** at n = 1024. The
+  twiddles themselves improve: error at n = 65536 goes 6.8e-13 → 2.2e-15.
+  `tests/hisab_interop.tcyr` pins n = 4096.
+- ⚠ **New floor: the JSON surface needs bayan ≥ 1.5.10, so cyrius ≥ 6.6.13.** The eight
+  `bayan_json_v_obj_get` calls moved to `_by_cstr` (the old name forwards to it and warns
+  at every consumer's build). `scripts/check-consumer-link.sh` passes in full at 6.6.13
+  with that snapshot's own `lib/` and fails at 6.6.12. Below the floor the bundle still
+  links and runs ranga's surface, with a second undefined-function warning.
+- **`dist/` bundles open with a `# Requires` include block** (6.6.18): `lib/bayan.cyr`
+  for core, plus `lib/sandhi.cyr` for ai. It is include-once and harmless, but it does not
+  make the bundle self-sufficient. See *Sidecars* below.
+- **Binary size:** `src/main.cyr` 2,752,552 → 3,366,656 B (+22%). hisab's bundle went
+  1.12 → 2.10 MB, and unreachable functions are 2.16 MB of the result.
+
+### Sidecars — the override stays, for a new reason
+`cyrius distlib` no longer gets the inverted layout backwards. Since 6.6.18 a sidecar is
+what a compile-verify proves, and it reports `dist/prakash.deps` = `bayan` and
+`dist/prakash-ai.deps` = `sandhi bayan`, **"compile-verified"**. That is false for the
+hisab-free consumer the README promises: the verify runs with the named deps in scope, so
+hisab's own requires block supplies `math` and `ganita`, and `[deps.sakshi]` supplies
+sakshi. The bundle with those leaves alone is 798 errors, and
+`scripts/check-consumer-link.sh` fails on the generated sidecar. With `[deps.hisab]` removed
+from a scratch manifest, the same generator derives 10 leaves and warns on `num_fft`.
+`scripts/sync-deps-sidecar.sh` therefore keeps writing 19 / 28 leaves, and its header, CI's
+comment, `CLAUDE.md` and `overview.md` now say why. ⚠ `cyrius distlib --check` reads STALE
+after that script by design; CI runs distlib, the script and `git diff dist/` instead.
+
+### Changed — vendoring
+- **cyrius.cyml, lib/, cyrius.lock** — pin `6.6.20`, `[deps.hisab]` tag `3.3.7`. 97 files
+  changed and **2 are new: `lib/poison.cyr` and `lib/tls_hostid.cyr` must be `git add`ed**,
+  because the lock already hashes them. 113 files byte-match the 6.6.20 snapshot, and
+  `lib/hisab.cyr` matches the 3.3.7 tag. The lock holds hisab `fe33c40`, sakshi `716182d`
+  and trailer `cyrius 6.6.20`.
+- ⚠ **The re-vendoring sequence changed.** After a pin move, `deps` then `lib sync --full`
+  refuses (29 rows record the old pin). The sequence is `deps` → `lib sync --full
+  --relock` → `deps` → `deps --verify`. `deps` also keeps the old commit rows alongside the
+  new ones while `--verify` reads 114/114, so delete `cyrius.lock` and re-run `deps`.
+- **tests/serialize.tcyr** — 12 `streq(str_data(x), ...)` became `str_eq_cstr`: a Str is
+  not NUL-terminated at its length, and 6.6.13 warns on it.
+- **Comments** that stated the old semantics as fact are corrected, in `src/error.cyr`,
+  `src/spectral_core.cyr`, `src/wave_beam.cyr`, `src/wave_doe.cyr` and
+  `src/wave_diffraction.cyr`, including `wave_beam`'s "f64_neg is 0 - x, so every zero
+  phase is +0". The `_prk_sin` guard stays: past 2⁶³ the argument no longer identifies a
+  phase, whatever the reduction does.
+
+### Not exposed — checked rather than assumed
+- **−0 reaching a decision.** Every one of the 186 `f64_neg` sites was instrumented, and
+  46 receive +0 across the suite. With old semantics restored, exactly the 4 −0 failures
+  clear and nothing else moves. A taint scan over all sites found 5 paths into a divisor,
+  none into a raw compare, sign mask or `atan2`, and each of the 5 is guarded or lands
+  outside its accepted range either way.
+- **`f64_to`** — the other 9 of 10 sites are range-guarded. `_r_sat_u8` and `spd_at` catch
+  a NaN either way, and `_prk_is_odd_int` bounds |v| below 2⁵³.
+- **`_prk_pow` and `_prk_exp`** — raw `ganita_f64_pow` was compared with the shim over all
+  256 rows of the C99 special values: no value differs, and the 27 rows that differ are
+  NaN sign only (ganita answers `0xFFF8…`, the shim the operand's NaN, as Rust does). The
+  `pow(2, 0.5)` 1-ulp row stands. Both tables in `src/error.cyr` are re-measured.
+- **Bare float literals, float-builtin operands, `*T` steps, by-value structs** —
+  `src/` has none of the shapes 6.6.8, 6.6.10, 6.6.16 or 6.6.17 changed.
+- **`bayan_json_parse`'s 1.5.10 change** — prakash uses only the `bayan_json_v_*` tree API.
+- **`cyrius lint` still exits 0 with warnings at 6.6.20** — re-verified: rc 0 on a file
+  producing two `warn` lines. CONTRIBUTING's stdout grep stays load-bearing.
+
+### Performance
+Two real costs, both bought accuracy, and one of them avoidable (filed as 2.10.2):
+
+| Call | 6.6.6 | 6.6.20 |
+|---|---|---|
+| `sin`, \|x\| < 2²⁰·π/2 ≈ 1.65e6 | 47–50 ns | 41–51 ns |
+| `sin`, \|x\| above that (full Payne-Hanek reduction) | 51–55 ns | **525–673 ns** |
+| `ganita_f64_pow` | 100 ns | **198 ns** |
+
+- **Large phases:** `wave/interference_pattern_16x16` 97,963 → 889,301 ns (**+808%**),
+  because k·r ≈ 1e7 at visible wavelengths.
+- **`pow` rows gain ~100 ns per call:** `pbr/sheen_charlie` 146 → 260 ns,
+  `spectral/linear_to_srgb_gamma` 125 → 215 ns, `atmosphere/air_mass` 171 → 273 ns,
+  `spectral/xyz_to_srgb` 476 → 798 ns (three calls).
+- **No other speed claim.** 166 rows, median **+1.08%**. Atmosphere and colour composites
+  of those `pow` rows rise with them. A dozen `sin`-heavy rows read 10–30% faster, and
+  `pbr/sample_ggx` and `wave/mueller_retarder` 12–15% slower, but one run on this host
+  spreads that far, so neither is claimed. Both runs sit in `bench-history.csv` against
+  commit `dcbf2e5` (the tree was uncommitted): **03:12:05Z** is 6.6.6, **03:43:46Z** is
+  6.6.20, floors 1,210 ns and 1,377 ns.
+
 ## [2.10.0] - 2026-09-23 — absorbing thin films and fiber dispersion
 
 Closes the 2.10.0 roadmap row and the last two gaps that

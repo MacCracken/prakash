@@ -24,6 +24,7 @@ Fixes found along the way ship as patches of the current minor.
 
 | Version | Release | Pinned against |
 |---|---|---|
+| 2.10.2 | Large-phase interference | Same-binary A/B, exact-rational reference |
 | **2.11.0** | 3×3 polarization ray tracing | Chipman's PRT matrix |
 | 2.12.0 | Vectorial focusing | Richards-Wolf, scalar Airy limit |
 | 2.13.0 | Fifth-order aberrations | Buchdahl, real-ray residual |
@@ -33,6 +34,12 @@ Fixes found along the way ship as patches of the current minor.
 | 2.17.0 | CIE 2006 observer | CIE 170-1:2006 tables |
 
 Keep each section below to a few lines: what ships and what it is pinned against.
+
+### 2.10.2 — Large-phase interference
+`interference_pattern` calls sin/cos on k·r ≈ 1e7, past the 1.65e6 where they take full
+Payne-Hanek reduction: 9× at 2.10.1 (98 µs → 889 µs, 16×16). Reduce first, as
+2π·frac(r/λ). This moves bits, so pin it against exact rational arithmetic and prove
+the gain same-binary. Check Fabry-Perot's δ at the same threshold.
 
 ### 2.11.0 — 3×3 polarization ray tracing
 Chipman's polarization ray-tracing matrix per surface, accumulated through the
@@ -72,10 +79,13 @@ densities, and LMS → XYZ. Pinned to the published 2° and 10° tables at age 3
 Each of these rules is a measurement. The CHANGELOG has the story behind each one.
 
 **Performance**
-- **Cost model (cyrius 6.6.6):**
+- **Cost model (cyrius 6.6.20):**
   - `f64_mul` (~2 ns) and `f64_div` (~4.5 ns) are inline; a user-function call adds
     1–3 ns.
-  - The expensive calls are transcendentals: ln ~43 ns, atan2 ~53 ns, exp ~20 ns.
+  - The expensive calls are transcendentals: ln ~43 ns, atan2 ~53 ns, exp ~20 ns,
+    sin/cos ~45 ns, pow ~198 ns.
+  - ⚠ sin/cos cost ~525 ns at |x| ≥ 2^20·π/2 ≈ 1.65e6 (full reduction). Reduce a
+    large phase first: a path of 0.14 m at 550 nm crosses it.
   - So remove transcendental and function calls, not arithmetic, and hoist
     loop-invariant transcendentals first.
 - **Benchmarking:** run-to-run spread reaches 40%. Prove any change same-binary,

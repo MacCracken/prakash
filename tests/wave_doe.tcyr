@@ -183,7 +183,8 @@ _assert_rel(doe_lens_phase(_fd(1, 10000), f64_from(50), _fd(55, 100000)), 0xBEB3
   "lens phase at r = 1e-4: no cancellation");
 _assert_rel(doe_lens_phase(f64_from(3), f64_from(0 - 20), _fd(633, 1000000)), 0x40A159DF73E66A06, REL13,
   "diverging lens: positive phase");
-assert_eq(doe_lens_phase(Z, f64_from(50), _fd(55, 100000)), 0, "zero phase on axis");
+# Compared as a value: a positive lens negates its phase, so this is -0 from cyrius 6.6.8.
+assert_eq(f64_eq(doe_lens_phase(Z, f64_from(50), _fd(55, 100000)), 0), 1, "zero phase on axis");
 # Paraxially -pi r^2/(lambda f).
 var ppx = f64_neg(f64_div(f64_mul(F64_PI, _fd(1, 1000000)), f64_mul(_fd(55, 100000), f64_from(50))));
 _assert_rel(doe_lens_phase(_fd(1, 1000), f64_from(50), _fd(55, 100000)), ppx, _fd(1, 1000000000), "paraxial limit");

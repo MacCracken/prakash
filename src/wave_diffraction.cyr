@@ -823,9 +823,10 @@ fn multilayer_rta(wavelength, angle, n_incident, n_substrate, k_substrate, layer
     if (f64_lt(f64_abs(angle), F64_PI_2) == 0) { return PK_ERR_INVALID_ANGLE; }
     # cos theta_0 near grazing as sin(pi/2 - |theta|), pi/2 split into its double
     # and the 6.1e-17 remainder: the subtraction is exact (Sterbenz) past pi/4, and
-    # x87 fcos's ~2e-21 absolute error near pi/2 would otherwise be the whole of a
-    # grazing cosine's last digits — 7e-6 relative at pi/2 - 1 ulp, carried into
-    # eta_0 (R_p 2.7e-6 off on a 1e15 substrate; round 1 of the review).
+    # x87 fcos's ~2e-21 absolute error near pi/2 (f64_cos below cyrius 6.6.9, which
+    # a consumer may still pin) would otherwise be the whole of a grazing cosine's
+    # last digits — 7e-6 relative at pi/2 - 1 ulp, carried into eta_0 (R_p 2.7e-6
+    # off on a 1e15 substrate; round 1 of the review).
     var c0 = _prk_cos(angle);
     if (f64_gt(f64_abs(angle), F64_PI_4) == 1) {
         c0 = _prk_sin(f64_add(f64_sub(F64_PI_2, f64_abs(angle)), 0x3C91A62633145C07));

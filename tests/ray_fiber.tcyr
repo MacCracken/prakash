@@ -46,6 +46,11 @@ test_group("num_modes");
 
 assert_eq(num_modes(F64_TWO), 1, "V=2.0 single mode");
 assert(num_modes(v_mm) > 100, "multimode fiber has many modes");
+# 2.10.1: a count past 2^63 saturates. Below cyrius 6.6.8 f64_to wrapped it to
+# i64::MIN, `n < 1` read that as "no modes", and V = 2^33 reported 1.
+assert_eq(num_modes(0x41E0000000000000), 0x2000000000000000, "V = 2^31: N = 2^61 exactly");
+assert_eq(num_modes(0x4200000000000000), 0x7FFFFFFFFFFFFFFF, "V = 2^33: N saturates, not 1");
+assert_eq(num_modes(0x7FF0000000000000), 0x7FFFFFFFFFFFFFFF, "V = +inf: N saturates, not 1");
 assert_eq(is_single_mode(F64_TWO), 1, "V=2.0 is single-mode");
 assert_eq(is_single_mode(f64_from(3)), 0, "V=3.0 is not single-mode");
 
@@ -325,7 +330,9 @@ assert(f64_lt(fiber_material_dispersion(fsf, 0x4FFBA2BFD0D5FF5B), Z), "D at 2e77
 assert(f64_lt(sellmeier_dn_dlambda(fsf, 0x4FFBA2BFD0D5FF5B), Z), "dn/dl at 2e77 um < 0 (true -6.3e-231)");
 # An exactly-zero end is refused, not returned: D(1e100) underflows to 0 while the
 # true value is -5.1e-295, and must not come back as a zero from either side.
-assert_eq(fiber_dispersion(fsf, Z, F64_ONE, 0x54B249AD2594C37D, &ed), Z, "D(1e100 um) underflows to exactly 0");
+# Compared as values: D is -(...), and from cyrius 6.6.8 f64_neg(+0) is -0.
+assert_eq(f64_eq(fiber_dispersion(fsf, Z, F64_ONE, 0x54B249AD2594C37D, &ed), Z), 1,
+  "D(1e100 um) underflows to exactly 0");
 var _z100 = fiber_zero_dispersion_wavelength(fsf, Z, F64_ONE, F64_ONE, 0x54B249AD2594C37D, &ez);
 assert_eq(ez, PK_ERR_INVALID_PARAMETER, "[1, 1e100] um: D < 0 and exactly 0 -> refused");
 var _z15 = fiber_zero_dispersion_wavelength(fsf, Z, F64_ONE, _fd(15, 10), 0x54B249AD2594C37D, &ez);
@@ -400,7 +407,7 @@ var _wci = fiber_waveguide_dispersion(cinf, 0x3F6D7DBF487FCB92, 0x40106666666666
 assert_eq(ew, PK_ERR_INVALID_PARAMETER, "infinite C (f finite, f' NaN) refused");
 # All b = 0 is vacuum: chi = 0 is accepted (not refused as n^2 < 1), D = 0.
 var vac = _sellmeier_mk(Z, F64_ONE, Z, F64_ONE, Z, F64_ONE);
-assert_eq(fiber_dispersion(vac, Z, F64_ONE, F64_ONE, &ed), Z, "vacuum: D = 0");
+assert_eq(f64_eq(fiber_dispersion(vac, Z, F64_ONE, F64_ONE, &ed), Z), 1, "vacuum: D = 0");
 assert_eq(ed, PK_ERR_NONE, "vacuum accepted");
 # l^2 underflowing to 0 is refused (every term 0, chi a true +0).
 var _lu = fiber_dispersion(fsf, Z, F64_ONE, 0x1CA3529BA7D19EAF, &ed);

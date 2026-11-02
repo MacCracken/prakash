@@ -10,33 +10,38 @@
 # this): the sidecar is NOT an enforced contract. A consumer declaring fewer
 # folds than it lists still resolves cleanly (exit 0), a bogus fold name in it
 # raises no error, and in the git-dep flow the vendored set comes from prakash's
-# own cyrius.cyml. The upstream issue below reports a hard-error behaviour that
-# does NOT reproduce here. We correct the sidecar because a published file
-# should be true, not because a build breaks without it.
+# own cyrius.cyml. We correct the sidecar because a published file should be
+# true, not because a build breaks without it.
 #
-# Since cyrius 6.5.10 the generator emits, for the BASE bundle, the declared
-# `[deps] stdlib` unioned with an include-scan; PROFILE bundles keep a pruned
-# inference "so a narrow bundle cannot over-report". That rule assumes the base
-# bundle is the widest one and profiles are subsets of it. prakash is inverted:
+# ⛔ 2.10.1: THE REASON THIS SCRIPT EXISTS CHANGED UNDER IT. Through cyrius 6.6.17
+# the generator emitted `[deps] stdlib` unioned with an include-scan for the base
+# bundle and a pruned inference for profiles, which was backwards for prakash: the
+# base (dist/prakash.cyr, math-only) is the NARROW bundle and the profile
+# (dist/prakash-ai.cyr, + TLS) the WIDE one. 6.6.18 threw that away. A sidecar is
+# now whatever a compile-verify fixpoint proves the bundle needs, and the bundle
+# opens with a matching `# Requires` include block. That fixed the inversion and
+# opened a new hole, because the verify runs with the package's NAMED deps in scope:
 #
-#   [lib]     -> dist/prakash.cyr     math-only core, NO TLS   (the NARROW one)
-#   [lib.ai]  -> dist/prakash-ai.cyr  core + AI client, + TLS  (the WIDE one)
+#   [deps.hisab]'s own requires block supplies math and ganita, and its
+#   [deps.sakshi] supplies sakshi, so the generator derives
+#     dist/prakash.deps     = bayan
+#     dist/prakash-ai.deps  = sandhi bayan
+#   "compile-verified", and FALSE for a consumer without hisab, which the README
+#   promises works and ranga depends on. Measured at 6.6.20: the bundle with only
+#   those leaves is 798 errors (F64_ONE, ganita_*, sakshi_*), and
+#   scripts/check-consumer-link.sh fails on the generated sidecar and passes on
+#   this script's. With [deps.hisab] deleted from a scratch manifest the same
+#   generator derives `math sakshi ganita string alloc vec fnptr result bayan str`
+#   and warns on num_fft, so the verify is right about the question it is asked;
+#   "does this build WITHOUT the optional dep" is not that question.
 #
-# so the generator gets both backwards for us:
-#   - dist/prakash.deps OVER-reports  — it inherits the whole sandhi/TLS stack
-#     from `[deps] stdlib` (which must list it, because src/ai.cyr needs it),
-#     even though the core bundle references none of it. That misdescribes the
-#     math-only bundle to anyone reading it (and to any future tooling that
-#     does treat it as authoritative).
-#   - dist/prakash-ai.deps UNDER-reports — the pruned inference omits most of
-#     what sandhi transitively needs.
-#     ⚠ RE-MEASURED AT 6.5.33: through 6.5.20 this yielded literally
-#     `syscalls io`. It now yields ten folds — `string alloc str vec math ganita
-#     tagged bayan sandhi sakshi` — still missing `net http tls async random
-#     fdlopen dynlib chrono` (the stack sandhi actually needs) as well as
-#     `syscalls io fmt args assert result simd fnptr bench callback`. The
-#     shortfall shrank; it did not close. The core over-reporting above
-#     reproduces unchanged.
+# ⚠ Two consequences of overriding it, both expected:
+#   - `cyrius distlib --check` reads STALE after this script, because it compares
+#     against the generated sidecar. CI runs distlib, this script and
+#     `git diff dist/` instead; do the same.
+#   - the `# Requires` block in each bundle still names only the generated leaves,
+#     so `include "dist/prakash.cyr"` alone does not compile. Consumers declare
+#     this sidecar's leaves, as the README says.
 #
 # Upstream issue (fix shipped v6.5.10, prakash's inverted layout not covered):
 #   cyrius docs/development/issues/archived/2026-08-07-distlib-deps-sidecar-under-reports.md

@@ -1,12 +1,12 @@
 # fdlopen.cyr — foreign-dlopen: full-libc access for static cyrius binaries
 # Usage: include "lib/fdlopen.cyr"
-# Requires: string.cyr, syscalls.cyr, mmap.cyr, dynlib.cyr, fnptr.cyr
+# Includes its own definers (6.6.9): alloc.cyr, string.cyr, mmap.cyr, dynlib.cyr, fnptr.cyr.
 #
 # The pattern pfalcon/foreign-dlopen + Cosmopolitan libc use to get
 # a fully-initialised glibc into a static binary's address space
 # without shelling out. Ships v5.5.28 as the real fix for the NSS
 # dispatch problem the v5.5.23–v5.5.25 auxv-synthesis attempt could
-# not solve (see docs/development/issues/dynlib-nss-bootstrap.md +
+# not solve (see docs/development/issues/archived/dynlib-nss-bootstrap.md +
 # vidya :: static_dlopen_and_nss_bootstrap_limits).
 #
 # ARCHITECTURE
@@ -48,8 +48,10 @@
 #         `dl_longjmp` to return to the caller's setjmp frame.
 #
 #   3. Post-`fdlopen_init`, `state_buf` holds real fn pointers into
-#      a fully-initialised glibc. `fdlopen_sym(state, "getaddrinfo")`
-#      returns the pointer; caller invokes via `fncallN`.
+#      a fully-initialised glibc. `fdlopen_getaddrinfo(state)` returns
+#      the pointer (each slot has such an accessor, over
+#      `fdlopen_slot(state, off)`; `fdlopen_dlsym(state)` is glibc's own
+#      dlsym, for any other symbol); caller invokes via `fncallN`.
 #
 # RISKS & MITIGATIONS
 # ===================
@@ -104,6 +106,14 @@
 # Darwin + Windows stubbed (foreign-dlopen is inherently glibc-shaped —
 # Darwin uses dyld, Windows uses its own PE loader, both work
 # differently).
+
+# 6.6.9: alloc / memcpy / cyr_munmap / the dynlib_auxv_* helpers were all called and none
+# included. CHANGELOG [6.6.9]
+include "lib/alloc.cyr"
+include "lib/string.cyr"
+include "lib/mmap.cyr"
+include "lib/dynlib.cyr"
+include "lib/fnptr.cyr"
 
 # Error codes — cyrius enums don't accept negative literals, so these
 # live as plain constants. Returned as negative values from init:
@@ -436,7 +446,7 @@ fn fdlopen_helper_available(): i64 {
 }
 
 # ================================================================
-# fdlopen_init / fdlopen_sym / helpers
+# fdlopen_init / fdlopen_slot + the slot accessors / helpers
 # ================================================================
 
 # Returns the size in bytes that caller must allocate for the

@@ -151,9 +151,9 @@ jobs:
         run: |
           cyrius distlib
           cyrius distlib ai
-          # `cyrius distlib` gets the .deps sidecars backwards for prakash's
-          # inverted layout (base = narrow math-only, profile = wide + TLS), so
-          # we rewrite them from the manifest. See the script header.
+          # `cyrius distlib` compile-verifies the .deps sidecars with hisab in
+          # scope, which hides leaves a hisab-free consumer needs, so we rewrite
+          # them from the manifest. See the script header.
           ./scripts/sync-deps-sidecar.sh
           if ! git diff --quiet dist/; then
             echo "ERROR: a dist artifact is stale. Run 'cyrius distlib && cyrius distlib ai"

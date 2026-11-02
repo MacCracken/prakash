@@ -11,10 +11,8 @@
 # catch a renderer regression, not a tight one forced by the encoder. Verified
 # unchanged by the 2.2.4 bump: the 6.5.20 -> 6.5.33 bayan diff has no hunk in the
 # Grisu2 region, so no JSON byte moves.
-# ⚠ 2.4.9: this used to add "tightening these to bit-exact is worth doing". It is
-# not, for EVERY value: bayan's decoder mis-rounds ~1 in 10^5 doubles by 1 ULP (see
-# src/serialize.cyr's header). Bit-exact pins are right for SPECIFIC values that
-# are known to survive, which is what tests/hardening.tcyr does.
+# Bit-exact pins for specific values live in tests/hardening.tcyr. The decoder has
+# been correctly rounded since bayan 1.5.7 (see src/serialize.cyr's header).
 
 include "src/error.cyr"
 include "src/spectral_core.cyr"
@@ -83,7 +81,7 @@ var div_js = lens_type_to_json(LENS_DIVERGING);
 assert_eq(lens_type_from_json(str_data(div_js), str_len(div_js), &e), LENS_DIVERGING, "diverging roundtrip");
 assert_eq(e, PK_ERR_NONE, "lens_type decode reports PK_ERR_NONE");
 # wire format check: serializes to the bare variant string
-assert(streq(str_data(conv_js), "\"Converging\"") == 1, "converging wire format");
+assert(str_eq_cstr(conv_js, "\"Converging\"") == 1, "converging wire format");
 
 # ── Polarization ────────
 test_group("polarization");
@@ -144,19 +142,19 @@ if (dback != 0) {
 # The wire format is a published contract: consumers and other languages parse it.
 # A round-trip test cannot guard it, because prakash's own decoder would happily
 # accept a format only prakash emits.
-assert_eq(streq(str_data(rgb_to_json(rgb_new(_fd(1, 10), _fd(2, 10), _fd(3, 10)))),
+assert_eq(str_eq_cstr(rgb_to_json(rgb_new(_fd(1, 10), _fd(2, 10), _fd(3, 10))),
     "{\"r\":0.1,\"g\":0.2,\"b\":0.3}"), 1, "rgb wire format");
-assert_eq(streq(str_data(medium_to_json(medium_glass())),
+assert_eq(str_eq_cstr(medium_to_json(medium_glass()),
     "{\"n\":1.52,\"name\":\"glass\"}"), 1, "medium wire format");
 var w_sell = str_builder_new();
 str_builder_add_cstr(w_sell, "{\"b1\":1.03961212,\"c1\":0.00600069867,");
 str_builder_add_cstr(w_sell, "\"b2\":0.231792344,\"c2\":0.0200179144,");
 str_builder_add_cstr(w_sell, "\"b3\":1.01046945,\"c3\":103.560653}");
-assert_eq(streq(str_data(sellmeier_to_json(sellmeier_bk7())),
+assert_eq(str_eq_cstr(sellmeier_to_json(sellmeier_bk7()),
     str_data(str_builder_build(w_sell))), 1, "sellmeier wire format");
-assert_eq(streq(str_data(lens_type_to_json(LENS_DIVERGING)), "\"Diverging\""), 1,
+assert_eq(str_eq_cstr(lens_type_to_json(LENS_DIVERGING), "\"Diverging\""), 1,
   "lens_type diverging wire format");
-assert_eq(streq(str_data(polarization_to_json(polarization_new(F64_ONE, f64_from(0), f64_div(F64_PI, f64_from(2))))),
+assert_eq(str_eq_cstr(polarization_to_json(polarization_new(F64_ONE, f64_from(0), f64_div(F64_PI, f64_from(2)))),
     "{\"ex\":1.0,\"ey\":0.0,\"phase\":1.5707963267948966}"), 1, "polarization wire format");
 
 var wpr = prescription_new("test lens");
@@ -166,10 +164,10 @@ str_builder_add_cstr(w_pre, "{\"name\":\"test lens\",\"surfaces\":[");
 str_builder_add_cstr(w_pre, "{\"radius\":50.0,\"thickness\":3.0,");
 str_builder_add_cstr(w_pre, "\"n_after\":1.52,\"aperture_radius\":12.5}");
 str_builder_add_cstr(w_pre, "],\"n_initial\":1.0}");
-assert_eq(streq(str_data(prescription_to_json(wpr)),
+assert_eq(str_eq_cstr(prescription_to_json(wpr),
     str_data(str_builder_build(w_pre))), 1, "prescription wire format");
 # An empty surfaces array still emits [] and keeps the trailing key.
-assert_eq(streq(str_data(prescription_to_json(prescription_new("empty"))),
+assert_eq(str_eq_cstr(prescription_to_json(prescription_new("empty")),
     "{\"name\":\"empty\",\"surfaces\":[],\"n_initial\":1.0}"), 1,
   "prescription with no surfaces emits an empty array");
 
@@ -179,7 +177,7 @@ assert_eq(streq(str_data(prescription_to_json(prescription_new("empty"))),
 var escn = alloc(16);
 store8(escn, 34); store8(escn + 1, 92); store8(escn + 2, 10); store8(escn + 3, 9);
 store8(escn + 4, 1); store8(escn + 5, 65); store8(escn + 6, 0);
-assert_eq(streq(str_data(medium_to_json(_medium_mk(F64_ONE, escn))),
+assert_eq(str_eq_cstr(medium_to_json(_medium_mk(F64_ONE, escn)),
     "{\"n\":1.0,\"name\":\"\\\"\\\\\\n\\t\\u0001A\"}"), 1,
   "medium name escapes quote, backslash, newline, tab and a control char");
 
@@ -208,7 +206,7 @@ store64(wvals + 16, f64_div(f64_from(1), f64_from(3)));
 store64(wvals + 24, f64_from(0));
 var wspd = spd_from_static(f64_from(380), f64_from(5), wvals, 4);
 var wjs = spd_to_json(wspd);
-assert_eq(streq(str_data(wjs),
+assert_eq(str_eq_cstr(wjs,
     "{\"start_nm\":380.0,\"step_nm\":5.0,\"values\":[0.1,2.0,0.3333333333333333,0.0]}"), 1,
   "spd_to_json emits the exact documented wire format");
 
@@ -216,7 +214,7 @@ assert_eq(streq(str_data(wjs),
 var w1 = alloc(8);
 store64(w1, f64_from(7));
 var wspd1 = spd_from_static(f64_from(400), f64_div(f64_from(25), f64_from(10)), w1, 1);
-assert_eq(streq(str_data(spd_to_json(wspd1)),
+assert_eq(str_eq_cstr(spd_to_json(wspd1),
     "{\"start_nm\":400.0,\"step_nm\":2.5,\"values\":[7.0]}"), 1,
   "spd_to_json single sample emits no trailing comma");
 
@@ -238,7 +236,7 @@ store64(wneg,     f64_neg(f64_div(f64_from(1), f64_from(4))));
 store64(wneg + 8, 0x8000000000000000);
 var wspdn = spd_from_static(f64_from(380), f64_from(5), wneg, 2);
 var wnjs = spd_to_json(wspdn);
-assert_eq(streq(str_data(wnjs),
+assert_eq(str_eq_cstr(wnjs,
     "{\"start_nm\":380.0,\"step_nm\":5.0,\"values\":[-0.25,-0.0]}"), 1,
   "spd_to_json keeps a negative value AND negative zero's sign");
 var wne = 0;

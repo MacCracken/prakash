@@ -99,4 +99,26 @@ for (var i = 1; i < 12; i = i + 1) {
 assert(checked == 121, "checked 121 reflect cases");
 assert(mismatches == 0, "ray_reflect_3d agrees with hvec3_reflect on all 121 cases");
 
+# The FFT of a unit impulse at index 1 is its own twiddle table, so this reads
+# num_fft's accuracy directly. hisab 3.2.1 drifted to 6.7e-14 at n = 4096 (the
+# recurrence ran the whole stage); 3.3.7 reseeds every 64th twiddle: 2.6e-15.
+test_group("num_fft twiddles stay accurate at n = 4096");
+var _tw_n = 4096;
+var _tw_buf = alloc(_tw_n * 16);
+assert(_tw_buf != 0, "twiddle buffer allocated");
+memset(_tw_buf, 0, _tw_n * 16);
+store64(_tw_buf + 16, F64_ONE);
+var _tw_t, _tw_v = num_fft(_tw_buf, _tw_n);
+assert(is_err_result(_tw_t) == 0, "num_fft(4096) is Ok");
+var _tw_worst = 0;
+var _tw_i = 0;
+while (_tw_i < _tw_n) {
+    var _tw_a = f64_div(f64_mul(F64_TAU, f64_from(_tw_i)), f64_from(_tw_n));
+    var _tw_e = f64_abs(f64_sub(load64(_tw_buf + _tw_i * 16), f64_cos(_tw_a)));
+    if (f64_gt(_tw_e, _tw_worst) == 1) { _tw_worst = _tw_e; }
+    _tw_i = _tw_i + 1;
+}
+assert(f64_lt(_tw_worst, f64_div(F64_ONE, f64_from(100000000000000))) == 1,
+  "every twiddle of a 4096-point stage within 1e-14 of cos(2 pi k/n)");
+
 var r = assert_summary();

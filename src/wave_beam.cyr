@@ -1370,9 +1370,10 @@ fn _bm_field_fail(re_out, im_out) {
 # underflow, and no w (a subnormal w's coarse grid). Within 4 ulps of mpmath (3.96
 # at worst over 400k valid beams and points from 2^-1074 to DBL_MAX; 98% within 2),
 # 1.4 subnormal ulps where the phase is subnormal. A phase of 2^63 or more still
-# reaches _prk_cos's NaN. On the axis, or at Re q = +-0, it is f64_neg(0*Re q),
-# the +0 the direct form gives there where it is finite (f64_neg is 0 - x, so every
-# zero phase is +0). A beam whose fields no constructor or element makes
+# reaches _prk_cos's NaN. On the axis, or at Re q = +-0, it is f64_neg(0*Re q), the
+# zero the direct form gives there where it is finite, sign included (from cyrius
+# 6.6.8 f64_neg flips a zero's sign, so it is -0 for Re q >= +0; below that it was
+# 0 - x, and every zero phase +0). A beam whose fields no constructor or element makes
 # (_bm_q_valid) keeps curv, the 2.6.0 inf or NaN.
 fn _bm_curv_scaled(beam, x, y, curv) {
     if (_bm_q_valid(beam) == 0) { return curv; }

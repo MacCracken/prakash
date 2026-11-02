@@ -72,8 +72,9 @@ fn rgb_clamp(c) {
 struct RgbU8 { r; g; b; }
 
 # channel*255 + 0.5 truncated, with Rust `as u8` saturation. f64_clamp lets a
-# NaN through (matching Rust f64::clamp), and f64_to(NaN) is INT64_MIN, so the
-# NaN case must be caught here: Rust's saturating cast yields 0.
+# NaN through (matching Rust f64::clamp), and f64_to(NaN) depends on the
+# consumer's pin (0 from cyrius 6.6.8, INT64_MIN below it), so the NaN case is
+# caught here: Rust's saturating cast yields 0.
 fn _r_sat_u8(ch) {
     var v = f64_add(f64_mul(ch, f64_from(255)), _r(5, 10));
     # NaN fails every comparison, so this catches it as well as negatives.

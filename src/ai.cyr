@@ -56,7 +56,7 @@ fn _ai_json_str_field(v, key, err_out) {
         store64(err_out, PK_ERR_PARSE);
         return 0;
     }
-    var node = bayan_json_v_obj_get(v, key);
+    var node = bayan_json_v_obj_get_by_cstr(v, key);
     if (bayan_json_v_is_str(node) == 0) {
         store64(err_out, PK_ERR_INVALID_PARAMETER);
         return 0;
@@ -140,7 +140,7 @@ fn ai_daimon_config_from_json(json, len, err_out) {
     var v = bayan_json_v_parse_buf(json, len);
     var endpoint = _ai_json_str_field(v, "endpoint", err_out);
     if (prakash_is_err(load64(err_out)) == 1) { return 0; }
-    var ak_v = bayan_json_v_obj_get(v, "api_key");
+    var ak_v = bayan_json_v_obj_get_by_cstr(v, "api_key");
     var api_key = 0;
     if (bayan_json_v_is_str(ak_v) == 1) {
         api_key = str_data(bayan_json_v_str(ak_v));
@@ -206,7 +206,7 @@ fn _ai_register_response(status, body, body_len, err_out) {
         store64(err_out, PK_ERR_PARSE);
         return "unknown";
     }
-    var id = bayan_json_v_obj_get(data, "id");
+    var id = bayan_json_v_obj_get_by_cstr(data, "id");
     if (bayan_json_v_is_int(id) == 0) {
         store64(err_out, PK_ERR_INVALID_PARAMETER);
         return "unknown";

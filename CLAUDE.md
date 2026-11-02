@@ -8,8 +8,8 @@
 - **Type**: Cyrius library — `src/` modules bundled by `cyrius distlib` into `dist/prakash.cyr`
   (math-only) and `dist/prakash-ai.cyr` (adds the sandhi HTTP/TLS AI client)
 - **License**: GPL-3.0
-- **Toolchain pin**: cyrius 6.6.6 — single source of truth is `cyrius = "..."` in `cyrius.cyml`
-- **Version**: SemVer, currently 2.6.x. `VERSION` is the single source; `cyrius.cyml`
+- **Toolchain pin**: cyrius 6.6.20 — single source of truth is `cyrius = "..."` in `cyrius.cyml`
+- **Version**: SemVer, currently 2.10.x. `VERSION` is the single source; `cyrius.cyml`
   reads it via `${file:VERSION}` and the release workflow fails if the tag disagrees
 
 ⚠ **The Rust original is a FIDELITY reference, not a CORRECTNESS one.** 2.2.6 found six
@@ -61,8 +61,9 @@ soorat, kiran on the frozen Rust 1.x crate. Per-consumer detail: `docs/architect
 11. Version check — `VERSION` bumped; `cyrius.cyml` picks it up via `${file:VERSION}`
 12. Regenerate the bundles — `cyrius distlib && cyrius distlib ai && ./scripts/sync-deps-sidecar.sh`,
     then confirm `git diff dist/` is what you expect. ⚠ `cyrius distlib` OVERWRITES the
-    `.deps` sidecars with a backwards base-vs-profile inference; the sync script must run
-    after it, every time (CI does exactly this and diffs)
+    `.deps` sidecars with a list compile-verified with hisab in scope, which is false for
+    a hisab-free consumer; the sync script must run after it, every time (CI does exactly
+    this and diffs). `cyrius distlib --check` reads STALE afterwards by design
 13. Return to step 1
 
 ### Task Sizing
@@ -138,6 +139,9 @@ soorat, kiran on the frozen Rust 1.x crate. Per-consumer detail: `docs/architect
   ONE bundle, and `dist/prakash.cyr` must stay free of sandhi/TLS/net symbols (CI greps).
 - **sakshi tracing on operations** — `_prk_trace("op")` at operation entry, level set by
   `prakash_set_log_level`.
+- ⚠ **`x == 0` on a float is a BIT compare, and `f64_neg(+0)` is −0 from cyrius 6.6.8.**
+  Test a float zero with `(x & _PRK_ABS) == 0` or `f64_eq`. 2.10.1 audited the 186
+  `f64_neg` sites and found every guard in `src/` already masks; keep it that way.
 - **Report, don't fabricate.** A function that cannot compute its answer returns a
   `PK_ERR_*` code through `err_out`, or a 0 sentinel — never a plausible-looking number.
   A null handle must be distinguishable from a computed zero.

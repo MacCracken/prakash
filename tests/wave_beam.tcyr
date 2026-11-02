@@ -2475,10 +2475,11 @@ _assert_rel(_bm_curv_scaled(fbU, 0x5BE8D4B07B3C07B2, 0, _PRK_NAN), 0x7C248255D5F
   "phase at x = 5.64e134 = 9.9933918219685204e289 (mpmath)");
 t61 = hg_mode_field(fbU, 0, 0, f64_mul(beam_radius(fbU), F64_HALF), 0, &fr61, &fi61);
 assert((fr61 & _PRK_ABS) > _PRK_INF, "HG_00 at x = w/2 there (phase 2.5e599): NaN");
-# On the axis the phase is +0 before any exponent is formed: q = 2^-1022 (1 + i),
+# On the axis the phase is a zero before any exponent is formed: q = 2^-1022 (1 + i),
 # lambda = 2^-1074 would otherwise give a phase of -8.7e-17 from the exponent of 0.
 var fbZ = gaussian_beam_from_q(0x0010000000000000, 0x0010000000000000, 1, &e);
-assert_eq(_bm_curv_scaled(fbZ, 0, 0, _PRK_NAN), 0, "on the axis: +0");
+# Compared as a value: f64_neg(0*Re q) is -0 here from cyrius 6.6.8.
+assert_eq(f64_eq(_bm_curv_scaled(fbZ, 0, 0, _PRK_NAN), 0), 1, "on the axis: zero");
 # ... and at a waist (Re q = 0) likewise: q = i*2^-100, lambda = 2^-1074 (k
 # overflows, 1/R = 0: inf*0 before). The Gouy phase is 0 there, so Im u is exactly 0.
 var fbY = gaussian_beam_from_q(0, 0x39B0000000000000, 1, &e);

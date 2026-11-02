@@ -615,8 +615,9 @@ fn hologram_efficiency(g, theta, wavelength, polarization, err_out) {
     var xi = f64_div(f64_mul(deph, d), f64_mul(F64_TWO, acs));
     var nu2 = f64_mul(nu, nu);
     var xi2 = f64_mul(xi, xi);
-    # How well the doubles resolve the sine's argument: the rounding of c_R (fcos
-    # near pi/2 is good to ~2^-68 absolute), of c_S (which cancels near grazing)
+    # How well the doubles resolve the sine's argument: the rounding of c_R (x87
+    # fcos near pi/2 is good to ~2^-68 absolute; f64_cos is 1 ulp from cyrius
+    # 6.6.9, inside this bound), of c_S (which cancels near grazing)
     # and of the dephasing, carried into w^2 = nu^2 + xi^2 (or q^2 = xi^2 - nu^2).
     var ecr = f64_add(0x3BD0000000000000, f64_mul(0x3CB0000000000000, cr));
     var ecs = f64_add(f64_mul(0x3CB0000000000000, f64_add(cr, f64_abs(kz))), ecr);

@@ -29,15 +29,16 @@ Consumed by [ranga](https://github.com/MacCracken/ranga) (spectral/colour — **
 name     = "your-project"
 version  = "${file:VERSION}"
 language = "cyrius"
-cyrius   = "6.6.6"
+cyrius   = "6.6.20"
 
 [deps]
 # ganita provides the transcendentals (acos/asin/atan2/pow/sinh/…) and subsumes
 # matrix/linalg. math stays for comparisons/clamp/lerp/min/max + polyfills.
 # This is dist/prakash.deps verbatim — the stdlib folds the core bundle needs in
-# scope. ⚠ A shorter list does NOT build: without sakshi the bundle fails on
-# SK_TRACE/sakshi_trace, without bayan on the JSON surface, without syscalls/io
-# on bayan's own dependencies.
+# scope. ⚠ Do not shorten it to the `# Requires` block at the head of the bundle:
+# that block is verified with hisab in scope and names only bayan. Without
+# math/ganita the bundle does not build, and without sakshi it fails on
+# SK_TRACE/sakshi_trace. The JSON surface needs bayan >= 1.5.10 (cyrius >= 6.6.13).
 stdlib = [
     "syscalls", "string", "alloc", "str", "fmt", "vec", "io", "args",
     "assert", "result", "math", "simd", "ganita", "tagged", "fnptr",
@@ -54,12 +55,12 @@ stdlib = [
 # refuses to build. Everything else in prakash is self-contained. CI proves this
 # on every commit: scripts/check-consumer-link.sh.
 git     = "https://github.com/MacCracken/hisab.git"
-tag     = "3.2.1"
+tag     = "3.3.7"
 modules = ["dist/hisab.cyr"]
 
 [deps.prakash]
 git     = "https://github.com/MacCracken/prakash.git"
-tag     = "2.5.1"
+tag     = "2.10.1"
 modules = ["dist/prakash.cyr"]        # math-only core (no TLS)
 # For the AI client instead, pull the ai bundle (adds the sandhi HTTP/TLS stack):
 # modules = ["dist/prakash-ai.cyr"]
@@ -104,7 +105,7 @@ var transmitted = malus_law(F64_ONE, F64_PI_4);
 
 ```
 prakash (Cyrius)
-  ├── hisab   (git dep, tag 3.2.1) — FFT (num_fft) for wave_pattern
+  ├── hisab   (git dep, tag 3.3.7) — FFT (num_fft) for wave_pattern
   ├── ganita  (stdlib) — transcendentals + linear algebra
   ├── bayan   (stdlib) — JSON (serialize module)
   ├── sakshi  (stdlib) — logging (trace diagnostics)
@@ -115,7 +116,7 @@ prakash (Cyrius)
 
 ```sh
 cyrius deps                 # resolve the hisab git dep
-for f in tests/*.tcyr; do cyrius test "$f"; done   # 9605 assertions, 35 suites
+for f in tests/*.tcyr; do cyrius test "$f"; done   # 9622 assertions, 35 suites
 cyrius distlib              # regenerate dist/prakash.cyr
 cyrius distlib ai           # regenerate dist/prakash-ai.cyr
 cyrius bench tests/prakash.bcyr                     # 166 benchmarks

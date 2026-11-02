@@ -30,7 +30,8 @@ fn v_number(core_radius, na, wavelength) {
 }
 
 # Approximate guided-mode count in a step-index multimode fiber: N ~ V^2/2
-# (>= 1). Single-mode (V < 2.405) has exactly one mode.
+# (>= 1). Single-mode (V < 2.405) has exactly one mode. From V ~ 2^32 the count
+# saturates at i64::MAX (cyrius >= 6.6.8; below it f64_to wraps and this answers 1).
 #must_use
 fn num_modes(v) {
     if (f64_lt(v, _fib_cutoff()) == 1) {

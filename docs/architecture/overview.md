@@ -21,7 +21,7 @@ after the port-completeness review; recover it with
 | `serialize` | serialize.cyr | 55 | (free functions) | JSON roundtrips for the seven serde-tested types. ⚠ **Encode goes straight into a `str_builder`** since 2.3.4/2.3.5 — bayan is used only for Grisu2 float rendering; **decode** still walks a bayan value tree. The encoder emits round-trip-correct floats; bayan's decoder mis-rounds ~1 in 10⁵ doubles by 1 ULP (see serialize.cyr); every `*_from_json` reports via `err_out`; every wire format is pinned to exact bytes |
 | `ai` | ai.cyr | 62 | `DaimonClient`, `DaimonConfig`, `HooshConfig` | AI-assisted optics queries via sandhi HTTP POST — **not in the core bundle** |
 
-**Total**: 28 science modules + error, **9605 test assertions across 35 suites**,
+**Total**: 28 science modules + error, **9622 test assertions across 35 suites**,
 166 benchmarks. (`tests/hardening.tcyr` is the cross-module regression suite for the
 2.0.2 audit repairs and the 2.1.0 error channels — see those CHANGELOG entries.)
 
@@ -112,39 +112,37 @@ than the sidecar lists still resolves cleanly (`cyrius deps` exits 0), a bogus
 fold name in the sidecar raises no error, and in the git-dep flow the vendored
 set is driven by prakash's own `cyrius.cyml`, not by the sidecar.
 
-Even so it should state the truth, and by default it does not. prakash's bundle
-layout is **inverted** relative to what `cyrius distlib` assumes: the base bundle
-(`[lib]` → `dist/prakash.cyr`) is the *narrow* math-only one and the profile
-(`[lib.ai]`) is the *wide* one, whereas since 6.5.10 the generator emits
-`[deps] stdlib` ∪ include-scan for the base and a pruned inference for profiles —
-i.e. it assumes the base is widest. Left alone, the core sidecar therefore
-advertises the sandhi/TLS stack the math-only bundle never touches, and the ai
-sidecar under-reports.
+Even so it should state the truth, and what `cyrius distlib` generates does not.
 
-⚠ **The ai half of that was re-measured at 6.5.33, at 6.6.4 and at 6.6.6; the
-figure keeps moving and the defect does not.** Through 6.5.20 the pruned inference
-yielded literally `syscalls io`. At 6.5.33 it yielded ten folds — `string alloc
-str vec math ganita tagged bayan sandhi sakshi`. At **6.6.4** (measured for 2.3.0)
-it yielded **25** at 2.3.0 and yields **26** at 2.4.0 (the extra leaf is `fnptr`,
-pulled in by `spd_from_function`'s `fncall1` — prakash's first callback site), and
-the generator now reports its own patching — `sidecar:
-re-added 15 leaf(s) the inference missed (compile-verified)` — but the inversion
-survives all of it: the same run emits **29** leaves for the math-only base
-against those 25 for ai, i.e. the narrow bundle is still advertised as the wider
-one, complete with the sandhi/TLS stack it never touches. At **6.6.6** (2.4.1) the
-same 29-for-base / 26-for-ai pair reproduces. The generator still
-under-reports for the wide profile; only the size of the shortfall moved. The core
-over-reporting reproduces unchanged. **`scripts/sync-deps-sidecar.sh`** regenerates
-both from the manifest — core = declared stdlib minus the AI-only folds
-(`net http tls async random fdlopen dynlib chrono sandhi`), ai = the full declared
-list. CI enforces the sync plus a core-bundle-is-TLS-free symbol scan, which is
-the check that actually has teeth.
+Through cyrius 6.6.17 the generator got prakash's layout backwards. The base bundle
+(`[lib]` → `dist/prakash.cyr`) is the *narrow* math-only one and the profile
+(`[lib.ai]`) the *wide* one, and the generator assumed the opposite: the core sidecar
+advertised the sandhi/TLS stack and the ai sidecar under-reported.
+
+⚠ **6.6.18 fixed that and opened a different hole.** A sidecar is now what a
+compile-verify fixpoint proves the bundle needs, and the bundle opens with a matching
+`# Requires` include block. But the verify runs with the package's named deps in scope,
+and hisab is optional for prakash's consumers: its own requires block supplies `math`
+and `ganita`, and `[deps.sakshi]` supplies sakshi. So at 6.6.20 the generator reports
+`bayan` for core and `sandhi bayan` for ai, "compile-verified", and that is false for
+the hisab-free link the README promises: the bundle with those leaves alone is 798
+errors, and `scripts/check-consumer-link.sh` fails on it. With `[deps.hisab]` removed
+from a scratch manifest, the same generator derives ten leaves (`math sakshi ganita
+string alloc vec fnptr result bayan str`) and warns on `num_fft`.
+
+**`scripts/sync-deps-sidecar.sh`** therefore regenerates both from the manifest: core =
+declared stdlib minus the AI-only folds (`net http tls async random fdlopen dynlib
+chrono sandhi`), ai = the full declared list. Two consequences are expected:
+`cyrius distlib --check` reads STALE afterwards, and the `# Requires` block still names
+only the generated leaves, so `include "dist/prakash.cyr"` alone does not compile. CI
+enforces the sync, a core-bundle-is-TLS-free symbol scan and the consumer link, which
+are the checks with teeth. bayan's include closure is 24 files, none of them net or TLS.
 
 ## Dependencies
 
 | Dependency | Kind | Purpose |
 |-----------|------|---------|
-| `hisab` | git dep (tag 3.2.1) | FFT (`num_fft`) for `wave_pattern` (the suite also exercises `num_ifft`). `RayVec3` is layout-identical to hisab's `HVec3`, so all 26 `hvec3_*` ops work on prakash vectors unconverted — contract pinned by `tests/hisab_interop.tcyr` |
+| `hisab` | git dep (tag 3.3.7) | FFT (`num_fft`) for `wave_pattern` (the suite also exercises `num_ifft`). `RayVec3` is layout-identical to hisab's `HVec3`, so all 26 `hvec3_*` ops work on prakash vectors unconverted — contract pinned by `tests/hisab_interop.tcyr` |
 | `ganita` | stdlib | Transcendentals (acos/asin/atan2/pow/sinh/…) + linear algebra |
 | `math` | stdlib | Comparisons, clamp/lerp/min/max, `F64_PI` etc., aarch64 polyfills |
 | `bayan` | stdlib | JSON (`serialize` module) |

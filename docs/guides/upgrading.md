@@ -22,10 +22,42 @@ details of each change are in `CHANGELOG.md`.
 - **It builds without hisab, and on ranga's toolchain.** The bundle compiles and
   runs ranga's surface with one `undefined function 'num_fft'` warning.
   `scripts/check-consumer-link.sh` is the check. **CI runs it bare**, which covers
-  the pinned cyrius 6.6.6 with prakash's own `lib/` on every commit. **ranga's exact
+  the pinned cyrius with prakash's own `lib/` on every commit. **ranga's exact
   configuration** — cyrius 6.6.2 and ranga's own vendored stdlib — was checked by
-  hand at 2.5.1 and is not held by CI; to repeat it:
-  `./scripts/check-consumer-link.sh --root ~/Repos/ranga ~/.cyrius/versions/6.6.2/bin/cycc`.
+  hand at 2.5.1 and is not held by CI; to repeat it, name ranga's current pin:
+  `./scripts/check-consumer-link.sh --root ~/Repos/ranga ~/.cyrius/versions/<pin>/bin/cycc`.
+  ⚠ From 2.10.1 that passes in full only at cyrius ≥ 6.6.13; see below.
+
+## 2.10.1: what the cyrius 6.6.20 bump moves
+
+A consumer compiles the bundle against its **own** stdlib, so none of this reaches it
+until its own pin moves. Measured by running one program under 6.6.6 and 6.6.20 and
+comparing bits.
+
+- **What ranga calls is bit-identical** over the sample: `cct_from_xy`, `cie_cmf_at`,
+  `spd_to_xyz` on blackbodies. So is `wavelength_to_rgb`. On its re-exported surface,
+  `color_temperature_to_rgb`'s red channel and `color_rendering_index` move by at most
+  2 ulp.
+- ⚠ **A zero can come back as −0.** `f64_neg(+0)` is −0 from cyrius 6.6.8, and
+  `x == 0` is a bit compare, so `doe_lens_phase` on the axis or `fiber_dispersion` in
+  vacuum now read false against it. Use `f64_eq(x, 0)` or `(x & 0x7FFFFFFFFFFFFFFF) == 0`.
+- **`sin`/`cos` are right near multiples of π.** x87 `fsin` was up to 44% wrong there.
+  Resonant results move: Fabry-Perot by up to 2.2e-11, slits and multilayers by up to
+  6e-14. The new values are the correct ones.
+- **FFT patterns** are bit-identical to n = 128, and move by at most 3.4e-14 of peak at
+  n = 1024.
+- **`num_modes`** saturates at `i64::MAX` past V ≈ 2³², where it used to answer 1.
+- **JSON** round-trips bit-exactly, so a pin on an old decoded value goes red by design.
+- **Cost:** `sin`/`cos` at |x| ≥ 2²⁰·π/2 ≈ 1.65e6 are ~10× slower (525 ns, full
+  reduction), and `pow` is ~2× slower (198 ns). `interference_pattern` is the row that
+  shows it, at about 9×; a phase k·r passes that threshold at r ≈ 0.14 m in visible light.
+- ⚠ **New floor: bayan ≥ 1.5.10, which is cyrius ≥ 6.6.13, for the JSON surface.** Below
+  it the bundle still links and runs everything else, with a second undefined-function
+  warning, `bayan_json_v_obj_get_by_cstr`, beside `num_fft`. ranga's cyrius 6.6.9 is below
+  it: its surface passes, and the FFT-refusal check reports the extra name.
+- **`dist/prakash.cyr` opens with `include "lib/bayan.cyr"`.** It is include-once, so a
+  consumer that already declares bayan is unaffected, but it does not make the bundle
+  self-sufficient: declare `dist/prakash.deps`.
 
 ## What does move
 

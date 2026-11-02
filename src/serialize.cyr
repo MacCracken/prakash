@@ -11,24 +11,17 @@
 # always emits the shortest string that parses back to the original bits. (Before
 # that it rendered 6 decimals, which silently flushed any |x| < 5e-7 to zero —
 # prakash 2.0.0 shipped against that encoder.)
-# ⛔ 2.4.9: "survives a to_json/from_json cycle BIT-EXACTLY" WAS STATED HERE WITHOUT
-# QUALIFICATION, AND IT IS NOT TRUE. The encoder is right; bayan's DECODER
-# (`_d_decimal_to_f64`, vendored in lib/bayan.cyr) mis-rounds a small fraction of
-# the strings it is handed by exactly 1 ULP. Measured with seeded random doubles
-# through rgb_to_json -> rgb_from_json: **2 in 200,000 with |x| in 1e-16..1e16** —
-# prakash's own magnitude band, e.g. 1.621274542797433e-9 comes back one ULP high —
-# and 5 in 200,000 across the full exponent range. A correctly-rounded parser
-# (Python's float()) returns the ORIGINAL bits from every one of those strings, so
-# the defect is the decoder, not the text. There is no band in which it cannot
-# happen; it is rare, not absent. Upstream's to fix (CLAUDE.md: never edit lib/);
-# tests/hardening.tcyr pins a known-failing value so this note retires itself.
-# 2.5.0: filed upstream as bayan docs/development/issues/
+# The DECODER is correctly rounded since bayan 1.5.7, so a finite double survives a
+# to_json/from_json cycle BIT-EXACTLY. 2.10.1, seeded random doubles through
+# rgb_to_json -> rgb_from_json, half over the whole exponent range and half with
+# |x| in 1e-16..1e16: **0 mismatches in 299,763**, where the same sweep on 2.10.0's
+# bayan 1.5.6 gave 6. tests/hardening.tcyr pins a value that used to fail.
+# ⛔ 2.4.9 had recorded the gap: this header used to claim bit-exactness without
+# qualification when the decoder mis-rounded ~1 in 10^5 doubles by 1 ULP.
+# Filed upstream at 2.5.0 as bayan docs/development/issues/
 # 2026-09-22-prakash-f64-parse-double-rounding-at-midpoint.md. Root cause: the
-# slow path rounds W*10^E to 64 bits, which lands near-midpoint values EXACTLY on
-# the midpoint, then breaks that false tie to even — so the error is 1 ULP in
-# EITHER direction (13 up, 14 down of 27 cases) and only ever hits odd doubles.
-# Re-measured by direct to_json/from_json at 1.5.6: 22 per 10^6 across all
-# doubles.
+# slow path rounded W*10^E to 64 bits, which landed near-midpoint values EXACTLY on
+# the midpoint, then broke that false tie to even.
 #
 # FAILURE CONVENTION (2.1.0): every `*_from_json` takes a trailing `err_out`
 # pointer, per the library-wide convention in error.cyr. It writes PK_ERR_NONE on
@@ -89,7 +82,7 @@ fn _ser_obj(json, len, err_out) {
 # A missing or wrong-typed field writes PK_ERR_INVALID_PARAMETER and returns 0.0.
 #must_use
 fn _ser_num(v, key, err_out) {
-    var node = bayan_json_v_obj_get(v, key);
+    var node = bayan_json_v_obj_get_by_cstr(v, key);
     if (bayan_json_v_is_float(node) == 1) { return bayan_json_v_float(node); }
     if (bayan_json_v_is_int(node) == 1) { return bayan_json_v_float(node); }
     store64(err_out, PK_ERR_INVALID_PARAMETER);
@@ -104,7 +97,7 @@ fn _ser_num(v, key, err_out) {
 # physical inverse.
 #must_use
 fn _ser_num_or_inf(v, key, err_out) {
-    var node = bayan_json_v_obj_get(v, key);
+    var node = bayan_json_v_obj_get_by_cstr(v, key);
     if (bayan_json_v_is_null(node) == 1) { return 0x7FF0000000000000; }
     if (bayan_json_v_is_float(node) == 1) { return bayan_json_v_float(node); }
     if (bayan_json_v_is_int(node) == 1) { return bayan_json_v_float(node); }
@@ -116,7 +109,7 @@ fn _ser_num_or_inf(v, key, err_out) {
 # PK_ERR_INVALID_PARAMETER.
 #must_use
 fn _ser_str(v, key, err_out) {
-    var node = bayan_json_v_obj_get(v, key);
+    var node = bayan_json_v_obj_get_by_cstr(v, key);
     if (bayan_json_v_is_str(node) == 0) {
         store64(err_out, PK_ERR_INVALID_PARAMETER);
         return 0;
@@ -462,7 +455,7 @@ fn prescription_from_json(json, len, err_out) {
     var name = _ser_str(v, "name", err_out);
     var n_initial = _ser_num(v, "n_initial", err_out);
     if (prakash_is_err(load64(err_out)) == 1) { return 0; }
-    var surfaces_v = bayan_json_v_obj_get(v, "surfaces");
+    var surfaces_v = bayan_json_v_obj_get_by_cstr(v, "surfaces");
     if (bayan_json_v_is_arr(surfaces_v) == 0) {
         store64(err_out, PK_ERR_INVALID_PARAMETER);
         return 0;
@@ -562,7 +555,7 @@ fn spd_from_json(json, len, err_out) {
     var start_nm = _ser_num(v, "start_nm", err_out);
     var step_nm = _ser_num(v, "step_nm", err_out);
     if (prakash_is_err(load64(err_out)) == 1) { return 0; }
-    var vals_v = bayan_json_v_obj_get(v, "values");
+    var vals_v = bayan_json_v_obj_get_by_cstr(v, "values");
     if (bayan_json_v_is_arr(vals_v) == 0) {
         store64(err_out, PK_ERR_INVALID_PARAMETER);
         return 0;
